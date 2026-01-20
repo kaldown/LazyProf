@@ -1,6 +1,9 @@
 # Claude Code
 .claude/
 
+# Design docs (not distributed)
+docs/
+
 # macOS
 .DS_Store
 .AppleDouble
