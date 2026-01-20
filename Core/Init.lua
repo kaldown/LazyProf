@@ -58,6 +58,27 @@ end
 
 function LazyProf:OnTradeSkillShow()
     self:ScheduleRecalculation()
+    self:HookTradeSkillScroll()
+end
+
+-- Hook scroll frame to update arrow position when scrolling
+function LazyProf:HookTradeSkillScroll()
+    if self.scrollHooked then return end
+
+    -- Hook the scroll frame's OnVerticalScroll to reposition arrow
+    if TradeSkillListScrollFrame then
+        local origScript = TradeSkillListScrollFrame:GetScript("OnVerticalScroll")
+        TradeSkillListScrollFrame:SetScript("OnVerticalScroll", function(self, offset, ...)
+            if origScript then
+                origScript(self, offset, ...)
+            end
+            -- Update arrow position after scroll (without full recalculation)
+            if LazyProf.ArrowManager and LazyProf.Pathfinder.currentPath then
+                LazyProf.ArrowManager:Update(LazyProf.Pathfinder.currentPath)
+            end
+        end)
+        self.scrollHooked = true
+    end
 end
 
 function LazyProf:OnTradeSkillUpdate()
