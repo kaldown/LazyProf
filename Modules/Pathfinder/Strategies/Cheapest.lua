@@ -23,9 +23,9 @@ LazyProf.PathfinderStrategies.cheapest = {
                 break
             end
 
-            -- Score each by cost per expected skillup
+            -- Score each by TOTAL cost per expected skillup (for full quantity until gray)
             local best, bestScore = Utils.MinBy(candidates, function(recipe)
-                return self:ScoreRecipe(recipe, simulatedSkill, simulatedInventory, prices)
+                return self:ScoreRecipe(recipe, simulatedSkill, targetSkill, simulatedInventory, prices)
             end)
 
             if not best then
@@ -35,15 +35,14 @@ LazyProf.PathfinderStrategies.cheapest = {
 
             -- Calculate how many to craft
             local quantity = self:CalculateQuantity(best, simulatedSkill, targetSkill)
-            local expectedSkillups = self:GetExpectedSkillups(best, simulatedSkill) * quantity
-            local totalCost = self:CalculateCost(best, simulatedInventory, prices) * quantity
+            local totalSkillups, totalCost = self:CalculateTotalCostAndSkillups(best, simulatedSkill, quantity, simulatedInventory, prices)
 
             -- Add step to path
             table.insert(path, {
                 recipe = best,
                 quantity = quantity,
                 skillStart = simulatedSkill,
-                skillEnd = math.min(simulatedSkill + expectedSkillups, targetSkill),
+                skillEnd = math.min(simulatedSkill + totalSkillups, targetSkill),
                 totalCost = totalCost,
             })
 
@@ -75,33 +74,61 @@ LazyProf.PathfinderStrategies.cheapest = {
         return candidates
     end,
 
-    -- Score recipe: lower = better (cost per expected skillup)
-    ScoreRecipe = function(self, recipe, currentSkill, inventory, prices)
-        local cost = self:CalculateCost(recipe, inventory, prices)
-        local expectedSkillups = self:GetExpectedSkillups(recipe, currentSkill)
+    -- Score recipe: lower = better (TOTAL cost per expected skillup for full quantity)
+    -- This fixes the bug where a recipe with 1 "free" craft in inventory would beat
+    -- a better recipe that needs 80 crafts total
+    ScoreRecipe = function(self, recipe, currentSkill, targetSkill, inventory, prices)
+        -- Calculate how many we'd craft until gray or target
+        local quantity = self:CalculateQuantity(recipe, currentSkill, targetSkill)
 
-        if expectedSkillups <= 0 then
+        -- Calculate total cost for ALL those crafts considering inventory
+        local totalCost = 0
+        for _, reagent in ipairs(recipe.reagents) do
+            local have = inventory[reagent.itemId] or 0
+            local totalNeed = reagent.count * quantity
+            local needToBuy = math.max(0, totalNeed - have)
+            local price = prices[reagent.itemId] or 0
+            totalCost = totalCost + (price * needToBuy)
+        end
+
+        -- Calculate total expected skillups across all crafts
+        local totalSkillups = 0
+        local simSkill = currentSkill
+        for i = 1, quantity do
+            local expected = self:GetExpectedSkillups(recipe, simSkill)
+            totalSkillups = totalSkillups + expected
+            simSkill = simSkill + expected
+        end
+
+        if totalSkillups <= 0 then
             return math.huge
         end
 
-        return cost / expectedSkillups
+        return totalCost / totalSkillups
     end,
 
-    -- Calculate cost to craft one of this recipe
-    CalculateCost = function(self, recipe, inventory, prices)
-        local total = 0
-
+    -- Calculate total cost and skillups for a given quantity (used after best is chosen)
+    CalculateTotalCostAndSkillups = function(self, recipe, currentSkill, quantity, inventory, prices)
+        -- Calculate total cost
+        local totalCost = 0
         for _, reagent in ipairs(recipe.reagents) do
             local have = inventory[reagent.itemId] or 0
-            local need = math.max(0, reagent.count - have)
-
-            if need > 0 then
-                local price = prices[reagent.itemId] or 0
-                total = total + (price * need)
-            end
+            local totalNeed = reagent.count * quantity
+            local needToBuy = math.max(0, totalNeed - have)
+            local price = prices[reagent.itemId] or 0
+            totalCost = totalCost + (price * needToBuy)
         end
 
-        return total
+        -- Calculate total skillups
+        local totalSkillups = 0
+        local simSkill = currentSkill
+        for i = 1, quantity do
+            local expected = self:GetExpectedSkillups(recipe, simSkill)
+            totalSkillups = totalSkillups + expected
+            simSkill = simSkill + expected
+        end
+
+        return totalSkillups, totalCost
     end,
 
     -- Get expected skillups based on color

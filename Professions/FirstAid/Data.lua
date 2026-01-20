@@ -2,7 +2,9 @@
 local ADDON_NAME, LazyProf = ...
 local Constants = LazyProf.Constants
 
--- First Aid recipe database for TBC Classic
+-- First Aid recipe database
+-- Skill ranges: orange (100%), yellow (50%), green (25%), gray (0%)
+-- Note: Algorithm considers green recipes if they're cheaper per skillup overall
 local FirstAidRecipes = {
     -- Linen Bandage
     {

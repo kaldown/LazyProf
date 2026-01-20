@@ -6,6 +6,7 @@
 ## SavedVariables: LazyProfDB
 ## OptionalDeps: TradeSkillMaster, Auctionator
 
+# Libraries
 Libs\Ace3\LibStub\LibStub.lua
 Libs\Ace3\CallbackHandler-1.0\CallbackHandler-1.0.lua
 Libs\Ace3\AceAddon-3.0\AceAddon-3.0.lua
@@ -18,18 +19,31 @@ Libs\Ace3\AceConfig-3.0\AceConfigRegistry-3.0\AceConfigRegistry-3.0.lua
 Libs\Ace3\AceConfig-3.0\AceConfigDialog-3.0\AceConfigDialog-3.0.lua
 Libs\Ace3\AceConfig-3.0\AceConfigCmd-3.0\AceConfigCmd-3.0.lua
 
+# Core
 Core\Constants.lua
 Core\Utils.lua
 Core\Config.lua
 
+# Modules - Data
 Modules\Inventory\Scanner.lua
 Modules\Pricing\Providers\TSM.lua
 Modules\Pricing\Providers\Auctionator.lua
 Modules\Pricing\Providers\Vendor.lua
 Modules\Pricing\PriceManager.lua
-Modules\Pathfinder\Strategies\Cheapest.lua
 
+# Modules - Pathfinding
+Modules\Pathfinder\Strategies\Cheapest.lua
+Modules\Pathfinder\Pathfinder.lua
+
+# Modules - UI
+Modules\UI\Arrow\Strategies\ArrowTooltip.lua
+Modules\UI\Arrow\ArrowManager.lua
+Modules\UI\MilestoneBreakdown.lua
+Modules\UI\MissingMaterials.lua
+
+# Professions
 Professions\Registry.lua
 Professions\FirstAid\Data.lua
 
+# Main
 Core\Init.lua

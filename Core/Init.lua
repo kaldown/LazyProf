@@ -26,6 +26,15 @@ function LazyProf:OnEnable()
     if self.PriceManager then
         self.PriceManager:Initialize()
     end
+    if self.ArrowManager then
+        self.ArrowManager:Initialize()
+    end
+    if self.MilestonePanel then
+        self.MilestonePanel:Initialize()
+    end
+    if self.MissingMaterialsPanel then
+        self.MissingMaterialsPanel:Initialize()
+    end
 
     -- Register events
     self:RegisterEvent("TRADE_SKILL_SHOW", "OnTradeSkillShow")
@@ -59,6 +68,12 @@ function LazyProf:OnTradeSkillClose()
     if self.ArrowManager then
         self.ArrowManager:Hide()
     end
+    if self.MilestonePanel then
+        self.MilestonePanel:Hide()
+    end
+    if self.MissingMaterialsPanel then
+        self.MissingMaterialsPanel:Hide()
+    end
 end
 
 function LazyProf:OnBagUpdate()
@@ -78,8 +93,25 @@ function LazyProf:ScheduleRecalculation()
 end
 
 function LazyProf:Recalculate()
-    -- Will be implemented in later tasks
-    self:Debug("Recalculate triggered")
+    local path = self.Pathfinder:Calculate()
+    if path then
+        self:UpdateDisplay()
+    end
+end
+
+function LazyProf:UpdateDisplay()
+    local path = self.Pathfinder.currentPath
+    if path then
+        if self.ArrowManager then
+            self.ArrowManager:Update(path)
+        end
+        if self.MilestonePanel then
+            self.MilestonePanel:Update(path.milestoneBreakdown, path.totalCost)
+        end
+        if self.MissingMaterialsPanel then
+            self.MissingMaterialsPanel:Update(path.missingMaterials)
+        end
+    end
 end
 
 function LazyProf:Debug(msg)
