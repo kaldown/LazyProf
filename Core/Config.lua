@@ -15,6 +15,7 @@ LazyProf.defaults = {
         displayMode = Constants.DISPLAY_MODE.ARROW_TOOLTIP,
         showMilestonePanel = true,
         showMissingMaterials = true,
+        calculateFromCurrentSkill = false,
 
         -- Pricing
         priceSourcePriority = {
@@ -133,6 +134,18 @@ LazyProf.options = {
                     set = function(_, v)
                         LazyProf.db.profile.showMissingMaterials = v
                         LazyProf:UpdateDisplay()
+                    end,
+                },
+                calculateFromCurrentSkill = {
+                    name = "Calculate from current skill",
+                    desc = "Show materials needed from your current skill level instead of the full milestone bracket (e.g., at skill 148, show 148-150 instead of 75-150)",
+                    type = "toggle",
+                    order = 4,
+                    width = "full",
+                    get = function() return LazyProf.db.profile.calculateFromCurrentSkill end,
+                    set = function(_, v)
+                        LazyProf.db.profile.calculateFromCurrentSkill = v
+                        LazyProf:Recalculate()
                     end,
                 },
             },

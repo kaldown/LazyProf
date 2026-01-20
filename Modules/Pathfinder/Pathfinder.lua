@@ -64,7 +64,7 @@ function Pathfinder:Calculate()
         steps = steps,
         totalCost = Utils.Sum(steps, "totalCost"),
         missingMaterials = self:CalculateMissingMaterials(steps, inventory, prices),
-        milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, inventory, prices),
+        milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, currentSkill, inventory, prices),
     }
 
     LazyProf:Debug(string.format("Path calculated: %d steps, %s total",
@@ -126,8 +126,9 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, prices)
 end
 
 -- Break down path by milestones
-function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, inventory, prices)
+function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, currentSkill, inventory, prices)
     local breakdown = {}
+    local calculateFromCurrent = LazyProf.db.profile.calculateFromCurrentSkill
 
     -- Build milestone ranges
     local ranges = {}
@@ -139,6 +140,11 @@ function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, inventory, pr
 
     -- Group steps into ranges
     for _, range in ipairs(ranges) do
+        -- When calculateFromCurrentSkill is enabled, adjust the first applicable range
+        local displayFrom = range.from
+        if calculateFromCurrent and currentSkill > range.from and currentSkill < range.to then
+            displayFrom = currentSkill
+        end
         local rangeSteps = {}
         local rangeCost = 0
         local rangeNeeded = {}
@@ -158,40 +164,45 @@ function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, inventory, pr
         end
 
         if #rangeSteps > 0 then
-            -- Build recipe summary
-            local summaryParts = {}
-            for _, step in ipairs(rangeSteps) do
-                table.insert(summaryParts, string.format("%dx %s", step.quantity, step.recipe.name))
-            end
+            -- Skip ranges already completed when calculateFromCurrent is enabled
+            if calculateFromCurrent and currentSkill >= range.to then
+                -- Skip this completed range
+            else
+                -- Build recipe summary
+                local summaryParts = {}
+                for _, step in ipairs(rangeSteps) do
+                    table.insert(summaryParts, string.format("%dx %s", step.quantity, step.recipe.name))
+                end
 
-            -- Build materials list
-            local materials = {}
-            for itemId, need in pairs(rangeNeeded) do
-                local have = inventory[itemId] or 0
-                local short = math.max(0, need - have)
-                local name, link, icon = Utils.GetItemInfo(itemId)
-                local price = prices[itemId] or 0
+                -- Build materials list
+                local materials = {}
+                for itemId, need in pairs(rangeNeeded) do
+                    local have = inventory[itemId] or 0
+                    local short = math.max(0, need - have)
+                    local name, link, icon = Utils.GetItemInfo(itemId)
+                    local price = prices[itemId] or 0
 
-                table.insert(materials, {
-                    itemId = itemId,
-                    name = name or "Unknown",
-                    icon = icon,
-                    link = link,
-                    have = have,
-                    need = need,
-                    missing = short,
-                    estimatedCost = price * short,
+                    table.insert(materials, {
+                        itemId = itemId,
+                        name = name or "Unknown",
+                        icon = icon,
+                        link = link,
+                        have = have,
+                        need = need,
+                        missing = short,
+                        estimatedCost = price * short,
+                    })
+                end
+
+                table.insert(breakdown, {
+                    from = displayFrom,
+                    to = range.to,
+                    steps = rangeSteps,
+                    summary = table.concat(summaryParts, ", "),
+                    cost = rangeCost,
+                    materials = materials,
                 })
             end
-
-            table.insert(breakdown, {
-                from = range.from,
-                to = range.to,
-                steps = rangeSteps,
-                summary = table.concat(summaryParts, ", "),
-                cost = rangeCost,
-                materials = materials,
-            })
         end
     end
 
