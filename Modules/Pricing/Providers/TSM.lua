@@ -14,8 +14,11 @@ LazyProf.PriceProviders.tsm = {
         if not self:IsAvailable() then return nil end
 
         local itemString = "i:" .. itemId
-        -- Try DBMarket first, fall back to DBMinBuyout
-        local price = TSM_API.GetCustomPriceValue("DBMarket", itemString)
+        -- Fallback chain: Regional (manipulation-resistant) → Realm → Local scan
+        local price = TSM_API.GetCustomPriceValue("DBRegionMarketAvg", itemString)
+        if not price or price == 0 then
+            price = TSM_API.GetCustomPriceValue("DBMarket", itemString)
+        end
         if not price or price == 0 then
             price = TSM_API.GetCustomPriceValue("DBMinBuyout", itemString)
         end
