@@ -4,7 +4,8 @@
 ## Author: Kaldown
 ## Version: 0.1.0
 ## SavedVariables: LazyProfDB
-## OptionalDeps: TradeSkillMaster, Auctionator
+## OptionalDeps: TradeSkillMaster, Auctionator, Syndicator
+## Dependencies: CraftDB
 
 # Libraries - Core
 Libs\Ace3\LibStub\LibStub.lua
@@ -45,11 +46,6 @@ Libs\Ace3\AceConfig-3.0\AceConfigRegistry-3.0\AceConfigRegistry-3.0.lua
 Libs\Ace3\AceConfig-3.0\AceConfigDialog-3.0\AceConfigDialog-3.0.lua
 Libs\Ace3\AceConfig-3.0\AceConfigCmd-3.0\AceConfigCmd-3.0.lua
 
-# Libraries - CraftDB (embedded recipe database)
-Libs\CraftDB\CraftDB.lua
-Libs\CraftDB\Data\FirstAid.lua
-Libs\CraftDB\Data\Cooking.lua
-
 # Core
 Core\Constants.lua
 Core\Utils.lua
@@ -64,6 +60,7 @@ Modules\Pricing\PriceManager.lua
 
 # Modules - Pathfinding
 Modules\Pathfinder\Strategies\Cheapest.lua
+Modules\Pathfinder\Strategies\Fastest.lua
 Modules\Pathfinder\Pathfinder.lua
 
 # Modules - UI
@@ -71,6 +68,7 @@ Modules\UI\Arrow\Strategies\ArrowTooltip.lua
 Modules\UI\Arrow\ArrowManager.lua
 Modules\UI\MilestoneBreakdown.lua
 Modules\UI\MissingMaterials.lua
+Modules\UI\RecipeDetails.lua
 
 # Professions
 Professions\Registry.lua

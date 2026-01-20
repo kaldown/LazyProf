@@ -90,6 +90,136 @@ function Utils.Contains(tbl, value)
     return false
 end
 
+-- Get player faction ("Alliance" or "Horde")
+function Utils.GetPlayerFaction()
+    local _, race = UnitRace("player")
+    local horde = { Orc = true, Troll = true, Tauren = true, Scourge = true, BloodElf = true }
+    return horde[race] and "Horde" or "Alliance"
+end
+
+-- Get vendors filtered by faction (returns array)
+function Utils.GetVendorsForFaction(source, faction, showAll)
+    if not source or not source.vendors then return {} end
+    if showAll then return source.vendors end
+
+    local filtered = {}
+    for _, vendor in ipairs(source.vendors) do
+        if not vendor.faction or vendor.faction == faction or vendor.faction == "Neutral" then
+            table.insert(filtered, vendor)
+        end
+    end
+    return filtered
+end
+
+-- Count total vendors for a source
+function Utils.GetVendorCount(source)
+    if not source or not source.vendors then return 0 end
+    return #source.vendors
+end
+
+-- Get Wowhead TBC URL for a spell
+function Utils.GetWowheadUrl(spellId)
+    return "https://www.wowhead.com/tbc/spell=" .. tostring(spellId)
+end
+
+-- Get human-readable description for recipe source (short version for list display)
+function Utils.GetSourceDescription(source)
+    if not source then return "Unknown" end
+
+    local sourceType = source.type
+
+    if sourceType == "trainer" then
+        -- For trainers, show specific NPC if available, otherwise generic
+        if source.npcName and source.npcName ~= "Any Cooking Trainer" then
+            return source.npcName
+        end
+        return source.npcName or "Any Trainer"
+
+    elseif sourceType == "vendor" then
+        -- For vendors, show count or specific vendor if only one
+        if source.vendors then
+            local count = #source.vendors
+            if count == 1 then
+                local v = source.vendors[1]
+                return v.npcName .. " (" .. v.location .. ")"
+            else
+                -- Filter by player faction for display count
+                local playerFaction = Utils.GetPlayerFaction()
+                local forFaction = Utils.GetVendorsForFaction(source, playerFaction, false)
+                local factionCount = #forFaction
+                if factionCount > 0 then
+                    return factionCount .. " vendor" .. (factionCount > 1 and "s" or "")
+                else
+                    return count .. " vendor" .. (count > 1 and "s" or "") .. " (other faction)"
+                end
+            end
+        end
+        return source.npcName or "Vendor"
+
+    elseif sourceType == "quest" then
+        if source.questName then
+            return "Quest: " .. source.questName
+        end
+        return "Quest"
+
+    elseif sourceType == "drop" then
+        if source.npcName then
+            return "Drop: " .. source.npcName
+        end
+        return "World Drop"
+
+    elseif sourceType == "world_drop" then
+        return "World Drop"
+
+    elseif sourceType == "reputation" then
+        if source.factionName and source.level then
+            return source.factionName .. " (" .. source.level .. ")"
+        end
+        return "Reputation"
+
+    elseif sourceType == "discovery" then
+        return "Discovery"
+    end
+
+    return sourceType or "Unknown"
+end
+
+-- Get detailed source info for side panel
+function Utils.GetSourceDetails(source, showAllFactions)
+    if not source then return nil end
+
+    local details = {
+        type = source.type,
+        vendors = {},
+        quest = nil,
+        trainer = nil,
+    }
+
+    if source.type == "vendor" and source.vendors then
+        local playerFaction = Utils.GetPlayerFaction()
+        details.vendors = Utils.GetVendorsForFaction(source, playerFaction, showAllFactions)
+        details.recipeItemId = source.itemId
+        details.cost = source.cost
+
+    elseif source.type == "quest" then
+        details.quest = {
+            id = source.questId,
+            name = source.questName,
+            location = source.location,
+            faction = source.faction,
+        }
+
+    elseif source.type == "trainer" then
+        details.trainer = {
+            npcName = source.npcName,
+            cost = source.cost,
+            note = source.note,
+        }
+    end
+
+    return details
+end
+
 -- Get item info with caching
 local itemCache = {}
 function Utils.GetItemInfo(itemId)

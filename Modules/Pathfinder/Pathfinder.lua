@@ -33,8 +33,8 @@ function Pathfinder:Calculate()
     -- Get recipes with learned status
     local recipes = LazyProf.Professions:GetRecipesWithLearnedStatus(LazyProf.Professions.active)
 
-    -- Get inventory
-    local inventory = LazyProf.Inventory:ScanBags()
+    -- Get inventory (bags + optional bank)
+    local inventory, bankInventory = LazyProf.Inventory:ScanAll()
 
     -- Get prices for all reagents
     local reagentIds = {}
@@ -63,7 +63,7 @@ function Pathfinder:Calculate()
         targetSkill = targetSkill,
         steps = steps,
         totalCost = Utils.Sum(steps, "totalCost"),
-        missingMaterials = self:CalculateMissingMaterials(steps, inventory, prices),
+        missingMaterials = self:CalculateMissingMaterials(steps, inventory, bankInventory, prices),
         milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, currentSkill, inventory, prices),
     }
 
@@ -85,7 +85,8 @@ function Pathfinder:GetTargetSkill(currentSkill, milestones)
 end
 
 -- Calculate total missing materials for entire path
-function Pathfinder:CalculateMissingMaterials(steps, inventory, prices)
+-- Returns { fromBank = {...}, fromAH = {...} }
+function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, prices)
     local needed = {}
 
     -- Sum up all reagents needed
@@ -96,33 +97,60 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, prices)
         end
     end
 
-    -- Calculate missing vs inventory
-    local missing = {}
-    for itemId, need in pairs(needed) do
-        local have = inventory[itemId] or 0
-        local short = math.max(0, need - have)
+    -- Categorize by source: bags already counted in inventory, so calculate what comes from bank vs AH
+    local fromBank = {}
+    local fromAH = {}
 
-        if short > 0 then
+    for itemId, need in pairs(needed) do
+        local inBags = LazyProf.Inventory:ScanBags()[itemId] or 0
+        local inBank = bankInventory and bankInventory[itemId] or 0
+        local totalHave = inventory[itemId] or 0
+
+        -- How many do we still need after bags?
+        local afterBags = math.max(0, need - inBags)
+
+        if afterBags > 0 then
             local name, link, icon = Utils.GetItemInfo(itemId)
             local price = prices[itemId] or 0
 
-            table.insert(missing, {
-                itemId = itemId,
-                name = name or "Unknown",
-                icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark",
-                link = link,
-                have = have,
-                need = need,
-                missing = short,
-                estimatedCost = price * short,
-            })
+            -- How many can come from bank?
+            local fromBankCount = math.min(afterBags, inBank)
+            -- How many must come from AH?
+            local fromAHCount = math.max(0, afterBags - inBank)
+
+            if fromBankCount > 0 then
+                table.insert(fromBank, {
+                    itemId = itemId,
+                    name = name or "Unknown",
+                    icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark",
+                    link = link,
+                    have = inBank,
+                    need = fromBankCount,
+                    missing = fromBankCount,
+                    estimatedCost = 0, -- Bank items are free
+                })
+            end
+
+            if fromAHCount > 0 then
+                table.insert(fromAH, {
+                    itemId = itemId,
+                    name = name or "Unknown",
+                    icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark",
+                    link = link,
+                    have = totalHave,
+                    need = need,
+                    missing = fromAHCount,
+                    estimatedCost = price * fromAHCount,
+                })
+            end
         end
     end
 
-    -- Sort by cost descending
-    table.sort(missing, function(a, b) return a.estimatedCost > b.estimatedCost end)
+    -- Sort by cost descending (AH items) and by name (bank items)
+    table.sort(fromAH, function(a, b) return a.estimatedCost > b.estimatedCost end)
+    table.sort(fromBank, function(a, b) return (a.name or "") < (b.name or "") end)
 
-    return missing
+    return { fromBank = fromBank, fromAH = fromAH }
 end
 
 -- Break down path by milestones

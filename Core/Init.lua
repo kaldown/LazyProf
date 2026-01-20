@@ -35,6 +35,9 @@ function LazyProf:OnEnable()
     if self.MissingMaterialsPanel then
         self.MissingMaterialsPanel:Initialize()
     end
+    if self.RecipeDetails then
+        self.RecipeDetails:Initialize()
+    end
 
     -- Register events
     self:RegisterEvent("TRADE_SKILL_SHOW", "OnTradeSkillShow")
@@ -94,6 +97,9 @@ function LazyProf:OnTradeSkillClose()
     end
     if self.MissingMaterialsPanel then
         self.MissingMaterialsPanel:Hide()
+    end
+    if self.RecipeDetails then
+        self.RecipeDetails:Hide()
     end
 end
 

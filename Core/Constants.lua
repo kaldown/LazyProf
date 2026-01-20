@@ -39,6 +39,7 @@ LazyProf.Constants = {
     -- Pathfinding strategies
     STRATEGY = {
         CHEAPEST = "cheapest",
+        FASTEST = "fastest",
     },
 
     -- Cache TTL in seconds

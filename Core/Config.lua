@@ -16,6 +16,7 @@ LazyProf.defaults = {
         showMilestonePanel = true,
         showMissingMaterials = true,
         calculateFromCurrentSkill = false,
+        includeBankItems = false,
 
         -- Pricing
         priceSourcePriority = {
@@ -59,12 +60,19 @@ LazyProf.options = {
                     order = 2,
                     values = {
                         [Constants.STRATEGY.CHEAPEST] = "Cheapest (minimize gold)",
+                        [Constants.STRATEGY.FASTEST] = "Fastest (minimize crafts)",
                     },
                     get = function() return LazyProf.db.profile.strategy end,
                     set = function(_, v)
                         LazyProf.db.profile.strategy = v
                         LazyProf:Recalculate()
                     end,
+                },
+                strategyWarning = {
+                    name = "|cFFFF6666Warning:|r Fastest strategy prioritizes fewer crafts over cost. This can be significantly more expensive than Cheapest.",
+                    type = "description",
+                    order = 3,
+                    hidden = function() return LazyProf.db.profile.strategy ~= Constants.STRATEGY.FASTEST end,
                 },
                 useIntermediates = {
                     name = "Calculate intermediate crafts",
@@ -145,6 +153,19 @@ LazyProf.options = {
                     get = function() return LazyProf.db.profile.calculateFromCurrentSkill end,
                     set = function(_, v)
                         LazyProf.db.profile.calculateFromCurrentSkill = v
+                        LazyProf:Recalculate()
+                    end,
+                },
+                includeBankItems = {
+                    name = "Include bank items",
+                    desc = Syndicator and "Count items in your bank when calculating missing materials" or "Count items in your bank when calculating missing materials. Requires Baganator addon.",
+                    type = "toggle",
+                    order = 5,
+                    width = "full",
+                    disabled = function() return not Syndicator end,
+                    get = function() return LazyProf.db.profile.includeBankItems end,
+                    set = function(_, v)
+                        LazyProf.db.profile.includeBankItems = v
                         LazyProf:Recalculate()
                     end,
                 },

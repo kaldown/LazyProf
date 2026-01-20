@@ -4,8 +4,8 @@ local ADDON_NAME, LazyProf = ...
 LazyProf.Professions = {}
 local Professions = LazyProf.Professions
 
--- Reference to CraftDB library
-local CraftDB = LibStub("CraftDB")
+-- Reference to CraftDB (standalone addon, loaded via Dependencies)
+local CraftDB = _G.CraftDB
 
 -- Registered profession data (populated from CraftDB)
 Professions.registry = {}

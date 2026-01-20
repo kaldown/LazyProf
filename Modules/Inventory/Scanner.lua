@@ -35,6 +35,62 @@ function Inventory:ScanBags()
     return items
 end
 
+-- Scan bank via Syndicator API (requires Baganator addon)
+function Inventory:ScanBank()
+    if not Syndicator or not Syndicator.API then
+        return {}
+    end
+
+    local items = {}
+    local character = Syndicator.API.GetCurrentCharacter()
+    if not character then
+        return items
+    end
+
+    -- Scan bank bags
+    if character.bank then
+        for _, bag in ipairs(character.bank) do
+            if bag then
+                for _, slot in ipairs(bag) do
+                    if slot and slot.itemID then
+                        items[slot.itemID] = (items[slot.itemID] or 0) + (slot.itemCount or 1)
+                    end
+                end
+            end
+        end
+    end
+
+    -- Scan bank tabs (newer bank system)
+    if character.bankTabs then
+        for _, tab in ipairs(character.bankTabs) do
+            if tab and tab.slots then
+                for _, slot in ipairs(tab.slots) do
+                    if slot and slot.itemID then
+                        items[slot.itemID] = (items[slot.itemID] or 0) + (slot.itemCount or 1)
+                    end
+                end
+            end
+        end
+    end
+
+    return items
+end
+
+-- Scan all inventory sources (bags + optional bank)
+function Inventory:ScanAll()
+    local items = self:ScanBags()
+    local bankItems = {}
+
+    if LazyProf.db.profile.includeBankItems then
+        bankItems = self:ScanBank()
+        for itemId, count in pairs(bankItems) do
+            items[itemId] = (items[itemId] or 0) + count
+        end
+    end
+
+    return items, bankItems
+end
+
 -- Get count of specific item in bags
 function Inventory:GetItemCount(itemId)
     local items = self:ScanBags()

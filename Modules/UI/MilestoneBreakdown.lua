@@ -11,6 +11,7 @@ MilestonePanel.expandedRows = {}
 
 local ROW_HEIGHT = 22
 local INGREDIENT_ROW_HEIGHT = 20
+local UNLEARNED_ROW_HEIGHT = 18
 local MIN_WIDTH = 300
 local MIN_HEIGHT = 100
 local DEFAULT_WIDTH = 320
@@ -153,8 +154,18 @@ function MilestonePanel:Update(breakdown, totalCost)
         table.insert(self.rows, row)
         yOffset = yOffset + ROW_HEIGHT
 
-        -- If expanded, show ingredients
+        -- If expanded, show unlearned indicators and ingredients
         if self.expandedRows[i] then
+            -- Show unlearned recipe indicators first
+            for _, step in ipairs(bracket.steps) do
+                if not step.recipe.learned then
+                    local unlearnedRow = self:CreateUnlearnedRecipeRow(step, yOffset, contentWidth)
+                    table.insert(self.rows, unlearnedRow)
+                    yOffset = yOffset + UNLEARNED_ROW_HEIGHT
+                end
+            end
+
+            -- Then show ingredients
             for _, mat in ipairs(bracket.materials) do
                 local ingredientRow = self:CreateIngredientRow(mat, yOffset, contentWidth)
                 table.insert(self.rows, ingredientRow)
@@ -237,6 +248,55 @@ function MilestonePanel:CreateMilestoneRow(bracket, index, yOffset, contentWidth
     return row
 end
 
+-- Create an unlearned recipe indicator row
+function MilestonePanel:CreateUnlearnedRecipeRow(step, yOffset, contentWidth)
+    local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
+    row:SetSize(contentWidth - 20, UNLEARNED_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 20, -yOffset)
+
+    -- Row background for hover
+    row:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+    })
+    row:SetBackdropColor(0, 0, 0, 0)
+
+    -- Warning indicator
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.text:SetPoint("LEFT", 4, 0)
+    row.text:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+    row.text:SetJustifyH("LEFT")
+
+    local sourceDesc = Utils.GetSourceDescription(step.recipe.source)
+    local recipeName = step.recipe.name or "Unknown"
+    row.text:SetText(string.format("|cFFFF8800[!]|r %s: |cFFFF8800%s|r", recipeName, sourceDesc))
+
+    -- Store recipe reference for click handler
+    row.recipe = step.recipe
+
+    -- Click to show recipe details panel
+    row:SetScript("OnClick", function(self)
+        if LazyProf.RecipeDetails then
+            LazyProf.RecipeDetails:Toggle(self.recipe)
+        end
+    end)
+
+    -- Hover effects
+    row:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(0.3, 0.3, 0.1, 0.5)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Click for details", 1, 1, 1)
+        GameTooltip:AddLine("View vendors, Wowhead link", 0.7, 0.7, 0.7)
+        GameTooltip:Show()
+    end)
+    row:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(0, 0, 0, 0)
+        GameTooltip:Hide()
+    end)
+
+    row:Show()
+    return row
+end
+
 -- Create an ingredient row
 function MilestonePanel:CreateIngredientRow(mat, yOffset, contentWidth)
     local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
@@ -277,7 +337,7 @@ function MilestonePanel:CreateIngredientRow(mat, yOffset, contentWidth)
     -- Shift-click to link
     row:SetScript("OnClick", function()
         if IsShiftKeyDown() and mat.link then
-            ChatEdit_InsertLink(mat.link)
+            HandleModifiedItemClick(mat.link)
         end
     end)
 
