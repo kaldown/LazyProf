@@ -1,0 +1,29 @@
+# Claude Code
+.claude/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+*.zip
+*.tar.gz
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+
+# WoW Addon Development
+# SavedVariables are generated at runtime
+SavedVariables/

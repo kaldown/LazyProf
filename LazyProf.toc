@@ -1,0 +1,35 @@
+## Interface: 110207, 50503, 38000, 20505, 11508
+## Title: LazyProf
+## Notes: Optimal profession leveling path calculator
+## Author: Kaldown
+## Version: 0.1.0
+## SavedVariables: LazyProfDB
+## OptionalDeps: TradeSkillMaster, Auctionator
+
+Libs\Ace3\LibStub\LibStub.lua
+Libs\Ace3\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\Ace3\AceAddon-3.0\AceAddon-3.0.lua
+Libs\Ace3\AceDB-3.0\AceDB-3.0.lua
+Libs\Ace3\AceEvent-3.0\AceEvent-3.0.lua
+Libs\Ace3\AceHook-3.0\AceHook-3.0.lua
+Libs\Ace3\AceConsole-3.0\AceConsole-3.0.lua
+Libs\Ace3\AceGUI-3.0\AceGUI-3.0.lua
+Libs\Ace3\AceConfig-3.0\AceConfigRegistry-3.0\AceConfigRegistry-3.0.lua
+Libs\Ace3\AceConfig-3.0\AceConfigDialog-3.0\AceConfigDialog-3.0.lua
+Libs\Ace3\AceConfig-3.0\AceConfigCmd-3.0\AceConfigCmd-3.0.lua
+
+Core\Constants.lua
+Core\Utils.lua
+Core\Config.lua
+
+Modules\Inventory\Scanner.lua
+Modules\Pricing\Providers\TSM.lua
+Modules\Pricing\Providers\Auctionator.lua
+Modules\Pricing\Providers\Vendor.lua
+Modules\Pricing\PriceManager.lua
+Modules\Pathfinder\Strategies\Cheapest.lua
+
+Professions\Registry.lua
+Professions\FirstAid\Data.lua
+
+Core\Init.lua
