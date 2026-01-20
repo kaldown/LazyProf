@@ -45,6 +45,11 @@ Libs\Ace3\AceConfig-3.0\AceConfigRegistry-3.0\AceConfigRegistry-3.0.lua
 Libs\Ace3\AceConfig-3.0\AceConfigDialog-3.0\AceConfigDialog-3.0.lua
 Libs\Ace3\AceConfig-3.0\AceConfigCmd-3.0\AceConfigCmd-3.0.lua
 
+# Libraries - CraftDB (embedded recipe database)
+Libs\CraftDB\CraftDB.lua
+Libs\CraftDB\Data\FirstAid.lua
+Libs\CraftDB\Data\Cooking.lua
+
 # Core
 Core\Constants.lua
 Core\Utils.lua
@@ -69,7 +74,6 @@ Modules\UI\MissingMaterials.lua
 
 # Professions
 Professions\Registry.lua
-Professions\FirstAid\Data.lua
 
 # Main
 Core\Init.lua
