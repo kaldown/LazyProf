@@ -96,6 +96,21 @@ function LazyProf:Recalculate()
     local path = self.Pathfinder:Calculate()
     if path then
         self:UpdateDisplay()
+    else
+        -- No matching profession data - hide panels
+        self:HideDisplay()
+    end
+end
+
+function LazyProf:HideDisplay()
+    if self.ArrowManager then
+        self.ArrowManager:Hide()
+    end
+    if self.MilestonePanel then
+        self.MilestonePanel:Hide()
+    end
+    if self.MissingMaterialsPanel then
+        self.MissingMaterialsPanel:Hide()
     end
 end
 

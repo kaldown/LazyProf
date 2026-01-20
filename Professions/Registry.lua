@@ -68,9 +68,8 @@ end
 
 -- Get active profession data
 function Professions:GetActive()
-    if not self.active then
-        self:DetectActive()
-    end
+    -- Always detect fresh - profession window may have changed
+    self:DetectActive()
     return self.active and self.registry[self.active] or nil
 end
 
