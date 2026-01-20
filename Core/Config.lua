@@ -203,11 +203,6 @@ LazyProf.options = {
 -- Register config with Ace
 function LazyProf:SetupConfig()
     LibStub("AceConfigRegistry-3.0"):RegisterOptionsTable("LazyProf", self.options)
-    -- Skip Blizzard options integration - use /lp command instead
+    LibStub("AceConfigDialog-3.0"):AddToBlizOptions("LazyProf", "LazyProf")
     self.configRegistered = true
-end
-
-function LazyProf:UpdateDisplay()
-    -- Will be implemented when UI is built
-    if self.Debug then self:Debug("UpdateDisplay called") end
 end
