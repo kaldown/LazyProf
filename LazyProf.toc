@@ -5,7 +5,7 @@
 ## Version: 0.2.0
 ## SavedVariables: LazyProfDB
 ## OptionalDeps: TradeSkillMaster, Auctionator, Syndicator
-## Dependencies: CraftDB
+## Dependencies: CraftLib
 
 # Libraries - Core
 Libs\Ace3\LibStub\LibStub.lua

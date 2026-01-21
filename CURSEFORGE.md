@@ -1,6 +1,6 @@
 Tired of wasting gold leveling professions? LazyProf figures out the cheapest crafting path so you don't have to.
 
-**Requires [CraftDB](https://www.curseforge.com/wow/addons/craftdb)** - Install both addons together.
+**Requires [CraftLib](https://www.curseforge.com/wow/addons/craftlib)** - Install both addons together.
 
 ## Features
 
@@ -28,9 +28,9 @@ Tired of wasting gold leveling professions? LazyProf figures out the cheapest cr
 
 ## Required Addon
 
-**[CraftDB](https://www.curseforge.com/wow/addons/craftdb)** - Recipe database (MUST INSTALL)
+**[CraftLib](https://www.curseforge.com/wow/addons/craftlib)** - Recipe database (MUST INSTALL)
 
-LazyProf requires CraftDB to function. Install both addons together.
+LazyProf requires CraftLib to function. Install both addons together.
 
 ## Optional Addons
 

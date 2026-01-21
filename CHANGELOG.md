@@ -4,10 +4,10 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [0.2.0] - 2025-01-21
 
-First public release with CraftDB integration.
+First public release with CraftLib integration.
 
 ### Added
-- External CraftDB addon integration for recipe data (required dependency)
+- External CraftLib addon integration for recipe data (required dependency)
 - TSM Regional prices (DBRegionMarketAvg) for manipulation-resistant pricing
 - Fastest strategy - minimize number of crafts instead of gold
 - Recipe Details panel - shows materials, skill-ups, and costs for selected recipes
