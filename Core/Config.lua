@@ -7,6 +7,7 @@ LazyProf.defaults = {
     profile = {
         -- Pathfinding
         strategy = Constants.STRATEGY.CHEAPEST,
+        materialResolution = Constants.MATERIAL_RESOLUTION.COST_COMPARE,
         useIntermediates = true,
         suggestUnlearnedRecipes = true,
         includeDropRecipes = false,
@@ -73,6 +74,29 @@ LazyProf.options = {
                     type = "description",
                     order = 3,
                     hidden = function() return LazyProf.db.profile.strategy ~= Constants.STRATEGY.FASTEST end,
+                },
+                materialResolution = {
+                    name = "Material Resolution",
+                    desc = "How to handle craftable intermediate materials (e.g., smelt ore into bars)",
+                    type = "select",
+                    order = 4,
+                    values = {
+                        [Constants.MATERIAL_RESOLUTION.NONE] = "None (buy all materials)",
+                        [Constants.MATERIAL_RESOLUTION.COST_COMPARE] = "Cost-compare (craft if cheaper)",
+                        [Constants.MATERIAL_RESOLUTION.ALWAYS_CRAFT] = "Always craft (use raw materials)",
+                    },
+                    disabled = function() return LazyProf.db.profile.strategy ~= Constants.STRATEGY.CHEAPEST end,
+                    get = function() return LazyProf.db.profile.materialResolution end,
+                    set = function(_, v)
+                        LazyProf.db.profile.materialResolution = v
+                        LazyProf:Recalculate()
+                    end,
+                },
+                materialResolutionNote = {
+                    name = "|cFF888888Material resolution is only available with Cheapest strategy.|r",
+                    type = "description",
+                    order = 5,
+                    hidden = function() return LazyProf.db.profile.strategy == Constants.STRATEGY.CHEAPEST end,
                 },
                 useIntermediates = {
                     name = "Calculate intermediate crafts",

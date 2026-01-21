@@ -6,7 +6,8 @@ Tired of wasting gold leveling professions? LazyProf figures out the cheapest cr
 
 - **Optimal leveling path** - Calculates which recipes to craft based on current AH prices
 - **Two strategies** - Cheapest (minimize gold) or Fastest (minimize crafts)
-- **Missing materials list** - Shows what you need to buy and total cost
+- **Material Resolution** - Automatically suggests crafting intermediates (e.g., smelt ore into bars) when cheaper than buying
+- **Missing materials list** - Shows what you need to buy, what to craft, and total cost
 - **Milestone tracking** - See your progress through each skill bracket
 - **Bank integration** - Counts bank items when calculating what you need (requires Syndicator)
 

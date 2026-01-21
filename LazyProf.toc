@@ -61,6 +61,7 @@ Modules\Pricing\PriceManager.lua
 # Modules - Pathfinding
 Modules\Pathfinder\Strategies\Cheapest.lua
 Modules\Pathfinder\Strategies\Fastest.lua
+Modules\Pathfinder\MaterialResolver.lua
 Modules\Pathfinder\Pathfinder.lua
 
 # Modules - UI

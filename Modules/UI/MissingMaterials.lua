@@ -124,7 +124,7 @@ function MissingPanel:RefreshLayout()
 end
 
 -- Update panel with missing materials
--- missingMaterials is now { fromBank = {...}, fromAH = {...} }
+-- missingMaterials is now { fromBank = {...}, toCraft = {...}, fromAH = {...} }
 function MissingPanel:Update(missingMaterials)
     if not LazyProf.db.profile.showMissingMaterials then
         self:Hide()
@@ -137,11 +137,12 @@ function MissingPanel:Update(missingMaterials)
     end
     self.rows = {}
 
-    -- Handle new structure { fromBank, fromAH }
+    -- Handle structure { fromBank, toCraft, fromAH }
     local fromBank = missingMaterials and missingMaterials.fromBank or {}
+    local toCraft = missingMaterials and missingMaterials.toCraft or {}
     local fromAH = missingMaterials and missingMaterials.fromAH or {}
 
-    if #fromBank == 0 and #fromAH == 0 then
+    if #fromBank == 0 and #toCraft == 0 and #fromAH == 0 then
         self.frame.title:SetText("All Materials Ready!")
         self.frame.title:SetTextColor(0.4, 1, 0.4)
         self.frame.total:SetText("")
@@ -157,27 +158,48 @@ function MissingPanel:Update(missingMaterials)
     local yOffset = 0
     local totalCost = 0
 
-    -- Show bank section first (if any)
+    -- 1. Show bank section first (if any)
     if #fromBank > 0 then
         local headerRow = self:CreateSectionHeader("From Bank", yOffset, contentWidth)
         table.insert(self.rows, headerRow)
         yOffset = yOffset + ROW_HEIGHT
 
         for _, mat in ipairs(fromBank) do
-            local row = self:CreateMaterialRow(mat, yOffset, contentWidth, true)
+            local row = self:CreateMaterialRow(mat, yOffset, contentWidth, "bank")
             table.insert(self.rows, row)
             yOffset = yOffset + ROW_HEIGHT
         end
     end
 
-    -- Show AH section (if any)
+    -- 2. Show "To Craft" section (if any)
+    if #toCraft > 0 then
+        local headerRow = self:CreateSectionHeader("To Craft", yOffset, contentWidth)
+        table.insert(self.rows, headerRow)
+        yOffset = yOffset + ROW_HEIGHT
+
+        for _, craft in ipairs(toCraft) do
+            -- Main craft row
+            local row = self:CreateCraftRow(craft, yOffset, contentWidth)
+            table.insert(self.rows, row)
+            yOffset = yOffset + ROW_HEIGHT
+
+            -- Sub-row showing material breakdown
+            local subRow = self:CreateCraftSubRow(craft, yOffset, contentWidth)
+            table.insert(self.rows, subRow)
+            yOffset = yOffset + ROW_HEIGHT
+
+            totalCost = totalCost + (craft.craftCost or 0)
+        end
+    end
+
+    -- 3. Show AH section (if any)
     if #fromAH > 0 then
         local headerRow = self:CreateSectionHeader("From AH", yOffset, contentWidth)
         table.insert(self.rows, headerRow)
         yOffset = yOffset + ROW_HEIGHT
 
         for _, mat in ipairs(fromAH) do
-            local row = self:CreateMaterialRow(mat, yOffset, contentWidth, false)
+            local row = self:CreateMaterialRow(mat, yOffset, contentWidth, "ah")
             table.insert(self.rows, row)
             yOffset = yOffset + ROW_HEIGHT
             totalCost = totalCost + mat.estimatedCost
@@ -216,8 +238,8 @@ function MissingPanel:CreateSectionHeader(text, yOffset, contentWidth)
 end
 
 -- Create a material row
--- isBank: true for bank items (green), false for AH items (red with price)
-function MissingPanel:CreateMaterialRow(mat, yOffset, contentWidth, isBank)
+-- rowType: "bank" for bank items (green), "ah" for AH items (red with price)
+function MissingPanel:CreateMaterialRow(mat, yOffset, contentWidth, rowType)
     local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
     row:SetSize(contentWidth, ROW_HEIGHT)
     row:SetPoint("TOPLEFT", 0, -yOffset)
@@ -228,19 +250,27 @@ function MissingPanel:CreateMaterialRow(mat, yOffset, contentWidth, isBank)
     })
     row:SetBackdropColor(0.15, 0.15, 0.15, 0.5)
 
+    local isBank = (rowType == "bank")
+
     -- Icon
     row.icon = row:CreateTexture(nil, "ARTWORK")
     row.icon:SetSize(18, 18)
     row.icon:SetPoint("LEFT", 4, 0)
     row.icon:SetTexture(mat.icon)
 
-    -- Count and name (green for bank, red for AH)
+    -- Count and name (green for bank, red for AH) with optional purpose annotation
     row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     row.text:SetPoint("LEFT", 26, 0)
     row.text:SetPoint("RIGHT", row, "RIGHT", -80, 0)
     row.text:SetJustifyH("LEFT")
     local countColor = isBank and "|cFF66FF66" or "|cFFFF6666"
-    row.text:SetText(string.format("%s%dx|r %s", countColor, mat.missing, mat.name or "Unknown"))
+    local displayText = string.format("%s%dx|r %s", countColor, mat.missing, mat.name or "Unknown")
+
+    -- Add purpose annotation for bank items (e.g., "for smelting")
+    if isBank and mat.purpose then
+        displayText = displayText .. string.format(" |cFF888888(%s)|r", mat.purpose)
+    end
+    row.text:SetText(displayText)
 
     -- Cost (only for AH items)
     row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -269,6 +299,9 @@ function MissingPanel:CreateMaterialRow(mat, yOffset, contentWidth, isBank)
             GameTooltip:AddLine(" ")
             if isBank then
                 GameTooltip:AddLine(string.format("In bank: %d | Grab: %d", mat.have, mat.missing), 0.4, 1, 0.4)
+                if mat.purpose then
+                    GameTooltip:AddLine("Purpose: " .. mat.purpose, 0.6, 0.6, 0.6)
+                end
             else
                 GameTooltip:AddLine(string.format("Have: %d | Need: %d | Buy: %d", mat.have, mat.need, mat.missing), 1, 1, 1)
             end
@@ -280,6 +313,98 @@ function MissingPanel:CreateMaterialRow(mat, yOffset, contentWidth, isBank)
         row:SetBackdropColor(0.15, 0.15, 0.15, 0.5)
         GameTooltip:Hide()
     end)
+
+    row:Show()
+    return row
+end
+
+-- Create a craft row for "To Craft" section
+-- Format: 46x Fel Iron Bar (Smelt Fel Iron: 92x Fel Iron Ore)
+function MissingPanel:CreateCraftRow(craft, yOffset, contentWidth)
+    local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
+    row:SetSize(contentWidth, ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -yOffset)
+
+    -- Row background for hover
+    row:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+    })
+    row:SetBackdropColor(0.15, 0.15, 0.15, 0.5)
+
+    -- Icon
+    row.icon = row:CreateTexture(nil, "ARTWORK")
+    row.icon:SetSize(18, 18)
+    row.icon:SetPoint("LEFT", 4, 0)
+    row.icon:SetTexture(craft.icon)
+
+    -- Text: "46x Fel Iron Bar (Smelt Fel Iron: 92x Fel Iron Ore)"
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.text:SetPoint("LEFT", 26, 0)
+    row.text:SetPoint("RIGHT", row, "RIGHT", -80, 0)
+    row.text:SetJustifyH("LEFT")
+
+    local displayText = string.format("|cFF66CCFF%dx|r %s", craft.quantity, craft.name or "Unknown")
+    if craft.recipeName and craft.sourceDesc then
+        displayText = displayText .. string.format(" |cFFAAAAAA(%s: %s)|r", craft.recipeName, craft.sourceDesc)
+    end
+    row.text:SetText(displayText)
+
+    -- Cost
+    row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.cost:SetPoint("RIGHT", -8, 0)
+    if craft.craftCost and craft.craftCost > 0 then
+        row.cost:SetText(Utils.FormatMoney(craft.craftCost))
+    else
+        row.cost:SetText("|cFF66FF66Free|r")
+    end
+
+    -- Shift-click to link
+    row:SetScript("OnClick", function()
+        if IsShiftKeyDown() and craft.link then
+            HandleModifiedItemClick(craft.link)
+        end
+    end)
+
+    -- Tooltip and hover
+    row:SetScript("OnEnter", function()
+        row:SetBackdropColor(0.25, 0.25, 0.25, 0.8)
+        if craft.itemId then
+            GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+            GameTooltip:SetItemByID(craft.itemId)
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Craft this intermediate material", 0.4, 0.8, 1)
+            if craft.recipeName then
+                GameTooltip:AddLine("Recipe: " .. craft.recipeName, 1, 1, 1)
+            end
+            if craft.professionKey then
+                GameTooltip:AddLine("Profession: " .. craft.professionKey, 0.8, 0.8, 0.8)
+            end
+            GameTooltip:AddLine("Shift-click to link", 0.5, 0.5, 0.5)
+            GameTooltip:Show()
+        end
+    end)
+    row:SetScript("OnLeave", function()
+        row:SetBackdropColor(0.15, 0.15, 0.15, 0.5)
+        GameTooltip:Hide()
+    end)
+
+    row:Show()
+    return row
+end
+
+-- Create a sub-row showing material breakdown: "└─ Using: 50x from bank + 42x from AH"
+function MissingPanel:CreateCraftSubRow(craft, yOffset, contentWidth)
+    local row = CreateFrame("Frame", nil, self.frame.content)
+    row:SetSize(contentWidth, ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -yOffset)
+
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.text:SetPoint("LEFT", 26, 0)
+    row.text:SetJustifyH("LEFT")
+    row.text:SetTextColor(0.6, 0.6, 0.6)
+
+    local usingText = craft.usingDesc or ""
+    row.text:SetText(string.format("    \226\148\148\226\148\128 Using: %s", usingText))
 
     row:Show()
     return row

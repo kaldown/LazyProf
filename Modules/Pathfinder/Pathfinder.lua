@@ -36,13 +36,38 @@ function Pathfinder:Calculate()
     -- Get inventory (bags + optional bank)
     local inventory, bankInventory = LazyProf.Inventory:ScanAll()
 
-    -- Get prices for all reagents
+    -- Get prices for all reagents (and potential source materials for resolution)
     local reagentIds = {}
+    local seenIds = {}
     for _, recipe in ipairs(recipes) do
         for _, reagent in ipairs(recipe.reagents) do
-            table.insert(reagentIds, reagent.itemId)
+            if not seenIds[reagent.itemId] then
+                seenIds[reagent.itemId] = true
+                table.insert(reagentIds, reagent.itemId)
+            end
         end
     end
+
+    -- Also get prices for potential source materials (for material resolution)
+    local CraftLib = _G.CraftLib
+    if CraftLib and CraftLib.GetRecipeByProduct then
+        for itemId in pairs(seenIds) do
+            local craftRecipes = CraftLib:GetRecipeByProduct(itemId)
+            if craftRecipes then
+                for _, recipeInfo in ipairs(craftRecipes) do
+                    if recipeInfo.recipe and recipeInfo.recipe.reagents then
+                        for _, reagent in ipairs(recipeInfo.recipe.reagents) do
+                            if not seenIds[reagent.itemId] then
+                                seenIds[reagent.itemId] = true
+                                table.insert(reagentIds, reagent.itemId)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     local prices = LazyProf.PriceManager:GetPrices(reagentIds)
 
     -- Get strategy
@@ -85,7 +110,7 @@ function Pathfinder:GetTargetSkill(currentSkill, milestones)
 end
 
 -- Calculate total missing materials for entire path
--- Returns { fromBank = {...}, fromAH = {...} }
+-- Returns { fromBank = {...}, toCraft = {...}, fromAH = {...} }
 function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, prices)
     local needed = {}
 
@@ -97,11 +122,92 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
         end
     end
 
-    -- Categorize by source: bags already counted in inventory, so calculate what comes from bank vs AH
+    -- Get resolution mode (only applies to Cheapest strategy)
+    local resolutionMode = Constants.MATERIAL_RESOLUTION.NONE
+    if LazyProf.db.profile.strategy == Constants.STRATEGY.CHEAPEST then
+        resolutionMode = LazyProf.db.profile.materialResolution
+    end
+
+    -- Track intermediate crafts and resolved materials
+    local toCraft = {}
+    local resolvedNeeded = {} -- Final materials after resolution
+    local bankPurpose = {}    -- Track why bank items are needed (for annotations)
+
+    -- Process each needed material through MaterialResolver
+    for itemId, need in pairs(needed) do
+        local inBags = LazyProf.Inventory:ScanBags()[itemId] or 0
+        local afterBags = math.max(0, need - inBags)
+
+        if afterBags > 0 and LazyProf.MaterialResolver then
+            -- Check if this material should be crafted
+            local resolution = LazyProf.MaterialResolver:ResolveMaterial(
+                itemId, afterBags, inventory, prices, {}, resolutionMode
+            )
+
+            if resolution.shouldCraft and resolution.craftRecipe then
+                -- Add to toCraft list
+                local name, link, icon = Utils.GetItemInfo(itemId)
+                local recipeName = resolution.craftRecipe.name or "Unknown Recipe"
+
+                -- Calculate source material breakdown
+                local sourceFromBank = 0
+                local sourceFromAH = 0
+                local sourceMaterialName = ""
+
+                for _, source in ipairs(resolution.sourceItems) do
+                    sourceFromBank = sourceFromBank + source.fromInventory
+                    sourceFromAH = sourceFromAH + source.toBuy
+                    sourceMaterialName = source.name or "Unknown"
+
+                    -- Add source materials to resolvedNeeded
+                    resolvedNeeded[source.itemId] = (resolvedNeeded[source.itemId] or 0) + source.totalNeeded
+
+                    -- Track bank purpose for source materials
+                    if source.fromInventory > 0 then
+                        bankPurpose[source.itemId] = string.format("for %s", recipeName:lower())
+                    end
+                end
+
+                -- Build source description for UI
+                local totalSourceNeeded = sourceFromBank + sourceFromAH
+                local sourceDesc = string.format("%dx %s", totalSourceNeeded, sourceMaterialName)
+                local usingDesc = ""
+                if sourceFromBank > 0 and sourceFromAH > 0 then
+                    usingDesc = string.format("%dx from bank + %dx from AH", sourceFromBank, sourceFromAH)
+                elseif sourceFromBank > 0 then
+                    usingDesc = string.format("%dx from bank", sourceFromBank)
+                else
+                    usingDesc = string.format("%dx from AH", sourceFromAH)
+                end
+
+                table.insert(toCraft, {
+                    itemId = itemId,
+                    name = name or "Unknown",
+                    icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark",
+                    link = link,
+                    quantity = afterBags,
+                    recipeName = recipeName,
+                    professionKey = resolution.professionKey,
+                    sourceDesc = sourceDesc,
+                    usingDesc = usingDesc,
+                    craftCost = resolution.craftCost,
+                    sourceItems = resolution.sourceItems,
+                })
+            else
+                -- Not crafting - add directly to resolvedNeeded
+                resolvedNeeded[itemId] = (resolvedNeeded[itemId] or 0) + afterBags
+            end
+        elseif afterBags > 0 then
+            -- No MaterialResolver or no resolution needed
+            resolvedNeeded[itemId] = (resolvedNeeded[itemId] or 0) + afterBags
+        end
+    end
+
+    -- Categorize resolved materials by source: bank vs AH
     local fromBank = {}
     local fromAH = {}
 
-    for itemId, need in pairs(needed) do
+    for itemId, need in pairs(resolvedNeeded) do
         local inBags = LazyProf.Inventory:ScanBags()[itemId] or 0
         local inBank = bankInventory and bankInventory[itemId] or 0
         local totalHave = inventory[itemId] or 0
@@ -119,6 +225,7 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
             local fromAHCount = math.max(0, afterBags - inBank)
 
             if fromBankCount > 0 then
+                local purpose = bankPurpose[itemId] -- e.g., "for smelting"
                 table.insert(fromBank, {
                     itemId = itemId,
                     name = name or "Unknown",
@@ -128,6 +235,7 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
                     need = fromBankCount,
                     missing = fromBankCount,
                     estimatedCost = 0, -- Bank items are free
+                    purpose = purpose, -- Annotation for UI
                 })
             end
 
@@ -146,11 +254,12 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
         end
     end
 
-    -- Sort by cost descending (AH items) and by name (bank items)
+    -- Sort by cost descending (AH items) and by name (bank/craft items)
     table.sort(fromAH, function(a, b) return a.estimatedCost > b.estimatedCost end)
     table.sort(fromBank, function(a, b) return (a.name or "") < (b.name or "") end)
+    table.sort(toCraft, function(a, b) return (a.name or "") < (b.name or "") end)
 
-    return { fromBank = fromBank, fromAH = fromAH }
+    return { fromBank = fromBank, toCraft = toCraft, fromAH = fromAH }
 end
 
 -- Break down path by milestones

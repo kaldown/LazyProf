@@ -42,6 +42,13 @@ LazyProf.Constants = {
         FASTEST = "fastest",
     },
 
+    -- Material resolution modes (for Cheapest strategy)
+    MATERIAL_RESOLUTION = {
+        NONE = "none",           -- Buy all materials from AH
+        COST_COMPARE = "cost",   -- Craft intermediates if cheaper
+        ALWAYS_CRAFT = "craft",  -- Always use raw materials
+    },
+
     -- Cache TTL in seconds
     PRICE_CACHE_TTL = 300,        -- 5 minutes
     PRICE_STALE_THRESHOLD = 86400, -- 24 hours

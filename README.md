@@ -10,7 +10,8 @@ Calculate the cheapest path to level your professions in World of Warcraft.
 
 - Calculates optimal leveling path based on current AH prices
 - Two strategies: Cheapest (minimize gold) or Fastest (minimize crafts)
-- Shows missing materials with cost breakdown
+- Material Resolution: Automatically suggests crafting intermediates (e.g., smelt ore into bars) when cheaper
+- Shows missing materials with cost breakdown and "To Craft" section
 - Tracks progress with milestone breakdowns
 - Bank inventory integration (with optional addon)
 

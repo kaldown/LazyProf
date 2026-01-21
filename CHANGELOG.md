@@ -2,6 +2,15 @@
 
 All notable changes to LazyProf will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Material Resolution system for intermediate crafting (smelt ore into bars, etc.)
+- "To Craft" section in Shopping List showing intermediate materials to craft
+- Config option: Material Resolution (None / Cost-compare / Always craft)
+- Material flow annotations showing where resources come from (bank vs AH)
+- CraftLib `GetRecipeByProduct` integration for reverse recipe lookups
+
 ## [0.2.0] - 2025-01-21
 
 First public release with CraftLib integration.
