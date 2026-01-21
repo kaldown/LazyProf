@@ -1,6 +1,10 @@
 # LazyProf
 
+[![CurseForge](https://img.shields.io/badge/CurseForge-LazyProf-orange)](https://www.curseforge.com/wow/addons/lazyprof)
+
 Calculate the cheapest path to level your professions in World of Warcraft.
+
+**Requires [CraftLib](https://www.curseforge.com/wow/addons/craftlib)** - Install both addons together.
 
 ## Features
 
@@ -22,7 +26,7 @@ Calculate the cheapest path to level your professions in World of Warcraft.
 |-------|---------|
 | [TradeSkillMaster](https://www.curseforge.com/wow/addons/tradeskill-master) | TSM pricing integration |
 | [Auctionator](https://www.curseforge.com/wow/addons/auctionator) | Auctionator pricing + shift-click search |
-| [Baganator](https://www.curseforge.com/wow/addons/baganator) | Bank inventory scanning |
+| [Syndicator](https://www.curseforge.com/wow/addons/baganator) | Bank inventory scanning |
 
 ## Usage
 
@@ -36,6 +40,6 @@ Commands: `/lazyprof` or `/lp`
 
 Access via `/lp` or the Interface Options panel:
 
-- **Include bank items** - Count bank contents when calculating missing materials (requires Baganator)
+- **Include bank items** - Count bank contents when calculating missing materials (requires Syndicator)
 - **Suggest unlearned recipes** - Include recipes you haven't learned yet
 - **Calculate from current skill** - Show materials from current skill instead of full bracket
