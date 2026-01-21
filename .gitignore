@@ -1,8 +1,11 @@
 # Claude Code
 .claude/
 
-# Design docs (not distributed)
-docs/
+# Agent-specific files (local context only)
+docs/agents/
+
+# Plans are local working documents
+docs/plans/
 
 # macOS
 .DS_Store
