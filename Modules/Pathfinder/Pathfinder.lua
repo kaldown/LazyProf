@@ -114,11 +114,14 @@ end
 function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, prices)
     local needed = {}
 
-    -- Sum up all reagents needed
+    -- Sum up all reagents needed (preserve name from CraftLib as fallback)
     for _, step in ipairs(steps) do
         for _, reagent in ipairs(step.recipe.reagents) do
             local itemId = reagent.itemId
-            needed[itemId] = (needed[itemId] or 0) + (reagent.count * step.quantity)
+            if not needed[itemId] then
+                needed[itemId] = { count = 0, nameFromData = reagent.name }
+            end
+            needed[itemId].count = needed[itemId].count + (reagent.count * step.quantity)
         end
     end
 
@@ -134,7 +137,8 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
     local bankPurpose = {}    -- Track why bank items are needed (for annotations)
 
     -- Process each needed material through MaterialResolver
-    for itemId, need in pairs(needed) do
+    for itemId, data in pairs(needed) do
+        local need = data.count
         local inBags = LazyProf.Inventory:ScanBags()[itemId] or 0
         local afterBags = math.max(0, need - inBags)
 
@@ -147,6 +151,9 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
             if resolution.shouldCraft and resolution.craftRecipe then
                 -- Add to toCraft list
                 local name, link, icon = Utils.GetItemInfo(itemId)
+                -- Fallback to CraftLib's reagent name if GetItemInfo hasn't cached the item
+                name = name or data.nameFromData or "Unknown"
+                icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark"
                 local recipeName = resolution.craftRecipe.name or "Unknown Recipe"
 
                 -- Calculate source material breakdown
@@ -159,8 +166,11 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
                     sourceFromAH = sourceFromAH + source.toBuy
                     sourceMaterialName = source.name or "Unknown"
 
-                    -- Add source materials to resolvedNeeded
-                    resolvedNeeded[source.itemId] = (resolvedNeeded[source.itemId] or 0) + source.totalNeeded
+                    -- Add source materials to resolvedNeeded (preserve name fallback)
+                    if not resolvedNeeded[source.itemId] then
+                        resolvedNeeded[source.itemId] = { count = 0, nameFromData = source.name }
+                    end
+                    resolvedNeeded[source.itemId].count = resolvedNeeded[source.itemId].count + source.totalNeeded
 
                     -- Track bank purpose for source materials
                     if source.fromInventory > 0 then
@@ -182,8 +192,8 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
 
                 table.insert(toCraft, {
                     itemId = itemId,
-                    name = name or "Unknown",
-                    icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark",
+                    name = name,
+                    icon = icon,
                     link = link,
                     quantity = afterBags,
                     recipeName = recipeName,
@@ -194,12 +204,18 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
                     sourceItems = resolution.sourceItems,
                 })
             else
-                -- Not crafting - add directly to resolvedNeeded
-                resolvedNeeded[itemId] = (resolvedNeeded[itemId] or 0) + afterBags
+                -- Not crafting - add directly to resolvedNeeded (preserve name fallback)
+                if not resolvedNeeded[itemId] then
+                    resolvedNeeded[itemId] = { count = 0, nameFromData = data.nameFromData }
+                end
+                resolvedNeeded[itemId].count = resolvedNeeded[itemId].count + afterBags
             end
         elseif afterBags > 0 then
-            -- No MaterialResolver or no resolution needed
-            resolvedNeeded[itemId] = (resolvedNeeded[itemId] or 0) + afterBags
+            -- No MaterialResolver or no resolution needed (preserve name fallback)
+            if not resolvedNeeded[itemId] then
+                resolvedNeeded[itemId] = { count = 0, nameFromData = data.nameFromData }
+            end
+            resolvedNeeded[itemId].count = resolvedNeeded[itemId].count + afterBags
         end
     end
 
@@ -207,7 +223,8 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
     local fromBank = {}
     local fromAH = {}
 
-    for itemId, need in pairs(resolvedNeeded) do
+    for itemId, data in pairs(resolvedNeeded) do
+        local need = data.count
         local inBags = LazyProf.Inventory:ScanBags()[itemId] or 0
         local inBank = bankInventory and bankInventory[itemId] or 0
         local totalHave = inventory[itemId] or 0
@@ -219,6 +236,10 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
             local name, link, icon = Utils.GetItemInfo(itemId)
             local price = prices[itemId] or 0
 
+            -- Fallback to CraftLib's reagent name if GetItemInfo hasn't cached the item
+            name = name or data.nameFromData or "Unknown"
+            icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark"
+
             -- How many can come from bank?
             local fromBankCount = math.min(afterBags, inBank)
             -- How many must come from AH?
@@ -228,8 +249,8 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
                 local purpose = bankPurpose[itemId] -- e.g., "for smelting"
                 table.insert(fromBank, {
                     itemId = itemId,
-                    name = name or "Unknown",
-                    icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark",
+                    name = name,
+                    icon = icon,
                     link = link,
                     have = inBank,
                     need = fromBankCount,
@@ -242,8 +263,8 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
             if fromAHCount > 0 then
                 table.insert(fromAH, {
                     itemId = itemId,
-                    name = name or "Unknown",
-                    icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark",
+                    name = name,
+                    icon = icon,
                     link = link,
                     have = totalHave,
                     need = need,
@@ -292,10 +313,13 @@ function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, currentSkill,
                 table.insert(rangeSteps, step)
                 rangeCost = rangeCost + step.totalCost
 
-                -- Track materials for this range
+                -- Track materials for this range (preserve name from CraftLib as fallback)
                 for _, reagent in ipairs(step.recipe.reagents) do
                     local itemId = reagent.itemId
-                    rangeNeeded[itemId] = (rangeNeeded[itemId] or 0) + (reagent.count * step.quantity)
+                    if not rangeNeeded[itemId] then
+                        rangeNeeded[itemId] = { count = 0, nameFromData = reagent.name }
+                    end
+                    rangeNeeded[itemId].count = rangeNeeded[itemId].count + (reagent.count * step.quantity)
                 end
             end
         end
@@ -313,15 +337,20 @@ function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, currentSkill,
 
                 -- Build materials list
                 local materials = {}
-                for itemId, need in pairs(rangeNeeded) do
+                for itemId, data in pairs(rangeNeeded) do
+                    local need = data.count
                     local have = inventory[itemId] or 0
                     local short = math.max(0, need - have)
                     local name, link, icon = Utils.GetItemInfo(itemId)
                     local price = prices[itemId] or 0
 
+                    -- Fallback to CraftLib's reagent name if GetItemInfo hasn't cached the item
+                    name = name or data.nameFromData or "Unknown"
+                    icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark"
+
                     table.insert(materials, {
                         itemId = itemId,
-                        name = name or "Unknown",
+                        name = name,
                         icon = icon,
                         link = link,
                         have = have,
