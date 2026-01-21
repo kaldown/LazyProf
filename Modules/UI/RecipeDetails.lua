@@ -223,9 +223,13 @@ function RecipeDetails:Show(recipe)
     self.currentRecipe = recipe
     local content = self.frame.content
 
-    -- Update header
-    local itemName, itemLink, _, _, _, _, _, _, _, itemIcon = GetItemInfo(recipe.itemId or 0)
-    content.icon:SetTexture(itemIcon or "Interface\\Icons\\INV_Misc_QuestionMark")
+    -- Update header icon from crafted item
+    local icon = nil
+    if recipe.itemId then
+        local _, _, _, _, _, _, _, _, _, itemIcon = GetItemInfo(recipe.itemId)
+        icon = itemIcon
+    end
+    content.icon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
     content.name:SetText(recipe.name or "Unknown Recipe")
     content.skill:SetText("Requires: " .. (recipe.skillRequired or "?"))
 
@@ -258,6 +262,7 @@ end
 function RecipeDetails:UpdateDifficultyBar(recipe)
     local content = self.frame.content
     local range = recipe.skillRange
+    local skillRequired = recipe.skillRequired
 
     if not range then
         content.diffBar:SetVertexColor(0.5, 0.5, 0.5, 1)
@@ -266,8 +271,28 @@ function RecipeDetails:UpdateDifficultyBar(recipe)
         return
     end
 
-    -- Get current profession skill (simplified - would need profession detection)
-    local currentSkill = 300 -- Placeholder - should get from profession API
+    -- Get current profession skill from TradeSkill API
+    local _, currentSkill = GetTradeSkillLine()
+    if not currentSkill then
+        content.diffBar:SetVertexColor(0.5, 0.5, 0.5, 1)
+        content.diffBar:SetWidth(50)
+        content.diffLabel:SetText("Unknown")
+        return
+    end
+
+    -- Check if player can't learn this recipe yet
+    if skillRequired and currentSkill < skillRequired then
+        content.diffBg:Hide()
+        content.diffBar:Hide()
+        content.diffLabel:SetText("")  -- "Requires: X" already shows the info
+        return
+    end
+
+    -- Show bars and restore label position (in case they were hidden)
+    content.diffBg:Show()
+    content.diffBar:Show()
+    content.diffLabel:ClearAllPoints()
+    content.diffLabel:SetPoint("LEFT", content.diffBg, "RIGHT", 8, 0)
 
     local color, label
     if currentSkill < range.yellow then
