@@ -16,6 +16,9 @@ BUILD_DIR="/tmp/claude/${ADDON_NAME}-build"
 
 echo "Building ${ADDON_NAME} v${VERSION}..."
 
+# Ensure submodules are initialized
+git submodule update --init --recursive
+
 # Clean previous build
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR/${ADDON_NAME}"
@@ -26,6 +29,12 @@ cp -r Core "$BUILD_DIR/${ADDON_NAME}/"
 cp -r Modules "$BUILD_DIR/${ADDON_NAME}/"
 cp -r Professions "$BUILD_DIR/${ADDON_NAME}/"
 cp -r Libs "$BUILD_DIR/${ADDON_NAME}/"
+
+# Remove submodule dev files from build
+rm -rf "$BUILD_DIR/${ADDON_NAME}/Libs/Ace3/.git"*
+rm -rf "$BUILD_DIR/${ADDON_NAME}/Libs/Ace3/.github"
+rm -rf "$BUILD_DIR/${ADDON_NAME}/Libs/Ace3/tests"
+rm -rf "$BUILD_DIR/${ADDON_NAME}/Libs/Ace3/.luacheckrc"
 
 # Exclude development files that should never be in release
 # (Makefile, README.md, scripts/, docs/, .claude/, .git/, .gitignore are already
