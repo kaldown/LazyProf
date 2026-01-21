@@ -17,7 +17,7 @@ docs/
 *~
 
 # Build artifacts
-*.zip
+releases/
 *.tar.gz
 
 # Logs

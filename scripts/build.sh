@@ -36,12 +36,13 @@ cd "$BUILD_DIR"
 rm -f "${ZIP_NAME}"
 zip -r "${ZIP_NAME}" "${ADDON_NAME}"
 
-# Move to project root
+# Move to releases folder
 cd - > /dev/null
-mv "$BUILD_DIR/${ZIP_NAME}" .
+mkdir -p releases
+mv "$BUILD_DIR/${ZIP_NAME}" releases/
 
 # Cleanup
 rm -rf "$BUILD_DIR"
 
-echo "Created: ${ZIP_NAME}"
+echo "Created: releases/${ZIP_NAME}"
 echo "Ready for CurseForge upload"
