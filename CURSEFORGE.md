@@ -2,6 +2,10 @@ Tired of wasting gold leveling professions? LazyProf figures out the cheapest cr
 
 **Requires [CraftLib](https://www.curseforge.com/wow/addons/craftlib)** - Install both addons together.
 
+## Supported Professions
+
+See [CraftLib's profession coverage](https://github.com/kaldown/CraftLib#profession-coverage) for the current list of supported professions.
+
 ## Features
 
 - **Optimal leveling path** - Calculates which recipes to craft based on current AH prices

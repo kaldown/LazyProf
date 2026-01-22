@@ -6,6 +6,10 @@ Calculate the cheapest path to level your professions in World of Warcraft.
 
 **Requires [CraftLib](https://www.curseforge.com/wow/addons/craftlib)** - Install both addons together.
 
+## Supported Professions
+
+See [CraftLib's profession coverage](https://github.com/kaldown/CraftLib#profession-coverage) for the current list of supported professions.
+
 ## Features
 
 - Calculates optimal leveling path based on current AH prices
