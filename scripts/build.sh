@@ -29,6 +29,7 @@ cp -r Core "$BUILD_DIR/${ADDON_NAME}/"
 cp -r Modules "$BUILD_DIR/${ADDON_NAME}/"
 cp -r Professions "$BUILD_DIR/${ADDON_NAME}/"
 cp -r Libs "$BUILD_DIR/${ADDON_NAME}/"
+cp icon.tga "$BUILD_DIR/${ADDON_NAME}/"
 
 # Remove submodule dev files from build
 rm -rf "$BUILD_DIR/${ADDON_NAME}/Libs/Ace3/.git"*

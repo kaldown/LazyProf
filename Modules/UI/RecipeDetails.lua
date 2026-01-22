@@ -23,6 +23,17 @@ function RecipeDetails:Initialize()
     self.frame:SetFrameStrata("HIGH")
     self.frame:SetFrameLevel(20)
 
+    -- Register for item info received event to update icon when data is loaded
+    self.frame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+    self.frame:SetScript("OnEvent", function(_, event, itemId)
+        if event == "GET_ITEM_INFO_RECEIVED" and self.currentRecipe and self.currentRecipe.itemId == itemId then
+            local _, _, _, _, _, _, _, _, _, itemIcon = GetItemInfo(itemId)
+            if itemIcon then
+                self.frame.content.icon:SetTexture(itemIcon)
+            end
+        end
+    end)
+
     -- Solid dark background
     self.frame:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",

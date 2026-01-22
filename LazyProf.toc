@@ -3,6 +3,7 @@
 ## Notes: Optimal profession leveling path calculator
 ## Author: Kaldown
 ## Version: 0.2.0
+## IconTexture: Interface\AddOns\LazyProf\icon
 ## SavedVariables: LazyProfDB
 ## OptionalDeps: TradeSkillMaster, Auctionator, Syndicator
 ## Dependencies: CraftLib
