@@ -36,6 +36,17 @@ rm -rf "$BUILD_DIR/${ADDON_NAME}/Libs/Ace3/.github"
 rm -rf "$BUILD_DIR/${ADDON_NAME}/Libs/Ace3/tests"
 rm -rf "$BUILD_DIR/${ADDON_NAME}/Libs/Ace3/.luacheckrc"
 
+rm -rf "$BUILD_DIR/${ADDON_NAME}/Libs/CraftLib/.git"*
+rm -rf "$BUILD_DIR/${ADDON_NAME}/Libs/CraftLib/.github"
+rm -rf "$BUILD_DIR/${ADDON_NAME}/Libs/CraftLib/.claude"
+rm -rf "$BUILD_DIR/${ADDON_NAME}/Libs/CraftLib/docs"
+rm -rf "$BUILD_DIR/${ADDON_NAME}/Libs/CraftLib/.luacheckrc"
+rm -f "$BUILD_DIR/${ADDON_NAME}/Libs/CraftLib/CLAUDE.md"
+
+# Remove CLAUDE.md from all locations
+find "$BUILD_DIR/${ADDON_NAME}" -name "CLAUDE.md" -delete
+find "$BUILD_DIR/${ADDON_NAME}" -name ".claude" -type d -exec rm -rf {} + 2>/dev/null || true
+
 # Exclude development files that should never be in release
 # (Makefile, README.md, scripts/, docs/, .claude/, .git/, .gitignore are already
 # excluded by only copying specific directories above)
