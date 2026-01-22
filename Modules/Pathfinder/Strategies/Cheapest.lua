@@ -74,37 +74,40 @@ LazyProf.PathfinderStrategies.cheapest = {
         return candidates
     end,
 
-    -- Score recipe: lower = better (TOTAL cost per expected skillup for full quantity)
-    -- This fixes the bug where a recipe with 1 "free" craft in inventory would beat
-    -- a better recipe that needs 80 crafts total
+    -- Score recipe: lower = better
+    -- Score based on cost-per-skillup at CURRENT skill level, with bonuses for flexibility
     ScoreRecipe = function(self, recipe, currentSkill, targetSkill, inventory, prices)
-        -- Calculate how many we'd craft until gray or target
-        local quantity = self:CalculateQuantity(recipe, currentSkill, targetSkill)
-
-        -- Calculate total cost for ALL those crafts considering inventory
-        local totalCost = 0
+        -- Calculate cost per craft considering inventory
+        local costPerCraft = 0
         for _, reagent in ipairs(recipe.reagents) do
-            local have = inventory[reagent.itemId] or 0
-            local totalNeed = reagent.count * quantity
-            local needToBuy = math.max(0, totalNeed - have)
             local price = prices[reagent.itemId] or 0
-            totalCost = totalCost + (price * needToBuy)
+            costPerCraft = costPerCraft + (price * reagent.count)
         end
 
-        -- Calculate total expected skillups across all crafts
-        local totalSkillups = 0
-        local simSkill = currentSkill
-        for i = 1, quantity do
-            local expected = self:GetExpectedSkillups(recipe, simSkill)
-            totalSkillups = totalSkillups + expected
-            simSkill = simSkill + expected
-        end
+        -- Get expected skillups at current skill level
+        local expectedSkillups = self:GetExpectedSkillups(recipe, currentSkill)
 
-        if totalSkillups <= 0 then
+        if expectedSkillups <= 0 then
             return math.huge
         end
 
-        return totalCost / totalSkillups
+        -- Base score: cost per skillup at current skill
+        local costPerSkillup = costPerCraft / expectedSkillups
+
+        -- Bonus for recipes that stay useful longer (higher gray point)
+        -- Prefer recipes that won't need to be replaced soon
+        local rangeBonus = 0
+        if recipe.skillRange.gray > currentSkill then
+            -- How many more skill points until this recipe goes gray?
+            local remainingRange = math.min(recipe.skillRange.gray, targetSkill) - currentSkill
+            -- Small bonus per skill point of remaining usefulness
+            rangeBonus = -remainingRange * 0.001
+        end
+
+        -- Tiebreaker: prefer higher difficulty (better skillup rate)
+        local difficultyBonus = -expectedSkillups / 100
+
+        return costPerSkillup + rangeBonus + difficultyBonus
     end,
 
     -- Calculate total cost and skillups for a given quantity (used after best is chosen)
