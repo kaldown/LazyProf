@@ -58,8 +58,10 @@ function Professions:Register(name, data)
     if LazyProf.Debug then LazyProf:Debug("Registered profession: " .. name) end
 end
 
--- Auto-initialize from CraftLib on load
-Professions:Initialize()
+-- Auto-initialize from CraftLib on load (skip if dependency check failed)
+if not LazyProf.dependencyCheckFailed then
+    Professions:Initialize()
+end
 
 -- Get profession by internal name
 function Professions:Get(name)

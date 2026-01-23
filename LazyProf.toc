@@ -48,6 +48,7 @@ Libs\Ace3\AceConfig-3.0\AceConfigDialog-3.0\AceConfigDialog-3.0.lua
 Libs\Ace3\AceConfig-3.0\AceConfigCmd-3.0\AceConfigCmd-3.0.lua
 
 # Core
+Core\DependencyCheck.lua
 Core\Constants.lua
 Core\Utils.lua
 Core\Config.lua

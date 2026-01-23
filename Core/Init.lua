@@ -12,6 +12,11 @@ LazyProf = LibStub("AceAddon-3.0"):NewAddon(
 _G.LazyProf = LazyProf
 
 function LazyProf:OnInitialize()
+    -- Skip initialization if CraftLib dependency is missing
+    if self.dependencyCheckFailed then
+        return
+    end
+
     self.db = LibStub("AceDB-3.0"):New("LazyProfDB", self.defaults, true)
     self:RegisterChatCommand("lazyprof", "SlashCommand")
     self:RegisterChatCommand("lp", "SlashCommand")
@@ -22,6 +27,11 @@ function LazyProf:OnInitialize()
 end
 
 function LazyProf:OnEnable()
+    -- Skip enabling if CraftLib dependency is missing
+    if self.dependencyCheckFailed then
+        return
+    end
+
     -- Initialize modules
     if self.PriceManager then
         self.PriceManager:Initialize()
