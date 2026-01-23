@@ -5,8 +5,7 @@
 ## Version: 0.2.1
 ## IconTexture: Interface\AddOns\LazyProf\icon
 ## SavedVariables: LazyProfDB
-## OptionalDeps: TradeSkillMaster, Auctionator, Syndicator
-## Dependencies: CraftLib
+## OptionalDeps: TradeSkillMaster, Auctionator, Syndicator, CraftLib
 
 # Libraries - Core
 Libs\Ace3\LibStub\LibStub.lua
