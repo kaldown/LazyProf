@@ -4,6 +4,8 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-01-23
+
 ### Added
 - Friendly error dialog when CraftLib dependency is missing
 - Graceful addon disable instead of silent failure
