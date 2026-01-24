@@ -13,5 +13,6 @@ ignore:
   - CURSEFORGE.md
   - CHANGELOG.md
   - "*.md"
+  - Libs/Ace3/tests
 
 enable-nolib-creation: no
