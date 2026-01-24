@@ -315,14 +315,14 @@ function MilestonePanel:CreateIngredientRow(mat, yOffset, contentWidth)
     row.icon:SetPoint("LEFT", 4, 0)
     row.icon:SetTexture(mat.icon)
 
-    -- Name and count
+    -- Name and count (show how many still needed)
     row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     row.text:SetPoint("LEFT", 24, 0)
     row.text:SetPoint("RIGHT", row, "RIGHT", -80, 0)
     row.text:SetJustifyH("LEFT")
     local countText = mat.missing > 0 and
-        string.format("|cFFFF6666%d|r/%d", mat.have, mat.need) or
-        string.format("|cFF66FF66%d|r", mat.need)
+        string.format("|cFFFF6666%dx|r", mat.missing) or
+        "|cFF66FF66Ready|r"
     row.text:SetText(countText .. " " .. (mat.name or "Unknown"))
 
     -- Cost

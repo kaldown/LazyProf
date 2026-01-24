@@ -4,6 +4,9 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Milestone breakdown now shows missing count (e.g., "178x Silk Cloth") instead of confusing have/need format (e.g., "22/200")
+
 ## [0.2.2] - 2026-01-23
 
 ### Added
