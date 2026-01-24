@@ -133,7 +133,9 @@ docs/plans/
    ```
    This pushes both LazyProf and CraftLib commits/tags in one command.
 
-8. Upload to CurseForge
+8. Upload to marketplaces:
+   - CurseForge
+   - Wago.io
 
 ## Cross-Project Coordination
 
