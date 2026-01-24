@@ -4,6 +4,11 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-01-24
+
+### Added
+- Automated releases via GitHub Actions (CurseForge, Wago.io, GitHub Releases)
+
 ### Changed
 - Milestone breakdown now shows missing count (e.g., "178x Silk Cloth") instead of confusing have/need format (e.g., "22/200")
 
