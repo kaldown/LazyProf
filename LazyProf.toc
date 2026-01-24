@@ -6,6 +6,8 @@
 ## IconTexture: Interface\AddOns\LazyProf\icon
 ## SavedVariables: LazyProfDB
 ## OptionalDeps: TradeSkillMaster, Auctionator, Syndicator, CraftLib
+## X-Curse-Project-ID: 1438767
+## X-Wago-ID: RNLkkEGo
 
 # Libraries - Core
 Libs\Ace3\LibStub\LibStub.lua

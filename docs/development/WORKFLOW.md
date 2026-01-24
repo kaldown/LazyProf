@@ -134,9 +134,10 @@ docs/plans/
    ```
    This pushes both LazyProf and CraftLib commits/tags in one command.
 
-8. Upload to marketplaces:
-   - CurseForge
-   - Wago.io
+8. **Automated uploads** (via GitHub Actions):
+   - CurseForge, Wago.io, and GitHub Releases are uploaded automatically
+   - Watch progress at: https://github.com/YOUR_USERNAME/LazyProf/actions
+   - If a release fails, check the Actions logs for errors
 
 ## Cross-Project Coordination
 

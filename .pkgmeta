@@ -1,0 +1,17 @@
+package-as: LazyProf
+
+ignore:
+  - .git
+  - .github
+  - .claude
+  - docs
+  - scripts
+  - releases
+  - Makefile
+  - README.md
+  - CONTRIBUTING.md
+  - CURSEFORGE.md
+  - CHANGELOG.md
+  - "*.md"
+
+enable-nolib-creation: no
