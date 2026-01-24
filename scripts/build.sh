@@ -66,4 +66,10 @@ mv "$BUILD_DIR/${ZIP_NAME}" releases/
 rm -rf "$BUILD_DIR"
 
 echo "Created: releases/${ZIP_NAME}"
-echo "Ready for CurseForge upload"
+echo ""
+echo "=== Changelog for v${VERSION} ==="
+echo ""
+# Extract changelog section for this version
+awk "/^## \[${VERSION}\]/{found=1; next} /^## \[/{if(found) exit} found{print}" CHANGELOG.md
+echo ""
+echo "Ready for CurseForge/Wago.io upload"
