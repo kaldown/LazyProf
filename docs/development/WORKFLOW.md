@@ -136,8 +136,27 @@ docs/plans/
 
 8. **Automated uploads** (via GitHub Actions):
    - CurseForge, Wago.io, and GitHub Releases are uploaded automatically
-   - Watch progress at: https://github.com/YOUR_USERNAME/LazyProf/actions
+   - Watch progress at: https://github.com/kaldown/LazyProf/actions
    - If a release fails, check the Actions logs for errors
+
+### If Release Fails
+
+If the GitHub Actions workflow fails:
+
+1. Fix the issue
+2. Delete the tag locally and remotely:
+   ```bash
+   git tag -d vX.Y.Z
+   git push origin :refs/tags/vX.Y.Z
+   ```
+3. Amend commit if needed, re-tag, and push:
+   ```bash
+   git commit --amend --no-edit  # if changes needed
+   git tag vX.Y.Z
+   git push origin main --tags --force
+   ```
+
+This avoids burning version numbers on CI fixes.
 
 ## Cross-Project Coordination
 
