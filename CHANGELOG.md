@@ -4,6 +4,11 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-01-24
+
+### Fixed
+- Removed invalid interface version (38000) from TOC
+
 ## [0.2.4] - 2026-01-24
 
 ### Added
