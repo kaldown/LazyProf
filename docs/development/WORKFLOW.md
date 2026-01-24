@@ -90,9 +90,24 @@ docs/plans/
 
 ## Release Process
 
+### If CraftLib Changed
+
+1. **In CraftLib directory** (`Libs/CraftLib/`):
+   - Update `CHANGELOG.md` with version and date
+   - Update `CraftLib.toc` version
+   - Commit: `chore: release vX.Y.Z`
+   - Tag: `git tag -a vX.Y.Z -m "vX.Y.Z - description"`
+
+2. **In LazyProf root**:
+   - CraftLib submodule will show as modified
+   - Continue with LazyProf release below
+
+### LazyProf Release
+
 1. Update `CHANGELOG.md`:
    - Move `[Unreleased]` items to new version section
    - Add release date
+   - Note CraftLib version if updated
 
 2. Update version in `LazyProf.toc`:
    ```
@@ -103,13 +118,22 @@ docs/plans/
    - README features match actual
    - CURSEFORGE matches README
 
-4. Commit: `chore: release vX.Y.Z`
+4. Stage all changes (including `Libs/CraftLib` if changed):
+   ```bash
+   git add -A
+   ```
 
-5. Tag: `git tag vX.Y.Z`
+5. Commit: `chore: release vX.Y.Z`
 
-6. Push: `git push && git push --tags`
+6. Tag: `git tag -a vX.Y.Z -m "vX.Y.Z - description"`
 
-7. Upload to CurseForge
+7. Push with submodules (on-demand is configured):
+   ```bash
+   git push --recurse-submodules=on-demand origin main --tags
+   ```
+   This pushes both LazyProf and CraftLib commits/tags in one command.
+
+8. Upload to CurseForge
 
 ## Cross-Project Coordination
 
