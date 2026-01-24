@@ -114,9 +114,10 @@ docs/plans/
    ## Version: X.Y.Z
    ```
 
-3. Verify docs are in sync:
+3. Verify docs and code are in sync:
    - README features match actual
    - CURSEFORGE matches README
+   - No hardcoded version strings (use `C_AddOns.GetAddOnMetadata`)
 
 4. Stage all changes (including `Libs/CraftLib` if changed):
    ```bash
