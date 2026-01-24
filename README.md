@@ -1,6 +1,7 @@
 # LazyProf
 
 [![CurseForge](https://img.shields.io/badge/CurseForge-LazyProf-orange)](https://www.curseforge.com/wow/addons/lazyprof)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Calculate the cheapest path to level your professions in World of Warcraft.
 
@@ -48,3 +49,7 @@ Access via `/lp` or the Interface Options panel:
 - **Include bank items** - Count bank contents when calculating missing materials (requires Syndicator)
 - **Suggest unlearned recipes** - Include recipes you haven't learned yet
 - **Calculate from current skill** - Show materials from current skill instead of full bracket
+
+## License
+
+MIT - See [LICENSE](LICENSE) for details.
