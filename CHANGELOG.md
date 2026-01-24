@@ -4,6 +4,11 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-01-24
+
+### Fixed
+- CraftLib v0.2.4: All 10 professions now have Wowhead-verified difficulty values (97.7% coverage)
+
 ## [0.2.5] - 2026-01-24
 
 ### Fixed
