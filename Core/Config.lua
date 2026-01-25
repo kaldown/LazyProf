@@ -19,6 +19,11 @@ LazyProf.defaults = {
         calculateFromCurrentSkill = false,
         includeBankItems = false,
 
+        -- Minimap button
+        minimap = {
+            hide = false,
+        },
+
         -- Pricing
         priceSourcePriority = {
             Constants.PRICE_SOURCE.TSM,
@@ -129,6 +134,22 @@ LazyProf.options = {
             type = "group",
             order = 2,
             args = {
+                minimapButton = {
+                    name = "Show minimap button",
+                    desc = "Show the LazyProf minimap button",
+                    type = "toggle",
+                    order = 0,
+                    width = "full",
+                    get = function() return not LazyProf.db.profile.minimap.hide end,
+                    set = function(_, v)
+                        LazyProf.db.profile.minimap.hide = not v
+                        if v then
+                            LazyProf.MinimapButton:Show()
+                        else
+                            LazyProf.MinimapButton:Hide()
+                        end
+                    end,
+                },
                 displayMode = {
                     name = "Arrow Style",
                     desc = "How to display the recommended recipe indicator",

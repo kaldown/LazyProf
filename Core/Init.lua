@@ -55,6 +55,9 @@ function LazyProf:OnEnable()
     if self.ProfessionBrowser then
         self.ProfessionBrowser:Initialize()
     end
+    if self.MinimapButton then
+        self.MinimapButton:Initialize()
+    end
 
     -- Register events
     self:RegisterEvent("TRADE_SKILL_SHOW", "OnTradeSkillShow")
