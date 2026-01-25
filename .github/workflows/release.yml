@@ -18,6 +18,22 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Clean up draft releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get the tag name from the ref
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          echo "Cleaning up draft releases for tag: $TAG_NAME"
+
+          # Delete any existing draft releases for this tag
+          gh release list --json tagName,isDraft --jq '.[] | select(.isDraft) | .tagName' | while read -r draft_tag; do
+            if [ "$draft_tag" = "$TAG_NAME" ]; then
+              echo "Deleting draft release for $draft_tag"
+              gh release delete "$draft_tag" --yes || true
+            fi
+          done
+
       - name: Package and Release
         uses: BigWigsMods/packager@v2
         with:
