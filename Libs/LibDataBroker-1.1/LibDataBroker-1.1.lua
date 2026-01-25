@@ -9,10 +9,16 @@ local MAJOR, MINOR = "LibDataBroker-1.1", 4
 local lib, oldminor = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end
 
-lib.callbacks = lib.callbacks or LibStub("CallbackHandler-1.0"):New(lib)
 lib.attributestorage = lib.attributestorage or {}
 lib.namestorage = lib.namestorage or {}
 lib.proxystorage = lib.proxystorage or {}
+
+-- Create callbacks registry with CallbackHandler methods
+-- CallbackHandler:New creates a registry with RegisterCallback, UnregisterCallback, Fire methods
+if not lib.callbacks then
+    lib.callbacks = {}
+    LibStub("CallbackHandler-1.0"):New(lib.callbacks)
+end
 
 local attributestorage = lib.attributestorage
 local namestorage = lib.namestorage
