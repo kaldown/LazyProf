@@ -52,6 +52,9 @@ function LazyProf:OnEnable()
     if self.PlanningWindow then
         self.PlanningWindow:Initialize()
     end
+    if self.ProfessionBrowser then
+        self.ProfessionBrowser:Initialize()
+    end
 
     -- Register events
     self:RegisterEvent("TRADE_SKILL_SHOW", "OnTradeSkillShow")
@@ -70,10 +73,14 @@ function LazyProf:SlashCommand(input)
         if self.PlanningWindow then
             self.PlanningWindow:Open("engineering")
         end
+    elseif input == "browse" then
+        if self.ProfessionBrowser then
+            self.ProfessionBrowser:Toggle()
+        end
     elseif self.configRegistered then
         LibStub("AceConfigDialog-3.0"):Open("LazyProf")
     else
-        self:Print("Commands: /lp scan | /lp reset | /lp plan | /lp debug")
+        self:Print("Commands: /lp scan | /lp reset | /lp plan | /lp browse | /lp debug")
     end
 end
 

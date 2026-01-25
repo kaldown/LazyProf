@@ -76,6 +76,7 @@ Modules\UI\MilestoneBreakdown.lua
 Modules\UI\MissingMaterials.lua
 Modules\UI\RecipeDetails.lua
 Modules\UI\PlanningWindow.lua
+Modules\UI\ProfessionBrowser.lua
 
 # Professions
 Professions\Registry.lua
