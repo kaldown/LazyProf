@@ -33,3 +33,8 @@ temp/
 # WoW Addon Development
 # SavedVariables are generated at runtime
 SavedVariables/
+
+# External libraries (fetched via .pkgmeta externals during release)
+# Downloaded locally via SVN for development
+Libs/LibDBIcon-1.0/
+Libs/LibDataBroker-1.1/
