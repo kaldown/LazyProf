@@ -4,6 +4,16 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-01-25
+
+### Added
+- Debug log popup: `/lp debuglog` opens copyable log window (Ctrl+A, Ctrl+C)
+
+### Fixed
+- PlanningWindow now standalone (no longer hijacks MilestoneBreakdown)
+- Skill detection uses Classic-compatible API (GetSkillLineInfo)
+- Planner correctly shows current skill level for learned professions
+
 ## [0.2.8] - 2026-01-25
 
 ### Added
@@ -13,7 +23,6 @@ All notable changes to LazyProf will be documented in this file.
 
 ### Fixed
 - Planning mode now correctly calculates paths (skill level starts at 1, not 0)
-- MilestonePanel properly embeds inside PlanningWindow (no separate floating panel)
 - Professions now load reliably from CraftLib on startup
 - Resize PlanningWindow properly refreshes content layout
 
