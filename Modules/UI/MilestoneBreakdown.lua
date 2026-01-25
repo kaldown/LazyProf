@@ -128,6 +128,28 @@ function MilestonePanel:RefreshLayout()
     end
 end
 
+-- Set the parent frame for standalone vs attached mode
+-- mode: "tradeskill" (attached to TradeSkillFrame) or "planning" (standalone)
+function MilestonePanel:SetParentMode(mode, parentFrame)
+    self.parentMode = mode
+    self.customParent = parentFrame
+
+    if mode == "planning" and parentFrame then
+        self.frame:SetParent(parentFrame)
+        self.frame:ClearAllPoints()
+        self.frame:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", 0, 0)
+        self.frame:SetPoint("BOTTOMRIGHT", parentFrame, "BOTTOMRIGHT", 0, 0)
+        -- Hide close button in planning mode (parent handles it)
+        self.frame.closeBtn:Hide()
+        -- Hide resize handle (parent handles it)
+        self.frame.resizeBtn:Hide()
+    else
+        self.frame:SetParent(UIParent)
+        self.frame.closeBtn:Show()
+        self.frame.resizeBtn:Show()
+    end
+end
+
 -- Update the panel with milestone breakdown data (step-by-step format)
 function MilestonePanel:Update(breakdown, totalCost)
     if not LazyProf.db.profile.showMilestonePanel then
@@ -188,8 +210,10 @@ function MilestonePanel:Update(breakdown, totalCost)
     -- Update content height for scrolling
     self.frame.content:SetHeight(math.max(yOffset + 10, self.frame:GetHeight() - 70))
 
-    -- Position next to TradeSkill frame (only if not manually moved)
-    if TradeSkillFrame and TradeSkillFrame:IsVisible() and not self.manuallyMoved then
+    -- Position based on mode
+    if self.parentMode == "planning" then
+        -- Already positioned by SetParentMode, don't reposition
+    elseif TradeSkillFrame and TradeSkillFrame:IsVisible() and not self.manuallyMoved then
         self.frame:ClearAllPoints()
         self.frame:SetPoint("TOPLEFT", TradeSkillFrame, "TOPRIGHT", 10, 0)
     end

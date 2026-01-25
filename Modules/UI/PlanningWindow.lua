@@ -186,8 +186,10 @@ function PlanningWindow:LoadProfession(profKey)
     -- Calculate path
     self.currentPath = LazyProf.Pathfinder:CalculateForProfession(profKey, skillLevel)
 
-    -- Update embedded panels (TODO: will be added in Task 8)
-    if self.currentPath then
+    -- Update milestone panel in planning mode
+    if self.currentPath and LazyProf.MilestonePanel then
+        LazyProf.MilestonePanel:SetParentMode("planning", self.frame.contentArea)
+        LazyProf.MilestonePanel:Update(self.currentPath.milestoneBreakdown, self.currentPath.totalCost)
         LazyProf:Debug(string.format("Loaded %s: %d steps, %s",
             profInfo.name, #self.currentPath.steps,
             Utils.FormatMoney(self.currentPath.totalCost)))
@@ -203,6 +205,11 @@ end
 function PlanningWindow:Hide()
     if self.frame then
         self.frame:Hide()
+    end
+    -- Reset milestone panel to normal mode
+    if LazyProf.MilestonePanel then
+        LazyProf.MilestonePanel:SetParentMode("tradeskill", nil)
+        LazyProf.MilestonePanel:Hide()
     end
 end
 
