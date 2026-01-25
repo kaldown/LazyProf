@@ -40,8 +40,16 @@ function MilestonePanel:Initialize()
     self.frame:SetResizable(true)
     self.frame:SetClampedToScreen(true)
     self.frame:RegisterForDrag("LeftButton")
-    self.frame:SetScript("OnDragStart", function(f) f:StartMoving() end)
-    self.frame:SetScript("OnDragStop", function(f) f:StopMovingOrSizing() end)
+    self.frame:SetScript("OnDragStart", function(f)
+        if f:IsMovable() then
+            f:StartMoving()
+        end
+    end)
+    self.frame:SetScript("OnDragStop", function(f)
+        if f:IsMovable() then
+            f:StopMovingOrSizing()
+        end
+    end)
 
     -- Set resize bounds
     if self.frame.SetResizeBounds then
@@ -122,14 +130,21 @@ end
 
 -- Refresh layout after resize
 function MilestonePanel:RefreshLayout()
-    if LazyProf.Pathfinder and LazyProf.Pathfinder.currentPath then
-        self:Update(LazyProf.Pathfinder.currentPath.milestoneBreakdown,
-                    LazyProf.Pathfinder.currentPath.totalCost)
+    -- Use the appropriate path based on current mode
+    local path
+    if self.parentMode == "planning" and LazyProf.PlanningWindow then
+        path = LazyProf.PlanningWindow.currentPath
+    elseif LazyProf.Pathfinder then
+        path = LazyProf.Pathfinder.currentPath
+    end
+
+    if path then
+        self:Update(path.milestoneBreakdown, path.totalCost)
     end
 end
 
 -- Set the parent frame for standalone vs attached mode
--- mode: "tradeskill" (attached to TradeSkillFrame) or "planning" (standalone)
+-- mode: "tradeskill" (attached to TradeSkillFrame) or "planning" (embedded in PlanningWindow)
 function MilestonePanel:SetParentMode(mode, parentFrame)
     self.parentMode = mode
     self.customParent = parentFrame
@@ -139,14 +154,37 @@ function MilestonePanel:SetParentMode(mode, parentFrame)
         self.frame:ClearAllPoints()
         self.frame:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", 0, 0)
         self.frame:SetPoint("BOTTOMRIGHT", parentFrame, "BOTTOMRIGHT", 0, 0)
-        -- Hide close button in planning mode (parent handles it)
+        -- Hide UI elements handled by parent in planning mode
         self.frame.closeBtn:Hide()
-        -- Hide resize handle (parent handles it)
         self.frame.resizeBtn:Hide()
+        self.frame.titleBg:Hide()
+        self.frame.title:Hide()
+        -- Disable dragging (parent handles it)
+        self.frame:SetMovable(false)
+        -- Remove backdrop (parent has its own styling)
+        self.frame:SetBackdrop(nil)
+        -- Adjust scroll frame to use full space (no title bar)
+        self.frame.scrollFrame:SetPoint("TOPLEFT", 4, -4)
+        self.frame.scrollFrame:SetPoint("BOTTOMRIGHT", -24, 28)
     else
         self.frame:SetParent(UIParent)
         self.frame.closeBtn:Show()
         self.frame.resizeBtn:Show()
+        self.frame.titleBg:Show()
+        self.frame.title:Show()
+        self.frame:SetMovable(true)
+        -- Restore backdrop
+        self.frame:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 16,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 }
+        })
+        self.frame:SetBackdropColor(0.1, 0.1, 0.1, 0.95)
+        self.frame:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+        -- Restore scroll frame position (leave room for title bar)
+        self.frame.scrollFrame:SetPoint("TOPLEFT", 8, -32)
+        self.frame.scrollFrame:SetPoint("BOTTOMRIGHT", -28, 32)
     end
 end
 

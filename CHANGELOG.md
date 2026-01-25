@@ -4,10 +4,18 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-01-25
+
 ### Added
 - Profession Browser: Browse and plan any profession's leveling path
 - Minimap button for quick access to profession browser
-- Planning mode: See costs before committing to a profession
+- Planning mode: See full leveling path and costs for any profession
+
+### Fixed
+- Planning mode now correctly calculates paths (skill level starts at 1, not 0)
+- MilestonePanel properly embeds inside PlanningWindow (no separate floating panel)
+- Professions now load reliably from CraftLib on startup
+- Resize PlanningWindow properly refreshes content layout
 
 ## [0.2.7] - 2026-01-25
 

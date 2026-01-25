@@ -101,6 +101,21 @@ function PlanningWindow:Initialize()
     end)
     self.frame.resizeBtn:SetScript("OnMouseUp", function()
         self.frame:StopMovingOrSizing()
+        -- Refresh MilestonePanel layout after resize
+        if self.currentPath and LazyProf.MilestonePanel then
+            LazyProf.MilestonePanel:RefreshLayout()
+        end
+    end)
+
+    -- Handle continuous resize for smooth content updates
+    self.frame:SetScript("OnSizeChanged", function(f, width, height)
+        if self.currentPath and LazyProf.MilestonePanel and LazyProf.MilestonePanel.frame then
+            -- Update content width in MilestonePanel
+            local contentArea = self.frame.contentArea
+            if contentArea and LazyProf.MilestonePanel.frame.content then
+                LazyProf.MilestonePanel.frame.content:SetWidth(contentArea:GetWidth() - 30)
+            end
+        end
     end)
 
     -- Make closable with Escape

@@ -4,9 +4,6 @@ local ADDON_NAME, LazyProf = ...
 LazyProf.Professions = {}
 local Professions = LazyProf.Professions
 
--- Reference to CraftLib (standalone addon, loaded via Dependencies)
-local CraftLib = _G.CraftLib
-
 -- Registered profession data (populated from CraftLib)
 Professions.registry = {}
 
@@ -15,8 +12,13 @@ Professions.active = nil
 
 -- Initialize registry from CraftLib
 function Professions:Initialize()
+    local CraftLib = _G.CraftLib
     if not CraftLib or not CraftLib:IsReady() then
-        if LazyProf.Debug then LazyProf:Debug("CraftLib not ready") end
+        return
+    end
+
+    -- Skip if already initialized
+    if next(self.registry) ~= nil then
         return
     end
 
@@ -28,7 +30,6 @@ function Professions:Initialize()
             milestones = data.milestones,
             recipes = data.recipes,
         }
-        if LazyProf.Debug then LazyProf:Debug("Loaded profession from CraftLib: " .. key) end
     end
 end
 

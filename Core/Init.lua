@@ -33,6 +33,11 @@ function LazyProf:OnEnable()
         return
     end
 
+    -- Initialize professions from CraftLib (must happen after all addons loaded)
+    if self.Professions then
+        self.Professions:Initialize()
+    end
+
     -- Initialize modules
     if self.PriceManager then
         self.PriceManager:Initialize()

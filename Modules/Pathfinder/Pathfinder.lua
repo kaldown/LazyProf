@@ -108,7 +108,9 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel)
         return nil
     end
 
-    skillLevel = skillLevel or 0
+    -- In WoW, you start at skill 1 when learning a profession, not 0
+    -- Use minimum of 1 for planning mode calculations
+    skillLevel = math.max(1, skillLevel or 0)
     local targetSkill = self:GetTargetSkill(skillLevel, profData.milestones)
 
     LazyProf:Debug(string.format("Planning path: %s %d -> %d", profData.name, skillLevel, targetSkill))
