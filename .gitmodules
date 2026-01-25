@@ -4,3 +4,9 @@
 [submodule "Libs/CraftLib"]
 	path = Libs/CraftLib
 	url = git@github.com:kaldown/CraftLib.git
+[submodule "Libs/LibDBIcon-1.0"]
+	path = Libs/LibDBIcon-1.0
+	url = git@github.com:kaldown/LibDBIcon-1.0.git
+[submodule "Libs/LibDataBroker-1.1"]
+	path = Libs/LibDataBroker-1.1
+	url = git@github.com:kaldown/LibDataBroker-1.1.git

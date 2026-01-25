@@ -1,8 +1,8 @@
 package-as: LazyProf
 
 externals:
-  Libs/LibDataBroker-1.1: https://github.com/kaldown/LibDataBroker
-  Libs/LibDBIcon-1.0: https://github.com/kaldown/LibDBIcon
+  Libs/LibDataBroker-1.1: https://github.com/kaldown/LibDataBroker-1.1
+  Libs/LibDBIcon-1.0: https://github.com/kaldown/LibDBIcon-1.0
 
 ignore:
   - .git
