@@ -314,8 +314,15 @@ function MilestonePanel:CreateStepRow(step, index, yOffset, contentWidth)
     -- Click to expand/collapse
     row:SetScript("OnClick", function()
         self.expandedRows[index] = not self.expandedRows[index]
-        self:Update(LazyProf.Pathfinder.currentPath.milestoneBreakdown,
-                    LazyProf.Pathfinder.currentPath.totalCost)
+        local path
+        if self.parentMode == "planning" and LazyProf.PlanningWindow then
+            path = LazyProf.PlanningWindow.currentPath
+        elseif LazyProf.Pathfinder then
+            path = LazyProf.Pathfinder.currentPath
+        end
+        if path then
+            self:Update(path.milestoneBreakdown, path.totalCost)
+        end
     end)
 
     -- Highlight on hover
@@ -352,8 +359,14 @@ function MilestonePanel:GetRecipeColor(recipe)
         return { r = 1, g = 1, b = 1 }
     end
 
-    -- Use current skill from pathfinder
-    local currentSkill = LazyProf.Pathfinder.currentPath and LazyProf.Pathfinder.currentPath.currentSkill or 1
+    -- Use current skill from appropriate path based on mode
+    local path
+    if self.parentMode == "planning" and LazyProf.PlanningWindow then
+        path = LazyProf.PlanningWindow.currentPath
+    elseif LazyProf.Pathfinder then
+        path = LazyProf.Pathfinder.currentPath
+    end
+    local currentSkill = path and path.currentSkill or 1
     local color = Utils.GetSkillColor(currentSkill, recipe.skillRange)
 
     if color == "orange" then
