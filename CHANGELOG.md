@@ -4,6 +4,15 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-01-25
+
+### Changed
+- Milestone Breakdown now shows step-by-step format like wow-professions.com guides
+  - Each recipe displays as its own row: "184-197: 30x Bronze Tube - materials"
+  - Click to expand and see detailed material list with have/need counts
+  - Trainer milestone separators (75, 150, 225, 300) appear between relevant steps
+  - Hover tooltip shows full material breakdown
+
 ## [0.2.6] - 2026-01-24
 
 ### Fixed

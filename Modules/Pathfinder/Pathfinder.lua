@@ -283,96 +283,77 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
     return { fromBank = fromBank, toCraft = toCraft, fromAH = fromAH }
 end
 
--- Break down path by milestones
+-- Break down path by individual steps (step-by-step format)
 function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, currentSkill, inventory, prices)
     local breakdown = {}
-    local calculateFromCurrent = LazyProf.db.profile.calculateFromCurrentSkill
 
-    -- Build milestone ranges
-    local ranges = {}
-    local prev = 1
-    for _, m in ipairs(milestones) do
-        table.insert(ranges, { from = prev, to = m })
-        prev = m
-    end
+    for _, step in ipairs(steps) do
+        -- Calculate materials for this step only
+        local materials = {}
+        for _, reagent in ipairs(step.recipe.reagents) do
+            local need = reagent.count * step.quantity
+            local have = inventory[reagent.itemId] or 0
+            local missing = math.max(0, need - have)
+            local name, link, icon = Utils.GetItemInfo(reagent.itemId)
+            local price = prices[reagent.itemId] or 0
 
-    -- Group steps into ranges
-    for _, range in ipairs(ranges) do
-        -- When calculateFromCurrentSkill is enabled, adjust the first applicable range
-        local displayFrom = range.from
-        if calculateFromCurrent and currentSkill > range.from and currentSkill < range.to then
-            displayFrom = currentSkill
-        end
-        local rangeSteps = {}
-        local rangeCost = 0
-        local rangeNeeded = {}
+            -- Fallback to CraftLib's reagent name if GetItemInfo hasn't cached the item
+            name = name or reagent.name or "Unknown"
+            icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark"
 
-        for _, step in ipairs(steps) do
-            -- Check if step falls within this range
-            if step.skillStart < range.to and step.skillEnd > range.from then
-                table.insert(rangeSteps, step)
-                rangeCost = rangeCost + step.totalCost
-
-                -- Track materials for this range (preserve name from CraftLib as fallback)
-                for _, reagent in ipairs(step.recipe.reagents) do
-                    local itemId = reagent.itemId
-                    if not rangeNeeded[itemId] then
-                        rangeNeeded[itemId] = { count = 0, nameFromData = reagent.name }
-                    end
-                    rangeNeeded[itemId].count = rangeNeeded[itemId].count + (reagent.count * step.quantity)
-                end
-            end
+            table.insert(materials, {
+                itemId = reagent.itemId,
+                name = name,
+                icon = icon,
+                link = link,
+                need = need,
+                have = have,
+                missing = missing,
+                estimatedCost = price * missing,
+            })
         end
 
-        if #rangeSteps > 0 then
-            -- Skip ranges already completed when calculateFromCurrent is enabled
-            if calculateFromCurrent and currentSkill >= range.to then
-                -- Skip this completed range
-            else
-                -- Build recipe summary
-                local summaryParts = {}
-                for _, step in ipairs(rangeSteps) do
-                    table.insert(summaryParts, string.format("%dx %s", step.quantity, step.recipe.name))
-                end
-
-                -- Build materials list
-                local materials = {}
-                for itemId, data in pairs(rangeNeeded) do
-                    local need = data.count
-                    local have = inventory[itemId] or 0
-                    local short = math.max(0, need - have)
-                    local name, link, icon = Utils.GetItemInfo(itemId)
-                    local price = prices[itemId] or 0
-
-                    -- Fallback to CraftLib's reagent name if GetItemInfo hasn't cached the item
-                    name = name or data.nameFromData or "Unknown"
-                    icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark"
-
-                    table.insert(materials, {
-                        itemId = itemId,
-                        name = name,
-                        icon = icon,
-                        link = link,
-                        have = have,
-                        need = need,
-                        missing = short,
-                        estimatedCost = price * short,
-                    })
-                end
-
-                table.insert(breakdown, {
-                    from = displayFrom,
-                    to = range.to,
-                    steps = rangeSteps,
-                    summary = table.concat(summaryParts, ", "),
-                    cost = rangeCost,
-                    materials = materials,
-                })
-            end
+        -- Build materials summary string
+        local materialParts = {}
+        for _, mat in ipairs(materials) do
+            table.insert(materialParts, string.format("%dx %s", mat.need, mat.name))
         end
+
+        table.insert(breakdown, {
+            from = step.skillStart,
+            to = step.skillEnd,
+            recipe = step.recipe,
+            quantity = step.quantity,
+            cost = step.totalCost,
+            materials = materials,
+            materialsSummary = table.concat(materialParts, ", "),
+            -- Check if this step crosses a trainer milestone
+            trainerMilestoneAfter = self:GetMilestoneBetween(step.skillStart, step.skillEnd, milestones),
+        })
     end
 
     return breakdown
+end
+
+-- Helper: Get the highest milestone that this skill level has reached or passed
+function Pathfinder:GetMilestoneAt(skill, milestones)
+    local highestMilestone = nil
+    for _, m in ipairs(milestones) do
+        if skill >= m then
+            highestMilestone = m
+        end
+    end
+    return highestMilestone
+end
+
+-- Helper: Check if a milestone exists between two skill levels (exclusive start, inclusive end)
+function Pathfinder:GetMilestoneBetween(fromSkill, toSkill, milestones)
+    for _, m in ipairs(milestones) do
+        if m > fromSkill and m <= toSkill then
+            return m
+        end
+    end
+    return nil
 end
 
 -- Get the current recommended recipe (first step)

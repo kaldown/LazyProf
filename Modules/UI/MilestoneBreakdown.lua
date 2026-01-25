@@ -9,12 +9,12 @@ MilestonePanel.frame = nil
 MilestonePanel.rows = {}
 MilestonePanel.expandedRows = {}
 
-local ROW_HEIGHT = 22
-local INGREDIENT_ROW_HEIGHT = 20
-local UNLEARNED_ROW_HEIGHT = 18
-local MIN_WIDTH = 300
+local STEP_ROW_HEIGHT = 20
+local INGREDIENT_ROW_HEIGHT = 18
+local MILESTONE_SEPARATOR_HEIGHT = 16
+local MIN_WIDTH = 350
 local MIN_HEIGHT = 100
-local DEFAULT_WIDTH = 320
+local DEFAULT_WIDTH = 400
 
 -- Initialize the milestone panel
 function MilestonePanel:Initialize()
@@ -128,7 +128,7 @@ function MilestonePanel:RefreshLayout()
     end
 end
 
--- Update the panel with milestone breakdown data
+-- Update the panel with milestone breakdown data (step-by-step format)
 function MilestonePanel:Update(breakdown, totalCost)
     if not LazyProf.db.profile.showMilestonePanel then
         self:Hide()
@@ -148,29 +148,37 @@ function MilestonePanel:Update(breakdown, totalCost)
 
     local contentWidth = self.frame:GetWidth() - 40
     local yOffset = 0
+    local lastMilestone = nil
 
-    for i, bracket in ipairs(breakdown) do
-        local row = self:CreateMilestoneRow(bracket, i, yOffset, contentWidth)
+    for i, step in ipairs(breakdown) do
+        -- Create step row
+        local row = self:CreateStepRow(step, i, yOffset, contentWidth)
         table.insert(self.rows, row)
-        yOffset = yOffset + ROW_HEIGHT
+        yOffset = yOffset + STEP_ROW_HEIGHT
 
-        -- If expanded, show unlearned indicators and ingredients
+        -- If expanded, show ingredients for this step
         if self.expandedRows[i] then
-            -- Show unlearned recipe indicators first
-            for _, step in ipairs(bracket.steps) do
-                if not step.recipe.learned then
-                    local unlearnedRow = self:CreateUnlearnedRecipeRow(step, yOffset, contentWidth)
-                    table.insert(self.rows, unlearnedRow)
-                    yOffset = yOffset + UNLEARNED_ROW_HEIGHT
-                end
+            -- Show unlearned indicator if recipe not learned
+            if step.recipe and not step.recipe.learned then
+                local unlearnedRow = self:CreateUnlearnedIndicator(step, yOffset, contentWidth)
+                table.insert(self.rows, unlearnedRow)
+                yOffset = yOffset + INGREDIENT_ROW_HEIGHT
             end
 
-            -- Then show ingredients
-            for _, mat in ipairs(bracket.materials) do
+            -- Show ingredients
+            for _, mat in ipairs(step.materials) do
                 local ingredientRow = self:CreateIngredientRow(mat, yOffset, contentWidth)
                 table.insert(self.rows, ingredientRow)
                 yOffset = yOffset + INGREDIENT_ROW_HEIGHT
             end
+        end
+
+        -- Add milestone separator after this step if it crosses a trainer milestone
+        if step.trainerMilestoneAfter and step.trainerMilestoneAfter ~= lastMilestone then
+            local separator = self:CreateMilestoneSeparator(step.trainerMilestoneAfter, yOffset, contentWidth)
+            table.insert(self.rows, separator)
+            yOffset = yOffset + MILESTONE_SEPARATOR_HEIGHT
+            lastMilestone = step.trainerMilestoneAfter
         end
     end
 
@@ -189,42 +197,56 @@ function MilestonePanel:Update(breakdown, totalCost)
     self:Show()
 end
 
--- Create a milestone row
-function MilestonePanel:CreateMilestoneRow(bracket, index, yOffset, contentWidth)
+-- Create a step row (single recipe step)
+function MilestonePanel:CreateStepRow(step, index, yOffset, contentWidth)
     local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
-    row:SetSize(contentWidth, ROW_HEIGHT)
+    row:SetSize(contentWidth, STEP_ROW_HEIGHT)
     row:SetPoint("TOPLEFT", 0, -yOffset)
 
     -- Row background for hover
     row:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
     })
-    row:SetBackdropColor(0.2, 0.2, 0.2, 0)
+    row:SetBackdropColor(0.15, 0.15, 0.15, 0.3)
 
-    -- Expand/collapse button
-    row.expandBtn = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    row.expandBtn:SetPoint("LEFT", 4, 0)
+    -- Expand/collapse indicator
+    row.expandBtn = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.expandBtn:SetPoint("LEFT", 2, 0)
     row.expandBtn:SetText(self.expandedRows[index] and "[-]" or "[+]")
-    row.expandBtn:SetTextColor(0.7, 0.7, 0.7)
+    row.expandBtn:SetTextColor(0.6, 0.6, 0.6)
 
-    -- Range label
-    row.label = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    row.label:SetPoint("LEFT", 28, 0)
-    row.label:SetText(string.format("%d-%d:", bracket.from, bracket.to))
-    row.label:SetTextColor(1, 0.82, 0)
+    -- Skill range (e.g., "184-197")
+    row.range = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.range:SetPoint("LEFT", 18, 0)
+    row.range:SetText(string.format("%d-%d", step.from, step.to))
+    row.range:SetTextColor(1, 0.82, 0) -- Gold color
 
-    -- Summary
-    row.summary = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    row.summary:SetPoint("LEFT", 85, 0)
-    row.summary:SetPoint("RIGHT", row, "RIGHT", -80, 0)
-    row.summary:SetJustifyH("LEFT")
-    row.summary:SetWordWrap(false)
-    row.summary:SetText(bracket.summary)
+    -- Quantity and recipe name (e.g., "30x Bronze Tube")
+    local recipeName = step.recipe and step.recipe.name or "Unknown"
+    local recipeColor = self:GetRecipeColor(step.recipe)
+
+    row.recipe = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.recipe:SetPoint("LEFT", 65, 0)
+    row.recipe:SetText(string.format("%dx %s", step.quantity, recipeName))
+    row.recipe:SetTextColor(recipeColor.r, recipeColor.g, recipeColor.b)
+
+    -- Materials summary (truncated)
+    row.materials = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.materials:SetPoint("LEFT", 180, 0)
+    row.materials:SetPoint("RIGHT", row, "RIGHT", -55, 0)
+    row.materials:SetJustifyH("LEFT")
+    row.materials:SetWordWrap(false)
+    local matSummary = step.materialsSummary or ""
+    if #matSummary > 40 then
+        matSummary = matSummary:sub(1, 37) .. "..."
+    end
+    row.materials:SetText("- " .. matSummary)
+    row.materials:SetTextColor(0.7, 0.7, 0.7)
 
     -- Cost
-    row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    row.cost:SetPoint("RIGHT", -8, 0)
-    row.cost:SetText(Utils.FormatMoney(bracket.cost))
+    row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.cost:SetPoint("RIGHT", -4, 0)
+    row.cost:SetText(Utils.FormatMoney(step.cost))
     row.cost:SetTextColor(1, 1, 1)
 
     -- Click to expand/collapse
@@ -236,29 +258,64 @@ function MilestonePanel:CreateMilestoneRow(bracket, index, yOffset, contentWidth
 
     -- Highlight on hover
     row:SetScript("OnEnter", function()
-        row:SetBackdropColor(0.3, 0.3, 0.3, 0.5)
+        row:SetBackdropColor(0.25, 0.25, 0.25, 0.6)
         row.expandBtn:SetTextColor(1, 1, 0)
+        -- Tooltip with full materials
+        GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(string.format("%dx %s", step.quantity, recipeName), 1, 1, 1)
+        GameTooltip:AddLine(string.format("Skill: %d -> %d", step.from, step.to), 0.7, 0.7, 0.7)
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Materials:", 1, 0.82, 0)
+        for _, mat in ipairs(step.materials) do
+            local color = mat.missing > 0 and "|cFFFF6666" or "|cFF66FF66"
+            GameTooltip:AddLine(string.format("  %s%dx|r %s", color, mat.need, mat.name), 1, 1, 1)
+        end
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Click to expand/collapse", 0.5, 0.5, 0.5)
+        GameTooltip:Show()
     end)
     row:SetScript("OnLeave", function()
-        row:SetBackdropColor(0.2, 0.2, 0.2, 0)
-        row.expandBtn:SetTextColor(0.7, 0.7, 0.7)
+        row:SetBackdropColor(0.15, 0.15, 0.15, 0.3)
+        row.expandBtn:SetTextColor(0.6, 0.6, 0.6)
+        GameTooltip:Hide()
     end)
 
     row:Show()
     return row
 end
 
--- Create an unlearned recipe indicator row
-function MilestonePanel:CreateUnlearnedRecipeRow(step, yOffset, contentWidth)
+-- Get recipe color based on difficulty
+function MilestonePanel:GetRecipeColor(recipe)
+    if not recipe or not recipe.skillRange then
+        return { r = 1, g = 1, b = 1 }
+    end
+
+    -- Use current skill from pathfinder
+    local currentSkill = LazyProf.Pathfinder.currentPath and LazyProf.Pathfinder.currentPath.currentSkill or 1
+    local color = Utils.GetSkillColor(currentSkill, recipe.skillRange)
+
+    if color == "orange" then
+        return { r = 1, g = 0.5, b = 0.25 }
+    elseif color == "yellow" then
+        return { r = 1, g = 1, b = 0 }
+    elseif color == "green" then
+        return { r = 0.25, g = 0.75, b = 0.25 }
+    else
+        return { r = 0.5, g = 0.5, b = 0.5 }
+    end
+end
+
+-- Create an unlearned recipe indicator row (for expanded step view)
+function MilestonePanel:CreateUnlearnedIndicator(step, yOffset, contentWidth)
     local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
-    row:SetSize(contentWidth - 20, UNLEARNED_ROW_HEIGHT)
+    row:SetSize(contentWidth - 20, INGREDIENT_ROW_HEIGHT)
     row:SetPoint("TOPLEFT", 20, -yOffset)
 
     -- Row background for hover
     row:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
     })
-    row:SetBackdropColor(0, 0, 0, 0)
+    row:SetBackdropColor(0.2, 0.15, 0, 0.3)
 
     -- Warning indicator
     row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -267,8 +324,7 @@ function MilestonePanel:CreateUnlearnedRecipeRow(step, yOffset, contentWidth)
     row.text:SetJustifyH("LEFT")
 
     local sourceDesc = Utils.GetSourceDescription(step.recipe.source)
-    local recipeName = step.recipe.name or "Unknown"
-    row.text:SetText(string.format("|cFFFF8800[!]|r %s: |cFFFF8800%s|r", recipeName, sourceDesc))
+    row.text:SetText(string.format("|cFFFF8800[!] Unlearned:|r %s", sourceDesc))
 
     -- Store recipe reference for click handler
     row.recipe = step.recipe
@@ -282,16 +338,48 @@ function MilestonePanel:CreateUnlearnedRecipeRow(step, yOffset, contentWidth)
 
     -- Hover effects
     row:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.3, 0.3, 0.1, 0.5)
+        self:SetBackdropColor(0.3, 0.25, 0.1, 0.5)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:AddLine("Click for details", 1, 1, 1)
         GameTooltip:AddLine("View vendors, Wowhead link", 0.7, 0.7, 0.7)
         GameTooltip:Show()
     end)
     row:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0, 0, 0, 0)
+        self:SetBackdropColor(0.2, 0.15, 0, 0.3)
         GameTooltip:Hide()
     end)
+
+    row:Show()
+    return row
+end
+
+-- Create a trainer milestone separator
+function MilestonePanel:CreateMilestoneSeparator(milestone, yOffset, contentWidth)
+    local row = CreateFrame("Frame", nil, self.frame.content)
+    row:SetSize(contentWidth, MILESTONE_SEPARATOR_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -yOffset)
+
+    -- Separator line left
+    row.lineLeft = row:CreateTexture(nil, "ARTWORK")
+    row.lineLeft:SetTexture("Interface\\Buttons\\WHITE8x8")
+    row.lineLeft:SetVertexColor(0.4, 0.4, 0.4, 0.8)
+    row.lineLeft:SetHeight(1)
+    row.lineLeft:SetPoint("LEFT", 4, 0)
+    row.lineLeft:SetPoint("RIGHT", row, "CENTER", -40, 0)
+
+    -- Milestone text
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.text:SetPoint("CENTER", 0, 0)
+    row.text:SetText(string.format("Train (%d)", milestone))
+    row.text:SetTextColor(0.6, 0.6, 0.6)
+
+    -- Separator line right
+    row.lineRight = row:CreateTexture(nil, "ARTWORK")
+    row.lineRight:SetTexture("Interface\\Buttons\\WHITE8x8")
+    row.lineRight:SetVertexColor(0.4, 0.4, 0.4, 0.8)
+    row.lineRight:SetHeight(1)
+    row.lineRight:SetPoint("LEFT", row, "CENTER", 40, 0)
+    row.lineRight:SetPoint("RIGHT", -4, 0)
 
     row:Show()
     return row
