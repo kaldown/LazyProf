@@ -1,8 +1,8 @@
 package-as: LazyProf
 
 externals:
-  Libs/LibDataBroker-1.1: https://repos.curseforge.com/wow/libdatabroker-1-1/trunk
-  Libs/LibDBIcon-1.0: https://repos.curseforge.com/wow/libdbicon-1-0/trunk/LibDBIcon-1.0
+  Libs/LibDataBroker-1.1: https://github.com/kaldown/LibDataBroker
+  Libs/LibDBIcon-1.0: https://github.com/kaldown/LibDBIcon
 
 ignore:
   - .git
