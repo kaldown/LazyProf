@@ -83,10 +83,12 @@ function LazyProf:SlashCommand(input)
     elseif cmd == "reset" then
         self.db:ResetDB()
         self:Print("Database reset.")
+    elseif cmd == "debuglog" then
+        self:ShowDebugLog()
     elseif self.configRegistered then
         LibStub("AceConfigDialog-3.0"):Open("LazyProf")
     else
-        self:Print("Commands: /lp | /lp browse | /lp reset")
+        self:Print("Commands: /lp | /lp browse | /lp reset | /lp debuglog")
     end
 end
 
@@ -187,8 +189,102 @@ function LazyProf:UpdateDisplay()
     end
 end
 
+-- Debug log buffer
+LazyProf.debugLog = {}
+LazyProf.debugLogMax = 500
+
 function LazyProf:Debug(msg)
     if self.db and self.db.profile.debug then
+        local timestamp = date("%H:%M:%S")
+        local entry = string.format("[%s] %s", timestamp, msg)
+
+        -- Store in buffer
+        table.insert(self.debugLog, entry)
+        if #self.debugLog > self.debugLogMax then
+            table.remove(self.debugLog, 1)
+        end
+
+        -- Also print to chat
         self:Print("[Debug] " .. msg)
     end
+end
+
+function LazyProf:ClearDebugLog()
+    wipe(self.debugLog)
+    self:Print("Debug log cleared.")
+end
+
+function LazyProf:ShowDebugLog()
+    if not self.debugFrame then
+        self:CreateDebugFrame()
+    end
+
+    -- Update content
+    local text = table.concat(self.debugLog, "\n")
+    if text == "" then
+        text = "(No debug messages yet. Enable debug mode and perform actions.)"
+    end
+    self.debugFrame.editBox:SetText(text)
+    self.debugFrame.editBox:SetCursorPosition(#text) -- Scroll to bottom
+    self.debugFrame:Show()
+end
+
+function LazyProf:CreateDebugFrame()
+    local frame = CreateFrame("Frame", "LazyProfDebugFrame", UIParent, "BackdropTemplate")
+    frame:SetSize(600, 400)
+    frame:SetPoint("CENTER")
+    frame:SetFrameStrata("DIALOG")
+    frame:SetMovable(true)
+    frame:SetClampedToScreen(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+
+    frame:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 }
+    })
+    frame:SetBackdropColor(0.1, 0.1, 0.1, 0.95)
+    frame:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+
+    -- Title
+    frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    frame.title:SetPoint("TOP", 0, -10)
+    frame.title:SetText("LazyProf Debug Log (Ctrl+A to select all, Ctrl+C to copy)")
+    frame.title:SetTextColor(1, 0.82, 0)
+
+    -- Close button
+    frame.closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+    frame.closeBtn:SetPoint("TOPRIGHT", -2, -2)
+
+    -- Clear button
+    frame.clearBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame.clearBtn:SetSize(60, 22)
+    frame.clearBtn:SetPoint("BOTTOMRIGHT", -10, 10)
+    frame.clearBtn:SetText("Clear")
+    frame.clearBtn:SetScript("OnClick", function()
+        LazyProf:ClearDebugLog()
+        frame.editBox:SetText("(Log cleared)")
+    end)
+
+    -- Scroll frame
+    frame.scrollFrame = CreateFrame("ScrollFrame", "LazyProfDebugScrollFrame", frame, "UIPanelScrollFrameTemplate")
+    frame.scrollFrame:SetPoint("TOPLEFT", 10, -30)
+    frame.scrollFrame:SetPoint("BOTTOMRIGHT", -30, 40)
+
+    -- EditBox for text (selectable, copyable)
+    frame.editBox = CreateFrame("EditBox", nil, frame.scrollFrame)
+    frame.editBox:SetMultiLine(true)
+    frame.editBox:SetFontObject(GameFontHighlightSmall)
+    frame.editBox:SetWidth(frame.scrollFrame:GetWidth())
+    frame.editBox:SetAutoFocus(false)
+    frame.editBox:EnableMouse(true)
+    frame.editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    frame.scrollFrame:SetScrollChild(frame.editBox)
+
+    tinsert(UISpecialFrames, "LazyProfDebugFrame")
+    self.debugFrame = frame
 end
