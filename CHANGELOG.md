@@ -4,6 +4,30 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-01-25
+
+### Added
+- **TSM Price Source Selection**: Choose which TSM price to use for calculations
+  - Min Buyout (current AH prices - what you can buy NOW)
+  - Market Value (realm average)
+  - Region Average (cross-realm, stable but may differ from local)
+- Settings recommendation when TSM is not installed, showing which fallback is active
+- Debug window auto-updates in real-time when open (no more chat spam during debugging)
+- Detailed pathfinder debug logging showing candidate scores, colors, and costs
+
+### Changed
+- Default TSM price source changed from Region Average to Min Buyout for more accurate local pricing
+- TSM provider now properly returns nil for items with no price data (0 = no data, not free)
+- Debug messages only print to chat when debug window is closed
+
+### Fixed
+- Items with no AH data no longer appear as "free" (0 cost) in path calculations
+- Removed non-functional "Scan AH Now" button and "Auto-scan AH" toggle
+
+### Technical
+- TSM price source configurable via `/lp` → Pricing settings
+- Price fallback chain: selected source → other TSM sources → Auctionator → Vendor
+
 ## [0.2.10] - 2026-01-25
 
 ### Added

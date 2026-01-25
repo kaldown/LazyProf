@@ -31,7 +31,7 @@ LazyProf.defaults = {
             Constants.PRICE_SOURCE.SCANNER,
             Constants.PRICE_SOURCE.VENDOR,
         },
-        autoScanAH = false,
+        tsmPriceSource = Constants.TSM_PRICE_SOURCE.MIN_BUYOUT, -- Default to current AH prices
 
         -- Debug
         debug = false,
@@ -226,27 +226,50 @@ LazyProf.options = {
                     type = "description",
                     order = 1,
                 },
-                autoScanAH = {
-                    name = "Auto-scan Auction House",
-                    desc = "Automatically scan prices when opening the Auction House",
-                    type = "toggle",
-                    order = 2,
-                    width = "full",
-                    get = function() return LazyProf.db.profile.autoScanAH end,
-                    set = function(_, v) LazyProf.db.profile.autoScanAH = v end,
-                },
-                scanButton = {
-                    name = "Scan AH Now",
-                    desc = "Manually trigger Auction House price scan (must have AH open)",
-                    type = "execute",
-                    order = 3,
-                    func = function()
-                        if LazyProf.PriceManager then
-                            LazyProf.PriceManager:ScanAuctionHouse()
-                        else
-                            LazyProf:Print("Price manager not loaded.")
+                tsmNotInstalled = {
+                    name = function()
+                        local source = "Vendor prices only"
+                        if Auctionator and Auctionator.API and Auctionator.API.v1 then
+                            source = "Auctionator"
                         end
+                        return "|cFFFFCC00Recommendation:|r Install TradeSkillMaster (TSM) for accurate AH prices. Without TSM, prices may be less accurate or unavailable.\n\n|cFF888888Currently using: " .. source .. "|r"
                     end,
+                    type = "description",
+                    order = 1.5,
+                    hidden = function() return TSM_API ~= nil end,
+                },
+                tsmHeader = {
+                    name = "TSM Settings",
+                    type = "header",
+                    order = 2,
+                    hidden = function() return not TSM_API end,
+                },
+                tsmPriceSource = {
+                    name = "TSM Price Source",
+                    desc = "Which TSM price value to use for calculations",
+                    type = "select",
+                    order = 3,
+                    width = "double",
+                    hidden = function() return not TSM_API end,
+                    values = {
+                        [Constants.TSM_PRICE_SOURCE.MIN_BUYOUT] = "Min Buyout (current AH prices)",
+                        [Constants.TSM_PRICE_SOURCE.MARKET] = "Market Value (realm average)",
+                        [Constants.TSM_PRICE_SOURCE.REGION_AVG] = "Region Average (cross-realm)",
+                    },
+                    get = function() return LazyProf.db.profile.tsmPriceSource end,
+                    set = function(_, v)
+                        LazyProf.db.profile.tsmPriceSource = v
+                        if LazyProf.PriceManager then
+                            LazyProf.PriceManager:ClearCache()
+                        end
+                        LazyProf:Recalculate()
+                    end,
+                },
+                tsmPriceDesc = {
+                    name = "|cFF888888Min Buyout = what you can buy right now on AH\nMarket Value = recent average on your realm\nRegion Average = average across all realms (stable but may differ from local)|r",
+                    type = "description",
+                    order = 4,
+                    hidden = function() return not TSM_API end,
                 },
             },
         },

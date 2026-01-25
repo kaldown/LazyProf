@@ -23,6 +23,31 @@ LazyProf.PathfinderStrategies.cheapest = {
                 break
             end
 
+            -- DEBUG: Log all candidates and their scores at this skill level
+            LazyProf:Debug("=== Scoring candidates at skill " .. simulatedSkill .. " ===")
+            local debugScores = {}
+            for _, recipe in ipairs(candidates) do
+                local score = self:ScoreRecipe(recipe, simulatedSkill, targetSkill, simulatedInventory, prices)
+                table.insert(debugScores, { recipe = recipe, score = score })
+            end
+            -- Sort by score (lowest first)
+            table.sort(debugScores, function(a, b) return a.score < b.score end)
+            -- Log top 10 candidates
+            for i = 1, math.min(10, #debugScores) do
+                local d = debugScores[i]
+                local color = Utils.GetSkillColor(simulatedSkill, d.recipe.skillRange)
+                local expectedSkillups = self:GetExpectedSkillups(d.recipe, simulatedSkill)
+                local costPerCraft = 0
+                local reagentPrices = {}
+                for _, reagent in ipairs(d.recipe.reagents) do
+                    local price = prices[reagent.itemId] or 0
+                    costPerCraft = costPerCraft + (price * reagent.count)
+                    table.insert(reagentPrices, string.format("%s=%s", reagent.name, Utils.FormatMoney(price)))
+                end
+                LazyProf:Debug(string.format("  #%d: %s | score=%.2f | color=%s | skillup=%.2f | cost=%s | prices: %s",
+                    i, d.recipe.name, d.score, color, expectedSkillups, Utils.FormatMoney(costPerCraft), table.concat(reagentPrices, ", ")))
+            end
+
             -- Score each by TOTAL cost per expected skillup (for full quantity until gray)
             local best, bestScore = Utils.MinBy(candidates, function(recipe)
                 return self:ScoreRecipe(recipe, simulatedSkill, targetSkill, simulatedInventory, prices)
@@ -32,6 +57,8 @@ LazyProf.PathfinderStrategies.cheapest = {
                 if LazyProf.Debug then LazyProf:Debug("No best recipe found at skill " .. simulatedSkill) end
                 break
             end
+
+            LazyProf:Debug(">>> WINNER: " .. best.name .. " with score " .. string.format("%.2f", bestScore))
 
             -- Calculate how many to craft
             local quantity = self:CalculateQuantity(best, simulatedSkill, targetSkill)

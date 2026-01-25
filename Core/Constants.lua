@@ -30,6 +30,13 @@ LazyProf.Constants = {
         VENDOR = "vendor",
     },
 
+    -- TSM price source options
+    TSM_PRICE_SOURCE = {
+        MIN_BUYOUT = "DBMinBuyout",       -- Current minimum buyout (what you can buy NOW)
+        MARKET = "DBMarket",              -- Realm market value (recent average)
+        REGION_AVG = "DBRegionMarketAvg", -- Regional average (manipulation resistant, but may differ from local)
+    },
+
     -- Display modes
     DISPLAY_MODE = {
         ARROW_TOOLTIP = "arrowWithTooltip",

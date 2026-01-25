@@ -204,8 +204,20 @@ function LazyProf:Debug(msg)
             table.remove(self.debugLog, 1)
         end
 
-        -- Also print to chat
-        self:Print("[Debug] " .. msg)
+        -- Auto-update debug window if visible (don't spam chat)
+        if self.debugFrame and self.debugFrame:IsShown() then
+            local text = table.concat(self.debugLog, "\n")
+            self.debugFrame.editBox:SetText(text)
+            -- Scroll to bottom
+            C_Timer.After(0.01, function()
+                if self.debugFrame and self.debugFrame.scrollFrame then
+                    self.debugFrame.scrollFrame:SetVerticalScroll(self.debugFrame.scrollFrame:GetVerticalScrollRange())
+                end
+            end)
+        else
+            -- Only print to chat if debug window is not open
+            self:Print("[Debug] " .. msg)
+        end
     end
 end
 
