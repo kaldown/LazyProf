@@ -299,6 +299,9 @@ function MilestonePanel:CreateStepRow(step, index, yOffset, contentWidth)
 
     row.recipe = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     row.recipe:SetPoint("LEFT", 65, 0)
+    row.recipe:SetPoint("RIGHT", row, "LEFT", 175, 0)  -- Constrain width to not overlap materials
+    row.recipe:SetJustifyH("LEFT")
+    row.recipe:SetWordWrap(false)
     row.recipe:SetText(string.format("%dx %s", step.quantity, recipeName))
     row.recipe:SetTextColor(recipeColor.r, recipeColor.g, recipeColor.b)
 
