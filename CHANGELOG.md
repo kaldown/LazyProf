@@ -4,7 +4,7 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
-## [0.2.9] - 2026-01-25
+## [0.2.10] - 2026-01-25
 
 ### Added
 - Debug log popup: `/lp debuglog` opens copyable log window (Ctrl+A, Ctrl+C)
