@@ -1,4 +1,5 @@
 -- Modules/UI/PlanningWindow.lua
+-- Standalone planning window - completely separate from MilestoneBreakdown
 local ADDON_NAME, LazyProf = ...
 local Utils = LazyProf.Utils
 local Constants = LazyProf.Constants
@@ -9,7 +10,12 @@ local PlanningWindow = LazyProf.PlanningWindow
 PlanningWindow.frame = nil
 PlanningWindow.currentProfession = nil
 PlanningWindow.currentPath = nil
+PlanningWindow.rows = {}
+PlanningWindow.expandedRows = {}
 
+local STEP_ROW_HEIGHT = 20
+local INGREDIENT_ROW_HEIGHT = 18
+local MILESTONE_SEPARATOR_HEIGHT = 16
 local DEFAULT_WIDTH = 420
 local DEFAULT_HEIGHT = 500
 
@@ -82,20 +88,35 @@ function PlanningWindow:Initialize()
     self.frame.status:SetPoint("LEFT", self.frame.statusBg, "LEFT", 8, 0)
     self.frame.status:SetTextColor(0.7, 0.7, 0.7)
 
-    -- Content area (will embed milestone panel)
-    self.frame.contentArea = CreateFrame("Frame", nil, self.frame)
-    self.frame.contentArea:SetPoint("TOPLEFT", 4, -62)
-    self.frame.contentArea:SetPoint("BOTTOMRIGHT", -4, 4)
+    -- Scroll frame for content
+    self.frame.scrollFrame = CreateFrame("ScrollFrame", "LazyProfPlanningScrollFrame", self.frame, "UIPanelScrollFrameTemplate")
+    self.frame.scrollFrame:SetPoint("TOPLEFT", 8, -62)
+    self.frame.scrollFrame:SetPoint("BOTTOMRIGHT", -28, 32)
 
-    -- Resize handle (solid hit area with grabber icon overlay)
+    -- Content frame inside scroll
+    self.frame.content = CreateFrame("Frame", nil, self.frame.scrollFrame)
+    self.frame.content:SetSize(DEFAULT_WIDTH - 40, 400)
+    self.frame.scrollFrame:SetScrollChild(self.frame.content)
+
+    -- Total cost bar at bottom
+    self.frame.totalBg = self.frame:CreateTexture(nil, "ARTWORK")
+    self.frame.totalBg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    self.frame.totalBg:SetVertexColor(0.15, 0.15, 0.15, 1)
+    self.frame.totalBg:SetPoint("BOTTOMLEFT", 4, 4)
+    self.frame.totalBg:SetPoint("BOTTOMRIGHT", -4, 4)
+    self.frame.totalBg:SetHeight(24)
+
+    self.frame.total = self.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    self.frame.total:SetPoint("BOTTOM", 0, 12)
+    self.frame.total:SetTextColor(1, 1, 1)
+
+    -- Resize handle
     self.frame.resizeBtn = CreateFrame("Button", nil, self.frame)
     self.frame.resizeBtn:SetSize(32, 32)
     self.frame.resizeBtn:SetPoint("BOTTOMRIGHT", 0, 0)
-    self.frame.resizeBtn:SetFrameStrata("DIALOG") -- Above all nested content
-    -- Solid texture for full-area click detection (nearly invisible)
+    self.frame.resizeBtn:SetFrameStrata("DIALOG")
     self.frame.resizeBtn:SetNormalTexture("Interface\\Buttons\\WHITE8x8")
     self.frame.resizeBtn:GetNormalTexture():SetVertexColor(0, 0, 0, 0.01)
-    -- Grabber icon on top
     self.frame.resizeBtn.icon = self.frame.resizeBtn:CreateTexture(nil, "OVERLAY")
     self.frame.resizeBtn.icon:SetPoint("BOTTOMRIGHT", 0, 0)
     self.frame.resizeBtn.icon:SetSize(16, 16)
@@ -107,20 +128,13 @@ function PlanningWindow:Initialize()
     end)
     self.frame.resizeBtn:SetScript("OnMouseUp", function()
         self.frame:StopMovingOrSizing()
-        -- Refresh MilestonePanel layout after resize
-        if self.currentPath and LazyProf.MilestonePanel then
-            LazyProf.MilestonePanel:RefreshLayout()
-        end
+        self:RefreshContent()
     end)
 
-    -- Handle continuous resize for smooth content updates
+    -- Handle resize events
     self.frame:SetScript("OnSizeChanged", function(f, width, height)
-        if self.currentPath and LazyProf.MilestonePanel and LazyProf.MilestonePanel.frame then
-            -- Update content width in MilestonePanel
-            local contentArea = self.frame.contentArea
-            if contentArea and LazyProf.MilestonePanel.frame.content then
-                LazyProf.MilestonePanel.frame.content:SetWidth(contentArea:GetWidth() - 30)
-            end
+        if self.frame.content then
+            self.frame.content:SetWidth(width - 40)
         end
     end)
 
@@ -145,12 +159,10 @@ function PlanningWindow:CreateModeDropdown()
     self.frame.modeBtn.text:SetText("Cheapest")
 
     self.frame.modeBtn:SetScript("OnClick", function()
-        -- Toggle between cheapest and fastest
         local current = LazyProf.db.profile.strategy
         local newStrategy = (current == Constants.STRATEGY.CHEAPEST) and Constants.STRATEGY.FASTEST or Constants.STRATEGY.CHEAPEST
         LazyProf.db.profile.strategy = newStrategy
         self.frame.modeBtn.text:SetText(newStrategy == Constants.STRATEGY.CHEAPEST and "Cheapest" or "Fastest")
-        -- Recalculate
         if self.currentProfession then
             self:LoadProfession(self.currentProfession)
         end
@@ -207,31 +219,325 @@ function PlanningWindow:LoadProfession(profKey)
     -- Calculate path
     self.currentPath = LazyProf.Pathfinder:CalculateForProfession(profKey, skillLevel)
 
-    -- Update milestone panel in planning mode
-    if self.currentPath and LazyProf.MilestonePanel then
-        LazyProf.MilestonePanel:SetParentMode("planning", self.frame.contentArea)
-        LazyProf.MilestonePanel:Update(self.currentPath.milestoneBreakdown, self.currentPath.totalCost)
-        LazyProf:Debug(string.format("Loaded %s: %d steps, %s",
-            profInfo.name, #self.currentPath.steps,
-            Utils.FormatMoney(self.currentPath.totalCost)))
+    -- Render content directly (no MilestonePanel dependency)
+    if self.currentPath then
+        self:RenderBreakdown(self.currentPath.milestoneBreakdown, self.currentPath.totalCost)
     end
 end
 
 function PlanningWindow:GetPlayerSkillLevel(profKey)
-    -- For now, return 0 (treat as unlearned)
-    -- TODO: Implement proper skill detection via GetProfessions() API
+    local profInfo = Constants.PROFESSIONS[profKey]
+    if not profInfo then
+        LazyProf:Debug("GetPlayerSkillLevel: No profInfo for key: " .. tostring(profKey))
+        return 0
+    end
+
+    local targetName = profInfo.name:lower()
+    LazyProf:Debug("GetPlayerSkillLevel: Looking for: " .. targetName)
+
+    -- Classic/TBC uses GetSkillLineInfo instead of GetProfessions
+    local numSkills = GetNumSkillLines()
+    LazyProf:Debug("GetPlayerSkillLevel: Scanning " .. numSkills .. " skill lines")
+
+    for i = 1, numSkills do
+        local skillName, isHeader, _, skillRank, _, _, skillMaxRank = GetSkillLineInfo(i)
+        if not isHeader and skillName then
+            if skillName:lower() == targetName then
+                LazyProf:Debug(string.format("GetPlayerSkillLevel: MATCH! %s = %d/%d", skillName, skillRank, skillMaxRank))
+                return skillRank or 0
+            end
+        end
+    end
+
+    LazyProf:Debug("GetPlayerSkillLevel: No match found, returning 0")
     return 0
+end
+
+function PlanningWindow:RefreshContent()
+    if self.currentPath then
+        self:RenderBreakdown(self.currentPath.milestoneBreakdown, self.currentPath.totalCost)
+    end
+end
+
+function PlanningWindow:RenderBreakdown(breakdown, totalCost)
+    -- Clear existing rows
+    for _, row in ipairs(self.rows) do
+        row:Hide()
+    end
+    self.rows = {}
+
+    if not breakdown or #breakdown == 0 then
+        self.frame.total:SetText("No path found")
+        return
+    end
+
+    local contentWidth = self.frame:GetWidth() - 40
+    local yOffset = 0
+    local lastMilestone = nil
+
+    for i, step in ipairs(breakdown) do
+        -- Create step row
+        local row = self:CreateStepRow(step, i, yOffset, contentWidth)
+        table.insert(self.rows, row)
+        yOffset = yOffset + STEP_ROW_HEIGHT
+
+        -- If expanded, show ingredients
+        if self.expandedRows[i] then
+            if step.recipe and not step.recipe.learned then
+                local unlearnedRow = self:CreateUnlearnedIndicator(step, yOffset, contentWidth)
+                table.insert(self.rows, unlearnedRow)
+                yOffset = yOffset + INGREDIENT_ROW_HEIGHT
+            end
+
+            for _, mat in ipairs(step.materials) do
+                local ingredientRow = self:CreateIngredientRow(mat, yOffset, contentWidth)
+                table.insert(self.rows, ingredientRow)
+                yOffset = yOffset + INGREDIENT_ROW_HEIGHT
+            end
+        end
+
+        -- Milestone separator
+        if step.trainerMilestoneAfter and step.trainerMilestoneAfter ~= lastMilestone then
+            local separator = self:CreateMilestoneSeparator(step.trainerMilestoneAfter, yOffset, contentWidth)
+            table.insert(self.rows, separator)
+            yOffset = yOffset + MILESTONE_SEPARATOR_HEIGHT
+            lastMilestone = step.trainerMilestoneAfter
+        end
+    end
+
+    -- Update total
+    self.frame.total:SetText("Total: " .. Utils.FormatMoney(totalCost))
+
+    -- Update content height
+    self.frame.content:SetHeight(math.max(yOffset + 10, self.frame:GetHeight() - 100))
+end
+
+function PlanningWindow:CreateStepRow(step, index, yOffset, contentWidth)
+    local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
+    row:SetSize(contentWidth, STEP_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -yOffset)
+
+    row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+    row:SetBackdropColor(0.15, 0.15, 0.15, 0.3)
+
+    -- Expand indicator
+    row.expandBtn = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.expandBtn:SetPoint("LEFT", 2, 0)
+    row.expandBtn:SetText(self.expandedRows[index] and "[-]" or "[+]")
+    row.expandBtn:SetTextColor(0.6, 0.6, 0.6)
+
+    -- Skill range
+    row.range = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.range:SetPoint("LEFT", 18, 0)
+    row.range:SetText(string.format("%d-%d", step.from, step.to))
+    row.range:SetTextColor(1, 0.82, 0)
+
+    -- Recipe name
+    local recipeName = step.recipe and step.recipe.name or "Unknown"
+    local recipeColor = self:GetRecipeColor(step.recipe)
+
+    row.recipe = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.recipe:SetPoint("LEFT", 65, 0)
+    row.recipe:SetText(string.format("%dx %s", step.quantity, recipeName))
+    row.recipe:SetTextColor(recipeColor.r, recipeColor.g, recipeColor.b)
+
+    -- Materials summary
+    row.materials = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.materials:SetPoint("LEFT", 180, 0)
+    row.materials:SetPoint("RIGHT", row, "RIGHT", -55, 0)
+    row.materials:SetJustifyH("LEFT")
+    row.materials:SetWordWrap(false)
+    local matSummary = step.materialsSummary or ""
+    if #matSummary > 40 then
+        matSummary = matSummary:sub(1, 37) .. "..."
+    end
+    row.materials:SetText("- " .. matSummary)
+    row.materials:SetTextColor(0.7, 0.7, 0.7)
+
+    -- Cost
+    row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.cost:SetPoint("RIGHT", -4, 0)
+    row.cost:SetText(Utils.FormatMoney(step.cost))
+    row.cost:SetTextColor(1, 1, 1)
+
+    -- Click to expand/collapse
+    row:SetScript("OnClick", function()
+        self.expandedRows[index] = not self.expandedRows[index]
+        self:RefreshContent()
+    end)
+
+    -- Hover
+    row:SetScript("OnEnter", function()
+        row:SetBackdropColor(0.25, 0.25, 0.25, 0.6)
+        row.expandBtn:SetTextColor(1, 1, 0)
+        GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(string.format("%dx %s", step.quantity, recipeName), 1, 1, 1)
+        GameTooltip:AddLine(string.format("Skill: %d -> %d", step.from, step.to), 0.7, 0.7, 0.7)
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Materials:", 1, 0.82, 0)
+        for _, mat in ipairs(step.materials) do
+            local color = mat.missing > 0 and "|cFFFF6666" or "|cFF66FF66"
+            GameTooltip:AddLine(string.format("  %s%dx|r %s", color, mat.need, mat.name), 1, 1, 1)
+        end
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Click to expand/collapse", 0.5, 0.5, 0.5)
+        GameTooltip:Show()
+    end)
+    row:SetScript("OnLeave", function()
+        row:SetBackdropColor(0.15, 0.15, 0.15, 0.3)
+        row.expandBtn:SetTextColor(0.6, 0.6, 0.6)
+        GameTooltip:Hide()
+    end)
+
+    row:Show()
+    return row
+end
+
+function PlanningWindow:GetRecipeColor(recipe)
+    if not recipe or not recipe.skillRange then
+        return { r = 1, g = 1, b = 1 }
+    end
+
+    local currentSkill = self.currentPath and self.currentPath.currentSkill or 1
+    local color = Utils.GetSkillColor(currentSkill, recipe.skillRange)
+
+    if color == "orange" then
+        return { r = 1, g = 0.5, b = 0.25 }
+    elseif color == "yellow" then
+        return { r = 1, g = 1, b = 0 }
+    elseif color == "green" then
+        return { r = 0.25, g = 0.75, b = 0.25 }
+    else
+        return { r = 0.5, g = 0.5, b = 0.5 }
+    end
+end
+
+function PlanningWindow:CreateUnlearnedIndicator(step, yOffset, contentWidth)
+    local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
+    row:SetSize(contentWidth - 20, INGREDIENT_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 20, -yOffset)
+
+    row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+    row:SetBackdropColor(0.2, 0.15, 0, 0.3)
+
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.text:SetPoint("LEFT", 4, 0)
+    row.text:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+    row.text:SetJustifyH("LEFT")
+
+    local sourceDesc = Utils.GetSourceDescription(step.recipe.source)
+    row.text:SetText(string.format("|cFFFF8800[!] Unlearned:|r %s", sourceDesc))
+
+    row.recipe = step.recipe
+
+    row:SetScript("OnClick", function(self)
+        if LazyProf.RecipeDetails then
+            LazyProf.RecipeDetails:Toggle(self.recipe)
+        end
+    end)
+
+    row:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(0.3, 0.25, 0.1, 0.5)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Click for details", 1, 1, 1)
+        GameTooltip:AddLine("View vendors, Wowhead link", 0.7, 0.7, 0.7)
+        GameTooltip:Show()
+    end)
+    row:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(0.2, 0.15, 0, 0.3)
+        GameTooltip:Hide()
+    end)
+
+    row:Show()
+    return row
+end
+
+function PlanningWindow:CreateMilestoneSeparator(milestone, yOffset, contentWidth)
+    local row = CreateFrame("Frame", nil, self.frame.content)
+    row:SetSize(contentWidth, MILESTONE_SEPARATOR_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -yOffset)
+
+    row.lineLeft = row:CreateTexture(nil, "ARTWORK")
+    row.lineLeft:SetTexture("Interface\\Buttons\\WHITE8x8")
+    row.lineLeft:SetVertexColor(0.4, 0.4, 0.4, 0.8)
+    row.lineLeft:SetHeight(1)
+    row.lineLeft:SetPoint("LEFT", 4, 0)
+    row.lineLeft:SetPoint("RIGHT", row, "CENTER", -40, 0)
+
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.text:SetPoint("CENTER", 0, 0)
+    row.text:SetText(string.format("Train (%d)", milestone))
+    row.text:SetTextColor(0.6, 0.6, 0.6)
+
+    row.lineRight = row:CreateTexture(nil, "ARTWORK")
+    row.lineRight:SetTexture("Interface\\Buttons\\WHITE8x8")
+    row.lineRight:SetVertexColor(0.4, 0.4, 0.4, 0.8)
+    row.lineRight:SetHeight(1)
+    row.lineRight:SetPoint("LEFT", row, "CENTER", 40, 0)
+    row.lineRight:SetPoint("RIGHT", -4, 0)
+
+    row:Show()
+    return row
+end
+
+function PlanningWindow:CreateIngredientRow(mat, yOffset, contentWidth)
+    local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
+    row:SetSize(contentWidth - 20, INGREDIENT_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 20, -yOffset)
+
+    row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+    row:SetBackdropColor(0.15, 0.15, 0.15, 0.5)
+
+    row.icon = row:CreateTexture(nil, "ARTWORK")
+    row.icon:SetSize(16, 16)
+    row.icon:SetPoint("LEFT", 4, 0)
+    row.icon:SetTexture(mat.icon)
+
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.text:SetPoint("LEFT", 24, 0)
+    row.text:SetPoint("RIGHT", row, "RIGHT", -80, 0)
+    row.text:SetJustifyH("LEFT")
+    local countText = mat.missing > 0 and
+        string.format("|cFFFF6666%dx|r", mat.missing) or
+        "|cFF66FF66Ready|r"
+    row.text:SetText(countText .. " " .. (mat.name or "Unknown"))
+
+    row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.cost:SetPoint("RIGHT", -8, 0)
+    if mat.estimatedCost > 0 then
+        row.cost:SetText(Utils.FormatMoney(mat.estimatedCost))
+    else
+        row.cost:SetText("|cFF666666N/A|r")
+    end
+
+    row:SetScript("OnClick", function()
+        if IsShiftKeyDown() and mat.link then
+            HandleModifiedItemClick(mat.link)
+        end
+    end)
+
+    row:SetScript("OnEnter", function()
+        row:SetBackdropColor(0.25, 0.25, 0.25, 0.8)
+        if mat.itemId then
+            GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+            GameTooltip:SetItemByID(mat.itemId)
+            GameTooltip:Show()
+        end
+    end)
+    row:SetScript("OnLeave", function()
+        row:SetBackdropColor(0.15, 0.15, 0.15, 0.5)
+        GameTooltip:Hide()
+    end)
+
+    row:Show()
+    return row
 end
 
 function PlanningWindow:Hide()
     if self.frame then
         self.frame:Hide()
     end
-    -- Reset milestone panel to normal mode
-    if LazyProf.MilestonePanel then
-        LazyProf.MilestonePanel:SetParentMode("tradeskill", nil)
-        LazyProf.MilestonePanel:Hide()
-    end
+    -- No MilestonePanel dependency - nothing else to reset
 end
 
 function PlanningWindow:IsVisible()

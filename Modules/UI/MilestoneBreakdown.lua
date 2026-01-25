@@ -174,6 +174,10 @@ function MilestonePanel:SetParentMode(mode, parentFrame)
         self.frame.scrollFrame:SetPoint("BOTTOMRIGHT", -24, 28)
     else
         self.frame:SetParent(UIParent)
+        -- Clear stale anchors from planning mode and reset to default position
+        self.frame:ClearAllPoints()
+        self.frame:SetSize(DEFAULT_WIDTH, 200)
+        self.frame:SetPoint("TOPLEFT", TradeSkillFrame or UIParent, "TOPRIGHT", 10, 0)
         self.frame.closeBtn:Show()
         self.frame.resizeBtn:Show()
         self.frame.titleBg:Show()
