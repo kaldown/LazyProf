@@ -51,8 +51,7 @@ LazyProf requires CraftLib to function. Install both addons together.
 
 ## Supported Game Versions
 
-- Retail (The War Within)
 - Classic Era
-- Classic Cataclysm
 - Season of Discovery
+- Anniversary
 - Hardcore

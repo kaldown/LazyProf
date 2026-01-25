@@ -54,6 +54,13 @@ Access via `/lp` or the Interface Options panel:
 - **Suggest unlearned recipes** - Include recipes you haven't learned yet
 - **Calculate from current skill** - Show materials from current skill instead of full bracket
 
+## Supported Game Versions
+
+- Classic Era
+- Season of Discovery
+- Anniversary
+- Hardcore
+
 ## License
 
 MIT - See [LICENSE](LICENSE) for details.
