@@ -4,6 +4,11 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Profession Browser: Browse and plan any profession's leveling path
+- Minimap button for quick access to profession browser
+- Planning mode: See costs before committing to a profession
+
 ## [0.2.7] - 2026-01-25
 
 ### Changed

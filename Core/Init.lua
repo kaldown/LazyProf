@@ -67,23 +67,21 @@ function LazyProf:OnEnable()
 end
 
 function LazyProf:SlashCommand(input)
-    if input == "scan" then
-        self:Print("AH scanning not yet implemented.")
-    elseif input == "reset" then
-        self.db:ResetDB()
-        self:Print("Database reset.")
-    elseif input == "plan" then
-        if self.PlanningWindow then
-            self.PlanningWindow:Open("engineering")
-        end
-    elseif input == "browse" then
+    local cmd = strlower(input or "")
+
+    if cmd == "browse" then
         if self.ProfessionBrowser then
             self.ProfessionBrowser:Toggle()
         end
+    elseif cmd == "scan" then
+        self:Print("AH scanning not yet implemented.")
+    elseif cmd == "reset" then
+        self.db:ResetDB()
+        self:Print("Database reset.")
     elseif self.configRegistered then
         LibStub("AceConfigDialog-3.0"):Open("LazyProf")
     else
-        self:Print("Commands: /lp scan | /lp reset | /lp plan | /lp browse | /lp debug")
+        self:Print("Commands: /lp | /lp browse | /lp reset")
     end
 end
 

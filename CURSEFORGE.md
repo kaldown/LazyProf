@@ -27,9 +27,15 @@ See [CraftLib's profession coverage](https://github.com/kaldown/CraftLib#profess
 
 ## Usage
 
-1. Open any profession window
-2. LazyProf panels appear showing optimal path and shopping list
-3. Type `/lazyprof` or `/lp` for settings
+1. **Minimap button** - Click to browse all professions
+   - Left-click: Open profession browser
+   - Right-click: Open settings
+2. **Open any profession window** - LazyProf shows optimal path
+3. **Shopping List** - Shows materials needed
+
+Commands:
+- `/lazyprof` or `/lp` - Open settings
+- `/lp browse` - Open profession browser
 
 ## Required Addon
 
