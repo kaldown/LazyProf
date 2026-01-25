@@ -14,10 +14,10 @@ function MinimapButton:Initialize()
     self.dataObject = LDB:NewDataObject("LazyProf", {
         type = "launcher",
         icon = "Interface\\AddOns\\LazyProf\\icon",
-        OnClick = function(_, button)
+        OnClick = function(frame, button)
             if button == "LeftButton" then
                 if LazyProf.ProfessionBrowser then
-                    LazyProf.ProfessionBrowser:Toggle(LazyProfMinimapButton)
+                    LazyProf.ProfessionBrowser:Toggle(frame)
                 end
             elseif button == "RightButton" then
                 if LazyProf.configRegistered then

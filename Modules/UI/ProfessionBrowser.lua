@@ -45,7 +45,7 @@ function Browser:Initialize()
     -- Close when clicking outside
     self.frame:SetScript("OnShow", function()
         self.frame:SetScript("OnUpdate", function()
-            if not self.frame:IsMouseOver() and not (LazyProfMinimapButton and LazyProfMinimapButton:IsMouseOver()) then
+            if not self.frame:IsMouseOver() and not (LibDBIcon10_LazyProf and LibDBIcon10_LazyProf:IsMouseOver()) then
                 if IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton") then
                     self:Hide()
                 end
