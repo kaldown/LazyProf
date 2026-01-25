@@ -1,4 +1,4 @@
-## Interface: 110207, 50503, 20505, 20504, 20503, 20502, 20501, 11508
+## Interface: 11508, 11505, 20504
 ## Title: LazyProf
 ## Notes: Optimal profession leveling path calculator
 ## Author: Kaldown
