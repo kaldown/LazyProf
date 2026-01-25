@@ -49,6 +49,9 @@ function LazyProf:OnEnable()
     if self.RecipeDetails then
         self.RecipeDetails:Initialize()
     end
+    if self.PlanningWindow then
+        self.PlanningWindow:Initialize()
+    end
 
     -- Register events
     self:RegisterEvent("TRADE_SKILL_SHOW", "OnTradeSkillShow")
@@ -63,10 +66,14 @@ function LazyProf:SlashCommand(input)
     elseif input == "reset" then
         self.db:ResetDB()
         self:Print("Database reset.")
+    elseif input == "plan" then
+        if self.PlanningWindow then
+            self.PlanningWindow:Open("engineering")
+        end
     elseif self.configRegistered then
         LibStub("AceConfigDialog-3.0"):Open("LazyProf")
     else
-        self:Print("Commands: /lp scan | /lp reset | /lp debug")
+        self:Print("Commands: /lp scan | /lp reset | /lp plan | /lp debug")
     end
 end
 
