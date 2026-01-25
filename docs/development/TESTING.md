@@ -56,19 +56,62 @@ After making changes, run `/reload` and verify:
 
 ## Debugging
 
-### BugSack Errors
+### BugSack/BugGrabber Setup
 
-Install BugSack + BugGrabber to capture Lua errors.
+Install both BugSack + !BugGrabber to capture Lua errors.
 
-**Reading errors:**
+**In-game commands:**
 ```
-/bugsack       - Open BugSack UI
+/bugsack       - Open BugSack UI to view errors
+/bugsack show  - Show most recent error
 ```
 
-**Error log location:**
+### Reading Errors from SavedVariables
+
+BugGrabber stores captured errors in SavedVariables. To read errors programmatically:
+
+**Error file location (user-specific path):**
 ```
-WTF/Account/<account>/SavedVariables/BugSack.lua
+/Volumes/kaldown/battlenet/world of warcraft/_anniversary_/WTF/Account/KALDOWN/SavedVariables/!BugGrabber.lua
 ```
+
+**Generic path structure:**
+```
+<WoW Install>/WTF/Account/<ACCOUNT>/SavedVariables/!BugGrabber.lua
+```
+
+**Error data structure:**
+```lua
+BugGrabberDB = {
+    errors = {
+        {
+            message = "Error text here",
+            stack = "Stack trace with file:line",
+            time = "2026/01/25 15:49:53",
+            locals = "Local variables at error time",
+            session = 115,  -- Game session number
+            counter = 1,    -- How many times this error occurred
+        },
+        -- ... more errors
+    }
+}
+```
+
+**Important:** Errors are only captured after the user:
+1. Triggers the bug in-game
+2. The error gets caught by BugGrabber
+3. Logs out or `/reload` to save the data
+
+### WoW Log Files
+
+Additional logs are in the Logs directory:
+```
+/Volumes/kaldown/battlenet/world of warcraft/_anniversary_/Logs/
+```
+
+Key files:
+- `FrameXML.log` - Addon loading errors
+- `Client.log` - General client issues
 
 ### Common Issues
 
