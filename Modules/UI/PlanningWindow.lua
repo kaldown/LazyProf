@@ -227,29 +227,18 @@ end
 
 function PlanningWindow:GetPlayerSkillLevel(profKey)
     local profInfo = Constants.PROFESSIONS[profKey]
-    if not profInfo then
-        LazyProf:Debug("GetPlayerSkillLevel: No profInfo for key: " .. tostring(profKey))
-        return 0
-    end
+    if not profInfo then return 0 end
 
     local targetName = profInfo.name:lower()
-    LazyProf:Debug("GetPlayerSkillLevel: Looking for: " .. targetName)
 
     -- Classic/TBC uses GetSkillLineInfo instead of GetProfessions
-    local numSkills = GetNumSkillLines()
-    LazyProf:Debug("GetPlayerSkillLevel: Scanning " .. numSkills .. " skill lines")
-
-    for i = 1, numSkills do
-        local skillName, isHeader, _, skillRank, _, _, skillMaxRank = GetSkillLineInfo(i)
-        if not isHeader and skillName then
-            if skillName:lower() == targetName then
-                LazyProf:Debug(string.format("GetPlayerSkillLevel: MATCH! %s = %d/%d", skillName, skillRank, skillMaxRank))
-                return skillRank or 0
-            end
+    for i = 1, GetNumSkillLines() do
+        local skillName, isHeader, _, skillRank = GetSkillLineInfo(i)
+        if not isHeader and skillName and skillName:lower() == targetName then
+            return skillRank or 0
         end
     end
 
-    LazyProf:Debug("GetPlayerSkillLevel: No match found, returning 0")
     return 0
 end
 
