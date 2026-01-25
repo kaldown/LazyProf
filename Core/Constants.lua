@@ -57,4 +57,48 @@ LazyProf.Constants = {
     PROFESSION_IDS = {
         FIRST_AID = 3273,
     },
+
+    -- Profession display info for browser
+    PROFESSIONS = {
+        alchemy = {
+            name = "Alchemy",
+            icon = "Interface\\Icons\\Trade_Alchemy",
+        },
+        blacksmithing = {
+            name = "Blacksmithing",
+            icon = "Interface\\Icons\\Trade_BlackSmithing",
+        },
+        cooking = {
+            name = "Cooking",
+            icon = "Interface\\Icons\\INV_Misc_Food_15",
+        },
+        enchanting = {
+            name = "Enchanting",
+            icon = "Interface\\Icons\\Trade_Engraving",
+        },
+        engineering = {
+            name = "Engineering",
+            icon = "Interface\\Icons\\Trade_Engineering",
+        },
+        firstAid = {
+            name = "First Aid",
+            icon = "Interface\\Icons\\Spell_Holy_SealOfSacrifice",
+        },
+        jewelcrafting = {
+            name = "Jewelcrafting",
+            icon = "Interface\\Icons\\INV_Misc_Gem_01",
+        },
+        leatherworking = {
+            name = "Leatherworking",
+            icon = "Interface\\Icons\\Trade_LeatherWorking",
+        },
+        mining = {
+            name = "Mining",
+            icon = "Interface\\Icons\\Trade_Mining",
+        },
+        tailoring = {
+            name = "Tailoring",
+            icon = "Interface\\Icons\\Trade_Tailoring",
+        },
+    },
 }
