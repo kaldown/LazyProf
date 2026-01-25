@@ -90,13 +90,19 @@ function MissingPanel:Initialize()
     self.frame.total:SetPoint("BOTTOM", 0, 12)
     self.frame.total:SetTextColor(1, 1, 1)
 
-    -- Resize handle
+    -- Resize handle (solid hit area with grabber icon overlay)
     self.frame.resizeBtn = CreateFrame("Button", nil, self.frame)
-    self.frame.resizeBtn:SetSize(16, 16)
-    self.frame.resizeBtn:SetPoint("BOTTOMRIGHT", -2, 2)
-    self.frame.resizeBtn:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
-    self.frame.resizeBtn:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
-    self.frame.resizeBtn:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    self.frame.resizeBtn:SetSize(32, 32)
+    self.frame.resizeBtn:SetPoint("BOTTOMRIGHT", 0, 0)
+    self.frame.resizeBtn:SetFrameStrata("DIALOG") -- Above all nested content
+    -- Solid texture for full-area click detection (nearly invisible)
+    self.frame.resizeBtn:SetNormalTexture("Interface\\Buttons\\WHITE8x8")
+    self.frame.resizeBtn:GetNormalTexture():SetVertexColor(0, 0, 0, 0.01)
+    -- Grabber icon on top
+    self.frame.resizeBtn.icon = self.frame.resizeBtn:CreateTexture(nil, "OVERLAY")
+    self.frame.resizeBtn.icon:SetPoint("BOTTOMRIGHT", 0, 0)
+    self.frame.resizeBtn.icon:SetSize(16, 16)
+    self.frame.resizeBtn.icon:SetTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
 
     self.frame.resizeBtn:SetScript("OnMouseDown", function(btn, button)
         if button == "LeftButton" then
