@@ -4,6 +4,14 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-01-26
+
+### Fixed
+
+- **Pathfinder now re-evaluates at breakpoints**: Previously, the pathfinder would commit to a recipe until it went gray, potentially skipping cheaper recipes that became available at intermediate skill levels. Now it stops and re-evaluates when:
+  - A new recipe becomes learnable (skillRequired boundary)
+  - The current recipe changes color (orange→yellow, yellow→green)
+
 ## [0.3.1] - 2026-01-26
 
 ### Fixed
