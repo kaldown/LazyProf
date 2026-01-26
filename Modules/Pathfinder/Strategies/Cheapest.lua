@@ -60,8 +60,8 @@ LazyProf.PathfinderStrategies.cheapest = {
 
             LazyProf:Debug(">>> WINNER: " .. best.name .. " with score " .. string.format("%.2f", bestScore))
 
-            -- Calculate how many to craft
-            local quantity = self:CalculateQuantity(best, simulatedSkill, targetSkill)
+            -- Calculate how many to craft (pass recipes for breakpoint detection)
+            local quantity = self:CalculateQuantity(best, simulatedSkill, targetSkill, recipes)
             local totalSkillups, totalCost = self:CalculateTotalCostAndSkillups(best, simulatedSkill, quantity, simulatedInventory, prices)
 
             -- Add step to path
@@ -167,13 +167,35 @@ LazyProf.PathfinderStrategies.cheapest = {
         return Constants.SKILLUP_CHANCE[color] or 0
     end,
 
-    -- Calculate how many crafts until gray or target reached
-    CalculateQuantity = function(self, recipe, currentSkill, targetSkill)
+    -- Calculate how many crafts until next breakpoint
+    -- Breakpoints: gray, target, new recipe unlocks, or color changes
+    CalculateQuantity = function(self, recipe, currentSkill, targetSkill, recipes)
         local quantity = 0
         local simSkill = currentSkill
 
-        -- Craft until gray or target reached, max 100 iterations
-        while simSkill < targetSkill and simSkill < recipe.skillRange.gray and quantity < 100 do
+        -- Find next breakpoint where we should re-evaluate
+        local nextBreakpoint = recipe.skillRange.gray  -- default: stop at gray
+
+        -- Check for new recipe unlocks
+        if recipes then
+            for _, r in ipairs(recipes) do
+                if r.skillRequired > currentSkill and r.skillRequired < nextBreakpoint then
+                    nextBreakpoint = r.skillRequired
+                end
+            end
+        end
+
+        -- Check for color changes of current recipe (yellow and green boundaries)
+        -- Only consider boundaries above current skill
+        if recipe.skillRange.yellow > currentSkill and recipe.skillRange.yellow < nextBreakpoint then
+            nextBreakpoint = recipe.skillRange.yellow
+        end
+        if recipe.skillRange.green > currentSkill and recipe.skillRange.green < nextBreakpoint then
+            nextBreakpoint = recipe.skillRange.green
+        end
+
+        -- Craft until breakpoint, target, or max iterations
+        while simSkill < targetSkill and simSkill < nextBreakpoint and quantity < 100 do
             quantity = quantity + 1
             local expected = self:GetExpectedSkillups(recipe, simSkill)
             simSkill = simSkill + expected
