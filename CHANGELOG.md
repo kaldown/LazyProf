@@ -4,6 +4,12 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-01-26
+
+### Fixed
+
+- Updated CraftLib to v0.2.7: removes 46 invalid/placeholder recipes (e.g., Crystal Infused Bandage)
+
 ## [0.3.0] - 2026-01-25
 
 ### Added
