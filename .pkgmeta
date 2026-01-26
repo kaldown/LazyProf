@@ -20,4 +20,3 @@ ignore:
   - Libs/Ace3/tests
 
 enable-nolib-creation: no
-enable-toc-creation: yes
