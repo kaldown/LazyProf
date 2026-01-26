@@ -265,7 +265,7 @@ function LazyProf:CreateDebugFrame()
     -- Title
     frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     frame.title:SetPoint("TOP", 0, -10)
-    frame.title:SetText("LazyProf Debug Log (Ctrl+A to select all, Ctrl+C to copy)")
+    frame.title:SetText("LazyProf Debug Log")
     frame.title:SetTextColor(1, 0.82, 0)
 
     -- Close button
@@ -280,6 +280,17 @@ function LazyProf:CreateDebugFrame()
     frame.clearBtn:SetScript("OnClick", function()
         LazyProf:ClearDebugLog()
         frame.editBox:SetText("(Log cleared)")
+    end)
+
+    -- Copy All button
+    frame.copyBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame.copyBtn:SetSize(80, 22)
+    frame.copyBtn:SetPoint("RIGHT", frame.clearBtn, "LEFT", -5, 0)
+    frame.copyBtn:SetText("Copy All")
+    frame.copyBtn:SetScript("OnClick", function()
+        frame.editBox:SetFocus()
+        frame.editBox:HighlightText()
+        LazyProf:Print("Text selected - press Ctrl+C to copy")
     end)
 
     -- Scroll frame

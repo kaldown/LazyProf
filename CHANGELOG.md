@@ -4,6 +4,9 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Copy All button in debug window**: Click to select all text, then Ctrl+C to copy
+
 ## [0.3.2] - 2026-01-26
 
 ### Fixed
