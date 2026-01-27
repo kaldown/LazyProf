@@ -63,6 +63,9 @@ Modules\Pricing\Providers\Auctionator.lua
 Modules\Pricing\Providers\Vendor.lua
 Modules\Pricing\PriceManager.lua
 
+# Modules - Recipes
+Modules\Recipes\Availability.lua
+
 # Modules - Pathfinding
 Modules\Pathfinder\Strategies\Cheapest.lua
 Modules\Pathfinder\Strategies\Fastest.lua
