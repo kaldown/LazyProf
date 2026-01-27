@@ -17,6 +17,7 @@ See [CraftLib's profession coverage](https://github.com/kaldown/CraftLib#profess
 - Two strategies: Cheapest (minimize gold) or Fastest (minimize crafts)
 - Material Resolution: Automatically suggests crafting intermediates (e.g., smelt ore into bars) when cheaper
 - **Owned Materials Optimization**: Treats materials you already own as free, prioritizing recipes that use your existing inventory
+- **Recipe Availability Filtering**: Only suggests recipes you can actually obtain - checks inventory, trainers, vendors, and Auction House listings
 - Shows missing materials with cost breakdown, "From Bank", "From Alts", and "To Craft" sections
 - Tracks progress with milestone breakdowns
 - Bank and alt character inventory integration (with optional addon)

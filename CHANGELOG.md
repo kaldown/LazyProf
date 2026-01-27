@@ -4,6 +4,19 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Recipe availability filtering: Unlearned recipes are now filtered from leveling paths unless they can actually be obtained
+  - Checks player inventory (bags, bank, alts) for recipe items
+  - Verifies trainer recipes meet faction requirements
+  - Vendor recipes always available (player can travel)
+  - Drop/quest/reputation recipes checked against Auction House listings (TSM/Auctionator)
+- Enhanced tooltip shows acquisition details for unlearned recipes:
+  - Location if in inventory ("In your bags", "In your bank", "On alt: Name")
+  - Trainer name and cost
+  - Vendor name, location, and cost
+  - Auction House price with source (TSM/Auctionator)
+  - Wowhead link to recipe item
+
 ## [0.3.7] - 2026-01-27
 
 ### Fixed
