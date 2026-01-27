@@ -37,15 +37,25 @@ LazyProf.PathfinderStrategies.cheapest = {
                 local d = debugScores[i]
                 local color = Utils.GetSkillColor(simulatedSkill, d.recipe.skillRange)
                 local expectedSkillups = self:GetExpectedSkillups(d.recipe, simulatedSkill)
-                local costPerCraft = 0
-                local reagentPrices = {}
+
+                -- Calculate both costs for debug display
+                local theoreticalCost = 0
+                local actualCost = 0
                 for _, reagent in ipairs(d.recipe.reagents) do
                     local price = prices[reagent.itemId] or 0
-                    costPerCraft = costPerCraft + (price * reagent.count)
-                    table.insert(reagentPrices, string.format("%s=%s", reagent.name, Utils.FormatMoney(price)))
+                    local owned = LazyProf.db.profile.useOwnedMaterials and (simulatedInventory[reagent.itemId] or 0) or 0
+                    local toBuy = math.max(0, reagent.count - owned)
+                    theoreticalCost = theoreticalCost + (price * reagent.count)
+                    actualCost = actualCost + (price * toBuy)
                 end
-                LazyProf:Debug(string.format("  #%d: %s | score=%.2f | color=%s | skillup=%.2f | cost=%s | prices: %s",
-                    i, d.recipe.name, d.score, color, expectedSkillups, Utils.FormatMoney(costPerCraft), table.concat(reagentPrices, ", ")))
+
+                local costDisplay = Utils.FormatMoney(actualCost)
+                if LazyProf.db.profile.useOwnedMaterials and actualCost ~= theoreticalCost then
+                    costDisplay = costDisplay .. " (market: " .. Utils.FormatMoney(theoreticalCost) .. ")"
+                end
+
+                LazyProf:Debug(string.format("  #%d: %s | score=%.2f | color=%s | skillup=%.2f | cost=%s",
+                    i, d.recipe.name, d.score, color, expectedSkillups, costDisplay))
             end
 
             -- Score each by TOTAL cost per expected skillup (for full quantity until gray)
@@ -103,12 +113,33 @@ LazyProf.PathfinderStrategies.cheapest = {
 
     -- Score recipe: lower = better
     -- Score based on cost-per-skillup at CURRENT skill level, with bonuses for flexibility
+    -- IMPORTANT: Uses actualCost (materials to buy) not theoreticalCost (full market value)
     ScoreRecipe = function(self, recipe, currentSkill, targetSkill, inventory, prices)
-        -- Calculate cost per craft considering inventory
-        local costPerCraft = 0
+        -- Calculate actual cost per craft (only count materials we need to BUY)
+        local theoreticalCost = 0
+        local actualCost = 0
+
         for _, reagent in ipairs(recipe.reagents) do
-            local price = prices[reagent.itemId] or 0
-            costPerCraft = costPerCraft + (price * reagent.count)
+            local price = prices[reagent.itemId]
+
+            -- Preserve existing nil/zero price rejection
+            -- If any reagent has no price, we can't calculate cost
+            if not price or price <= 0 then
+                return math.huge
+            end
+
+            local needed = reagent.count
+            local owned = 0
+
+            -- Only consider owned materials if useOwnedMaterials is enabled
+            if LazyProf.db.profile.useOwnedMaterials then
+                owned = inventory[reagent.itemId] or 0
+            end
+
+            local toBuy = math.max(0, needed - owned)
+
+            theoreticalCost = theoreticalCost + (price * needed)
+            actualCost = actualCost + (price * toBuy)
         end
 
         -- Get expected skillups at current skill level
@@ -118,8 +149,8 @@ LazyProf.PathfinderStrategies.cheapest = {
             return math.huge
         end
 
-        -- Base score: cost per skillup at current skill
-        local costPerSkillup = costPerCraft / expectedSkillups
+        -- Base score: ACTUAL cost per skillup (what you actually pay)
+        local costPerSkillup = actualCost / expectedSkillups
 
         -- Bonus for recipes that stay useful longer (higher gray point)
         -- Prefer recipes that won't need to be replaced soon
