@@ -113,6 +113,16 @@ LazyProf.PathfinderStrategies.fastest = {
             totalCost = totalCost + (price * needToBuy)
         end
 
+        -- Add recipe acquisition cost (one-time, not per craft)
+        if not recipe.learned and recipe._sourceInfo then
+            local srcType = recipe._sourceInfo.type
+            if srcType == "trainer" or srcType == "vendor" then
+                totalCost = totalCost + (recipe._sourceInfo.cost or 0)
+            elseif srcType == "ah" then
+                totalCost = totalCost + (recipe._sourceInfo.price or 0)
+            end
+        end
+
         -- Calculate total skillups
         local totalSkillups = 0
         local simSkill = currentSkill

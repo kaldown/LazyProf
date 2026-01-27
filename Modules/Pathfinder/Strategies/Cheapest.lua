@@ -150,6 +150,19 @@ LazyProf.PathfinderStrategies.cheapest = {
             actualCost = actualCost + (price * toBuy)
         end
 
+        -- Add recipe acquisition cost for unlearned recipes
+        -- Free if: already learned, or recipe item in inventory (bags/bank/alts)
+        -- Costs if: trainer, vendor, or AH purchase required
+        if not recipe.learned and recipe._sourceInfo then
+            local srcType = recipe._sourceInfo.type
+            if srcType == "trainer" or srcType == "vendor" then
+                actualCost = actualCost + (recipe._sourceInfo.cost or 0)
+            elseif srcType == "ah" then
+                actualCost = actualCost + (recipe._sourceInfo.price or 0)
+            end
+            -- "learned" and "inventory" types are free - no cost added
+        end
+
         -- Get expected skillups at current skill level
         local expectedSkillups = self:GetExpectedSkillups(recipe, currentSkill)
 
@@ -186,6 +199,16 @@ LazyProf.PathfinderStrategies.cheapest = {
             local needToBuy = math.max(0, totalNeed - have)
             local price = prices[reagent.itemId] or 0
             totalCost = totalCost + (price * needToBuy)
+        end
+
+        -- Add recipe acquisition cost (one-time, not per craft)
+        if not recipe.learned and recipe._sourceInfo then
+            local srcType = recipe._sourceInfo.type
+            if srcType == "trainer" or srcType == "vendor" then
+                totalCost = totalCost + (recipe._sourceInfo.cost or 0)
+            elseif srcType == "ah" then
+                totalCost = totalCost + (recipe._sourceInfo.price or 0)
+            end
         end
 
         -- Calculate total skillups
