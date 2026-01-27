@@ -93,3 +93,26 @@ function Availability:GetAHPrice(itemId)
 
     return nil, nil
 end
+
+-- Check if player meets trainer requirements (faction, honor, reputation)
+-- Currently simplified: returns true for basic trainers
+-- Returns: boolean
+function Availability:MeetsTrainerRequirements(source)
+    if not source then
+        return false
+    end
+
+    -- Check faction requirement
+    if source.faction then
+        local playerFaction = UnitFactionGroup("player")
+        if source.faction ~= playerFaction and source.faction ~= "Neutral" then
+            return false
+        end
+    end
+
+    -- Future: Check honor requirements
+    -- Future: Check reputation requirements
+
+    -- Basic trainer with no special requirements
+    return true
+end
