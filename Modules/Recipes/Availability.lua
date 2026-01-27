@@ -14,8 +14,17 @@ function Availability:IsRecipeAvailable(recipe)
 end
 
 -- Get the recipe item ID from source data
+-- For vendor/drop sources, this is the physical recipe item that teaches the spell
 -- Returns: itemId (number or nil)
 function Availability:GetRecipeItemId(recipe)
-    -- TODO: Implement in subsequent tasks
+    if not recipe.source then
+        return nil
+    end
+
+    -- Vendor and drop sources have itemId for the recipe item
+    if recipe.source.itemId then
+        return recipe.source.itemId
+    end
+
     return nil
 end
