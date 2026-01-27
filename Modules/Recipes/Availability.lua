@@ -28,3 +28,41 @@ function Availability:GetRecipeItemId(recipe)
 
     return nil
 end
+
+-- Find a recipe item in player's inventory (bags, bank, alts)
+-- Returns: location info table or nil
+-- location = { type = "bags|bank|alt", count = N, character = "Name" (for alts) }
+function Availability:FindRecipeInInventory(itemId)
+    if not itemId then
+        return nil
+    end
+
+    -- Check bags first (always available)
+    local bagCount = GetItemCount(itemId, false)  -- false = bags only
+    if bagCount and bagCount > 0 then
+        return { type = "bags", count = bagCount }
+    end
+
+    -- Check bank (requires Syndicator and setting enabled)
+    if LazyProf.db.profile.includeBankItems then
+        local bankItems = LazyProf.Inventory:ScanBank()
+        if bankItems[itemId] and bankItems[itemId] > 0 then
+            return { type = "bank", count = bankItems[itemId] }
+        end
+    end
+
+    -- Check alts (requires Syndicator and setting enabled)
+    if LazyProf.db.profile.includeAltCharacters then
+        local _, itemsByCharacter = LazyProf.Inventory:ScanAlts()
+        if itemsByCharacter[itemId] then
+            -- Find first alt with this item
+            for charName, count in pairs(itemsByCharacter[itemId]) do
+                if count > 0 then
+                    return { type = "alt", count = count, character = charName }
+                end
+            end
+        end
+    end
+
+    return nil
+end
