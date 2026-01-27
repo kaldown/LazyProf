@@ -24,7 +24,7 @@ function LazyProf:OnInitialize()
         self:SetupConfig()
     end
     local version = C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version") or "?"
-    self:Print("LazyProf v" .. version .. " loaded. Type /lp for options.")
+    self:Print("v" .. version .. " loaded. Type /lp for options.")
 end
 
 function LazyProf:OnEnable()
