@@ -4,6 +4,18 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-01-27
+
+### Fixed
+- **"Calculate from current skill" checkbox now works**: Setting was defined but never used by the pathfinder
+- **Planning window empty content**: Embedded MilestonePanel was rendered behind the window due to frame strata conflict
+- **Planning window not refreshing on settings change**: Now updates when toggling "Calculate from current skill"
+
+### Changed
+- MilestonePanel refactored to reusable class pattern (`MilestonePanelClass`)
+- PlanningWindow uses embedded MilestonePanel instance (removed ~280 lines of duplicate code)
+- Improved UI debug logging with scroll frame and row positioning diagnostics
+
 ## [0.3.5] - 2026-01-27
 
 ### Added

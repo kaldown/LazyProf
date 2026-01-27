@@ -37,6 +37,14 @@ LazyProf.defaults = {
 
         -- Debug
         debug = false,
+        debugCategories = {
+            scoring = false,      -- Verbose recipe scoring (VERY noisy)
+            pathfinder = true,    -- Path calculation summaries
+            ui = false,           -- Window/panel state changes
+            professions = false,  -- Profession registration
+            pricing = false,      -- Price provider info
+            arrow = false,        -- Arrow positioning
+        },
     },
     char = {
         -- Per-character price cache
@@ -193,7 +201,12 @@ LazyProf.options = {
                 },
                 calculateFromCurrentSkill = {
                     name = "Calculate from current skill",
-                    desc = "Show materials needed from your current skill level instead of the full milestone bracket (e.g., at skill 148, show 148-150 instead of 75-150)",
+                    desc = "When enabled, shows the leveling path starting from your " ..
+                           "current skill level.\n\n" ..
+                           "When disabled, shows the FULL leveling path from skill 1 " ..
+                           "to max, useful for planning total materials needed.\n\n" ..
+                           "Example: At Engineering 184, enabled shows 184-300, " ..
+                           "disabled shows 1-300 (full path).",
                     type = "toggle",
                     order = 4,
                     width = "full",
@@ -328,14 +341,106 @@ LazyProf.options = {
                     name = "Enable debug messages",
                     type = "toggle",
                     order = 1,
+                    width = "full",
                     get = function() return LazyProf.db.profile.debug end,
                     set = function(_, v) LazyProf.db.profile.debug = v end,
+                },
+                showDebugWindow = {
+                    name = "Show Debug Window",
+                    desc = "Open the debug log window to view captured messages.\n\n" ..
+                           "Same as /lp debuglog",
+                    type = "execute",
+                    order = 2,
+                    hidden = function() return not LazyProf.db.profile.debug end,
+                    func = function()
+                        LazyProf:ShowDebugLog()
+                    end,
+                },
+                categoriesHeader = {
+                    name = "Debug Categories",
+                    type = "header",
+                    order = 10,
+                    hidden = function() return not LazyProf.db.profile.debug end,
+                },
+                categoriesDesc = {
+                    name = "Select which categories to capture. Use /lp debuglog to view and filter logs.",
+                    type = "description",
+                    order = 11,
+                    hidden = function() return not LazyProf.db.profile.debug end,
+                },
+                catScoring = {
+                    name = "Pathfinder Scoring",
+                    desc = "Detailed recipe scoring at each skill level.\n\n" ..
+                           "WARNING: Very verbose - generates 10+ lines per skill level " ..
+                           "during path calculation. Only enable when debugging scoring issues.",
+                    type = "toggle",
+                    order = 12,
+                    hidden = function() return not LazyProf.db.profile.debug end,
+                    get = function() return LazyProf.db.profile.debugCategories.scoring end,
+                    set = function(_, v) LazyProf.db.profile.debugCategories.scoring = v end,
+                },
+                catPathfinder = {
+                    name = "Pathfinder Core",
+                    desc = "Path calculation summaries and results.\n\n" ..
+                           "Shows when paths are calculated, total steps, and costs. " ..
+                           "Recommended to keep enabled for general debugging.",
+                    type = "toggle",
+                    order = 13,
+                    hidden = function() return not LazyProf.db.profile.debug end,
+                    get = function() return LazyProf.db.profile.debugCategories.pathfinder end,
+                    set = function(_, v) LazyProf.db.profile.debugCategories.pathfinder = v end,
+                },
+                catUI = {
+                    name = "UI Updates",
+                    desc = "Planning window and milestone panel state changes.\n\n" ..
+                           "Shows when panels update, visibility changes, and frame state. " ..
+                           "Useful for debugging display issues.",
+                    type = "toggle",
+                    order = 14,
+                    hidden = function() return not LazyProf.db.profile.debug end,
+                    get = function() return LazyProf.db.profile.debugCategories.ui end,
+                    set = function(_, v) LazyProf.db.profile.debugCategories.ui = v end,
+                },
+                catProfessions = {
+                    name = "Professions",
+                    desc = "Profession registration and detection events.\n\n" ..
+                           "Shows when professions are registered from CraftLib data.",
+                    type = "toggle",
+                    order = 15,
+                    hidden = function() return not LazyProf.db.profile.debug end,
+                    get = function() return LazyProf.db.profile.debugCategories.professions end,
+                    set = function(_, v) LazyProf.db.profile.debugCategories.professions = v end,
+                },
+                catPricing = {
+                    name = "Pricing",
+                    desc = "Price provider selection and lookups.\n\n" ..
+                           "Shows which price sources are being used (TSM, Auctionator, etc).",
+                    type = "toggle",
+                    order = 16,
+                    hidden = function() return not LazyProf.db.profile.debug end,
+                    get = function() return LazyProf.db.profile.debugCategories.pricing end,
+                    set = function(_, v) LazyProf.db.profile.debugCategories.pricing = v end,
+                },
+                catArrow = {
+                    name = "Arrow",
+                    desc = "Arrow positioning and strategy changes.\n\n" ..
+                           "Shows arrow placement and display mode changes.",
+                    type = "toggle",
+                    order = 17,
+                    hidden = function() return not LazyProf.db.profile.debug end,
+                    get = function() return LazyProf.db.profile.debugCategories.arrow end,
+                    set = function(_, v) LazyProf.db.profile.debugCategories.arrow = v end,
+                },
+                resetHeader = {
+                    name = "",
+                    type = "header",
+                    order = 90,
                 },
                 resetDB = {
                     name = "Reset All Settings",
                     desc = "Reset all settings to defaults",
                     type = "execute",
-                    order = 2,
+                    order = 91,
                     confirm = true,
                     confirmText = "Are you sure you want to reset all LazyProf settings?",
                     func = function()

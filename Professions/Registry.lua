@@ -36,7 +36,7 @@ end
 -- Register a profession module (for local overrides/additions)
 function Professions:Register(name, data)
     if self.registry[name] then
-        if LazyProf.Debug then LazyProf:Debug("Profession already registered: " .. name) end
+        LazyProf:Debug("professions", "Profession already registered: " .. name)
         return
     end
 
@@ -56,7 +56,7 @@ function Professions:Register(name, data)
         specializations = data.specializations,
     }
 
-    if LazyProf.Debug then LazyProf:Debug("Registered profession: " .. name) end
+    LazyProf:Debug("professions", "Registered profession: " .. name)
 end
 
 -- Auto-initialize from CraftLib on load (skip if dependency check failed)

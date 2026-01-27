@@ -19,12 +19,12 @@ LazyProf.PathfinderStrategies.cheapest = {
             local candidates = self:GetCandidates(recipes, simulatedSkill)
 
             if #candidates == 0 then
-                if LazyProf.Debug then LazyProf:Debug("No candidates at skill " .. simulatedSkill) end
+                LazyProf:Debug("scoring", "No candidates at skill " .. simulatedSkill)
                 break
             end
 
             -- DEBUG: Log all candidates and their scores at this skill level
-            LazyProf:Debug("=== Scoring candidates at skill " .. simulatedSkill .. " ===")
+            LazyProf:Debug("scoring", "=== Scoring candidates at skill " .. simulatedSkill .. " ===")
             local debugScores = {}
             for _, recipe in ipairs(candidates) do
                 local score = self:ScoreRecipe(recipe, simulatedSkill, targetSkill, simulatedInventory, prices)
@@ -54,7 +54,7 @@ LazyProf.PathfinderStrategies.cheapest = {
                     costDisplay = costDisplay .. " (market: " .. Utils.FormatMoney(theoreticalCost) .. ")"
                 end
 
-                LazyProf:Debug(string.format("  #%d: %s | score=%.2f | color=%s | skillup=%.2f | cost=%s",
+                LazyProf:Debug("scoring", string.format("  #%d: %s | score=%.2f | color=%s | skillup=%.2f | cost=%s",
                     i, d.recipe.name, d.score, color, expectedSkillups, costDisplay))
             end
 
@@ -64,11 +64,11 @@ LazyProf.PathfinderStrategies.cheapest = {
             end)
 
             if not best then
-                if LazyProf.Debug then LazyProf:Debug("No best recipe found at skill " .. simulatedSkill) end
+                LazyProf:Debug("scoring", "No best recipe found at skill " .. simulatedSkill)
                 break
             end
 
-            LazyProf:Debug(">>> WINNER: " .. best.name .. " with score " .. string.format("%.2f", bestScore))
+            LazyProf:Debug("scoring", ">>> WINNER: " .. best.name .. " with score " .. string.format("%.2f", bestScore))
 
             -- Calculate how many to craft (pass recipes for breakpoint detection)
             local quantity = self:CalculateQuantity(best, simulatedSkill, targetSkill, recipes)

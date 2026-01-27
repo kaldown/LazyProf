@@ -1,13 +1,14 @@
 -- Modules/UI/MilestoneBreakdown.lua
+-- Reusable milestone breakdown panel - can be standalone or embedded
 local ADDON_NAME, LazyProf = ...
 local Utils = LazyProf.Utils
 
-LazyProf.MilestonePanel = {}
-local MilestonePanel = LazyProf.MilestonePanel
+-- Class definition
+local MilestonePanelClass = {}
+MilestonePanelClass.__index = MilestonePanelClass
 
-MilestonePanel.frame = nil
-MilestonePanel.rows = {}
-MilestonePanel.expandedRows = {}
+-- Export class for creating instances
+LazyProf.MilestonePanelClass = MilestonePanelClass
 
 local STEP_ROW_HEIGHT = 20
 local INGREDIENT_ROW_HEIGHT = 18
@@ -16,74 +17,136 @@ local MIN_WIDTH = 350
 local MIN_HEIGHT = 100
 local DEFAULT_WIDTH = 400
 
--- Initialize the milestone panel
-function MilestonePanel:Initialize()
+-- Constructor
+-- config.name: unique name for frame (e.g., "Main", "Planning")
+-- config.embedded: if true, no chrome (title bar, close btn, resize handle)
+-- config.parent: parent frame (required if embedded)
+function MilestonePanelClass:New(config)
+    local instance = setmetatable({}, MilestonePanelClass)
+    instance.config = config or {}
+    instance.rows = {}
+    instance.expandedRows = {}
+    instance.currentPath = nil
+    instance.frame = nil
+    return instance
+end
+
+-- Initialize the milestone panel UI
+function MilestonePanelClass:Initialize()
+    local config = self.config
+    local frameName = "LazyProfMilestonePanel" .. (config.name or "")
+    local parent = config.embedded and config.parent or UIParent
+
     -- Create main frame
-    self.frame = CreateFrame("Frame", "LazyProfMilestonePanel", UIParent, "BackdropTemplate")
-    self.frame:SetSize(DEFAULT_WIDTH, 200)
-    self.frame:SetPoint("TOPLEFT", TradeSkillFrame or UIParent, "TOPRIGHT", 10, 0)
-    self.frame:SetFrameStrata("MEDIUM")
-    self.frame:SetFrameLevel(10)
+    self.frame = CreateFrame("Frame", frameName, parent, "BackdropTemplate")
 
-    -- Solid dark background
-    self.frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 }
-    })
-    self.frame:SetBackdropColor(0.1, 0.1, 0.1, 0.95)
-    self.frame:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
-
-    self.frame:EnableMouse(true)
-    self.frame:SetMovable(true)
-    self.frame:SetResizable(true)
-    self.frame:SetClampedToScreen(true)
-    self.frame:RegisterForDrag("LeftButton")
-    self.frame:SetScript("OnDragStart", function(f)
-        if f:IsMovable() then
-            f:StartMoving()
-        end
-    end)
-    self.frame:SetScript("OnDragStop", function(f)
-        if f:IsMovable() then
-            f:StopMovingOrSizing()
-        end
-    end)
-
-    -- Set resize bounds
-    if self.frame.SetResizeBounds then
-        self.frame:SetResizeBounds(MIN_WIDTH, MIN_HEIGHT, 600, 800)
+    if config.embedded then
+        -- Embedded mode: fill parent, no chrome
+        -- Don't set strata - inherit from parent so we're not drawn behind it
+        self.frame:SetAllPoints(parent)
     else
-        self.frame:SetMinResize(MIN_WIDTH, MIN_HEIGHT)
-        self.frame:SetMaxResize(600, 800)
+        -- Standalone mode: own size, position, chrome
+        self.frame:SetSize(DEFAULT_WIDTH, 200)
+        self.frame:SetPoint("TOPLEFT", TradeSkillFrame or UIParent, "TOPRIGHT", 10, 0)
+        self.frame:SetFrameStrata("MEDIUM")
+        self.frame:SetFrameLevel(10)
+
+        -- Solid dark background
+        self.frame:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 16,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 }
+        })
+        self.frame:SetBackdropColor(0.1, 0.1, 0.1, 0.95)
+        self.frame:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+
+        self.frame:EnableMouse(true)
+        self.frame:SetMovable(true)
+        self.frame:SetResizable(true)
+        self.frame:SetClampedToScreen(true)
+        self.frame:RegisterForDrag("LeftButton")
+        self.frame:SetScript("OnDragStart", function(f)
+            if f:IsMovable() then
+                f:StartMoving()
+            end
+        end)
+        self.frame:SetScript("OnDragStop", function(f)
+            if f:IsMovable() then
+                f:StopMovingOrSizing()
+            end
+        end)
+
+        -- Set resize bounds
+        if self.frame.SetResizeBounds then
+            self.frame:SetResizeBounds(MIN_WIDTH, MIN_HEIGHT, 600, 800)
+        else
+            self.frame:SetMinResize(MIN_WIDTH, MIN_HEIGHT)
+            self.frame:SetMaxResize(600, 800)
+        end
+
+        -- Title bar background
+        self.frame.titleBg = self.frame:CreateTexture(nil, "ARTWORK")
+        self.frame.titleBg:SetTexture("Interface\\Buttons\\WHITE8x8")
+        self.frame.titleBg:SetVertexColor(0.2, 0.2, 0.2, 1)
+        self.frame.titleBg:SetPoint("TOPLEFT", 4, -4)
+        self.frame.titleBg:SetPoint("TOPRIGHT", -4, -4)
+        self.frame.titleBg:SetHeight(24)
+
+        -- Title
+        self.frame.title = self.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        self.frame.title:SetPoint("TOP", 0, -10)
+        self.frame.title:SetText("Milestone Breakdown")
+        self.frame.title:SetTextColor(1, 0.82, 0)
+
+        -- Close button
+        self.frame.closeBtn = CreateFrame("Button", nil, self.frame, "UIPanelCloseButton")
+        self.frame.closeBtn:SetPoint("TOPRIGHT", -2, -2)
+        self.frame.closeBtn:SetSize(20, 20)
+
+        -- Resize handle
+        self.frame.resizeBtn = CreateFrame("Button", nil, self.frame)
+        self.frame.resizeBtn:SetSize(32, 32)
+        self.frame.resizeBtn:SetPoint("BOTTOMRIGHT", 0, 0)
+        self.frame.resizeBtn:SetFrameStrata("DIALOG")
+        self.frame.resizeBtn:SetNormalTexture("Interface\\Buttons\\WHITE8x8")
+        self.frame.resizeBtn:GetNormalTexture():SetVertexColor(0, 0, 0, 0.01)
+        self.frame.resizeBtn.icon = self.frame.resizeBtn:CreateTexture(nil, "OVERLAY")
+        self.frame.resizeBtn.icon:SetPoint("BOTTOMRIGHT", 0, 0)
+        self.frame.resizeBtn.icon:SetSize(16, 16)
+        self.frame.resizeBtn.icon:SetTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+
+        self.frame.resizeBtn:SetScript("OnMouseDown", function(btn, button)
+            if button == "LeftButton" then
+                self.frame:StartSizing("BOTTOMRIGHT")
+            end
+        end)
+        self.frame.resizeBtn:SetScript("OnMouseUp", function(btn, button)
+            self.frame:StopMovingOrSizing()
+            self:Refresh()
+        end)
+
+        -- Handle resize events
+        self.frame:SetScript("OnSizeChanged", function(f, width, height)
+            if self.frame.content then
+                self.frame.content:SetWidth(width - 40)
+            end
+        end)
     end
 
     self.frame:Hide()
 
-    -- Title bar background
-    self.frame.titleBg = self.frame:CreateTexture(nil, "ARTWORK")
-    self.frame.titleBg:SetTexture("Interface\\Buttons\\WHITE8x8")
-    self.frame.titleBg:SetVertexColor(0.2, 0.2, 0.2, 1)
-    self.frame.titleBg:SetPoint("TOPLEFT", 4, -4)
-    self.frame.titleBg:SetPoint("TOPRIGHT", -4, -4)
-    self.frame.titleBg:SetHeight(24)
-
-    -- Title
-    self.frame.title = self.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    self.frame.title:SetPoint("TOP", 0, -10)
-    self.frame.title:SetText("Milestone Breakdown")
-    self.frame.title:SetTextColor(1, 0.82, 0)
-
-    -- Close button
-    self.frame.closeBtn = CreateFrame("Button", nil, self.frame, "UIPanelCloseButton")
-    self.frame.closeBtn:SetPoint("TOPRIGHT", -2, -2)
-    self.frame.closeBtn:SetSize(20, 20)
-
     -- Create scroll frame for content
-    self.frame.scrollFrame = CreateFrame("ScrollFrame", "LazyProfMilestoneScrollFrame", self.frame, "UIPanelScrollFrameTemplate")
-    self.frame.scrollFrame:SetPoint("TOPLEFT", 8, -32)
-    self.frame.scrollFrame:SetPoint("BOTTOMRIGHT", -28, 32)
+    local scrollName = frameName .. "ScrollFrame"
+    self.frame.scrollFrame = CreateFrame("ScrollFrame", scrollName, self.frame, "UIPanelScrollFrameTemplate")
+
+    if config.embedded then
+        self.frame.scrollFrame:SetPoint("TOPLEFT", 4, -4)
+        self.frame.scrollFrame:SetPoint("BOTTOMRIGHT", -24, 28)
+    else
+        self.frame.scrollFrame:SetPoint("TOPLEFT", 8, -32)
+        self.frame.scrollFrame:SetPoint("BOTTOMRIGHT", -28, 32)
+    end
 
     -- Content frame inside scroll
     self.frame.content = CreateFrame("Frame", nil, self.frame.scrollFrame)
@@ -101,106 +164,28 @@ function MilestonePanel:Initialize()
     self.frame.total = self.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     self.frame.total:SetPoint("BOTTOM", 0, 12)
     self.frame.total:SetTextColor(1, 1, 1)
-
-    -- Resize handle (solid hit area with grabber icon overlay)
-    self.frame.resizeBtn = CreateFrame("Button", nil, self.frame)
-    self.frame.resizeBtn:SetSize(32, 32)
-    self.frame.resizeBtn:SetPoint("BOTTOMRIGHT", 0, 0)
-    self.frame.resizeBtn:SetFrameStrata("DIALOG") -- Above all nested content
-    -- Solid texture for full-area click detection (nearly invisible)
-    self.frame.resizeBtn:SetNormalTexture("Interface\\Buttons\\WHITE8x8")
-    self.frame.resizeBtn:GetNormalTexture():SetVertexColor(0, 0, 0, 0.01)
-    -- Grabber icon on top
-    self.frame.resizeBtn.icon = self.frame.resizeBtn:CreateTexture(nil, "OVERLAY")
-    self.frame.resizeBtn.icon:SetPoint("BOTTOMRIGHT", 0, 0)
-    self.frame.resizeBtn.icon:SetSize(16, 16)
-    self.frame.resizeBtn.icon:SetTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
-
-    self.frame.resizeBtn:SetScript("OnMouseDown", function(btn, button)
-        if button == "LeftButton" then
-            self.frame:StartSizing("BOTTOMRIGHT")
-        end
-    end)
-    self.frame.resizeBtn:SetScript("OnMouseUp", function(btn, button)
-        self.frame:StopMovingOrSizing()
-        self:RefreshLayout()
-    end)
-
-    -- Handle resize events
-    self.frame:SetScript("OnSizeChanged", function(f, width, height)
-        if self.frame.content then
-            self.frame.content:SetWidth(width - 40)
-        end
-    end)
 end
 
--- Refresh layout after resize
-function MilestonePanel:RefreshLayout()
-    -- Use the appropriate path based on current mode
-    local path
-    if self.parentMode == "planning" and LazyProf.PlanningWindow then
-        path = LazyProf.PlanningWindow.currentPath
-    elseif LazyProf.Pathfinder then
-        path = LazyProf.Pathfinder.currentPath
-    end
-
-    if path then
-        self:Update(path.milestoneBreakdown, path.totalCost)
+-- Refresh the display using stored path
+function MilestonePanelClass:Refresh()
+    if self.currentPath then
+        self:Update(self.currentPath)
     end
 end
 
--- Set the parent frame for standalone vs attached mode
--- mode: "tradeskill" (attached to TradeSkillFrame) or "planning" (embedded in PlanningWindow)
-function MilestonePanel:SetParentMode(mode, parentFrame)
-    self.parentMode = mode
-    self.customParent = parentFrame
+-- Update the panel with path data
+-- path: full path object with milestoneBreakdown, totalCost, currentSkill
+function MilestonePanelClass:Update(path)
+    LazyProf:Debug("ui", "=== MilestonePanel:Update (" .. (self.config.name or "unnamed") .. ") ===")
+    LazyProf:Debug("ui", "  config.embedded: " .. tostring(self.config.embedded))
+    LazyProf:Debug("ui", "  path: " .. (path and "exists" or "NIL"))
 
-    if mode == "planning" and parentFrame then
-        self.frame:SetParent(parentFrame)
-        self.frame:ClearAllPoints()
-        self.frame:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", 0, 0)
-        self.frame:SetPoint("BOTTOMRIGHT", parentFrame, "BOTTOMRIGHT", 0, 0)
-        -- Hide UI elements handled by parent in planning mode
-        self.frame.closeBtn:Hide()
-        self.frame.resizeBtn:Hide()
-        self.frame.titleBg:Hide()
-        self.frame.title:Hide()
-        -- Disable dragging (parent handles it)
-        self.frame:SetMovable(false)
-        -- Remove backdrop (parent has its own styling)
-        self.frame:SetBackdrop(nil)
-        -- Adjust scroll frame to use full space (no title bar)
-        self.frame.scrollFrame:SetPoint("TOPLEFT", 4, -4)
-        self.frame.scrollFrame:SetPoint("BOTTOMRIGHT", -24, 28)
-    else
-        self.frame:SetParent(UIParent)
-        -- Clear stale anchors from planning mode and reset to default position
-        self.frame:ClearAllPoints()
-        self.frame:SetSize(DEFAULT_WIDTH, 200)
-        self.frame:SetPoint("TOPLEFT", TradeSkillFrame or UIParent, "TOPRIGHT", 10, 0)
-        self.frame.closeBtn:Show()
-        self.frame.resizeBtn:Show()
-        self.frame.titleBg:Show()
-        self.frame.title:Show()
-        self.frame:SetMovable(true)
-        -- Restore backdrop
-        self.frame:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true, tileSize = 16, edgeSize = 16,
-            insets = { left = 4, right = 4, top = 4, bottom = 4 }
-        })
-        self.frame:SetBackdropColor(0.1, 0.1, 0.1, 0.95)
-        self.frame:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
-        -- Restore scroll frame position (leave room for title bar)
-        self.frame.scrollFrame:SetPoint("TOPLEFT", 8, -32)
-        self.frame.scrollFrame:SetPoint("BOTTOMRIGHT", -28, 32)
-    end
-end
+    -- Store the path for refresh and click handlers
+    self.currentPath = path
 
--- Update the panel with milestone breakdown data (step-by-step format)
-function MilestonePanel:Update(breakdown, totalCost)
-    if not LazyProf.db.profile.showMilestonePanel then
+    -- For standalone mode, check if panel should be shown
+    if not self.config.embedded and not LazyProf.db.profile.showMilestonePanel then
+        LazyProf:Debug("ui", "  HIDING - standalone mode and showMilestonePanel=false")
         self:Hide()
         return
     end
@@ -211,9 +196,26 @@ function MilestonePanel:Update(breakdown, totalCost)
     end
     self.rows = {}
 
+    local breakdown = path and path.milestoneBreakdown
+    LazyProf:Debug("ui", "  breakdown: " .. (breakdown and ("#" .. #breakdown .. " steps") or "NIL"))
+
     if not breakdown or #breakdown == 0 then
+        LazyProf:Debug("ui", "  HIDING - no breakdown data")
         self:Hide()
         return
+    end
+
+    LazyProf:Debug("ui", "  frame: " .. (self.frame and tostring(self.frame:GetName()) or "NIL"))
+    LazyProf:Debug("ui", "  frame.content: " .. (self.frame and self.frame.content and "exists" or "NIL"))
+    LazyProf:Debug("ui", "  frame size: " .. (self.frame and (self.frame:GetWidth() .. "x" .. self.frame:GetHeight()) or "N/A"))
+
+    -- Update title with mode indicator (standalone only)
+    if not self.config.embedded and self.frame.title then
+        if LazyProf.db.profile.calculateFromCurrentSkill then
+            self.frame.title:SetText(string.format("Milestone Breakdown |cFF66FF66(from %d)|r", path.currentSkill))
+        else
+            self.frame.title:SetText("Milestone Breakdown |cFF888888(full path)|r")
+        end
     end
 
     local contentWidth = self.frame:GetWidth() - 40
@@ -253,24 +255,37 @@ function MilestonePanel:Update(breakdown, totalCost)
     end
 
     -- Update total
-    self.frame.total:SetText("Total: " .. Utils.FormatMoney(totalCost))
+    self.frame.total:SetText("Total: " .. Utils.FormatMoney(path.totalCost))
 
     -- Update content height for scrolling
     self.frame.content:SetHeight(math.max(yOffset + 10, self.frame:GetHeight() - 70))
 
-    -- Position based on mode
-    if self.parentMode == "planning" then
-        -- Already positioned by SetParentMode, don't reposition
-    elseif TradeSkillFrame and TradeSkillFrame:IsVisible() and not self.manuallyMoved then
-        self.frame:ClearAllPoints()
-        self.frame:SetPoint("TOPLEFT", TradeSkillFrame, "TOPRIGHT", 10, 0)
+    -- Position standalone panel next to TradeSkillFrame
+    if not self.config.embedded then
+        if TradeSkillFrame and TradeSkillFrame:IsVisible() and not self.manuallyMoved then
+            self.frame:ClearAllPoints()
+            self.frame:SetPoint("TOPLEFT", TradeSkillFrame, "TOPRIGHT", 10, 0)
+        end
     end
 
+    LazyProf:Debug("ui", string.format("  Created %d rows, content size: %.0fx%.0f",
+        #self.rows,
+        self.frame.content:GetWidth(),
+        self.frame.content:GetHeight()))
     self:Show()
+
+    -- Verify first row is actually visible (helps diagnose strata/positioning issues)
+    if #self.rows > 0 then
+        local firstRow = self.rows[1]
+        LazyProf:Debug("ui", string.format("  First row: visible=%s, left=%.0f, top=%.0f",
+            tostring(firstRow:IsVisible()),
+            firstRow:GetLeft() or -1,
+            firstRow:GetTop() or -1))
+    end
 end
 
 -- Create a step row (single recipe step)
-function MilestonePanel:CreateStepRow(step, index, yOffset, contentWidth)
+function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
     local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
     row:SetSize(contentWidth, STEP_ROW_HEIGHT)
     row:SetPoint("TOPLEFT", 0, -yOffset)
@@ -299,7 +314,7 @@ function MilestonePanel:CreateStepRow(step, index, yOffset, contentWidth)
 
     row.recipe = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     row.recipe:SetPoint("LEFT", 65, 0)
-    row.recipe:SetPoint("RIGHT", row, "LEFT", 175, 0)  -- Constrain width to not overlap materials
+    row.recipe:SetPoint("RIGHT", row, "LEFT", 175, 0)
     row.recipe:SetJustifyH("LEFT")
     row.recipe:SetWordWrap(false)
     row.recipe:SetText(string.format("%dx %s", step.quantity, recipeName))
@@ -324,18 +339,10 @@ function MilestonePanel:CreateStepRow(step, index, yOffset, contentWidth)
     row.cost:SetText(Utils.FormatMoney(step.cost))
     row.cost:SetTextColor(1, 1, 1)
 
-    -- Click to expand/collapse
+    -- Click to expand/collapse (uses stored self.currentPath)
     row:SetScript("OnClick", function()
         self.expandedRows[index] = not self.expandedRows[index]
-        local path
-        if self.parentMode == "planning" and LazyProf.PlanningWindow then
-            path = LazyProf.PlanningWindow.currentPath
-        elseif LazyProf.Pathfinder then
-            path = LazyProf.Pathfinder.currentPath
-        end
-        if path then
-            self:Update(path.milestoneBreakdown, path.totalCost)
-        end
+        self:Refresh()
     end)
 
     -- Highlight on hover
@@ -366,20 +373,13 @@ function MilestonePanel:CreateStepRow(step, index, yOffset, contentWidth)
     return row
 end
 
--- Get recipe color based on difficulty
-function MilestonePanel:GetRecipeColor(recipe)
+-- Get recipe color based on difficulty (uses stored currentPath)
+function MilestonePanelClass:GetRecipeColor(recipe)
     if not recipe or not recipe.skillRange then
         return { r = 1, g = 1, b = 1 }
     end
 
-    -- Use current skill from appropriate path based on mode
-    local path
-    if self.parentMode == "planning" and LazyProf.PlanningWindow then
-        path = LazyProf.PlanningWindow.currentPath
-    elseif LazyProf.Pathfinder then
-        path = LazyProf.Pathfinder.currentPath
-    end
-    local currentSkill = path and path.currentSkill or 1
+    local currentSkill = self.currentPath and self.currentPath.currentSkill or 1
     local color = Utils.GetSkillColor(currentSkill, recipe.skillRange)
 
     if color == "orange" then
@@ -394,7 +394,7 @@ function MilestonePanel:GetRecipeColor(recipe)
 end
 
 -- Create an unlearned recipe indicator row (for expanded step view)
-function MilestonePanel:CreateUnlearnedIndicator(step, yOffset, contentWidth)
+function MilestonePanelClass:CreateUnlearnedIndicator(step, yOffset, contentWidth)
     local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
     row:SetSize(contentWidth - 20, INGREDIENT_ROW_HEIGHT)
     row:SetPoint("TOPLEFT", 20, -yOffset)
@@ -442,7 +442,7 @@ function MilestonePanel:CreateUnlearnedIndicator(step, yOffset, contentWidth)
 end
 
 -- Create a trainer milestone separator
-function MilestonePanel:CreateMilestoneSeparator(milestone, yOffset, contentWidth)
+function MilestonePanelClass:CreateMilestoneSeparator(milestone, yOffset, contentWidth)
     local row = CreateFrame("Frame", nil, self.frame.content)
     row:SetSize(contentWidth, MILESTONE_SEPARATOR_HEIGHT)
     row:SetPoint("TOPLEFT", 0, -yOffset)
@@ -474,7 +474,7 @@ function MilestonePanel:CreateMilestoneSeparator(milestone, yOffset, contentWidt
 end
 
 -- Create an ingredient row
-function MilestonePanel:CreateIngredientRow(mat, yOffset, contentWidth)
+function MilestonePanelClass:CreateIngredientRow(mat, yOffset, contentWidth)
     local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
     row:SetSize(contentWidth - 20, INGREDIENT_ROW_HEIGHT)
     row:SetPoint("TOPLEFT", 20, -yOffset)
@@ -536,11 +536,22 @@ function MilestonePanel:CreateIngredientRow(mat, yOffset, contentWidth)
 end
 
 -- Show the panel
-function MilestonePanel:Show()
+function MilestonePanelClass:Show()
     self.frame:Show()
 end
 
 -- Hide the panel
-function MilestonePanel:Hide()
-    self.frame:Hide()
+function MilestonePanelClass:Hide()
+    if self.frame then
+        self.frame:Hide()
+    end
 end
+
+-- Check if visible
+function MilestonePanelClass:IsVisible()
+    return self.frame and self.frame:IsVisible()
+end
+
+-- Create the main standalone instance (backwards compatible)
+-- Empty name keeps frame as "LazyProfMilestonePanel" for other modules that reference it
+LazyProf.MilestonePanel = MilestonePanelClass:New({ name = "", embedded = false })

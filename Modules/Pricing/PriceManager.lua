@@ -18,7 +18,7 @@ function PriceManager:Initialize()
         local provider = LazyProf.PriceProviders and LazyProf.PriceProviders[name]
         if provider and provider:IsAvailable() then
             table.insert(self.providers, provider)
-            if LazyProf.Debug then LazyProf:Debug("Price provider enabled: " .. name) end
+            LazyProf:Debug("pricing", "Price provider enabled: " .. name)
         end
     end
 end

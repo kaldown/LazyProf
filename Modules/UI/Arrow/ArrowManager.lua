@@ -57,9 +57,9 @@ function ArrowManager:SetStrategy(strategyName)
     local strategy = self.strategies[strategyName]
     if strategy then
         self.activeStrategy = strategy
-        LazyProf:Debug("Arrow strategy set: " .. strategyName)
+        LazyProf:Debug("arrow", "Arrow strategy set: " .. strategyName)
     else
-        LazyProf:Debug("Unknown arrow strategy: " .. strategyName)
+        LazyProf:Debug("arrow", "Unknown arrow strategy: " .. strategyName)
     end
 end
 

@@ -20,7 +20,7 @@ LazyProf.PathfinderStrategies.fastest = {
             local candidates = self:GetCandidates(recipes, simulatedSkill)
 
             if #candidates == 0 then
-                if LazyProf.Debug then LazyProf:Debug("No candidates at skill " .. simulatedSkill) end
+                LazyProf:Debug("scoring", "No candidates at skill " .. simulatedSkill)
                 break
             end
 
@@ -30,7 +30,7 @@ LazyProf.PathfinderStrategies.fastest = {
             end)
 
             if not best then
-                if LazyProf.Debug then LazyProf:Debug("No best recipe found at skill " .. simulatedSkill) end
+                LazyProf:Debug("scoring", "No best recipe found at skill " .. simulatedSkill)
                 break
             end
 

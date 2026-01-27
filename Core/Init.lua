@@ -160,6 +160,11 @@ function LazyProf:Recalculate()
         -- No matching profession data - hide panels
         self:HideDisplay()
     end
+
+    -- Also refresh PlanningWindow if visible (it calculates independently)
+    if self.PlanningWindow and self.PlanningWindow:IsVisible() then
+        self.PlanningWindow:LoadProfession(self.PlanningWindow.currentProfession)
+    end
 end
 
 function LazyProf:HideDisplay()
@@ -181,7 +186,7 @@ function LazyProf:UpdateDisplay()
             self.ArrowManager:Update(path)
         end
         if self.MilestonePanel then
-            self.MilestonePanel:Update(path.milestoneBreakdown, path.totalCost)
+            self.MilestonePanel:Update(path)
         end
         if self.MissingMaterialsPanel then
             self.MissingMaterialsPanel:Update(path.missingMaterials)
@@ -192,37 +197,113 @@ end
 -- Debug log buffer
 LazyProf.debugLog = {}
 LazyProf.debugLogMax = 500
+LazyProf.debugFilter = nil  -- nil = show all, or category name
 
-function LazyProf:Debug(msg)
-    if self.db and self.db.profile.debug then
-        local timestamp = date("%H:%M:%S")
-        local entry = string.format("[%s] %s", timestamp, msg)
+-- Category display names for UI
+LazyProf.debugCategoryNames = {
+    scoring = "Pathfinder Scoring",
+    pathfinder = "Pathfinder Core",
+    ui = "UI Updates",
+    professions = "Professions",
+    pricing = "Pricing",
+    arrow = "Arrow",
+}
 
-        -- Store in buffer
-        table.insert(self.debugLog, entry)
-        if #self.debugLog > self.debugLogMax then
-            table.remove(self.debugLog, 1)
-        end
+function LazyProf:Debug(category, msg)
+    -- Backwards compatibility: single arg = message with "pathfinder" category
+    if msg == nil then
+        msg = category
+        category = "pathfinder"
+    end
 
-        -- Auto-update debug window if visible (don't spam chat)
-        if self.debugFrame and self.debugFrame:IsShown() then
-            local text = table.concat(self.debugLog, "\n")
-            self.debugFrame.editBox:SetText(text)
-            -- Scroll to bottom
-            C_Timer.After(0.01, function()
-                if self.debugFrame and self.debugFrame.scrollFrame then
-                    self.debugFrame.scrollFrame:SetVerticalScroll(self.debugFrame.scrollFrame:GetVerticalScrollRange())
-                end
-            end)
-        else
-            -- Only print to chat if debug window is not open
-            self:Print("[Debug] " .. msg)
+    if not self.db or not self.db.profile.debug then
+        return
+    end
+
+    -- Check if this category is enabled
+    if not self.db.profile.debugCategories[category] then
+        return
+    end
+
+    local timestamp = date("%H:%M:%S")
+
+    -- Store with category for filtering
+    table.insert(self.debugLog, {
+        timestamp = timestamp,
+        category = category,
+        message = msg,
+    })
+    if #self.debugLog > self.debugLogMax then
+        table.remove(self.debugLog, 1)
+    end
+
+    -- Auto-update debug window if visible
+    if self.debugFrame and self.debugFrame:IsShown() then
+        self:UpdateDebugWindowContent()
+    end
+    -- No chat output - use /lp debuglog to view logs
+end
+
+-- Get filtered debug log entries
+function LazyProf:GetFilteredDebugLog()
+    local filtered = {}
+    for _, entry in ipairs(self.debugLog) do
+        if not self.debugFilter or entry.category == self.debugFilter then
+            table.insert(filtered, entry)
         end
     end
+    return filtered
+end
+
+-- Format debug log entries as text
+function LazyProf:FormatDebugLog(entries)
+    local lines = {}
+    for _, entry in ipairs(entries) do
+        local catDisplay = self.debugCategoryNames[entry.category] or entry.category
+        table.insert(lines, string.format("[%s] [%s] %s", entry.timestamp, catDisplay, entry.message))
+    end
+    return table.concat(lines, "\n")
+end
+
+-- Update debug window content (respects filter)
+function LazyProf:UpdateDebugWindowContent()
+    if not self.debugFrame then return end
+
+    local filtered = self:GetFilteredDebugLog()
+    local text = self:FormatDebugLog(filtered)
+
+    if text == "" then
+        if self.debugFilter then
+            text = "(No messages in category: " .. (self.debugCategoryNames[self.debugFilter] or self.debugFilter) .. ")"
+        else
+            text = "(No debug messages yet. Enable debug mode and perform actions.)"
+        end
+    end
+
+    self.debugFrame.editBox:SetText(text)
+
+    -- Update count display
+    if self.debugFrame.countText then
+        if self.debugFilter then
+            self.debugFrame.countText:SetText(string.format("Showing %d of %d", #filtered, #self.debugLog))
+        else
+            self.debugFrame.countText:SetText(string.format("%d messages", #self.debugLog))
+        end
+    end
+
+    -- Scroll to bottom
+    C_Timer.After(0.01, function()
+        if self.debugFrame and self.debugFrame.scrollFrame then
+            self.debugFrame.scrollFrame:SetVerticalScroll(self.debugFrame.scrollFrame:GetVerticalScrollRange())
+        end
+    end)
 end
 
 function LazyProf:ClearDebugLog()
     wipe(self.debugLog)
+    if self.debugFrame and self.debugFrame:IsShown() then
+        self:UpdateDebugWindowContent()
+    end
     self:Print("Debug log cleared.")
 end
 
@@ -232,18 +313,13 @@ function LazyProf:ShowDebugLog()
     end
 
     -- Update content
-    local text = table.concat(self.debugLog, "\n")
-    if text == "" then
-        text = "(No debug messages yet. Enable debug mode and perform actions.)"
-    end
-    self.debugFrame.editBox:SetText(text)
-    self.debugFrame.editBox:SetCursorPosition(#text) -- Scroll to bottom
+    self:UpdateDebugWindowContent()
     self.debugFrame:Show()
 end
 
 function LazyProf:CreateDebugFrame()
     local frame = CreateFrame("Frame", "LazyProfDebugFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(600, 400)
+    frame:SetSize(700, 450)
     frame:SetPoint("CENTER")
     frame:SetFrameStrata("DIALOG")
     frame:SetMovable(true)
@@ -264,7 +340,7 @@ function LazyProf:CreateDebugFrame()
 
     -- Title
     frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    frame.title:SetPoint("TOP", 0, -10)
+    frame.title:SetPoint("TOPLEFT", 10, -10)
     frame.title:SetText("LazyProf Debug Log")
     frame.title:SetTextColor(1, 0.82, 0)
 
@@ -272,6 +348,56 @@ function LazyProf:CreateDebugFrame()
     frame.closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     frame.closeBtn:SetPoint("TOPRIGHT", -2, -2)
 
+    -- Filter dropdown
+    frame.filterDropdown = CreateFrame("Frame", "LazyProfDebugFilterDropdown", frame, "UIDropDownMenuTemplate")
+    frame.filterDropdown:SetPoint("TOPLEFT", 100, -3)
+    UIDropDownMenu_SetWidth(frame.filterDropdown, 150)
+
+    local function FilterDropdown_Initialize(dropdown, level)
+        local info = UIDropDownMenu_CreateInfo()
+
+        -- "All Categories" option
+        info.text = "All Categories"
+        info.value = nil
+        info.checked = (LazyProf.debugFilter == nil)
+        info.func = function()
+            LazyProf.debugFilter = nil
+            UIDropDownMenu_SetText(dropdown, "All Categories")
+            LazyProf:UpdateDebugWindowContent()
+        end
+        UIDropDownMenu_AddButton(info, level)
+
+        -- Separator
+        info = UIDropDownMenu_CreateInfo()
+        info.disabled = true
+        info.notCheckable = true
+        UIDropDownMenu_AddButton(info, level)
+
+        -- Category options
+        local categories = {"scoring", "pathfinder", "ui", "professions", "pricing", "arrow"}
+        for _, cat in ipairs(categories) do
+            info = UIDropDownMenu_CreateInfo()
+            info.text = LazyProf.debugCategoryNames[cat]
+            info.value = cat
+            info.checked = (LazyProf.debugFilter == cat)
+            info.func = function()
+                LazyProf.debugFilter = cat
+                UIDropDownMenu_SetText(dropdown, LazyProf.debugCategoryNames[cat])
+                LazyProf:UpdateDebugWindowContent()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end
+
+    UIDropDownMenu_Initialize(frame.filterDropdown, FilterDropdown_Initialize)
+    UIDropDownMenu_SetText(frame.filterDropdown, "All Categories")
+
+    -- Message count display
+    frame.countText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.countText:SetPoint("TOPRIGHT", frame.closeBtn, "TOPLEFT", -10, -8)
+    frame.countText:SetTextColor(0.7, 0.7, 0.7)
+
+    -- Bottom buttons
     -- Clear button
     frame.clearBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame.clearBtn:SetSize(60, 22)
@@ -279,23 +405,46 @@ function LazyProf:CreateDebugFrame()
     frame.clearBtn:SetText("Clear")
     frame.clearBtn:SetScript("OnClick", function()
         LazyProf:ClearDebugLog()
-        frame.editBox:SetText("(Log cleared)")
+    end)
+
+    -- Copy Filtered button
+    frame.copyFilteredBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame.copyFilteredBtn:SetSize(100, 22)
+    frame.copyFilteredBtn:SetPoint("RIGHT", frame.clearBtn, "LEFT", -5, 0)
+    frame.copyFilteredBtn:SetText("Copy Filtered")
+    frame.copyFilteredBtn:SetScript("OnClick", function()
+        -- Get only filtered content
+        local filtered = LazyProf:GetFilteredDebugLog()
+        local text = LazyProf:FormatDebugLog(filtered)
+        frame.editBox:SetText(text)
+        frame.editBox:SetFocus()
+        frame.editBox:HighlightText()
+        LazyProf:Print("Filtered text selected (" .. #filtered .. " messages) - press Ctrl+C to copy")
     end)
 
     -- Copy All button
     frame.copyBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame.copyBtn:SetSize(80, 22)
-    frame.copyBtn:SetPoint("RIGHT", frame.clearBtn, "LEFT", -5, 0)
+    frame.copyBtn:SetPoint("RIGHT", frame.copyFilteredBtn, "LEFT", -5, 0)
     frame.copyBtn:SetText("Copy All")
     frame.copyBtn:SetScript("OnClick", function()
+        -- Show all content temporarily for copying
+        local text = LazyProf:FormatDebugLog(LazyProf.debugLog)
+        frame.editBox:SetText(text)
         frame.editBox:SetFocus()
         frame.editBox:HighlightText()
-        LazyProf:Print("Text selected - press Ctrl+C to copy")
+        LazyProf:Print("All text selected (" .. #LazyProf.debugLog .. " messages) - press Ctrl+C to copy")
+        -- Restore filtered view after a moment
+        C_Timer.After(0.1, function()
+            if not frame.editBox:HasFocus() then
+                LazyProf:UpdateDebugWindowContent()
+            end
+        end)
     end)
 
     -- Scroll frame
     frame.scrollFrame = CreateFrame("ScrollFrame", "LazyProfDebugScrollFrame", frame, "UIPanelScrollFrameTemplate")
-    frame.scrollFrame:SetPoint("TOPLEFT", 10, -30)
+    frame.scrollFrame:SetPoint("TOPLEFT", 10, -35)
     frame.scrollFrame:SetPoint("BOTTOMRIGHT", -30, 40)
 
     -- EditBox for text (selectable, copyable)

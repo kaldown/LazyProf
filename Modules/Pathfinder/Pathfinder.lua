@@ -14,21 +14,29 @@ function Pathfinder:Calculate()
     -- Get active profession
     local profData = LazyProf.Professions:GetActive()
     if not profData then
-        LazyProf:Debug("No active profession detected")
+        LazyProf:Debug("pathfinder", "No active profession detected")
         return nil
     end
 
     -- Get current skill level
     local skillName, currentSkill, maxSkill = GetTradeSkillLine()
     if not currentSkill then
-        LazyProf:Debug("Could not get current skill")
+        LazyProf:Debug("pathfinder", "Could not get current skill")
         return nil
     end
 
-    -- Determine target skill (next milestone or max)
-    local targetSkill = self:GetTargetSkill(currentSkill, profData.milestones)
+    -- Determine starting skill based on setting
+    local startSkill = currentSkill
+    if not LazyProf.db.profile.calculateFromCurrentSkill then
+        -- Show full leveling path from skill 1
+        startSkill = 1
+    end
 
-    LazyProf:Debug(string.format("Calculating path: %s %d -> %d", skillName, currentSkill, targetSkill))
+    -- Determine target skill (next milestone or max)
+    local targetSkill = self:GetTargetSkill(startSkill, profData.milestones)
+
+    LazyProf:Debug("pathfinder", string.format("Calculating path: %s %d -> %d (actual skill: %d)",
+        skillName, startSkill, targetSkill, currentSkill))
 
     -- Get recipes with learned status
     local recipes = LazyProf.Professions:GetRecipesWithLearnedStatus(LazyProf.Professions.active)
@@ -74,25 +82,25 @@ function Pathfinder:Calculate()
     local strategyName = LazyProf.db.profile.strategy
     local strategy = LazyProf.PathfinderStrategies[strategyName]
     if not strategy then
-        LazyProf:Debug("Unknown strategy: " .. strategyName)
+        LazyProf:Debug("pathfinder", "Unknown strategy: " .. strategyName)
         return nil
     end
 
     -- Calculate path
-    local steps = strategy:Calculate(currentSkill, targetSkill, recipes, inventory, prices)
+    local steps = strategy:Calculate(startSkill, targetSkill, recipes, inventory, prices)
 
     -- Build result
     self.currentPath = {
         profession = profData.name,
-        currentSkill = currentSkill,
+        currentSkill = startSkill,
         targetSkill = targetSkill,
         steps = steps,
         totalCost = Utils.Sum(steps, "totalCost"),
         missingMaterials = self:CalculateMissingMaterials(steps, inventory, bankInventory, altInventory, altItemsByCharacter, prices),
-        milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, currentSkill, inventory, prices),
+        milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, startSkill, inventory, prices),
     }
 
-    LazyProf:Debug(string.format("Path calculated: %d steps, %s total",
+    LazyProf:Debug("pathfinder", string.format("Path calculated: %d steps, %s total",
         #steps, Utils.FormatMoney(self.currentPath.totalCost)))
 
     return self.currentPath
@@ -104,7 +112,7 @@ end
 function Pathfinder:CalculateForProfession(profKey, skillLevel)
     local profData = LazyProf.Professions:Get(profKey)
     if not profData then
-        LazyProf:Debug("Profession not found: " .. tostring(profKey))
+        LazyProf:Debug("pathfinder", "Profession not found: " .. tostring(profKey))
         return nil
     end
 
@@ -113,7 +121,7 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel)
     skillLevel = math.max(1, skillLevel or 0)
     local targetSkill = self:GetTargetSkill(skillLevel, profData.milestones)
 
-    LazyProf:Debug(string.format("Planning path: %s %d -> %d", profData.name, skillLevel, targetSkill))
+    LazyProf:Debug("pathfinder", string.format("Planning path: %s %d -> %d", profData.name, skillLevel, targetSkill))
 
     -- Get all recipes (no learned status needed for planning)
     local recipes = LazyProf.Utils.DeepCopy(profData.recipes)
@@ -163,7 +171,7 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel)
     local strategyName = LazyProf.db.profile.strategy
     local strategy = LazyProf.PathfinderStrategies[strategyName]
     if not strategy then
-        LazyProf:Debug("Unknown strategy: " .. strategyName)
+        LazyProf:Debug("pathfinder", "Unknown strategy: " .. strategyName)
         return nil
     end
 
@@ -182,7 +190,7 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel)
         milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, skillLevel, inventory, prices),
     }
 
-    LazyProf:Debug(string.format("Planning path calculated: %d steps, %s total",
+    LazyProf:Debug("pathfinder", string.format("Planning path calculated: %d steps, %s total",
         #steps, Utils.FormatMoney(path.totalCost)))
 
     return path
