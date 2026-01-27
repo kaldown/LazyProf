@@ -66,3 +66,30 @@ function Availability:FindRecipeInInventory(itemId)
 
     return nil
 end
+
+-- Check if an item is listed on the Auction House
+-- Returns: price (copper), source ("TSM"|"Auctionator") or nil, nil if not listed
+function Availability:GetAHPrice(itemId)
+    if not itemId then
+        return nil, nil
+    end
+
+    -- Try TSM first (uses DBMinBuyout - nil means no listings)
+    if TSM_API then
+        local itemString = "i:" .. itemId
+        local price = TSM_API.GetCustomPriceValue("DBMinBuyout", itemString)
+        if price and price > 0 then
+            return price, "TSM"
+        end
+    end
+
+    -- Fallback to Auctionator
+    if Auctionator and Auctionator.API and Auctionator.API.v1 then
+        local price = Auctionator.API.v1.GetAuctionPriceByItemID("LazyProf", itemId)
+        if price and price > 0 then
+            return price, "Auctionator"
+        end
+    end
+
+    return nil, nil
+end
