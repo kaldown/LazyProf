@@ -7,10 +7,70 @@ local Availability = LazyProf.RecipeAvailability
 
 -- Check if a recipe is available to obtain
 -- Returns: isAvailable (boolean), sourceInfo (table or nil)
--- sourceInfo = { type = "learned|inventory|trainer|vendor|ah", ... }
+-- sourceInfo contains details for tooltip display
 function Availability:IsRecipeAvailable(recipe)
-    -- TODO: Implement in subsequent tasks
-    return true, nil
+    -- 1. Already learned - always available
+    if recipe.learned then
+        return true, { type = "learned" }
+    end
+
+    -- 2. Check if we have the recipe item in inventory
+    local recipeItemId = self:GetRecipeItemId(recipe)
+    if recipeItemId then
+        local location = self:FindRecipeInInventory(recipeItemId)
+        if location then
+            return true, {
+                type = "inventory",
+                location = location,
+                itemId = recipeItemId
+            }
+        end
+    end
+
+    -- 3. Check source-based availability
+    local source = recipe.source
+    if not source then
+        -- No source data - can't determine availability
+        return false, nil
+    end
+
+    -- Trainer recipes - always available if requirements met
+    if source.type == "trainer" then
+        if self:MeetsTrainerRequirements(source) then
+            return true, {
+                type = "trainer",
+                cost = source.cost,
+                npcName = source.npcName
+            }
+        end
+        -- Doesn't meet requirements, fall through to check AH
+    end
+
+    -- Vendor recipes - always available (player can travel)
+    if source.type == "vendor" then
+        return true, {
+            type = "vendor",
+            cost = source.cost,
+            vendors = source.vendors,
+            itemId = source.itemId
+        }
+    end
+
+    -- 4. Quest/Rep/Drop/World Drop - check AH
+    if recipeItemId then
+        local ahPrice, ahSource = self:GetAHPrice(recipeItemId)
+        if ahPrice then
+            return true, {
+                type = "ah",
+                price = ahPrice,
+                source = ahSource,
+                itemId = recipeItemId
+            }
+        end
+    end
+
+    -- 5. Not available
+    return false, nil
 end
 
 -- Get the recipe item ID from source data
