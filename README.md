@@ -16,9 +16,10 @@ See [CraftLib's profession coverage](https://github.com/kaldown/CraftLib#profess
 - Calculates optimal leveling path based on current AH prices
 - Two strategies: Cheapest (minimize gold) or Fastest (minimize crafts)
 - Material Resolution: Automatically suggests crafting intermediates (e.g., smelt ore into bars) when cheaper
-- Shows missing materials with cost breakdown and "To Craft" section
+- **Owned Materials Optimization**: Treats materials you already own as free, prioritizing recipes that use your existing inventory
+- Shows missing materials with cost breakdown, "From Bank", "From Alts", and "To Craft" sections
 - Tracks progress with milestone breakdowns
-- Bank inventory integration (with optional addon)
+- Bank and alt character inventory integration (with optional addon)
 
 ## Price Sources
 
@@ -32,7 +33,7 @@ See [CraftLib's profession coverage](https://github.com/kaldown/CraftLib#profess
 |-------|---------|
 | [TradeSkillMaster](https://www.curseforge.com/wow/addons/tradeskill-master) | TSM pricing integration |
 | [Auctionator](https://www.curseforge.com/wow/addons/auctionator) | Auctionator pricing + shift-click search |
-| [Syndicator](https://www.curseforge.com/wow/addons/baganator) | Bank inventory scanning |
+| [Syndicator](https://www.curseforge.com/wow/addons/baganator) | Bank + alt character inventory scanning |
 
 ## Usage
 
@@ -51,6 +52,8 @@ Commands:
 Access via `/lp` or the Interface Options panel:
 
 - **Include bank items** - Count bank contents when calculating missing materials (requires Syndicator)
+- **Use owned materials as free** - Treat materials in bags/bank as free when calculating path costs
+- **Include alt characters** - Include materials on all your characters (requires Syndicator)
 - **Suggest unlearned recipes** - Include recipes you haven't learned yet
 - **Calculate from current skill** - Show materials from current skill instead of full bracket
 

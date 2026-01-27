@@ -11,9 +11,10 @@ See [CraftLib's profession coverage](https://github.com/kaldown/CraftLib#profess
 - **Optimal leveling path** - Calculates which recipes to craft based on current AH prices
 - **Two strategies** - Cheapest (minimize gold) or Fastest (minimize crafts)
 - **Material Resolution** - Automatically suggests crafting intermediates (e.g., smelt ore into bars) when cheaper than buying
-- **Missing materials list** - Shows what you need to buy, what to craft, and total cost
+- **Owned Materials Optimization** - Treats materials you already own as free, prioritizing recipes that use your existing inventory
+- **Missing materials list** - Shows what you need from bank, from alts, what to craft, and total cost
 - **Milestone tracking** - See your progress through each skill bracket
-- **Bank integration** - Counts bank items when calculating what you need (requires Syndicator)
+- **Bank + alt inventory integration** - Counts items on all characters when calculating what you need (requires Syndicator)
 
 ## Price Sources (Priority Order)
 
@@ -47,7 +48,7 @@ LazyProf requires CraftLib to function. Install both addons together.
 
 - **[TradeSkillMaster](https://www.curseforge.com/wow/addons/tradeskill-master)** - TSM pricing (recommended)
 - **[Auctionator](https://www.curseforge.com/wow/addons/auctionator)** - Auctionator pricing + shift-click AH search
-- **[Syndicator](https://www.curseforge.com/wow/addons/syndicator)** - Bank inventory scanning
+- **[Syndicator](https://www.curseforge.com/wow/addons/syndicator)** - Bank + alt character inventory scanning
 
 ## Supported Game Versions
 
