@@ -143,12 +143,13 @@ function MissingPanel:Update(missingMaterials)
     end
     self.rows = {}
 
-    -- Handle structure { fromBank, toCraft, fromAH }
+    -- Handle structure { fromBank, fromAlts, toCraft, fromAH }
     local fromBank = missingMaterials and missingMaterials.fromBank or {}
+    local fromAlts = missingMaterials and missingMaterials.fromAlts or {}
     local toCraft = missingMaterials and missingMaterials.toCraft or {}
     local fromAH = missingMaterials and missingMaterials.fromAH or {}
 
-    if #fromBank == 0 and #toCraft == 0 and #fromAH == 0 then
+    if #fromBank == 0 and #fromAlts == 0 and #toCraft == 0 and #fromAH == 0 then
         self.frame.title:SetText("All Materials Ready!")
         self.frame.title:SetTextColor(0.4, 1, 0.4)
         self.frame.total:SetText("")
@@ -177,7 +178,20 @@ function MissingPanel:Update(missingMaterials)
         end
     end
 
-    -- 2. Show "To Craft" section (if any)
+    -- 2. Show alts section (if any)
+    if #fromAlts > 0 then
+        local headerRow = self:CreateSectionHeader("From Alts", yOffset, contentWidth)
+        table.insert(self.rows, headerRow)
+        yOffset = yOffset + ROW_HEIGHT
+
+        for _, mat in ipairs(fromAlts) do
+            local row = self:CreateAltMaterialRow(mat, yOffset, contentWidth)
+            table.insert(self.rows, row)
+            yOffset = yOffset + ROW_HEIGHT
+        end
+    end
+
+    -- 3. Show "To Craft" section (if any)
     if #toCraft > 0 then
         local headerRow = self:CreateSectionHeader("To Craft", yOffset, contentWidth)
         table.insert(self.rows, headerRow)
@@ -198,7 +212,7 @@ function MissingPanel:Update(missingMaterials)
         end
     end
 
-    -- 3. Show AH section (if any)
+    -- 4. Show AH section (if any)
     if #fromAH > 0 then
         local headerRow = self:CreateSectionHeader("From AH", yOffset, contentWidth)
         table.insert(self.rows, headerRow)
@@ -311,6 +325,74 @@ function MissingPanel:CreateMaterialRow(mat, yOffset, contentWidth, rowType)
             else
                 GameTooltip:AddLine(string.format("Have: %d | Need: %d | Buy: %d", mat.have, mat.need, mat.missing), 1, 1, 1)
             end
+            GameTooltip:AddLine("Shift-click to link", 0.5, 0.5, 0.5)
+            GameTooltip:Show()
+        end
+    end)
+    row:SetScript("OnLeave", function()
+        row:SetBackdropColor(0.15, 0.15, 0.15, 0.5)
+        GameTooltip:Hide()
+    end)
+
+    row:Show()
+    return row
+end
+
+-- Create a material row for alt items (shows character name)
+function MissingPanel:CreateAltMaterialRow(mat, yOffset, contentWidth)
+    local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
+    row:SetSize(contentWidth, ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -yOffset)
+
+    row:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+    })
+    row:SetBackdropColor(0.15, 0.15, 0.15, 0.5)
+
+    -- Icon
+    row.icon = row:CreateTexture(nil, "ARTWORK")
+    row.icon:SetSize(18, 18)
+    row.icon:SetPoint("LEFT", 4, 0)
+    row.icon:SetTexture(mat.icon)
+
+    -- Build character list string
+    local charList = {}
+    for _, charInfo in ipairs(mat.characters or {}) do
+        -- Extract just character name (remove realm)
+        local charName = charInfo.name:match("^([^-]+)") or charInfo.name
+        table.insert(charList, string.format("%s:%d", charName, charInfo.count))
+    end
+    local charString = table.concat(charList, ", ")
+
+    -- Count and name (purple for alts)
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.text:SetPoint("LEFT", 26, 0)
+    row.text:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+    row.text:SetJustifyH("LEFT")
+    local displayText = string.format("|cFFCC99FF%dx|r %s |cFF888888(%s)|r",
+        mat.missing, mat.name or "Unknown", charString)
+    row.text:SetText(displayText)
+
+    -- Shift-click to link
+    row:SetScript("OnClick", function()
+        if IsShiftKeyDown() and mat.link then
+            HandleModifiedItemClick(mat.link)
+        end
+    end)
+
+    -- Tooltip
+    row:SetScript("OnEnter", function()
+        row:SetBackdropColor(0.25, 0.25, 0.25, 0.8)
+        if mat.itemId then
+            GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+            GameTooltip:SetItemByID(mat.itemId)
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("On your alts:", 0.8, 0.6, 1)
+            for _, charInfo in ipairs(mat.characters or {}) do
+                GameTooltip:AddLine(string.format("  %s: %d", charInfo.name, charInfo.count), 1, 1, 1)
+            end
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Transfer to crafter before crafting", 0.6, 0.6, 0.6)
             GameTooltip:AddLine("Shift-click to link", 0.5, 0.5, 0.5)
             GameTooltip:Show()
         end

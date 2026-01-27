@@ -33,8 +33,8 @@ function Pathfinder:Calculate()
     -- Get recipes with learned status
     local recipes = LazyProf.Professions:GetRecipesWithLearnedStatus(LazyProf.Professions.active)
 
-    -- Get inventory (bags + optional bank)
-    local inventory, bankInventory = LazyProf.Inventory:ScanAll()
+    -- Get inventory (bags + optional bank + optional alts)
+    local inventory, bankInventory, altInventory, altItemsByCharacter = LazyProf.Inventory:ScanAll()
 
     -- Get prices for all reagents (and potential source materials for resolution)
     local reagentIds = {}
@@ -88,7 +88,7 @@ function Pathfinder:Calculate()
         targetSkill = targetSkill,
         steps = steps,
         totalCost = Utils.Sum(steps, "totalCost"),
-        missingMaterials = self:CalculateMissingMaterials(steps, inventory, bankInventory, prices),
+        missingMaterials = self:CalculateMissingMaterials(steps, inventory, bankInventory, altInventory, altItemsByCharacter, prices),
         milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, currentSkill, inventory, prices),
     }
 
@@ -122,8 +122,8 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel)
         recipe.learned = false
     end
 
-    -- Get inventory (bags + optional bank)
-    local inventory, bankInventory = LazyProf.Inventory:ScanAll()
+    -- Get inventory (bags + optional bank + optional alts)
+    local inventory, bankInventory, altInventory, altItemsByCharacter = LazyProf.Inventory:ScanAll()
 
     -- Get prices for all reagents
     local reagentIds = {}
@@ -178,7 +178,7 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel)
         targetSkill = targetSkill,
         steps = steps,
         totalCost = Utils.Sum(steps, "totalCost"),
-        missingMaterials = self:CalculateMissingMaterials(steps, inventory, bankInventory, prices),
+        missingMaterials = self:CalculateMissingMaterials(steps, inventory, bankInventory, altInventory, altItemsByCharacter, prices),
         milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, skillLevel, inventory, prices),
     }
 
@@ -200,8 +200,8 @@ function Pathfinder:GetTargetSkill(currentSkill, milestones)
 end
 
 -- Calculate total missing materials for entire path
--- Returns { fromBank = {...}, toCraft = {...}, fromAH = {...} }
-function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, prices)
+-- Returns { fromBank = {...}, fromAlts = {...}, toCraft = {...}, fromAH = {...} }
+function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, altInventory, altItemsByCharacter, prices)
     local needed = {}
 
     -- Sum up all reagents needed (preserve name from CraftLib as fallback)
@@ -309,14 +309,16 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
         end
     end
 
-    -- Categorize resolved materials by source: bank vs AH
+    -- Categorize resolved materials by source: bank vs alts vs AH
     local fromBank = {}
+    local fromAlts = {}
     local fromAH = {}
 
     for itemId, data in pairs(resolvedNeeded) do
         local need = data.count
         local inBags = LazyProf.Inventory:ScanBags()[itemId] or 0
         local inBank = bankInventory and bankInventory[itemId] or 0
+        local inAlts = altInventory and altInventory[itemId] or 0
         local totalHave = inventory[itemId] or 0
 
         -- How many do we still need after bags?
@@ -332,8 +334,27 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
 
             -- How many can come from bank?
             local fromBankCount = math.min(afterBags, inBank)
+            local afterBank = math.max(0, afterBags - inBank)
+
+            -- How many can come from alts?
+            local fromAltCount = 0
+            local altCharacters = {}
+            if afterBank > 0 and altItemsByCharacter and altItemsByCharacter[itemId] then
+                local remaining = afterBank
+                for charName, charCount in pairs(altItemsByCharacter[itemId]) do
+                    local useFromChar = math.min(remaining, charCount)
+                    if useFromChar > 0 then
+                        fromAltCount = fromAltCount + useFromChar
+                        remaining = remaining - useFromChar
+                        table.insert(altCharacters, { name = charName, count = useFromChar })
+                    end
+                    if remaining <= 0 then break end
+                end
+            end
+            local afterAlts = math.max(0, afterBank - fromAltCount)
+
             -- How many must come from AH?
-            local fromAHCount = math.max(0, afterBags - inBank)
+            local fromAHCount = afterAlts
 
             if fromBankCount > 0 then
                 local purpose = bankPurpose[itemId] -- e.g., "for smelting"
@@ -347,6 +368,18 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
                     missing = fromBankCount,
                     estimatedCost = 0, -- Bank items are free
                     purpose = purpose, -- Annotation for UI
+                })
+            end
+
+            if fromAltCount > 0 then
+                table.insert(fromAlts, {
+                    itemId = itemId,
+                    name = name,
+                    icon = icon,
+                    link = link,
+                    missing = fromAltCount,
+                    have = inAlts,
+                    characters = altCharacters,  -- Which alts have this item
                 })
             end
 
@@ -365,12 +398,13 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, p
         end
     end
 
-    -- Sort by cost descending (AH items) and by name (bank/craft items)
+    -- Sort by cost descending (AH items) and by name (bank/craft/alt items)
     table.sort(fromAH, function(a, b) return a.estimatedCost > b.estimatedCost end)
     table.sort(fromBank, function(a, b) return (a.name or "") < (b.name or "") end)
+    table.sort(fromAlts, function(a, b) return (a.name or "") < (b.name or "") end)
     table.sort(toCraft, function(a, b) return (a.name or "") < (b.name or "") end)
 
-    return { fromBank = fromBank, toCraft = toCraft, fromAH = fromAH }
+    return { fromBank = fromBank, fromAlts = fromAlts, toCraft = toCraft, fromAH = fromAH }
 end
 
 -- Break down path by individual steps (step-by-step format)
