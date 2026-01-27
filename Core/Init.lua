@@ -118,7 +118,14 @@ function LazyProf:HookTradeSkillScroll()
 end
 
 function LazyProf:OnTradeSkillUpdate()
-    self:ScheduleRecalculation()
+    -- PERFORMANCE FIX (GitHub Issue #3): Only recalculate when skill actually changes.
+    -- TRADE_SKILL_UPDATE fires for many reasons (scrolling, UI refresh, etc).
+    -- Full path recalculation is expensive - only do it when the path might change.
+    -- DO NOT REVERT THIS to unconditional ScheduleRecalculation() - it causes FPS hitches.
+    local _, currentSkill = GetTradeSkillLine()
+    if currentSkill and currentSkill ~= self.lastCalculatedSkill then
+        self:ScheduleRecalculation()
+    end
 end
 
 function LazyProf:OnTradeSkillClose()
@@ -137,8 +144,13 @@ function LazyProf:OnTradeSkillClose()
 end
 
 function LazyProf:OnBagUpdate()
+    -- PERFORMANCE FIX (GitHub Issue #3): Don't trigger full recalculation on bag changes.
+    -- Bag changes during crafting don't affect the optimal PATH - only the shopping list
+    -- quantities change. Use lightweight RefreshShoppingList() instead of full recalc.
+    -- DO NOT REVERT THIS to ScheduleRecalculation() - it causes severe FPS hitches
+    -- during batch crafting as reported by users with both old and high-end hardware.
     if TradeSkillFrame and TradeSkillFrame:IsVisible() then
-        self:ScheduleRecalculation()
+        self:ScheduleShoppingListRefresh()
     end
 end
 
@@ -152,7 +164,53 @@ function LazyProf:ScheduleRecalculation()
     end)
 end
 
+-- PERFORMANCE FIX (GitHub Issue #3): Debounced lightweight shopping list refresh.
+-- This is separate from full recalculation and only updates material quantities.
+local shoppingListTimer = nil
+function LazyProf:ScheduleShoppingListRefresh()
+    if shoppingListTimer then return end
+    shoppingListTimer = C_Timer.After(0.3, function()
+        shoppingListTimer = nil
+        LazyProf:RefreshShoppingList()
+    end)
+end
+
+-- PERFORMANCE FIX (GitHub Issue #3): Lightweight refresh that only updates shopping list.
+-- This reuses the cached path and only recalculates missing materials based on
+-- current inventory. Much cheaper than full Recalculate() which re-runs the
+-- entire pathfinding algorithm with recipe scoring.
+-- Called on BAG_UPDATE instead of full recalculation.
+function LazyProf:RefreshShoppingList()
+    local path = self.Pathfinder.currentPath
+    if not path or not path.steps or #path.steps == 0 then
+        return
+    end
+
+    -- Rescan inventory
+    local inventory, bankInventory, altInventory, altItemsByCharacter = self.Inventory:ScanAll()
+
+    -- Extract prices from cache (avoid re-querying price providers)
+    local prices = {}
+    for itemId, cached in pairs(self.PriceManager.cache) do
+        prices[itemId] = cached.price
+    end
+
+    -- Recalculate only the missing materials using cached path
+    path.missingMaterials = self.Pathfinder:CalculateMissingMaterials(
+        path.steps, inventory, bankInventory, altInventory, altItemsByCharacter, prices
+    )
+
+    -- Update only the shopping list panel (skip arrow and milestone panels)
+    if self.MissingMaterialsPanel then
+        self.MissingMaterialsPanel:Update(path.missingMaterials)
+    end
+end
+
 function LazyProf:Recalculate()
+    -- Track skill level for OnTradeSkillUpdate optimization (Issue #3)
+    local _, currentSkill = GetTradeSkillLine()
+    self.lastCalculatedSkill = currentSkill
+
     local path = self.Pathfinder:Calculate()
     if path then
         self:UpdateDisplay()

@@ -4,6 +4,9 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **FPS hitches during batch crafting** (GitHub Issue #3): Separated expensive path recalculation from lightweight shopping list updates. Now only recalculates the full path when skill level changes, while bag changes trigger a cheap inventory refresh only.
+
 ## [0.3.6] - 2026-01-27
 
 ### Fixed
