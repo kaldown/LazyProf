@@ -4,12 +4,17 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-01-27
+
 ### Added
 - **Owned Materials Optimization**: New pathfinding mode that treats materials you own as free
   - Enable "Use owned materials as free" in Display settings to minimize actual gold spent
   - Optionally include alt characters' bags and banks (requires Syndicator/Baganator)
   - Shopping list now shows "From Alts" section with character names
 - **Copy All button in debug window**: Click to select all text, then Ctrl+C to copy
+
+### Changed
+- Welcome message no longer shows redundant addon name (Ace3 Print already adds prefix)
 
 ## [0.3.2] - 2026-01-26
 
