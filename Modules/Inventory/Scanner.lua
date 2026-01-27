@@ -76,19 +76,91 @@ function Inventory:ScanBank()
     return items
 end
 
--- Scan all inventory sources (bags + optional bank)
+-- Scan alt characters via Syndicator API
+function Inventory:ScanAlts()
+    if not Syndicator or not Syndicator.API then
+        return {}, {}  -- items, itemsByCharacter
+    end
+
+    local items = {}
+    local itemsByCharacter = {}  -- For UI: { [itemId] = { charName = count, ... } }
+    local currentChar = Syndicator.API.GetCurrentCharacter()
+    local allChars = Syndicator.API.GetAllCharacters()
+
+    if not allChars then
+        return items, itemsByCharacter
+    end
+
+    for _, charName in ipairs(allChars) do
+        if charName ~= currentChar then
+            local charData = Syndicator.API.GetByCharacterFullName(charName)
+            if charData then
+                -- Scan bags
+                for _, bag in ipairs(charData.bags or {}) do
+                    if bag then
+                        for _, slot in ipairs(bag) do
+                            if slot and slot.itemID then
+                                local itemId = slot.itemID
+                                local count = slot.itemCount or 1
+                                items[itemId] = (items[itemId] or 0) + count
+
+                                -- Track per-character for UI
+                                itemsByCharacter[itemId] = itemsByCharacter[itemId] or {}
+                                itemsByCharacter[itemId][charName] = (itemsByCharacter[itemId][charName] or 0) + count
+                            end
+                        end
+                    end
+                end
+
+                -- Scan bank
+                for _, bag in ipairs(charData.bank or {}) do
+                    if bag then
+                        for _, slot in ipairs(bag) do
+                            if slot and slot.itemID then
+                                local itemId = slot.itemID
+                                local count = slot.itemCount or 1
+                                items[itemId] = (items[itemId] or 0) + count
+
+                                -- Track per-character for UI
+                                itemsByCharacter[itemId] = itemsByCharacter[itemId] or {}
+                                itemsByCharacter[itemId][charName] = (itemsByCharacter[itemId][charName] or 0) + count
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return items, itemsByCharacter
+end
+
+-- Scan all inventory sources based on settings
+-- Returns: combinedInventory, bankInventory, altInventory, altItemsByCharacter
 function Inventory:ScanAll()
     local items = self:ScanBags()
     local bankItems = {}
+    local altItems = {}
+    local altItemsByCharacter = {}
 
-    if LazyProf.db.profile.includeBankItems then
+    -- Always include bank in combined inventory if includeBankItems is on (for shopping list)
+    -- OR if useOwnedMaterials is on (for pathfinding)
+    if LazyProf.db.profile.includeBankItems or LazyProf.db.profile.useOwnedMaterials then
         bankItems = self:ScanBank()
         for itemId, count in pairs(bankItems) do
             items[itemId] = (items[itemId] or 0) + count
         end
     end
 
-    return items, bankItems
+    -- Include alts if useOwnedMaterials AND includeAltCharacters
+    if LazyProf.db.profile.useOwnedMaterials and LazyProf.db.profile.includeAltCharacters then
+        altItems, altItemsByCharacter = self:ScanAlts()
+        for itemId, count in pairs(altItems) do
+            items[itemId] = (items[itemId] or 0) + count
+        end
+    end
+
+    return items, bankItems, altItems, altItemsByCharacter
 end
 
 -- Get count of specific item in bags
