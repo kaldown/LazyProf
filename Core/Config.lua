@@ -18,6 +18,8 @@ LazyProf.defaults = {
         showMissingMaterials = true,
         calculateFromCurrentSkill = false,
         includeBankItems = false,
+        useOwnedMaterials = false,
+        includeAltCharacters = false,
 
         -- Minimap button
         minimap = {
@@ -211,6 +213,50 @@ LazyProf.options = {
                     get = function() return LazyProf.db.profile.includeBankItems end,
                     set = function(_, v)
                         LazyProf.db.profile.includeBankItems = v
+                        LazyProf:Recalculate()
+                    end,
+                },
+                inventoryHeader = {
+                    name = "Inventory Optimization",
+                    type = "header",
+                    order = 6,
+                },
+                useOwnedMaterials = {
+                    name = "Use owned materials as free",
+                    desc = "When enabled, materials you already own (in bags and bank) " ..
+                           "are treated as FREE (0 cost) when calculating the cheapest " ..
+                           "leveling path.\n\n" ..
+                           "Example: If a recipe needs 10 Wool Cloth and you have 10 in " ..
+                           "your bank, that recipe costs 0g instead of market price.\n\n" ..
+                           "This helps the pathfinder choose recipes that use materials " ..
+                           "you already have, minimizing actual gold spent.",
+                    type = "toggle",
+                    order = 7,
+                    width = "full",
+                    get = function() return LazyProf.db.profile.useOwnedMaterials end,
+                    set = function(_, v)
+                        LazyProf.db.profile.useOwnedMaterials = v
+                        LazyProf:Recalculate()
+                    end,
+                },
+                includeAltCharacters = {
+                    name = "Include alt characters",
+                    desc = "When enabled, materials on ALL your characters (bags and " ..
+                           "banks) are considered when calculating path costs.\n\n" ..
+                           "Requires: Syndicator addon installed.\n\n" ..
+                           "Example: Your alt has 200 Silk Cloth. Recipes using Silk " ..
+                           "will be preferred since you already own the materials.\n\n" ..
+                           "Note: You'll need to transfer materials to your crafter " ..
+                           "before crafting - the addon just helps you plan.",
+                    type = "toggle",
+                    order = 8,
+                    width = "full",
+                    disabled = function()
+                        return not LazyProf.db.profile.useOwnedMaterials or not Syndicator
+                    end,
+                    get = function() return LazyProf.db.profile.includeAltCharacters end,
+                    set = function(_, v)
+                        LazyProf.db.profile.includeAltCharacters = v
                         LazyProf:Recalculate()
                     end,
                 },
