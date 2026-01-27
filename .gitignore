@@ -2,6 +2,7 @@
 .claude/
 CLAUDE.md
 docs/plans/
+.worktrees/
 docs/agents/
 **/PROMPT*.md
 **/*-design.md
