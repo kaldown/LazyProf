@@ -100,9 +100,17 @@ LazyProf.PathfinderStrategies.cheapest = {
             if currentSkill >= recipe.skillRequired then
                 -- Not gray yet?
                 if currentSkill < recipe.skillRange.gray then
-                    -- Check config for unlearned recipes
-                    if recipe.learned or LazyProf.db.profile.suggestUnlearnedRecipes then
+                    -- Already learned - always include
+                    if recipe.learned then
                         table.insert(candidates, recipe)
+                    elseif LazyProf.db.profile.suggestUnlearnedRecipes then
+                        -- Unlearned - check availability
+                        local isAvailable, sourceInfo = LazyProf.RecipeAvailability:IsRecipeAvailable(recipe)
+                        if isAvailable then
+                            -- Attach source info for tooltip display
+                            recipe._sourceInfo = sourceInfo
+                            table.insert(candidates, recipe)
+                        end
                     end
                 end
             end
