@@ -4,8 +4,12 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-01-28
+
 ### Fixed
-- **Arrow not showing in Anniversary Edition**: Arrow assumed 8 visible recipe slots (Classic), but Anniversary/TBC shows 20+. Now dynamically detects visible slots.
+- **Jewelcrafting and Mining paths now work**: Fixed empty leveling paths for professions where first recipe requires skill > 1
+- Pathfinder now skips to next available recipe when no candidates exist at current skill level
+- **Arrow not showing in Anniversary Edition**: Arrow assumed 8 visible recipe slots (Classic), but Anniversary/TBC shows 20+. Now dynamically detects visible slots
 
 ### Changed
 - Debug log command shortened from `/lp debuglog` to `/lp log`
