@@ -4,6 +4,13 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **Arrow not showing in Anniversary Edition**: Arrow assumed 8 visible recipe slots (Classic), but Anniversary/TBC shows 20+. Now dynamically detects visible slots.
+
+### Changed
+- Debug log command shortened from `/lp debuglog` to `/lp log`
+- Arrow scroll handling debounced for better performance
+
 ### Added
 - Recipe availability filtering: Unlearned recipes are now filtered from leveling paths unless they can actually be obtained
   - Checks player inventory (bags, bank, alts) for recipe items

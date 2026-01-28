@@ -68,7 +68,7 @@ LazyProf.ArrowStrategies.arrowWithTooltip = {
         end
 
         local recommendation = path.steps[1]
-        if not recommendation then
+        if not recommendation or not recommendation.recipe then
             manager:Hide()
             return
         end
@@ -78,7 +78,7 @@ LazyProf.ArrowStrategies.arrowWithTooltip = {
         if recipeIndex then
             manager:PositionAtRecipe(recipeIndex)
         else
-            -- Recipe not visible (not learned or scrolled away)
+            -- Recipe not in TradeSkill list (not learned)
             manager:Hide()
         end
     end,

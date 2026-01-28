@@ -83,12 +83,12 @@ function LazyProf:SlashCommand(input)
     elseif cmd == "reset" then
         self.db:ResetDB()
         self:Print("Database reset.")
-    elseif cmd == "debuglog" then
+    elseif cmd == "log" then
         self:ShowDebugLog()
     elseif self.configRegistered then
         LibStub("AceConfigDialog-3.0"):Open("LazyProf")
     else
-        self:Print("Commands: /lp | /lp browse | /lp reset | /lp debuglog")
+        self:Print("Commands: /lp | /lp browse | /lp reset | /lp log")
     end
 end
 
@@ -101,17 +101,21 @@ end
 function LazyProf:HookTradeSkillScroll()
     if self.scrollHooked then return end
 
-    -- Hook the scroll frame's OnVerticalScroll to reposition arrow
+    -- Hook the scroll frame's OnVerticalScroll to reposition arrow (debounced)
     if TradeSkillListScrollFrame then
         local origScript = TradeSkillListScrollFrame:GetScript("OnVerticalScroll")
+        local scrollTimer = nil
         TradeSkillListScrollFrame:SetScript("OnVerticalScroll", function(self, offset, ...)
             if origScript then
                 origScript(self, offset, ...)
             end
-            -- Update arrow position after scroll (without full recalculation)
-            if LazyProf.ArrowManager and LazyProf.Pathfinder.currentPath then
-                LazyProf.ArrowManager:Update(LazyProf.Pathfinder.currentPath)
-            end
+            -- Debounce: only refresh after scrolling stops
+            if scrollTimer then scrollTimer:Cancel() end
+            scrollTimer = C_Timer.After(0.05, function()
+                if LazyProf.ArrowManager then
+                    LazyProf.ArrowManager:RefreshPosition()
+                end
+            end)
         end)
         self.scrollHooked = true
     end
@@ -211,6 +215,11 @@ function LazyProf:Recalculate()
     local _, currentSkill = GetTradeSkillLine()
     self.lastCalculatedSkill = currentSkill
 
+    -- Invalidate arrow cache before recalculating (recipe may change)
+    if self.ArrowManager then
+        self.ArrowManager:InvalidateCache()
+    end
+
     local path = self.Pathfinder:Calculate()
     if path then
         self:UpdateDisplay()
@@ -299,7 +308,7 @@ function LazyProf:Debug(category, msg)
     if self.debugFrame and self.debugFrame:IsShown() then
         self:UpdateDebugWindowContent()
     end
-    -- No chat output - use /lp debuglog to view logs
+    -- No chat output - use /lp log to view logs
 end
 
 -- Get filtered debug log entries

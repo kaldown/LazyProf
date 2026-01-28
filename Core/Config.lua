@@ -348,7 +348,7 @@ LazyProf.options = {
                 showDebugWindow = {
                     name = "Show Debug Window",
                     desc = "Open the debug log window to view captured messages.\n\n" ..
-                           "Same as /lp debuglog",
+                           "Same as /lp log",
                     type = "execute",
                     order = 2,
                     hidden = function() return not LazyProf.db.profile.debug end,
@@ -363,7 +363,7 @@ LazyProf.options = {
                     hidden = function() return not LazyProf.db.profile.debug end,
                 },
                 categoriesDesc = {
-                    name = "Select which categories to capture. Use /lp debuglog to view and filter logs.",
+                    name = "Select which categories to capture. Use /lp log to view and filter logs.",
                     type = "description",
                     order = 11,
                     hidden = function() return not LazyProf.db.profile.debug end,

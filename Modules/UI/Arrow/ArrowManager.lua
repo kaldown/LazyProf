@@ -7,6 +7,8 @@ local ArrowManager = LazyProf.ArrowManager
 ArrowManager.strategies = {}
 ArrowManager.activeStrategy = nil
 ArrowManager.frame = nil
+ArrowManager.cachedRecipeIndex = nil  -- Cached index for scroll performance
+ArrowManager.cachedRecipeName = nil   -- Recipe name that was looked up
 
 -- Initialize arrow manager
 function ArrowManager:Initialize()
@@ -69,13 +71,28 @@ function ArrowManager:Update(path)
         self:SetStrategy(LazyProf.db.profile.displayMode)
     end
 
-    if not self.activeStrategy then
+    if not self.activeStrategy or not path or not path.steps or #path.steps == 0 then
         self:Hide()
         return
     end
 
     self.currentPath = path
     self.activeStrategy:Update(self, path)
+end
+
+-- Lightweight refresh for scroll events - uses cached recipe index
+function ArrowManager:RefreshPosition()
+    if not self.cachedRecipeIndex then
+        self:Hide()
+        return
+    end
+    self:PositionAtRecipe(self.cachedRecipeIndex)
+end
+
+-- Invalidate cache when path changes (called when a new path is calculated)
+function ArrowManager:InvalidateCache()
+    self.cachedRecipeIndex = nil
+    self.cachedRecipeName = nil
 end
 
 -- Show arrow and highlight
@@ -94,8 +111,20 @@ function ArrowManager:Hide()
     end
 end
 
--- Number of visible skill buttons in Classic/Anniversary TradeSkill frame
-local TRADE_SKILLS_DISPLAYED = 8
+-- Get number of visible skill buttons (varies by game version/UI addons)
+local function GetTradeSkillsDisplayed()
+    -- Try to count actual visible buttons
+    local count = 0
+    for i = 1, 30 do  -- Check up to 30 buttons
+        local button = _G["TradeSkillSkill" .. i]
+        if button and button:IsShown() then
+            count = i
+        else
+            break
+        end
+    end
+    return count > 0 and count or 8  -- Fallback to 8 if detection fails
+end
 
 -- Skill difficulty colors (matching WoW's TradeSkill colors)
 local SKILL_COLORS = {
@@ -108,7 +137,9 @@ local SKILL_COLORS = {
 
 -- Position arrow next to a recipe row
 function ArrowManager:PositionAtRecipe(recipeIndex)
-    if not TradeSkillFrame or not TradeSkillFrame:IsVisible() then return false end
+    if not TradeSkillFrame or not TradeSkillFrame:IsVisible() then
+        return false
+    end
 
     -- Get scroll offset to determine which button displays this recipe
     local scrollOffset = 0
@@ -120,8 +151,8 @@ function ArrowManager:PositionAtRecipe(recipeIndex)
     local buttonIndex = recipeIndex - scrollOffset
 
     -- Check if recipe is currently visible in the scroll frame
-    if buttonIndex < 1 or buttonIndex > TRADE_SKILLS_DISPLAYED then
-        -- Recipe is scrolled out of view
+    local maxVisible = GetTradeSkillsDisplayed()
+    if buttonIndex < 1 or buttonIndex > maxVisible then
         self:Hide()
         return false
     end
@@ -136,8 +167,13 @@ function ArrowManager:PositionAtRecipe(recipeIndex)
     end
 
     -- Get skill difficulty color from the recipe
-    local _, skillType = GetTradeSkillInfo(recipeIndex)
+    local skillName, skillType = GetTradeSkillInfo(recipeIndex)
     local color = SKILL_COLORS[skillType] or SKILL_COLORS.medium  -- Default to yellow
+
+    -- Log when arrow becomes visible
+    if not self.frame:IsShown() then
+        LazyProf:Debug("arrow", string.format("Showing arrow at '%s'", skillName or "?"))
+    end
 
     -- Set arrow color to match skill difficulty
     if self.frame.text then
@@ -166,21 +202,38 @@ function ArrowManager:PositionAtRecipe(recipeIndex)
     end
 
     self:Show()
-
     return true
 end
 
--- Find recipe index in TradeSkill frame
+-- Find recipe index in TradeSkill frame (with caching for scroll performance)
 function ArrowManager:FindRecipeIndex(recipe)
+    if not recipe then
+        self.cachedRecipeIndex = nil
+        self.cachedRecipeName = nil
+        return nil
+    end
+
+    local targetName = recipe.name
+
+    -- Use cache if same recipe
+    if self.cachedRecipeName == targetName and self.cachedRecipeIndex then
+        return self.cachedRecipeIndex
+    end
+
     local numSkills = GetNumTradeSkills()
 
     for i = 1, numSkills do
         local skillName, skillType = GetTradeSkillInfo(i)
-        if skillType ~= "header" and skillName == recipe.name then
+        if skillType ~= "header" and skillName == targetName then
+            -- Cache the result
+            self.cachedRecipeIndex = i
+            self.cachedRecipeName = targetName
             return i
         end
     end
 
+    self.cachedRecipeIndex = nil
+    self.cachedRecipeName = targetName  -- Still cache the name to avoid repeated searches
     return nil
 end
 
