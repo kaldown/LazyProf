@@ -20,8 +20,15 @@ LazyProf.PathfinderStrategies.fastest = {
             local candidates = self:GetCandidates(recipes, simulatedSkill)
 
             if #candidates == 0 then
-                LazyProf:Debug("scoring", "No candidates at skill " .. simulatedSkill)
-                break
+                -- No candidates at current skill - find the next skill level where a recipe becomes available
+                local nextSkill = self:FindNextRecipeSkill(recipes, simulatedSkill, targetSkill)
+                if nextSkill then
+                    LazyProf:Debug("scoring", "No candidates at skill " .. simulatedSkill .. ", skipping to " .. nextSkill)
+                    simulatedSkill = nextSkill
+                else
+                    LazyProf:Debug("scoring", "No candidates at skill " .. simulatedSkill .. " and no higher recipes available")
+                    break
+                end
             end
 
             -- Score each by expected skillups per craft (higher = better = fewer crafts)
@@ -188,5 +195,24 @@ LazyProf.PathfinderStrategies.fastest = {
         end
 
         return inv
+    end,
+
+    -- Find the next skill level where a recipe becomes available
+    -- Returns: skill level or nil if no recipes available above currentSkill
+    FindNextRecipeSkill = function(self, recipes, currentSkill, targetSkill)
+        local nextSkill = nil
+        for _, recipe in ipairs(recipes) do
+            local required = recipe.skillRequired
+            -- Recipe must be above current skill but not beyond target
+            if required > currentSkill and required <= targetSkill then
+                -- Recipe must not already be gray at that skill level
+                if required < recipe.skillRange.gray then
+                    if not nextSkill or required < nextSkill then
+                        nextSkill = required
+                    end
+                end
+            end
+        end
+        return nextSkill
     end,
 }
