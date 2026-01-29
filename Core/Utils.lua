@@ -220,6 +220,35 @@ function Utils.GetSourceDetails(source, showAllFactions)
     return details
 end
 
+-- Racial profession bonuses (TBC)
+-- These bonuses extend how long recipes stay orange/yellow/green
+local RACIAL_PROFESSION_BONUSES = {
+    Gnome = { profession = "engineering", bonus = 15 },
+    BloodElf = { profession = "enchanting", bonus = 10 },
+    Draenei = { profession = "jewelcrafting", bonus = 5 },
+}
+
+-- Get racial profession bonus for current player and profession
+-- Returns bonus amount (0 if no racial bonus applies)
+function Utils.GetRacialProfessionBonus(professionKey)
+    if not professionKey then return 0 end
+
+    local _, race = UnitRace("player")
+    local racialData = RACIAL_PROFESSION_BONUSES[race]
+
+    if racialData and racialData.profession == professionKey:lower() then
+        return racialData.bonus
+    end
+
+    return 0
+end
+
+-- Get player race name (for UI display)
+function Utils.GetPlayerRace()
+    local _, race = UnitRace("player")
+    return race
+end
+
 -- Get item info with caching
 local itemCache = {}
 function Utils.GetItemInfo(itemId)

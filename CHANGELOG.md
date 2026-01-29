@@ -4,6 +4,13 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Racial profession bonus support**: Pathfinder now accounts for racial skill bonuses that extend recipe color ranges
+  - Gnome: +15 Engineering (recipes stay orange/yellow/green 15 skill points longer)
+  - Blood Elf: +10 Enchanting
+  - Draenei: +5 Jewelcrafting
+  - UI shows racial bonus in planning window status bar (e.g., "Current skill: 198 (+15 Gnome)")
+
 ## [0.3.8] - 2026-01-28
 
 ### Fixed

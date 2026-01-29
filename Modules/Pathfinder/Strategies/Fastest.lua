@@ -10,18 +10,22 @@ LazyProf.PathfinderStrategies.fastest = {
     name = "Fastest",
 
     -- Calculate optimal path from currentSkill to targetSkill
-    Calculate = function(self, currentSkill, targetSkill, recipes, inventory, prices)
+    -- racialBonus: skill bonus from racial trait (e.g., Gnome +15 Engineering)
+    --              This extends how long recipes stay orange/yellow/green
+    Calculate = function(self, currentSkill, targetSkill, recipes, inventory, prices, racialBonus)
+        racialBonus = racialBonus or 0
         local path = {}
         local simulatedSkill = currentSkill
         local simulatedInventory = Utils.DeepCopy(inventory)
 
         while simulatedSkill < targetSkill do
             -- Get craftable recipes that can still give skillups
-            local candidates = self:GetCandidates(recipes, simulatedSkill)
+            -- Use effective skill (base - bonus) for color calculations
+            local candidates = self:GetCandidates(recipes, simulatedSkill, racialBonus)
 
             if #candidates == 0 then
                 -- No candidates at current skill - find the next skill level where a recipe becomes available
-                local nextSkill = self:FindNextRecipeSkill(recipes, simulatedSkill, targetSkill)
+                local nextSkill = self:FindNextRecipeSkill(recipes, simulatedSkill, targetSkill, racialBonus)
                 if nextSkill then
                     LazyProf:Debug("scoring", "No candidates at skill " .. simulatedSkill .. ", skipping to " .. nextSkill)
                     simulatedSkill = nextSkill
@@ -33,7 +37,7 @@ LazyProf.PathfinderStrategies.fastest = {
 
             -- Score each by expected skillups per craft (higher = better = fewer crafts)
             local best, bestScore = Utils.MinBy(candidates, function(recipe)
-                return self:ScoreRecipe(recipe, simulatedSkill, targetSkill)
+                return self:ScoreRecipe(recipe, simulatedSkill, targetSkill, racialBonus)
             end)
 
             if not best then
@@ -42,8 +46,8 @@ LazyProf.PathfinderStrategies.fastest = {
             end
 
             -- Calculate how many to craft (pass recipes for breakpoint detection)
-            local quantity = self:CalculateQuantity(best, simulatedSkill, targetSkill, recipes)
-            local totalSkillups, totalCost = self:CalculateTotalCostAndSkillups(best, simulatedSkill, quantity, simulatedInventory, prices)
+            local quantity = self:CalculateQuantity(best, simulatedSkill, targetSkill, recipes, racialBonus)
+            local totalSkillups, totalCost = self:CalculateTotalCostAndSkillups(best, simulatedSkill, quantity, simulatedInventory, prices, racialBonus)
 
             -- Add step to path
             table.insert(path, {
@@ -63,14 +67,18 @@ LazyProf.PathfinderStrategies.fastest = {
     end,
 
     -- Get recipes that can be crafted and give skillups at current skill
-    GetCandidates = function(self, recipes, currentSkill)
+    -- racialBonus: extends color ranges (e.g., Gnome +15 Engineering)
+    GetCandidates = function(self, recipes, currentSkill, racialBonus)
+        racialBonus = racialBonus or 0
         local candidates = {}
+        -- Effective skill for color calculations (racial bonus extends color ranges)
+        local effectiveSkill = currentSkill - racialBonus
 
         for _, recipe in ipairs(recipes) do
-            -- Can learn/craft at current skill?
+            -- Can learn/craft at current skill? (uses base skill, not effective)
             if currentSkill >= recipe.skillRequired then
-                -- Not gray yet?
-                if currentSkill < recipe.skillRange.gray then
+                -- Not gray yet? (uses effective skill for color check)
+                if effectiveSkill < recipe.skillRange.gray then
                     -- Already learned - always include
                     if recipe.learned then
                         table.insert(candidates, recipe)
@@ -93,8 +101,11 @@ LazyProf.PathfinderStrategies.fastest = {
     -- Score recipe: lower = better
     -- We want highest skillup chance, so return negative of expected skillups
     -- Orange (1.0) -> -1.0, Yellow (0.5) -> -0.5, Green (0.25) -> -0.25
-    ScoreRecipe = function(self, recipe, currentSkill, targetSkill)
-        local expected = self:GetExpectedSkillups(recipe, currentSkill)
+    -- racialBonus: extends color ranges (e.g., Gnome +15 Engineering)
+    ScoreRecipe = function(self, recipe, currentSkill, targetSkill, racialBonus)
+        racialBonus = racialBonus or 0
+        local effectiveSkill = currentSkill - racialBonus
+        local expected = self:GetExpectedSkillups(recipe, currentSkill, racialBonus)
 
         if expected <= 0 then
             return math.huge
@@ -102,14 +113,17 @@ LazyProf.PathfinderStrategies.fastest = {
 
         -- Return negative so higher skillup chance = lower score = better
         -- Add small tiebreaker: prefer recipes that stay orange longer
-        local orangeRange = recipe.skillRange.yellow - currentSkill
+        -- Use effective skill for color comparison
+        local orangeRange = recipe.skillRange.yellow - effectiveSkill
         local tiebreaker = -orangeRange / 1000
 
         return -expected + tiebreaker
     end,
 
     -- Calculate total cost and skillups for a given quantity
-    CalculateTotalCostAndSkillups = function(self, recipe, currentSkill, quantity, inventory, prices)
+    -- racialBonus: extends color ranges (e.g., Gnome +15 Engineering)
+    CalculateTotalCostAndSkillups = function(self, recipe, currentSkill, quantity, inventory, prices, racialBonus)
+        racialBonus = racialBonus or 0
         -- Calculate total cost (still track it for display)
         local totalCost = 0
         for _, reagent in ipairs(recipe.reagents) do
@@ -134,7 +148,7 @@ LazyProf.PathfinderStrategies.fastest = {
         local totalSkillups = 0
         local simSkill = currentSkill
         for i = 1, quantity do
-            local expected = self:GetExpectedSkillups(recipe, simSkill)
+            local expected = self:GetExpectedSkillups(recipe, simSkill, racialBonus)
             totalSkillups = totalSkillups + expected
             simSkill = simSkill + expected
         end
@@ -143,21 +157,30 @@ LazyProf.PathfinderStrategies.fastest = {
     end,
 
     -- Get expected skillups based on color
-    GetExpectedSkillups = function(self, recipe, currentSkill)
-        local color = Utils.GetSkillColor(currentSkill, recipe.skillRange)
+    -- racialBonus: extends color ranges (e.g., Gnome +15 Engineering)
+    GetExpectedSkillups = function(self, recipe, currentSkill, racialBonus)
+        racialBonus = racialBonus or 0
+        local effectiveSkill = currentSkill - racialBonus
+        local color = Utils.GetSkillColor(effectiveSkill, recipe.skillRange)
         return Constants.SKILLUP_CHANCE[color] or 0
     end,
 
     -- Calculate how many crafts until next breakpoint
     -- Breakpoints: gray, target, new recipe unlocks, or color changes
-    CalculateQuantity = function(self, recipe, currentSkill, targetSkill, recipes)
+    -- racialBonus: extends color ranges (e.g., Gnome +15 Engineering)
+    CalculateQuantity = function(self, recipe, currentSkill, targetSkill, recipes, racialBonus)
+        racialBonus = racialBonus or 0
         local quantity = 0
         local simSkill = currentSkill
 
         -- Find next breakpoint where we should re-evaluate
-        local nextBreakpoint = recipe.skillRange.gray  -- default: stop at gray
+        -- Racial bonus shifts when colors change (in base skill terms, add bonus to thresholds)
+        local grayAt = recipe.skillRange.gray + racialBonus
+        local yellowAt = recipe.skillRange.yellow + racialBonus
+        local greenAt = recipe.skillRange.green + racialBonus
+        local nextBreakpoint = grayAt  -- default: stop at gray
 
-        -- Check for new recipe unlocks
+        -- Check for new recipe unlocks (uses base skill, not affected by racial bonus)
         if recipes then
             for _, r in ipairs(recipes) do
                 if r.skillRequired > currentSkill and r.skillRequired < nextBreakpoint then
@@ -168,17 +191,17 @@ LazyProf.PathfinderStrategies.fastest = {
 
         -- Check for color changes of current recipe (yellow and green boundaries)
         -- Only consider boundaries above current skill
-        if recipe.skillRange.yellow > currentSkill and recipe.skillRange.yellow < nextBreakpoint then
-            nextBreakpoint = recipe.skillRange.yellow
+        if yellowAt > currentSkill and yellowAt < nextBreakpoint then
+            nextBreakpoint = yellowAt
         end
-        if recipe.skillRange.green > currentSkill and recipe.skillRange.green < nextBreakpoint then
-            nextBreakpoint = recipe.skillRange.green
+        if greenAt > currentSkill and greenAt < nextBreakpoint then
+            nextBreakpoint = greenAt
         end
 
         -- Craft until breakpoint, target, or max iterations
         while simSkill < targetSkill and simSkill < nextBreakpoint and quantity < 100 do
             quantity = quantity + 1
-            local expected = self:GetExpectedSkillups(recipe, simSkill)
+            local expected = self:GetExpectedSkillups(recipe, simSkill, racialBonus)
             simSkill = simSkill + expected
         end
 
@@ -199,14 +222,18 @@ LazyProf.PathfinderStrategies.fastest = {
 
     -- Find the next skill level where a recipe becomes available
     -- Returns: skill level or nil if no recipes available above currentSkill
-    FindNextRecipeSkill = function(self, recipes, currentSkill, targetSkill)
+    -- racialBonus: extends color ranges (e.g., Gnome +15 Engineering)
+    FindNextRecipeSkill = function(self, recipes, currentSkill, targetSkill, racialBonus)
+        racialBonus = racialBonus or 0
         local nextSkill = nil
         for _, recipe in ipairs(recipes) do
             local required = recipe.skillRequired
             -- Recipe must be above current skill but not beyond target
             if required > currentSkill and required <= targetSkill then
                 -- Recipe must not already be gray at that skill level
-                if required < recipe.skillRange.gray then
+                -- With racial bonus, gray is reached at base skill = gray + racialBonus
+                local grayAt = recipe.skillRange.gray + racialBonus
+                if required < grayAt then
                     if not nextSkill or required < nextSkill then
                         nextSkill = required
                     end

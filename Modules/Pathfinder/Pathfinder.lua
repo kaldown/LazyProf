@@ -86,14 +86,22 @@ function Pathfinder:Calculate()
         return nil
     end
 
+    -- Get racial profession bonus
+    local racialBonus = Utils.GetRacialProfessionBonus(LazyProf.Professions.active)
+    if racialBonus > 0 then
+        LazyProf:Debug("pathfinder", string.format("Racial bonus detected: +%d for %s",
+            racialBonus, LazyProf.Professions.active))
+    end
+
     -- Calculate path
-    local steps = strategy:Calculate(startSkill, targetSkill, recipes, inventory, prices)
+    local steps = strategy:Calculate(startSkill, targetSkill, recipes, inventory, prices, racialBonus)
 
     -- Build result
     self.currentPath = {
         profession = profData.name,
         currentSkill = startSkill,
         targetSkill = targetSkill,
+        racialBonus = racialBonus,
         steps = steps,
         totalCost = Utils.Sum(steps, "totalCost"),
         missingMaterials = self:CalculateMissingMaterials(steps, inventory, bankInventory, altInventory, altItemsByCharacter, prices),
@@ -175,8 +183,15 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel)
         return nil
     end
 
+    -- Get racial profession bonus
+    local racialBonus = Utils.GetRacialProfessionBonus(profKey)
+    if racialBonus > 0 then
+        LazyProf:Debug("pathfinder", string.format("Racial bonus detected: +%d for %s",
+            racialBonus, profKey))
+    end
+
     -- Calculate path
-    local steps = strategy:Calculate(skillLevel, targetSkill, recipes, inventory, prices)
+    local steps = strategy:Calculate(skillLevel, targetSkill, recipes, inventory, prices, racialBonus)
 
     -- Build result (similar to Calculate() but stored separately)
     local path = {
@@ -184,6 +199,7 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel)
         professionKey = profKey,
         currentSkill = skillLevel,
         targetSkill = targetSkill,
+        racialBonus = racialBonus,
         steps = steps,
         totalCost = Utils.Sum(steps, "totalCost"),
         missingMaterials = self:CalculateMissingMaterials(steps, inventory, bankInventory, altInventory, altItemsByCharacter, prices),
