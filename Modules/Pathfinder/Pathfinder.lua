@@ -123,11 +123,11 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel)
 
     LazyProf:Debug("pathfinder", string.format("Planning path: %s %d -> %d", profData.name, skillLevel, targetSkill))
 
-    -- Get all recipes (no learned status needed for planning)
+    -- Get all recipes with cached learned status for planning mode
     local recipes = LazyProf.Utils.DeepCopy(profData.recipes)
-    -- Mark all as unlearned for planning mode
+    local cachedLearned = LazyProf.db.char.learnedRecipes and LazyProf.db.char.learnedRecipes[profKey] or {}
     for _, recipe in ipairs(recipes) do
-        recipe.learned = false
+        recipe.learned = cachedLearned[recipe.id] or false
     end
 
     -- Get inventory (bags + optional bank + optional alts)

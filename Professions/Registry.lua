@@ -141,6 +141,12 @@ function Professions:GetRecipesWithLearnedStatus(profName)
         end
     end
 
+    -- Cache learned recipes for planning mode
+    if profName and next(knownSpellIds) then
+        LazyProf.db.char.learnedRecipes = LazyProf.db.char.learnedRecipes or {}
+        LazyProf.db.char.learnedRecipes[profName] = knownSpellIds
+    end
+
     -- Merge with our recipe data
     local recipes = LazyProf.Utils.DeepCopy(profData.recipes)
     for _, recipe in ipairs(recipes) do

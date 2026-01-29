@@ -50,6 +50,8 @@ LazyProf.defaults = {
         -- Per-character price cache
         priceCache = {},
         lastAHScan = 0,
+        -- Cached learned recipes per profession (for planning mode)
+        learnedRecipes = {},
     },
 }
 
