@@ -4,6 +4,8 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-01-29
+
 ### Added
 - **Racial profession bonus support**: Pathfinder now accounts for racial skill bonuses that extend recipe color ranges
   - Gnome: +15 Engineering (recipes stay orange/yellow/green 15 skill points longer)
