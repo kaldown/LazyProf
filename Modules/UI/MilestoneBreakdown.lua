@@ -310,7 +310,7 @@ function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
 
     -- Quantity and recipe name (e.g., "30x Bronze Tube")
     local recipeName = step.recipe and step.recipe.name or "Unknown"
-    local recipeColor = self:GetRecipeColor(step.recipe)
+    local recipeColor = self:ColorToRGB(step.color)
 
     row.recipe = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     row.recipe:SetPoint("LEFT", 65, 0)
@@ -373,15 +373,8 @@ function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
     return row
 end
 
--- Get recipe color based on difficulty (uses stored currentPath)
-function MilestonePanelClass:GetRecipeColor(recipe)
-    if not recipe or not recipe.skillRange then
-        return { r = 1, g = 1, b = 1 }
-    end
-
-    local currentSkill = self.currentPath and self.currentPath.currentSkill or 1
-    local color = Utils.GetSkillColor(currentSkill, recipe.skillRange)
-
+-- Convert color name to RGB values for display
+function MilestonePanelClass:ColorToRGB(color)
     if color == "orange" then
         return { r = 1, g = 0.5, b = 0.25 }
     elseif color == "yellow" then
@@ -389,7 +382,7 @@ function MilestonePanelClass:GetRecipeColor(recipe)
     elseif color == "green" then
         return { r = 0.25, g = 0.75, b = 0.25 }
     else
-        return { r = 0.5, g = 0.5, b = 0.5 }
+        return { r = 0.5, g = 0.5, b = 0.5 }  -- gray or unknown
     end
 end
 

@@ -105,7 +105,7 @@ function Pathfinder:Calculate()
         steps = steps,
         totalCost = Utils.Sum(steps, "totalCost"),
         missingMaterials = self:CalculateMissingMaterials(steps, inventory, bankInventory, altInventory, altItemsByCharacter, prices),
-        milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, startSkill, inventory, prices),
+        milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, startSkill, inventory, prices, racialBonus),
     }
 
     LazyProf:Debug("pathfinder", string.format("Path calculated: %d steps, %s total",
@@ -203,7 +203,7 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel)
         steps = steps,
         totalCost = Utils.Sum(steps, "totalCost"),
         missingMaterials = self:CalculateMissingMaterials(steps, inventory, bankInventory, altInventory, altItemsByCharacter, prices),
-        milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, skillLevel, inventory, prices),
+        milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, skillLevel, inventory, prices, racialBonus),
     }
 
     LazyProf:Debug("pathfinder", string.format("Planning path calculated: %d steps, %s total",
@@ -432,7 +432,8 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
 end
 
 -- Break down path by individual steps (step-by-step format)
-function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, currentSkill, inventory, prices)
+function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, currentSkill, inventory, prices, racialBonus)
+    racialBonus = racialBonus or 0
     local breakdown = {}
 
     for _, step in ipairs(steps) do
@@ -467,6 +468,10 @@ function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, currentSkill,
             table.insert(materialParts, string.format("%dx %s", mat.need, mat.name))
         end
 
+        -- Calculate recipe color at step's starting skill (with racial bonus)
+        local effectiveSkill = step.skillStart - racialBonus
+        local color = Utils.GetSkillColor(effectiveSkill, step.recipe.skillRange)
+
         table.insert(breakdown, {
             from = step.skillStart,
             to = step.skillEnd,
@@ -475,6 +480,7 @@ function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, currentSkill,
             cost = step.totalCost,
             materials = materials,
             materialsSummary = table.concat(materialParts, ", "),
+            color = color,  -- Pre-calculated color for UI display
             -- Check if this step crosses a trainer milestone
             trainerMilestoneAfter = self:GetMilestoneBetween(step.skillStart, step.skillEnd, milestones),
         })

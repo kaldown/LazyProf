@@ -10,6 +10,7 @@ All notable changes to LazyProf will be documented in this file.
   - Blood Elf: +10 Enchanting
   - Draenei: +5 Jewelcrafting
   - UI shows racial bonus in planning window status bar (e.g., "Current skill: 198 (+15 Gnome)")
+  - Recipe colors in milestone breakdown now correctly reflect racial bonus
 
 ## [0.3.8] - 2026-01-28
 
