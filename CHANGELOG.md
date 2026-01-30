@@ -4,8 +4,14 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-01-30
+
 ### Fixed
 - **Recipe acquisition costs now properly amortized**: One-time costs (vendor recipes, AH recipe items) are spread over expected crafts instead of being added to every scoring evaluation. This fixes recipes usable for many crafts being unfairly penalized (e.g., Filet of Redgill score: 16000 -> ~220).
+- **CraftLib v0.2.12**: Fixed incorrect difficulty data causing wrong recipe suggestions
+  - Steam Tonk Controller showed as orange when actually green at skill 280
+  - Thorium Shells showed as red when actually yellow at skill 295+
+  - Large Prismatic Shard and other Enchanting conversion recipes no longer appear at low skill levels
 
 ## [0.3.9] - 2026-01-29
 
