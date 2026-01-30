@@ -103,3 +103,71 @@
 - More accurate cost calculations
 - Shopping list shows intermediate crafts
 - Requires user to have relevant profession
+
+---
+
+## ADR-005: Racial Profession Bonus Support
+
+**Date**: 2026-01-29
+
+**Status**: Accepted
+
+**Context**: Some races have profession skill bonuses that extend how long recipes stay orange/yellow/green. For example, Gnomes have +15 Engineering skill for crafting purposes.
+
+**Decision**: Track racial bonuses and adjust color calculations using "effective skill" = base skill - racial bonus.
+
+**Supported Bonuses**:
+- Gnome: +15 Engineering
+- Blood Elf: +10 Enchanting
+- Draenei: +5 Jewelcrafting
+
+**Implementation**:
+- `GetRacialBonus(profKey)` in Pathfinder detects player race and returns bonus
+- All color calculations use `effectiveSkill = currentSkill - racialBonus`
+- `skillRequired` checks use base skill (racial bonus doesn't let you learn recipes earlier)
+- UI shows bonus in status bar: "Current skill: 198 (+15 Gnome)"
+
+**Consequences**:
+- More accurate paths for characters with racial bonuses
+- Recipes stay useful longer, potentially changing optimal path
+- Must track racial bonus through all scoring and quantity calculations
+
+---
+
+## ADR-006: Recipe Acquisition Cost Amortization
+
+**Date**: 2026-01-29
+
+**Status**: Accepted
+
+**Context**: Recipe acquisition costs (vendor purchases, AH recipe items) were added to scoring in v0.3.8, but the full cost was added to every evaluation. This over-penalized recipes usable for many crafts. Example: Filet of Redgill (vendor 1g 60s, usable 225-275) scored 16000 when amortized cost should be ~220.
+
+**Problem**: One-time costs treated as per-craft costs in scoring.
+
+**Decision**: Amortize one-time recipe costs over expected remaining crafts.
+
+**Formula**:
+```
+expected_crafts = sum of (1 / skillup_chance) for each skill point until gray or target
+amortized_cost = recipe_cost / expected_crafts
+score = (reagent_cost + amortized_cost) / expected_skillup
+```
+
+**Implementation**:
+- `GetExpectedCraftsUntilGray(recipe, currentSkill, targetSkill, racialBonus)` calculates expected uses
+- `purchasedRecipes` table tracks recipes "bought" in simulation (don't re-add cost)
+- `ScoreRecipe` adds `recipeCost / expectedCrafts` instead of full `recipeCost`
+- `CalculateTotalCostAndSkillups` still adds full cost once (for total display)
+
+**Example Results**:
+| Recipe | Uses | Old Score | New Score |
+|--------|------|-----------|-----------|
+| Filet of Redgill (1g 60s) | ~75 | 16009 | ~220 |
+| Short-use vendor recipe (5g) | ~15 | 50050 | ~3400 |
+| Trainer recipe (free) | any | 500 | 500 |
+
+**Consequences**:
+- Vendor recipes with low reagent cost can now compete fairly
+- High-cost short-range recipes still penalized appropriately
+- Total path cost unchanged (recipe paid once in totals)
+- Debug output shows: `cost=9c (+2s 13c recipe)`

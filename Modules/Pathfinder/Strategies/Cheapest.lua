@@ -16,6 +16,7 @@ LazyProf.PathfinderStrategies.cheapest = {
         local path = {}
         local simulatedSkill = currentSkill
         local simulatedInventory = Utils.DeepCopy(inventory)
+        local purchasedRecipes = {}  -- Track recipes we've "bought" in simulation
 
         while simulatedSkill < targetSkill do
             -- Get craftable recipes that can still give skillups
@@ -39,7 +40,7 @@ LazyProf.PathfinderStrategies.cheapest = {
             LazyProf:Debug("scoring", "=== Scoring candidates at skill " .. simulatedSkill .. " (effective: " .. effectiveSkill .. ") ===")
             local debugScores = {}
             for _, recipe in ipairs(candidates) do
-                local score = self:ScoreRecipe(recipe, simulatedSkill, targetSkill, simulatedInventory, prices, racialBonus)
+                local score = self:ScoreRecipe(recipe, simulatedSkill, targetSkill, simulatedInventory, prices, racialBonus, purchasedRecipes)
                 table.insert(debugScores, { recipe = recipe, score = score })
             end
             -- Sort by score (lowest first)
@@ -61,8 +62,26 @@ LazyProf.PathfinderStrategies.cheapest = {
                     actualCost = actualCost + (price * toBuy)
                 end
 
+                -- Calculate amortized recipe cost for display
+                local amortizedRecipeCost = 0
+                if not d.recipe.learned and not purchasedRecipes[d.recipe.id] and d.recipe._sourceInfo then
+                    local srcType = d.recipe._sourceInfo.type
+                    local rawCost = 0
+                    if srcType == "trainer" or srcType == "vendor" then
+                        rawCost = d.recipe._sourceInfo.cost or 0
+                    elseif srcType == "ah" then
+                        rawCost = d.recipe._sourceInfo.price or 0
+                    end
+                    if rawCost > 0 then
+                        local expectedCrafts = self:GetExpectedCraftsUntilGray(d.recipe, simulatedSkill, targetSkill, racialBonus)
+                        amortizedRecipeCost = rawCost / expectedCrafts
+                    end
+                end
+
                 local costDisplay = Utils.FormatMoney(actualCost)
-                if LazyProf.db.profile.useOwnedMaterials and actualCost ~= theoreticalCost then
+                if amortizedRecipeCost > 0 then
+                    costDisplay = costDisplay .. " (+" .. Utils.FormatMoney(math.floor(amortizedRecipeCost)) .. " recipe)"
+                elseif LazyProf.db.profile.useOwnedMaterials and actualCost ~= theoreticalCost then
                     costDisplay = costDisplay .. " (market: " .. Utils.FormatMoney(theoreticalCost) .. ")"
                 end
 
@@ -72,7 +91,7 @@ LazyProf.PathfinderStrategies.cheapest = {
 
             -- Score each by TOTAL cost per expected skillup (for full quantity until gray)
             local best, bestScore = Utils.MinBy(candidates, function(recipe)
-                return self:ScoreRecipe(recipe, simulatedSkill, targetSkill, simulatedInventory, prices, racialBonus)
+                return self:ScoreRecipe(recipe, simulatedSkill, targetSkill, simulatedInventory, prices, racialBonus, purchasedRecipes)
             end)
 
             if not best then
@@ -94,6 +113,11 @@ LazyProf.PathfinderStrategies.cheapest = {
                 skillEnd = math.min(simulatedSkill + totalSkillups, targetSkill),
                 totalCost = totalCost,
             })
+
+            -- Mark recipe as purchased in simulation (so future evaluations don't re-add cost)
+            if not best.learned and best._sourceInfo then
+                purchasedRecipes[best.id] = true
+            end
 
             -- Update simulation
             simulatedSkill = path[#path].skillEnd
@@ -139,8 +163,10 @@ LazyProf.PathfinderStrategies.cheapest = {
     -- Score based on cost-per-skillup at CURRENT skill level, with bonuses for flexibility
     -- IMPORTANT: Uses actualCost (materials to buy) not theoreticalCost (full market value)
     -- racialBonus: extends color ranges (e.g., Gnome +15 Engineering)
-    ScoreRecipe = function(self, recipe, currentSkill, targetSkill, inventory, prices, racialBonus)
+    -- purchasedRecipes: table of recipe IDs already "bought" in this simulation
+    ScoreRecipe = function(self, recipe, currentSkill, targetSkill, inventory, prices, racialBonus, purchasedRecipes)
         racialBonus = racialBonus or 0
+        purchasedRecipes = purchasedRecipes or {}
         local effectiveSkill = currentSkill - racialBonus
         -- Calculate actual cost per craft (only count materials we need to BUY)
         local theoreticalCost = 0
@@ -169,15 +195,21 @@ LazyProf.PathfinderStrategies.cheapest = {
             actualCost = actualCost + (price * toBuy)
         end
 
-        -- Add recipe acquisition cost for unlearned recipes
-        -- Free if: already learned, or recipe item in inventory (bags/bank/alts)
+        -- Add recipe acquisition cost for unlearned recipes (amortized over expected uses)
+        -- Free if: already learned, already purchased in simulation, or recipe item in inventory
         -- Costs if: trainer, vendor, or AH purchase required
-        if not recipe.learned and recipe._sourceInfo then
+        if not recipe.learned and not purchasedRecipes[recipe.id] and recipe._sourceInfo then
             local srcType = recipe._sourceInfo.type
+            local recipeCost = 0
             if srcType == "trainer" or srcType == "vendor" then
-                actualCost = actualCost + (recipe._sourceInfo.cost or 0)
+                recipeCost = recipe._sourceInfo.cost or 0
             elseif srcType == "ah" then
-                actualCost = actualCost + (recipe._sourceInfo.price or 0)
+                recipeCost = recipe._sourceInfo.price or 0
+            end
+            -- Amortize one-time cost over expected remaining crafts
+            if recipeCost > 0 then
+                local expectedCrafts = self:GetExpectedCraftsUntilGray(recipe, currentSkill, targetSkill, racialBonus)
+                actualCost = actualCost + (recipeCost / expectedCrafts)
             end
             -- "learned" and "inventory" types are free - no cost added
         end
@@ -252,6 +284,40 @@ LazyProf.PathfinderStrategies.cheapest = {
         local effectiveSkill = currentSkill - racialBonus
         local color = Utils.GetSkillColor(effectiveSkill, recipe.skillRange)
         return Constants.SKILLUP_CHANCE[color] or 0
+    end,
+
+    -- Calculate expected number of crafts from currentSkill until recipe goes gray or target is reached
+    -- Used to amortize one-time recipe acquisition costs
+    GetExpectedCraftsUntilGray = function(self, recipe, currentSkill, targetSkill, racialBonus)
+        racialBonus = racialBonus or 0
+        local effectiveSkill = currentSkill - racialBonus
+
+        -- Recipe already gray
+        if effectiveSkill >= recipe.skillRange.gray then
+            return 0
+        end
+
+        -- Stop at whichever comes first: target skill or gray
+        local stopAt = math.min(targetSkill, recipe.skillRange.gray + racialBonus)
+
+        local totalCrafts = 0
+        local simSkill = currentSkill
+
+        while simSkill < stopAt do
+            local effSkill = simSkill - racialBonus
+            local color = Utils.GetSkillColor(effSkill, recipe.skillRange)
+            local skillupChance = Constants.SKILLUP_CHANCE[color] or 0
+
+            if skillupChance <= 0 then
+                break
+            end
+
+            -- Expected crafts for 1 skill point at this color
+            totalCrafts = totalCrafts + (1 / skillupChance)
+            simSkill = simSkill + 1
+        end
+
+        return math.max(1, totalCrafts)  -- At least 1 to avoid division by zero
     end,
 
     -- Calculate how many crafts until next breakpoint

@@ -4,6 +4,9 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **Recipe acquisition costs now properly amortized**: One-time costs (vendor recipes, AH recipe items) are spread over expected crafts instead of being added to every scoring evaluation. This fixes recipes usable for many crafts being unfairly penalized (e.g., Filet of Redgill score: 16000 -> ~220).
+
 ## [0.3.9] - 2026-01-29
 
 ### Added
