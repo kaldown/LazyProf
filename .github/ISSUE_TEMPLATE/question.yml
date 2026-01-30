@@ -1,0 +1,32 @@
+name: Question
+description: Ask for help or clarification
+labels: ["question"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What do you need help with?
+      placeholder: |
+        How do I make LazyProf prefer recipes I already have materials for?
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you've tried
+      description: Steps you've already attempted
+      placeholder: |
+        I enabled "Use owned materials as free" but it still suggests...
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: If showing UI confusion
+      placeholder: Drag and drop image here
+    validations:
+      required: false

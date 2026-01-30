@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: CurseForge Page
+    url: https://www.curseforge.com/wow/addons/lazyprof
+    about: Download latest release and leave comments
+  - name: Wago Page
+    url: https://addons.wago.io/addons/lazyprof
+    about: Alternative download source

@@ -1,0 +1,98 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: What happened? What did you expect to happen?
+      placeholder: |
+        When I open the tradeskill window, the arrow points to the wrong recipe...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can we trigger this bug?
+      placeholder: |
+        1. Open Engineering tradeskill
+        2. Set strategy to "Cheapest"
+        3. Notice arrow points to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      description: Find in addon list or type /lp
+      value: |
+        - LazyProf:
+        - CraftLib:
+        - WoW Client: (e.g., Classic Anniversary 1.15.8 or TBC 2.5.5)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-source
+    attributes:
+      label: Installation source
+      description: Where did you download the addon?
+      options:
+        - CurseForge
+        - Wago
+        - GitHub Release
+        - Manual (git clone or zip)
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: If applicable, add a screenshot showing the issue
+      placeholder: Drag and drop image here or paste from clipboard
+    validations:
+      required: false
+
+  - type: textarea
+    id: profession-context
+    attributes:
+      label: Profession context
+      description: Which profession and skill level? (if relevant)
+      placeholder: "Engineering skill 184, trying to level to 300"
+    validations:
+      required: false
+
+  - type: textarea
+    id: debug-log
+    attributes:
+      label: Debug log
+      description: |
+        For pathfinder or calculation bugs, include debug output.
+
+        **How to capture debug logs:**
+        1. Open LazyProf settings (type `/lp` or use minimap button)
+        2. Go to **Debug** tab
+        3. Enable **"Enable debug messages"**
+        4. Enable relevant categories (Pathfinder Core, Scoring, etc.)
+        5. Reproduce the bug
+        6. Type `/lp log` to open the debug window
+        7. Click **"Copy Filtered"** or **"Copy All"**
+        8. Press Ctrl+C, then paste below
+      placeholder: Paste debug log here...
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: other-addons
+    attributes:
+      label: Other addons
+      description: List other addons if you suspect a conflict
+      placeholder: "TSM, Auctionator, Baganator..."
+    validations:
+      required: false
