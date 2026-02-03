@@ -171,3 +171,34 @@ score = (reagent_cost + amortized_cost) / expected_skillup
 - High-cost short-range recipes still penalized appropriately
 - Total path cost unchanged (recipe paid once in totals)
 - Debug output shows: `cost=9c (+2s 13c recipe)`
+
+---
+
+## Template for New ADRs
+
+```markdown
+## ADR-XXX: Title
+
+**Date:** YYYY-MM-DD
+**Status:** Proposed | Accepted | Deprecated | Superseded by ADR-XXX
+
+### Context
+
+What is the issue that we're seeing that is motivating this decision?
+
+### Decision
+
+What is the change that we're proposing and/or doing?
+
+### Alternatives Considered
+
+What other options were evaluated? Why were they rejected?
+
+### Trade-offs Accepted
+
+What are the downsides of this decision that we're accepting?
+
+### Consequences
+
+What becomes easier or more difficult because of this decision?
+```
