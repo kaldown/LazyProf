@@ -4,6 +4,20 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-08
+
+### Added
+- **Alternative recipes with pinning** ([#5](https://github.com/kaldown/LazyProf/issues/5)): Expand any step in the milestone breakdown to browse all scored recipe candidates at that skill level
+  - Each alternative shows difficulty color, skillup chance, cost per craft, and unlearned status
+  - Hover tooltip shows full material list and source info for unlearned recipes
+  - Alternatives grouped into collapsible packs of 5 under a dedicated "Alternatives" section, keeping the UI clean
+  - Click any alternative to pin it as an override for that skill level
+  - Pinned steps show a blue `[*]` indicator in the skill range
+  - "Recalculate with N pins" button appears when pins differ from the optimizer's choices
+  - Recalculate reruns the pathfinder respecting all pinned overrides, updating the full path, shopping list, and arrow
+  - Pins are session-only (reset on /reload) - designed for exploring "what if" scenarios
+  - Score and delta details shown in tooltip only when debug mode is enabled
+
 ## [0.3.10] - 2026-01-30
 
 ### Fixed

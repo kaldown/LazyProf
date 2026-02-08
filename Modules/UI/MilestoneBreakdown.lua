@@ -12,6 +12,9 @@ LazyProf.MilestonePanelClass = MilestonePanelClass
 
 local STEP_ROW_HEIGHT = 20
 local INGREDIENT_ROW_HEIGHT = 18
+local ALTERNATIVE_ROW_HEIGHT = 18
+local ALT_GROUP_HEADER_HEIGHT = 18
+local ALT_GROUP_SIZE = 5
 local MILESTONE_SEPARATOR_HEIGHT = 16
 local MIN_WIDTH = 350
 local MIN_HEIGHT = 100
@@ -26,6 +29,8 @@ function MilestonePanelClass:New(config)
     instance.config = config or {}
     instance.rows = {}
     instance.expandedRows = {}
+    instance.expandedAlternatives = {}  -- [stepIndex] = true/false (main alternatives spoiler)
+    instance.expandedAltGroups = {}     -- [stepIndex][groupIndex] = true/false
     instance.currentPath = nil
     instance.frame = nil
     return instance
@@ -228,7 +233,7 @@ function MilestonePanelClass:Update(path)
         table.insert(self.rows, row)
         yOffset = yOffset + STEP_ROW_HEIGHT
 
-        -- If expanded, show ingredients for this step
+        -- If expanded, show unlearned indicator, ingredients, then alternatives
         if self.expandedRows[i] then
             -- Show unlearned indicator if recipe not learned
             if step.recipe and not step.recipe.learned then
@@ -237,11 +242,70 @@ function MilestonePanelClass:Update(path)
                 yOffset = yOffset + INGREDIENT_ROW_HEIGHT
             end
 
-            -- Show ingredients
+            -- Show ingredients first (context for why the winner was chosen)
             for _, mat in ipairs(step.materials) do
                 local ingredientRow = self:CreateIngredientRow(mat, yOffset, contentWidth)
                 table.insert(self.rows, ingredientRow)
                 yOffset = yOffset + INGREDIENT_ROW_HEIGHT
+            end
+
+            -- Show alternatives section (collapsible spoiler with groups inside)
+            if step.alternatives and #step.alternatives > 1 then
+                -- Build filtered list (exclude current recipe)
+                local filteredAlts = {}
+                for rank, alt in ipairs(step.alternatives) do
+                    if alt.recipe.id ~= step.recipe.id then
+                        table.insert(filteredAlts, { alt = alt, rank = rank })
+                    end
+                end
+
+                local totalAlts = #filteredAlts
+                if totalAlts > 0 then
+                    -- Main "Alternatives" spoiler header with separator lines
+                    local isAltExpanded = self.expandedAlternatives[i]
+                    local altHeader = self:CreateAlternativesSpoiler(totalAlts, isAltExpanded, i, yOffset, contentWidth)
+                    table.insert(self.rows, altHeader)
+                    yOffset = yOffset + MILESTONE_SEPARATOR_HEIGHT
+
+                    -- Only show groups if the main spoiler is expanded
+                    if isAltExpanded then
+                        local bestScore = step.alternatives[1] and step.alternatives[1].score or 0
+
+                        -- Initialize group state for this step
+                        if not self.expandedAltGroups[i] then
+                            self.expandedAltGroups[i] = {}
+                        end
+
+                        -- Split into groups of ALT_GROUP_SIZE
+                        local groupIndex = 0
+                        for startIdx = 1, totalAlts, ALT_GROUP_SIZE do
+                            groupIndex = groupIndex + 1
+                            local endIdx = math.min(startIdx + ALT_GROUP_SIZE - 1, totalAlts)
+                            local firstRank = filteredAlts[startIdx].rank
+                            local lastRank = filteredAlts[endIdx].rank
+
+                            -- Group header
+                            local isGroupExpanded = self.expandedAltGroups[i][groupIndex]
+                            local headerRow = self:CreateAltGroupHeader(
+                                firstRank, lastRank, isGroupExpanded, i, groupIndex, yOffset, contentWidth
+                            )
+                            table.insert(self.rows, headerRow)
+                            yOffset = yOffset + ALT_GROUP_HEADER_HEIGHT
+
+                            -- Show individual rows if group is expanded
+                            if isGroupExpanded then
+                                for idx = startIdx, endIdx do
+                                    local entry = filteredAlts[idx]
+                                    local altRow = self:CreateAlternativeRow(
+                                        entry.alt, entry.rank, bestScore, step.from, yOffset, contentWidth
+                                    )
+                                    table.insert(self.rows, altRow)
+                                    yOffset = yOffset + ALTERNATIVE_ROW_HEIGHT
+                                end
+                            end
+                        end
+                    end
+                end
             end
         end
 
@@ -252,6 +316,15 @@ function MilestonePanelClass:Update(path)
             yOffset = yOffset + MILESTONE_SEPARATOR_HEIGHT
             lastMilestone = step.trainerMilestoneAfter
         end
+    end
+
+    -- Show recalculate button if there are dirty pins
+    if self.frame.recalcBtn then
+        self.frame.recalcBtn:Hide()
+    end
+    local dirtyCount = LazyProf.Pathfinder:GetDirtyPinCount()
+    if dirtyCount > 0 then
+        self:CreateRecalculateButton(dirtyCount)
     end
 
     -- Update total
@@ -302,11 +375,19 @@ function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
     row.expandBtn:SetText(self.expandedRows[index] and "[-]" or "[+]")
     row.expandBtn:SetTextColor(0.6, 0.6, 0.6)
 
-    -- Skill range (e.g., "184-197")
+    -- Skill range (e.g., "184-197") with pin indicator
+    local hasDirtyPin = LazyProf.Pathfinder.pinnedRecipes[step.from] and
+        LazyProf.Pathfinder.pinnedRecipes[step.from] ~= step.recipe.id
     row.range = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     row.range:SetPoint("LEFT", 18, 0)
-    row.range:SetText(string.format("%d-%d", step.from, step.to))
-    row.range:SetTextColor(1, 0.82, 0) -- Gold color
+    local rangeText = string.format("%d-%d", step.from, step.to)
+    if hasDirtyPin then
+        rangeText = rangeText .. " [*]"
+        row.range:SetTextColor(0.4, 0.7, 1) -- Blue tint for pending pin
+    else
+        row.range:SetTextColor(1, 0.82, 0) -- Gold color
+    end
+    row.range:SetText(rangeText)
 
     -- Quantity and recipe name (e.g., "30x Bronze Tube")
     local recipeName = step.recipe and step.recipe.name or "Unknown"
@@ -526,6 +607,304 @@ function MilestonePanelClass:CreateIngredientRow(mat, yOffset, contentWidth)
 
     row:Show()
     return row
+end
+
+-- Create the main "Alternatives" spoiler separator (with lines on both sides)
+function MilestonePanelClass:CreateAlternativesSpoiler(totalAlts, isExpanded, stepIndex, yOffset, contentWidth)
+    local row = CreateFrame("Button", nil, self.frame.content)
+    row:SetSize(contentWidth - 16, MILESTONE_SEPARATOR_HEIGHT)
+    row:SetPoint("TOPLEFT", 16, -yOffset)
+
+    -- Separator line left
+    row.lineLeft = row:CreateTexture(nil, "ARTWORK")
+    row.lineLeft:SetTexture("Interface\\Buttons\\WHITE8x8")
+    row.lineLeft:SetVertexColor(0.3, 0.4, 0.5, 0.8)
+    row.lineLeft:SetHeight(1)
+    row.lineLeft:SetPoint("LEFT", 0, 0)
+    row.lineLeft:SetPoint("RIGHT", row, "CENTER", -60, 0)
+
+    -- Label text
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.text:SetPoint("CENTER", 0, 0)
+    local indicator = isExpanded and "[-]" or "[+]"
+    row.text:SetText(string.format("%s Alternatives (%d)", indicator, totalAlts))
+    row.text:SetTextColor(0.5, 0.6, 0.8)
+
+    -- Separator line right
+    row.lineRight = row:CreateTexture(nil, "ARTWORK")
+    row.lineRight:SetTexture("Interface\\Buttons\\WHITE8x8")
+    row.lineRight:SetVertexColor(0.3, 0.4, 0.5, 0.8)
+    row.lineRight:SetHeight(1)
+    row.lineRight:SetPoint("LEFT", row, "CENTER", 60, 0)
+    row.lineRight:SetPoint("RIGHT", 0, 0)
+
+    -- Click to expand/collapse
+    row:SetScript("OnClick", function()
+        self.expandedAlternatives[stepIndex] = not self.expandedAlternatives[stepIndex]
+        self:Refresh()
+    end)
+
+    -- Hover
+    row:SetScript("OnEnter", function()
+        row.text:SetTextColor(0.7, 0.8, 1)
+        row.lineLeft:SetVertexColor(0.4, 0.5, 0.7, 1)
+        row.lineRight:SetVertexColor(0.4, 0.5, 0.7, 1)
+    end)
+    row:SetScript("OnLeave", function()
+        row.text:SetTextColor(0.5, 0.6, 0.8)
+        row.lineLeft:SetVertexColor(0.3, 0.4, 0.5, 0.8)
+        row.lineRight:SetVertexColor(0.3, 0.4, 0.5, 0.8)
+    end)
+
+    row:Show()
+    return row
+end
+
+-- Create a collapsible group header for alternatives (e.g., "Alternatives #2-#6")
+function MilestonePanelClass:CreateAltGroupHeader(firstRank, lastRank, isExpanded, stepIndex, groupIndex, yOffset, contentWidth)
+    local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
+    row:SetSize(contentWidth - 12, ALT_GROUP_HEADER_HEIGHT)
+    row:SetPoint("TOPLEFT", 12, -yOffset)
+
+    row:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+    })
+    row:SetBackdropColor(0.12, 0.14, 0.2, 0.5)
+
+    -- Expand/collapse indicator + label
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.text:SetPoint("LEFT", 4, 0)
+    local indicator = isExpanded and "[-]" or "[+]"
+    local label
+    if firstRank == lastRank then
+        label = string.format("%s Alternative #%d", indicator, firstRank)
+    else
+        label = string.format("%s Alternatives #%d - #%d", indicator, firstRank, lastRank)
+    end
+    row.text:SetText(label)
+    row.text:SetTextColor(0.5, 0.6, 0.8)
+
+    -- Click to expand/collapse this group
+    row:SetScript("OnClick", function()
+        if not self.expandedAltGroups[stepIndex] then
+            self.expandedAltGroups[stepIndex] = {}
+        end
+        self.expandedAltGroups[stepIndex][groupIndex] = not self.expandedAltGroups[stepIndex][groupIndex]
+        self:Refresh()
+    end)
+
+    -- Hover
+    row:SetScript("OnEnter", function()
+        row:SetBackdropColor(0.18, 0.2, 0.28, 0.6)
+        row.text:SetTextColor(0.7, 0.8, 1)
+    end)
+    row:SetScript("OnLeave", function()
+        row:SetBackdropColor(0.12, 0.14, 0.2, 0.5)
+        row.text:SetTextColor(0.5, 0.6, 0.8)
+    end)
+
+    row:Show()
+    return row
+end
+
+-- Create an alternative recipe row (shown when step is expanded)
+-- alt: { recipe, score, color, expectedSkillups, craftCost }
+-- rank: position in sorted alternatives (1 = best)
+-- bestScore: score of the #1 alternative for delta calculation
+-- skillLevel: the step's starting skill level (for pinning)
+function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLevel, yOffset, contentWidth)
+    local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
+    row:SetSize(contentWidth - 16, ALTERNATIVE_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 16, -yOffset)
+
+    -- Row background - blue tint to distinguish from ingredients
+    row:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+    })
+
+    -- Highlight if this recipe is currently pinned at this skill level
+    local pinnedId = LazyProf.Pathfinder.pinnedRecipes[skillLevel]
+    local isThisPinned = (pinnedId == alt.recipe.id)
+    if isThisPinned then
+        row:SetBackdropColor(0.15, 0.2, 0.3, 0.6)
+    else
+        row:SetBackdropColor(0.1, 0.12, 0.18, 0.4)
+    end
+
+    -- Pin indicator
+    row.pin = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.pin:SetPoint("LEFT", 2, 0)
+    if isThisPinned then
+        row.pin:SetText("[*]")
+        row.pin:SetTextColor(0.4, 0.7, 1)
+    else
+        row.pin:SetText("[>]")
+        row.pin:SetTextColor(0.4, 0.4, 0.5)
+    end
+
+    -- Rank
+    row.rank = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.rank:SetPoint("LEFT", 20, 0)
+    row.rank:SetText(string.format("#%d", rank))
+    row.rank:SetTextColor(0.5, 0.5, 0.5)
+
+    -- Recipe name (colored by difficulty), with [!] prefix if unlearned
+    local recipeColor = self:ColorToRGB(alt.color)
+    local isUnlearned = not alt.recipe.learned
+    row.recipe = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.recipe:SetPoint("LEFT", 40, 0)
+    row.recipe:SetPoint("RIGHT", row, "RIGHT", -120, 0)
+    row.recipe:SetJustifyH("LEFT")
+    row.recipe:SetWordWrap(false)
+    local displayName = alt.recipe.name or "Unknown"
+    if isUnlearned then
+        displayName = "|cFFFF8800[!]|r " .. displayName
+    end
+    row.recipe:SetText(displayName)
+    row.recipe:SetTextColor(recipeColor.r, recipeColor.g, recipeColor.b)
+
+    -- Skillup rate
+    row.skillup = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.skillup:SetPoint("RIGHT", row, "RIGHT", -70, 0)
+    row.skillup:SetText(string.format("%.0f%%", alt.expectedSkillups * 100))
+    row.skillup:SetTextColor(0.7, 0.7, 0.7)
+
+    -- Cost per craft
+    row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.cost:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+    if alt.score < math.huge then
+        row.cost:SetText(Utils.FormatMoney(alt.craftCost))
+    else
+        row.cost:SetText("|cFF666666N/A|r")
+    end
+    row.cost:SetTextColor(1, 1, 1)
+
+    -- Click to pin/unpin
+    row:SetScript("OnClick", function()
+        if isThisPinned then
+            -- Unpin
+            LazyProf.Pathfinder:UnpinRecipe(skillLevel)
+        else
+            -- Pin this recipe
+            LazyProf.Pathfinder:PinRecipe(skillLevel, alt.recipe.id)
+        end
+        self:Refresh()
+    end)
+
+    -- Hover effects
+    row:SetScript("OnEnter", function()
+        if isThisPinned then
+            row:SetBackdropColor(0.2, 0.25, 0.35, 0.7)
+        else
+            row:SetBackdropColor(0.15, 0.18, 0.25, 0.6)
+        end
+        row.pin:SetTextColor(0.6, 0.8, 1)
+
+        -- Tooltip with details
+        GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(alt.recipe.name or "Unknown", recipeColor.r, recipeColor.g, recipeColor.b)
+        if isUnlearned then
+            local sourceDesc = Utils.GetSourceDescription(alt.recipe.source)
+            GameTooltip:AddLine("[!] Unlearned: " .. sourceDesc, 1, 0.53, 0)
+        end
+        GameTooltip:AddLine(string.format("Difficulty: %s (%d%% skillup chance)", alt.color, alt.expectedSkillups * 100), 0.7, 0.7, 0.7)
+        if alt.score < math.huge then
+            GameTooltip:AddLine(string.format("Cost per craft: %s", Utils.FormatMoney(alt.craftCost)), 1, 1, 1)
+            -- Score details only in debug mode
+            if LazyProf.db.profile.debug then
+                GameTooltip:AddLine(string.format("Score: %.2f", alt.score), 0.5, 0.5, 0.5)
+                if bestScore and bestScore < math.huge and alt.score ~= bestScore then
+                    local delta = alt.score - bestScore
+                    local deltaColor = delta > 0 and "|cFFFF6666" or "|cFF66FF66"
+                    GameTooltip:AddLine(string.format("vs best: %s%+.2f|r", deltaColor, delta), 1, 1, 1)
+                end
+            end
+        else
+            GameTooltip:AddLine("Missing price data", 1, 0.4, 0.4)
+        end
+        GameTooltip:AddLine(" ")
+        -- Reagents
+        GameTooltip:AddLine("Materials:", 1, 0.82, 0)
+        for _, reagent in ipairs(alt.recipe.reagents) do
+            GameTooltip:AddLine(string.format("  %dx %s", reagent.count, reagent.name or "Unknown"), 0.8, 0.8, 0.8)
+        end
+        GameTooltip:AddLine(" ")
+        if isThisPinned then
+            GameTooltip:AddLine("Click to unpin", 0.5, 0.5, 0.5)
+        else
+            GameTooltip:AddLine("Click to pin (then Recalculate)", 0.5, 0.5, 0.5)
+        end
+        GameTooltip:Show()
+    end)
+    row:SetScript("OnLeave", function()
+        if isThisPinned then
+            row:SetBackdropColor(0.15, 0.2, 0.3, 0.6)
+        else
+            row:SetBackdropColor(0.1, 0.12, 0.18, 0.4)
+        end
+        row.pin:SetTextColor(isThisPinned and 0.4 or 0.4, isThisPinned and 0.7 or 0.4, isThisPinned and 1 or 0.5)
+        GameTooltip:Hide()
+    end)
+
+    row:Show()
+    return row
+end
+
+-- Create the recalculate button (shown when dirty pins exist)
+function MilestonePanelClass:CreateRecalculateButton(dirtyCount)
+    if not self.frame.recalcBtn then
+        self.frame.recalcBtn = CreateFrame("Button", nil, self.frame, "BackdropTemplate")
+        self.frame.recalcBtn:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 8, edgeSize = 12,
+            insets = { left = 3, right = 3, top = 3, bottom = 3 }
+        })
+        self.frame.recalcBtn:SetBackdropColor(0.1, 0.4, 0.15, 0.95)
+        self.frame.recalcBtn:SetBackdropBorderColor(0.3, 0.8, 0.4, 1)
+
+        -- Ensure button is above scroll content
+        self.frame.recalcBtn:SetFrameLevel(self.frame:GetFrameLevel() + 10)
+
+        self.frame.recalcBtn.text = self.frame.recalcBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        self.frame.recalcBtn.text:SetPoint("CENTER", 0, 0)
+        self.frame.recalcBtn.text:SetTextColor(1, 1, 1)
+
+        self.frame.recalcBtn:SetScript("OnClick", function()
+            -- Trigger recalculation with current pins
+            if LazyProf.Pathfinder.currentPath then
+                if LazyProf.Pathfinder.currentPath.professionKey then
+                    -- Planning mode - recalculate and update this panel
+                    local path = LazyProf.Pathfinder:CalculateForProfession(
+                        LazyProf.Pathfinder.currentPath.professionKey,
+                        LazyProf.Pathfinder.currentPath.currentSkill
+                    )
+                    if path then
+                        self:Update(path)
+                    end
+                else
+                    -- Active profession mode - recalculate and update all UI
+                    LazyProf.Pathfinder:Calculate()
+                    LazyProf:UpdateDisplay()
+                end
+            end
+        end)
+
+        self.frame.recalcBtn:SetScript("OnEnter", function(btn)
+            btn:SetBackdropColor(0.15, 0.5, 0.2, 1)
+        end)
+        self.frame.recalcBtn:SetScript("OnLeave", function(btn)
+            btn:SetBackdropColor(0.1, 0.4, 0.15, 0.95)
+        end)
+    end
+
+    -- Stretch across the full width, above the total bar
+    self.frame.recalcBtn:ClearAllPoints()
+    self.frame.recalcBtn:SetPoint("BOTTOMLEFT", self.frame.totalBg, "TOPLEFT", 0, 2)
+    self.frame.recalcBtn:SetPoint("BOTTOMRIGHT", self.frame.totalBg, "TOPRIGHT", 0, 2)
+    self.frame.recalcBtn:SetHeight(26)
+    self.frame.recalcBtn.text:SetText(string.format("Recalculate with %d pin%s", dirtyCount, dirtyCount > 1 and "s" or ""))
+    self.frame.recalcBtn:Show()
 end
 
 -- Show the panel

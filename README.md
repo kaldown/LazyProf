@@ -20,6 +20,7 @@ See [CraftLib's profession coverage](https://github.com/kaldown/CraftLib#profess
 - **Recipe Availability Filtering**: Only suggests recipes you can actually obtain - checks inventory, trainers, vendors, and Auction House listings
 - Shows missing materials with cost breakdown, "From Bank", "From Alts", and "To Craft" sections
 - Tracks progress with milestone breakdowns
+- **Alternative Recipes & Pinning**: Browse all recipe candidates at each step, pin overrides, and recalculate custom paths
 - Bank and alt character inventory integration (with optional addon)
 
 ## Price Sources

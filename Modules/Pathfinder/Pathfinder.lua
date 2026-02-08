@@ -9,6 +9,10 @@ local Pathfinder = LazyProf.Pathfinder
 -- Current calculated path
 Pathfinder.currentPath = nil
 
+-- Pinned recipes: session-only overrides for pathfinder choices
+-- Key: skill level (step's skillStart), Value: recipe ID
+Pathfinder.pinnedRecipes = {}
+
 -- Calculate optimal path for active profession
 function Pathfinder:Calculate()
     -- Get active profession
@@ -93,8 +97,8 @@ function Pathfinder:Calculate()
             racialBonus, LazyProf.Professions.active))
     end
 
-    -- Calculate path
-    local steps = strategy:Calculate(startSkill, targetSkill, recipes, inventory, prices, racialBonus)
+    -- Calculate path (pass pinned recipes for user overrides)
+    local steps = strategy:Calculate(startSkill, targetSkill, recipes, inventory, prices, racialBonus, self.pinnedRecipes)
 
     -- Build result
     self.currentPath = {
@@ -190,8 +194,8 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel)
             racialBonus, profKey))
     end
 
-    -- Calculate path
-    local steps = strategy:Calculate(skillLevel, targetSkill, recipes, inventory, prices, racialBonus)
+    -- Calculate path (pass pinned recipes for user overrides)
+    local steps = strategy:Calculate(skillLevel, targetSkill, recipes, inventory, prices, racialBonus, self.pinnedRecipes)
 
     -- Build result (similar to Calculate() but stored separately)
     local path = {
@@ -481,6 +485,7 @@ function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, currentSkill,
             materials = materials,
             materialsSummary = table.concat(materialParts, ", "),
             color = color,  -- Pre-calculated color for UI display
+            alternatives = step.alternatives,  -- All scored candidates at this skill level
             -- Check if this step crosses a trainer milestone
             trainerMilestoneAfter = self:GetMilestoneBetween(step.skillStart, step.skillEnd, milestones),
         })
@@ -516,4 +521,47 @@ function Pathfinder:GetCurrentRecommendation()
         return nil
     end
     return self.currentPath.steps[1]
+end
+
+-- Pin a recipe at a specific skill level (overrides optimizer's pick on next recalculate)
+function Pathfinder:PinRecipe(skillLevel, recipeId)
+    self.pinnedRecipes[skillLevel] = recipeId
+    LazyProf:Debug("pathfinder", string.format("Pinned recipe %s at skill %d", tostring(recipeId), skillLevel))
+end
+
+-- Remove a pin at a specific skill level
+function Pathfinder:UnpinRecipe(skillLevel)
+    self.pinnedRecipes[skillLevel] = nil
+    LazyProf:Debug("pathfinder", string.format("Unpinned recipe at skill %d", skillLevel))
+end
+
+-- Clear all pins
+function Pathfinder:ClearPins()
+    self.pinnedRecipes = {}
+    LazyProf:Debug("pathfinder", "Cleared all pinned recipes")
+end
+
+-- Check if any pins exist that differ from the current path's winners
+function Pathfinder:HasDirtyPins()
+    if not self.currentPath then return false end
+    for _, step in ipairs(self.currentPath.steps) do
+        local pinned = self.pinnedRecipes[step.skillStart]
+        if pinned and pinned ~= step.recipe.id then
+            return true
+        end
+    end
+    return false
+end
+
+-- Get count of pins that differ from current path winners
+function Pathfinder:GetDirtyPinCount()
+    if not self.currentPath then return 0 end
+    local count = 0
+    for _, step in ipairs(self.currentPath.steps) do
+        local pinned = self.pinnedRecipes[step.skillStart]
+        if pinned and pinned ~= step.recipe.id then
+            count = count + 1
+        end
+    end
+    return count
 end

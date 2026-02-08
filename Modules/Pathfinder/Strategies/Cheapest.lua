@@ -11,8 +11,10 @@ LazyProf.PathfinderStrategies.cheapest = {
     -- Calculate optimal path from currentSkill to targetSkill
     -- racialBonus: skill bonus from racial trait (e.g., Gnome +15 Engineering)
     --              This extends how long recipes stay orange/yellow/green
-    Calculate = function(self, currentSkill, targetSkill, recipes, inventory, prices, racialBonus)
+    -- pinnedRecipes: optional table { [skillLevel] = recipeId } to override best picks
+    Calculate = function(self, currentSkill, targetSkill, recipes, inventory, prices, racialBonus, pinnedRecipes)
         racialBonus = racialBonus or 0
+        pinnedRecipes = pinnedRecipes or {}
         local path = {}
         local simulatedSkill = currentSkill
         local simulatedInventory = Utils.DeepCopy(inventory)
@@ -35,83 +37,80 @@ LazyProf.PathfinderStrategies.cheapest = {
                 end
             end
 
-            -- DEBUG: Log all candidates and their scores at this skill level
+            -- Score all candidates and build alternatives list (also used for debug logging)
             local effectiveSkill = simulatedSkill - racialBonus
             LazyProf:Debug("scoring", "=== Scoring candidates at skill " .. simulatedSkill .. " (effective: " .. effectiveSkill .. ") ===")
-            local debugScores = {}
+            local alternatives = {}
             for _, recipe in ipairs(candidates) do
                 local score = self:ScoreRecipe(recipe, simulatedSkill, targetSkill, simulatedInventory, prices, racialBonus, purchasedRecipes)
-                table.insert(debugScores, { recipe = recipe, score = score })
-            end
-            -- Sort by score (lowest first)
-            table.sort(debugScores, function(a, b) return a.score < b.score end)
-            -- Log top 10 candidates
-            for i = 1, math.min(10, #debugScores) do
-                local d = debugScores[i]
-                local color = Utils.GetSkillColor(effectiveSkill, d.recipe.skillRange)
-                local expectedSkillups = self:GetExpectedSkillups(d.recipe, simulatedSkill, racialBonus)
+                local color = Utils.GetSkillColor(effectiveSkill, recipe.skillRange)
+                local expectedSkillups = self:GetExpectedSkillups(recipe, simulatedSkill, racialBonus)
 
-                -- Calculate both costs for debug display
-                local theoreticalCost = 0
-                local actualCost = 0
-                for _, reagent in ipairs(d.recipe.reagents) do
+                -- Calculate per-craft cost for display
+                local craftCost = 0
+                for _, reagent in ipairs(recipe.reagents) do
                     local price = prices[reagent.itemId] or 0
                     local owned = LazyProf.db.profile.useOwnedMaterials and (simulatedInventory[reagent.itemId] or 0) or 0
                     local toBuy = math.max(0, reagent.count - owned)
-                    theoreticalCost = theoreticalCost + (price * reagent.count)
-                    actualCost = actualCost + (price * toBuy)
+                    craftCost = craftCost + (price * toBuy)
                 end
 
-                -- Calculate amortized recipe cost for display
-                local amortizedRecipeCost = 0
-                if not d.recipe.learned and not purchasedRecipes[d.recipe.id] and d.recipe._sourceInfo then
-                    local srcType = d.recipe._sourceInfo.type
-                    local rawCost = 0
-                    if srcType == "trainer" or srcType == "vendor" then
-                        rawCost = d.recipe._sourceInfo.cost or 0
-                    elseif srcType == "ah" then
-                        rawCost = d.recipe._sourceInfo.price or 0
-                    end
-                    if rawCost > 0 then
-                        local expectedCrafts = self:GetExpectedCraftsUntilGray(d.recipe, simulatedSkill, targetSkill, racialBonus)
-                        amortizedRecipeCost = rawCost / expectedCrafts
-                    end
-                end
+                table.insert(alternatives, {
+                    recipe = recipe,
+                    score = score,
+                    color = color,
+                    expectedSkillups = expectedSkillups,
+                    craftCost = craftCost,
+                })
+            end
+            -- Sort by score (lowest = best first)
+            table.sort(alternatives, function(a, b) return a.score < b.score end)
 
-                local costDisplay = Utils.FormatMoney(actualCost)
-                if amortizedRecipeCost > 0 then
-                    costDisplay = costDisplay .. " (+" .. Utils.FormatMoney(math.floor(amortizedRecipeCost)) .. " recipe)"
-                elseif LazyProf.db.profile.useOwnedMaterials and actualCost ~= theoreticalCost then
-                    costDisplay = costDisplay .. " (market: " .. Utils.FormatMoney(theoreticalCost) .. ")"
-                end
-
+            -- Debug: log top 10
+            for i = 1, math.min(10, #alternatives) do
+                local d = alternatives[i]
                 LazyProf:Debug("scoring", string.format("  #%d: %s | score=%.2f | color=%s | skillup=%.2f | cost=%s",
-                    i, d.recipe.name, d.score, color, expectedSkillups, costDisplay))
+                    i, d.recipe.name, d.score, d.color, d.expectedSkillups, Utils.FormatMoney(d.craftCost)))
             end
 
-            -- Score each by TOTAL cost per expected skillup (for full quantity until gray)
-            local best, bestScore = Utils.MinBy(candidates, function(recipe)
-                return self:ScoreRecipe(recipe, simulatedSkill, targetSkill, simulatedInventory, prices, racialBonus, purchasedRecipes)
-            end)
+            -- Select best recipe (alternatives[1]), respecting pins
+            local best = alternatives[1] and alternatives[1].recipe
+            local bestScore = alternatives[1] and alternatives[1].score
+
+            -- Check for pinned recipe override
+            local pinnedId = pinnedRecipes[simulatedSkill]
+            if pinnedId then
+                for _, alt in ipairs(alternatives) do
+                    if alt.recipe.id == pinnedId and alt.score < math.huge then
+                        best = alt.recipe
+                        bestScore = alt.score
+                        LazyProf:Debug("scoring", ">>> PINNED: " .. best.name .. " (overriding optimizer)")
+                        break
+                    end
+                end
+            end
 
             if not best then
                 LazyProf:Debug("scoring", "No best recipe found at skill " .. simulatedSkill)
                 break
             end
 
-            LazyProf:Debug("scoring", ">>> WINNER: " .. best.name .. " with score " .. string.format("%.2f", bestScore))
+            if not pinnedId then
+                LazyProf:Debug("scoring", ">>> WINNER: " .. best.name .. " with score " .. string.format("%.2f", bestScore))
+            end
 
             -- Calculate how many to craft (pass recipes for breakpoint detection)
             local quantity = self:CalculateQuantity(best, simulatedSkill, targetSkill, recipes, racialBonus)
             local totalSkillups, totalCost = self:CalculateTotalCostAndSkillups(best, simulatedSkill, quantity, simulatedInventory, prices, racialBonus)
 
-            -- Add step to path
+            -- Add step to path (with alternatives for UI)
             table.insert(path, {
                 recipe = best,
                 quantity = quantity,
                 skillStart = simulatedSkill,
                 skillEnd = math.min(simulatedSkill + totalSkillups, targetSkill),
                 totalCost = totalCost,
+                alternatives = alternatives,
             })
 
             -- Mark recipe as purchased in simulation (so future evaluations don't re-add cost)

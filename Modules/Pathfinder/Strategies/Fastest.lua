@@ -12,8 +12,10 @@ LazyProf.PathfinderStrategies.fastest = {
     -- Calculate optimal path from currentSkill to targetSkill
     -- racialBonus: skill bonus from racial trait (e.g., Gnome +15 Engineering)
     --              This extends how long recipes stay orange/yellow/green
-    Calculate = function(self, currentSkill, targetSkill, recipes, inventory, prices, racialBonus)
+    -- pinnedRecipes: optional table { [skillLevel] = recipeId } to override best picks
+    Calculate = function(self, currentSkill, targetSkill, recipes, inventory, prices, racialBonus, pinnedRecipes)
         racialBonus = racialBonus or 0
+        pinnedRecipes = pinnedRecipes or {}
         local path = {}
         local simulatedSkill = currentSkill
         local simulatedInventory = Utils.DeepCopy(inventory)
@@ -35,10 +37,50 @@ LazyProf.PathfinderStrategies.fastest = {
                 end
             end
 
-            -- Score each by expected skillups per craft (higher = better = fewer crafts)
-            local best, bestScore = Utils.MinBy(candidates, function(recipe)
-                return self:ScoreRecipe(recipe, simulatedSkill, targetSkill, racialBonus)
-            end)
+            -- Score all candidates and build alternatives list
+            local effectiveSkill = simulatedSkill - racialBonus
+            local alternatives = {}
+            for _, recipe in ipairs(candidates) do
+                local score = self:ScoreRecipe(recipe, simulatedSkill, targetSkill, racialBonus)
+                local color = Utils.GetSkillColor(effectiveSkill, recipe.skillRange)
+                local expectedSkillups = self:GetExpectedSkillups(recipe, simulatedSkill, racialBonus)
+
+                -- Calculate per-craft cost for display
+                local craftCost = 0
+                for _, reagent in ipairs(recipe.reagents) do
+                    local price = prices[reagent.itemId] or 0
+                    local owned = LazyProf.db.profile.useOwnedMaterials and (simulatedInventory[reagent.itemId] or 0) or 0
+                    local toBuy = math.max(0, reagent.count - owned)
+                    craftCost = craftCost + (price * toBuy)
+                end
+
+                table.insert(alternatives, {
+                    recipe = recipe,
+                    score = score,
+                    color = color,
+                    expectedSkillups = expectedSkillups,
+                    craftCost = craftCost,
+                })
+            end
+            -- Sort by score (lowest = best first)
+            table.sort(alternatives, function(a, b) return a.score < b.score end)
+
+            -- Select best recipe (alternatives[1]), respecting pins
+            local best = alternatives[1] and alternatives[1].recipe
+            local bestScore = alternatives[1] and alternatives[1].score
+
+            -- Check for pinned recipe override
+            local pinnedId = pinnedRecipes[simulatedSkill]
+            if pinnedId then
+                for _, alt in ipairs(alternatives) do
+                    if alt.recipe.id == pinnedId and alt.score < math.huge then
+                        best = alt.recipe
+                        bestScore = alt.score
+                        LazyProf:Debug("scoring", ">>> PINNED: " .. best.name .. " (overriding optimizer)")
+                        break
+                    end
+                end
+            end
 
             if not best then
                 LazyProf:Debug("scoring", "No best recipe found at skill " .. simulatedSkill)
@@ -49,13 +91,14 @@ LazyProf.PathfinderStrategies.fastest = {
             local quantity = self:CalculateQuantity(best, simulatedSkill, targetSkill, recipes, racialBonus)
             local totalSkillups, totalCost = self:CalculateTotalCostAndSkillups(best, simulatedSkill, quantity, simulatedInventory, prices, racialBonus)
 
-            -- Add step to path
+            -- Add step to path (with alternatives for UI)
             table.insert(path, {
                 recipe = best,
                 quantity = quantity,
                 skillStart = simulatedSkill,
                 skillEnd = math.min(simulatedSkill + totalSkillups, targetSkill),
                 totalCost = totalCost,
+                alternatives = alternatives,
             })
 
             -- Update simulation
