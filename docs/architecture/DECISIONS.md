@@ -174,6 +174,39 @@ score = (reagent_cost + amortized_cost) / expected_skillup
 
 ---
 
+## ADR-007: Session-Only Pins for Alternative Recipe Selection
+
+**Date**: 2026-02-08
+
+**Status**: Accepted
+
+**Context**: Users want to override the optimizer's recipe choices (avoiding expensive patterns, specialization preferences, preferring safer orange/yellow over risky green). Need to decide whether pins persist across sessions.
+
+**Decision**: Pins are session-only and reset on `/reload` or logout.
+
+**Implementation**:
+- `Pathfinder.pinnedRecipes` table maps `skillLevel -> recipeId`
+- Strategies check pins after scoring and override best pick if valid
+- UI shows alternatives in collapsible groups, click to pin/unpin
+- "Recalculate with N pins" button triggers re-run with pins applied
+- `UpdateDisplay()` refreshes all panels after recalculation
+
+**Rationale**:
+- Pins are exploratory "what if" overrides, not permanent preferences
+- Path optimization changes with price fluctuations - stale pins could become invalid
+- Simpler implementation with no SavedVariables complexity
+
+**Alternatives Considered**:
+1. Persist pins in SavedVariables - rejected due to staleness risk
+2. Auto-recalculate on pin - rejected to avoid jarring UI changes while browsing
+
+**Consequences**:
+- Users must re-pin after `/reload` if still desired
+- No cross-character pin sharing
+- Pins are clearly temporary/exploratory by design
+
+---
+
 ## Template for New ADRs
 
 ```markdown

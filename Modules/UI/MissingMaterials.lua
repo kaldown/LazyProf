@@ -226,7 +226,13 @@ function MissingPanel:Update(missingMaterials)
         end
     end
 
-    self.frame.total:SetText("Total: " .. Utils.FormatMoney(totalCost))
+    local recipeCosts = missingMaterials and missingMaterials.recipeCosts or 0
+    if recipeCosts > 0 then
+        self.frame.total:SetText(string.format("Materials: %s  |cFF888888+ %s recipes|r",
+            Utils.FormatMoney(totalCost), Utils.FormatMoney(recipeCosts)))
+    else
+        self.frame.total:SetText("Total: " .. Utils.FormatMoney(totalCost))
+    end
 
     -- Update content height for scrolling
     self.frame.content:SetHeight(math.max(yOffset + 10, self.frame:GetHeight() - 70))

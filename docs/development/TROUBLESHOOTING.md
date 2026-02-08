@@ -163,6 +163,37 @@ Verify CraftLib is loaded and has profession data:
    - Check which price provider is active in settings
    - Items with no AH data use vendor prices (may be 0)
 
+### Alternatives Not Showing
+
+**Symptoms:** Expand step but no "Alternatives" section appears
+
+**Check:**
+1. Does the step have multiple candidates?
+   - Enable "Pathfinder Scoring" debug category
+   - Look for `=== Scoring candidates at skill X ===`
+   - If only 1 recipe scored, no alternatives exist at that skill level
+
+2. Are all other recipes gray?
+   - Gray recipes are filtered from candidates
+
+### Pins Not Working After Recalculate
+
+**Symptoms:** Click recalculate but pinned recipe not used
+
+**Check:**
+1. Is the pinned recipe still valid at that skill level?
+   - If recipe went gray or lacks price data, pin is silently ignored
+
+2. Check pathfinder debug:
+   - Enable "Pathfinder Scoring" category
+   - Look for `>>> PINNED:` messages after recalculate
+   - If missing, the pin didn't match any candidate
+
+3. Verify pin state:
+   ```
+   /run for k,v in pairs(LazyProf.Pathfinder.pinnedRecipes) do print("Skill "..k..": "..v) end
+   ```
+
 ### Settings Not Saving
 
 **Symptoms:** Settings reset after `/reload`

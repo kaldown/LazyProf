@@ -46,8 +46,9 @@ LazyProf calculates the optimal (cheapest) path to level professions in World of
 1. **Load**: Registry loads profession data from CraftLib
 2. **Detect**: Registry detects which profession is open
 3. **Price**: PriceManager queries TSM/Auctionator/Vendor for material costs
-4. **Calculate**: Pathfinder computes optimal leveling path
+4. **Calculate**: Pathfinder computes optimal leveling path (respecting user pins)
 5. **Display**: UI shows milestones, shopping list, and next-craft arrow
+6. **Pin** (optional): User browses alternatives per step, pins overrides, recalculates
 
 ## Key Modules
 

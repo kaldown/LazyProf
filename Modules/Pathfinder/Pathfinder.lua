@@ -237,7 +237,9 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
         for _, reagent in ipairs(step.recipe.reagents) do
             local itemId = reagent.itemId
             if not needed[itemId] then
-                needed[itemId] = { count = 0, nameFromData = reagent.name }
+                needed[itemId] = { count = 0, nameFromData = reagent.name, firstUsedAtSkill = step.skillStart }
+            else
+                needed[itemId].firstUsedAtSkill = math.min(needed[itemId].firstUsedAtSkill, step.skillStart)
             end
             needed[itemId].count = needed[itemId].count + (reagent.count * step.quantity)
         end
@@ -286,7 +288,9 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
 
                     -- Add source materials to resolvedNeeded (preserve name fallback)
                     if not resolvedNeeded[source.itemId] then
-                        resolvedNeeded[source.itemId] = { count = 0, nameFromData = source.name }
+                        resolvedNeeded[source.itemId] = { count = 0, nameFromData = source.name, firstUsedAtSkill = data.firstUsedAtSkill }
+                    else
+                        resolvedNeeded[source.itemId].firstUsedAtSkill = math.min(resolvedNeeded[source.itemId].firstUsedAtSkill, data.firstUsedAtSkill)
                     end
                     resolvedNeeded[source.itemId].count = resolvedNeeded[source.itemId].count + source.totalNeeded
 
@@ -320,18 +324,23 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
                     usingDesc = usingDesc,
                     craftCost = resolution.craftCost,
                     sourceItems = resolution.sourceItems,
+                    firstUsedAtSkill = data.firstUsedAtSkill,
                 })
             else
                 -- Not crafting - add directly to resolvedNeeded (preserve name fallback)
                 if not resolvedNeeded[itemId] then
-                    resolvedNeeded[itemId] = { count = 0, nameFromData = data.nameFromData }
+                    resolvedNeeded[itemId] = { count = 0, nameFromData = data.nameFromData, firstUsedAtSkill = data.firstUsedAtSkill }
+                else
+                    resolvedNeeded[itemId].firstUsedAtSkill = math.min(resolvedNeeded[itemId].firstUsedAtSkill, data.firstUsedAtSkill)
                 end
                 resolvedNeeded[itemId].count = resolvedNeeded[itemId].count + afterBags
             end
         elseif afterBags > 0 then
             -- No MaterialResolver or no resolution needed (preserve name fallback)
             if not resolvedNeeded[itemId] then
-                resolvedNeeded[itemId] = { count = 0, nameFromData = data.nameFromData }
+                resolvedNeeded[itemId] = { count = 0, nameFromData = data.nameFromData, firstUsedAtSkill = data.firstUsedAtSkill }
+            else
+                resolvedNeeded[itemId].firstUsedAtSkill = math.min(resolvedNeeded[itemId].firstUsedAtSkill, data.firstUsedAtSkill)
             end
             resolvedNeeded[itemId].count = resolvedNeeded[itemId].count + afterBags
         end
@@ -396,6 +405,7 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
                     missing = fromBankCount,
                     estimatedCost = 0, -- Bank items are free
                     purpose = purpose, -- Annotation for UI
+                    firstUsedAtSkill = data.firstUsedAtSkill,
                 })
             end
 
@@ -408,6 +418,7 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
                     missing = fromAltCount,
                     have = inAlts,
                     characters = altCharacters,  -- Which alts have this item
+                    firstUsedAtSkill = data.firstUsedAtSkill,
                 })
             end
 
@@ -421,18 +432,40 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
                     need = need,
                     missing = fromAHCount,
                     estimatedCost = price * fromAHCount,
+                    firstUsedAtSkill = data.firstUsedAtSkill,
                 })
             end
         end
     end
 
-    -- Sort by cost descending (AH items) and by name (bank/craft/alt items)
-    table.sort(fromAH, function(a, b) return a.estimatedCost > b.estimatedCost end)
-    table.sort(fromBank, function(a, b) return (a.name or "") < (b.name or "") end)
-    table.sort(fromAlts, function(a, b) return (a.name or "") < (b.name or "") end)
-    table.sort(toCraft, function(a, b) return (a.name or "") < (b.name or "") end)
+    -- Sort by skill level when materials are first consumed, then by name
+    local function sortBySkillThenName(a, b)
+        if a.firstUsedAtSkill ~= b.firstUsedAtSkill then
+            return a.firstUsedAtSkill < b.firstUsedAtSkill
+        end
+        return (a.name or "") < (b.name or "")
+    end
+    table.sort(fromAH, sortBySkillThenName)
+    table.sort(fromBank, sortBySkillThenName)
+    table.sort(fromAlts, sortBySkillThenName)
+    table.sort(toCraft, sortBySkillThenName)
 
-    return { fromBank = fromBank, fromAlts = fromAlts, toCraft = toCraft, fromAH = fromAH }
+    -- Calculate recipe acquisition costs (one-time costs for unlearned recipes)
+    local seenRecipes = {}
+    local recipeCosts = 0
+    for _, step in ipairs(steps) do
+        if not step.recipe.learned and step.recipe._sourceInfo and not seenRecipes[step.recipe.id] then
+            seenRecipes[step.recipe.id] = true
+            local srcType = step.recipe._sourceInfo.type
+            if srcType == "trainer" or srcType == "vendor" then
+                recipeCosts = recipeCosts + (step.recipe._sourceInfo.cost or 0)
+            elseif srcType == "ah" then
+                recipeCosts = recipeCosts + (step.recipe._sourceInfo.price or 0)
+            end
+        end
+    end
+
+    return { fromBank = fromBank, fromAlts = fromAlts, toCraft = toCraft, fromAH = fromAH, recipeCosts = recipeCosts }
 end
 
 -- Break down path by individual steps (step-by-step format)

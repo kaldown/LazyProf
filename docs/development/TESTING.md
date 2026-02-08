@@ -54,6 +54,19 @@ After making changes, run `/reload` and verify:
 2. Put materials in bank
 3. Shopping list should show "From Bank" for bank materials
 
+### Testing Alternative Recipes & Pinning
+
+1. Open profession with multiple recipe choices at same skill level
+2. Expand a step in milestone breakdown
+3. Verify ingredients show first, then collapsible "Alternatives (N)" section
+4. Expand alternatives, verify groups of 5
+5. Hover tooltip shows materials and source info for unlearned recipes (`[!]`)
+6. Click alternative to pin it - verify `[*]` indicator on skill range
+7. Verify "Recalculate with N pins" button appears (green, full-width)
+8. Click recalculate - verify path updates respecting pinned recipes
+9. Test unpin by clicking pinned recipe again
+10. Test `/reload` clears all pins
+
 ## Debugging
 
 ### BugSack/BugGrabber Setup

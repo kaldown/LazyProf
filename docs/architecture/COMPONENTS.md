@@ -51,6 +51,8 @@ LazyProf/
 - Accept strategy (Cheapest, Fastest)
 - Query pricing for all recipes
 - Build path from current skill to target
+- Store all scored alternatives per step
+- Manage session-only recipe pins (user overrides via `PinRecipe`/`UnpinRecipe`)
 - Return ordered list of recipes to craft
 
 ### PriceManager.lua
@@ -67,6 +69,8 @@ LazyProf/
 ### MilestoneBreakdown.lua
 
 Shows the calculated path broken into milestones (skill brackets).
+
+**Alternative recipes**: Expanding a step shows ingredients, then a collapsible "Alternatives" section with all scored candidates grouped in packs of 5. Users can pin alternative recipes and recalculate the path. Pins are session-only.
 
 ### MissingMaterials.lua
 
