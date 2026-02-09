@@ -2,7 +2,7 @@
 
 All notable changes to LazyProf will be documented in this file.
 
-## [Unreleased]
+## [0.4.1] - 2026-02-09
 
 ### Fixed
 - **Recipe Details difficulty bar now accounts for racial profession bonus**: Previously showed incorrect color (e.g., gray instead of green for gnomes with +15 Engineering)
