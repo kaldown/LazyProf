@@ -17,7 +17,6 @@ LazyProf.defaults = {
         showMissingMaterials = true,
         calculateFromCurrentSkill = false,
         includeBankItems = false,
-        useOwnedMaterials = false,
         includeAltCharacters = false,
 
         -- Minimap button
@@ -217,11 +216,20 @@ LazyProf.options = {
                         LazyProf:Recalculate()
                     end,
                 },
+                shoppingListHeader = {
+                    name = "Shopping List",
+                    type = "header",
+                    order = 5,
+                },
                 includeBankItems = {
                     name = "Include bank items",
-                    desc = Syndicator and "Count items in your bank when calculating missing materials" or "Count items in your bank when calculating missing materials. Requires Baganator addon.",
+                    desc = "When enabled, items in your bank are subtracted from the " ..
+                           "shopping list so you only see what you still need to buy.\n\n" ..
+                           (Syndicator and "" or "Requires: Syndicator addon installed.\n\n") ..
+                           "Example: You need 20 Thorium Bars but have 8 in your bank. " ..
+                           "The shopping list shows 12 to buy from the AH.",
                     type = "toggle",
-                    order = 5,
+                    order = 6,
                     width = "full",
                     disabled = function() return not Syndicator end,
                     get = function() return LazyProf.db.profile.includeBankItems end,
@@ -230,43 +238,20 @@ LazyProf.options = {
                         LazyProf:Recalculate()
                     end,
                 },
-                inventoryHeader = {
-                    name = "Inventory Optimization",
-                    type = "header",
-                    order = 6,
-                },
-                useOwnedMaterials = {
-                    name = "Use owned materials as free",
-                    desc = "When enabled, materials you already own (in bags and bank) " ..
-                           "are treated as FREE (0 cost) when calculating the cheapest " ..
-                           "leveling path.\n\n" ..
-                           "Example: If a recipe needs 10 Wool Cloth and you have 10 in " ..
-                           "your bank, that recipe costs 0g instead of market price.\n\n" ..
-                           "This helps the pathfinder choose recipes that use materials " ..
-                           "you already have, minimizing actual gold spent.",
-                    type = "toggle",
-                    order = 7,
-                    width = "full",
-                    get = function() return LazyProf.db.profile.useOwnedMaterials end,
-                    set = function(_, v)
-                        LazyProf.db.profile.useOwnedMaterials = v
-                        LazyProf:Recalculate()
-                    end,
-                },
                 includeAltCharacters = {
                     name = "Include alt characters",
                     desc = "When enabled, materials on ALL your characters (bags and " ..
-                           "banks) are considered when calculating path costs.\n\n" ..
+                           "banks) are subtracted from the shopping list.\n\n" ..
                            "Requires: Syndicator addon installed.\n\n" ..
-                           "Example: Your alt has 200 Silk Cloth. Recipes using Silk " ..
-                           "will be preferred since you already own the materials.\n\n" ..
+                           "Example: Your alt has 200 Silk Cloth. The shopping list " ..
+                           "will show 200 fewer Silk Cloth to buy from the AH.\n\n" ..
                            "Note: You'll need to transfer materials to your crafter " ..
                            "before crafting - the addon just helps you plan.",
                     type = "toggle",
-                    order = 8,
+                    order = 7,
                     width = "full",
                     disabled = function()
-                        return not LazyProf.db.profile.useOwnedMaterials or not Syndicator
+                        return not Syndicator
                     end,
                     get = function() return LazyProf.db.profile.includeAltCharacters end,
                     set = function(_, v)

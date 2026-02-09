@@ -42,7 +42,12 @@ function Inventory:ScanBank()
     end
 
     local items = {}
-    local character = Syndicator.API.GetCurrentCharacter()
+    local characterName = Syndicator.API.GetCurrentCharacter()
+    if not characterName then
+        return items
+    end
+
+    local character = Syndicator.API.GetByCharacterFullName(characterName)
     if not character then
         return items
     end
@@ -143,21 +148,34 @@ function Inventory:ScanAll()
     local altItems = {}
     local altItemsByCharacter = {}
 
-    -- Always include bank in combined inventory if includeBankItems is on (for shopping list)
-    -- OR if useOwnedMaterials is on (for pathfinding)
-    if LazyProf.db.profile.includeBankItems or LazyProf.db.profile.useOwnedMaterials then
+    -- Include bank in combined inventory for shopping list
+    local bagCount = 0
+    for _ in pairs(items) do bagCount = bagCount + 1 end
+    LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items in bags", bagCount))
+
+    if LazyProf.db.profile.includeBankItems then
         bankItems = self:ScanBank()
+        local bankCount = 0
+        for _ in pairs(bankItems) do bankCount = bankCount + 1 end
+        LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items in bank", bankCount))
         for itemId, count in pairs(bankItems) do
             items[itemId] = (items[itemId] or 0) + count
         end
+    else
+        LazyProf:Debug("pathfinder", "Inventory scan: bank disabled")
     end
 
-    -- Include alts if useOwnedMaterials AND includeAltCharacters
-    if LazyProf.db.profile.useOwnedMaterials and LazyProf.db.profile.includeAltCharacters then
+    -- Include alts for shopping list
+    if LazyProf.db.profile.includeAltCharacters then
         altItems, altItemsByCharacter = self:ScanAlts()
+        local altCount = 0
+        for _ in pairs(altItems) do altCount = altCount + 1 end
+        LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items from alts", altCount))
         for itemId, count in pairs(altItems) do
             items[itemId] = (items[itemId] or 0) + count
         end
+    else
+        LazyProf:Debug("pathfinder", "Inventory scan: alts disabled")
     end
 
     return items, bankItems, altItems, altItemsByCharacter

@@ -41,6 +41,11 @@ function Pathfinder:Calculate()
 
     LazyProf:Debug("pathfinder", string.format("Calculating path: %s %d -> %d (actual skill: %d)",
         skillName, startSkill, targetSkill, currentSkill))
+    LazyProf:Debug("pathfinder", string.format("Settings: strategy=%s, fromCurrentSkill=%s, bank=%s, alts=%s",
+        LazyProf.db.profile.strategy,
+        tostring(LazyProf.db.profile.calculateFromCurrentSkill),
+        tostring(LazyProf.db.profile.includeBankItems),
+        tostring(LazyProf.db.profile.includeAltCharacters)))
 
     -- Get recipes with learned status
     local recipes = LazyProf.Professions:GetRecipesWithLearnedStatus(LazyProf.Professions.active)
@@ -97,8 +102,9 @@ function Pathfinder:Calculate()
             racialBonus, LazyProf.Professions.active))
     end
 
-    -- Calculate path (pass pinned recipes for user overrides)
-    local steps = strategy:Calculate(startSkill, targetSkill, recipes, inventory, prices, racialBonus, self.pinnedRecipes)
+    -- Calculate path with empty inventory so scoring uses market prices only
+    -- (owned materials are handled separately by the shopping list)
+    local steps = strategy:Calculate(startSkill, targetSkill, recipes, {}, prices, racialBonus, self.pinnedRecipes)
 
     -- Build result
     self.currentPath = {
@@ -194,8 +200,9 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel)
             racialBonus, profKey))
     end
 
-    -- Calculate path (pass pinned recipes for user overrides)
-    local steps = strategy:Calculate(skillLevel, targetSkill, recipes, inventory, prices, racialBonus, self.pinnedRecipes)
+    -- Calculate path with empty inventory so scoring uses market prices only
+    -- (owned materials are handled separately by the shopping list)
+    local steps = strategy:Calculate(skillLevel, targetSkill, recipes, {}, prices, racialBonus, self.pinnedRecipes)
 
     -- Build result (similar to Calculate() but stored separately)
     local path = {
@@ -327,22 +334,24 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
                     firstUsedAtSkill = data.firstUsedAtSkill,
                 })
             else
-                -- Not crafting - add directly to resolvedNeeded (preserve name fallback)
+                -- Not crafting - add directly to resolvedNeeded with full need
+                -- (bag subtraction happens in pass 2 below)
                 if not resolvedNeeded[itemId] then
                     resolvedNeeded[itemId] = { count = 0, nameFromData = data.nameFromData, firstUsedAtSkill = data.firstUsedAtSkill }
                 else
                     resolvedNeeded[itemId].firstUsedAtSkill = math.min(resolvedNeeded[itemId].firstUsedAtSkill, data.firstUsedAtSkill)
                 end
-                resolvedNeeded[itemId].count = resolvedNeeded[itemId].count + afterBags
+                resolvedNeeded[itemId].count = resolvedNeeded[itemId].count + need
             end
         elseif afterBags > 0 then
-            -- No MaterialResolver or no resolution needed (preserve name fallback)
+            -- No MaterialResolver or no resolution needed - add full need
+            -- (bag subtraction happens in pass 2 below)
             if not resolvedNeeded[itemId] then
                 resolvedNeeded[itemId] = { count = 0, nameFromData = data.nameFromData, firstUsedAtSkill = data.firstUsedAtSkill }
             else
                 resolvedNeeded[itemId].firstUsedAtSkill = math.min(resolvedNeeded[itemId].firstUsedAtSkill, data.firstUsedAtSkill)
             end
-            resolvedNeeded[itemId].count = resolvedNeeded[itemId].count + afterBags
+            resolvedNeeded[itemId].count = resolvedNeeded[itemId].count + need
         end
     end
 

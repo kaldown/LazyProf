@@ -487,6 +487,23 @@ function LazyProf:CreateDebugFrame()
                 UIDropDownMenu_SetText(dropdown, LazyProf.debugCategoryNames[cat])
                 if frame.bracketDropdown then
                     if cat == "scoring" then
+                        -- Auto-select bracket matching current skill level
+                        local autoIndex = nil
+                        local path = LazyProf.Pathfinder and LazyProf.Pathfinder.currentPath
+                        if path and path.currentSkill then
+                            for i, bracket in ipairs(LazyProf.skillBrackets) do
+                                if path.currentSkill >= bracket.min and path.currentSkill < bracket.max then
+                                    autoIndex = i
+                                    break
+                                end
+                            end
+                        end
+                        LazyProf.debugScoringBracket = autoIndex
+                        if autoIndex then
+                            UIDropDownMenu_SetText(frame.bracketDropdown, LazyProf.skillBrackets[autoIndex].name)
+                        else
+                            UIDropDownMenu_SetText(frame.bracketDropdown, "All Skill Levels")
+                        end
                         frame.bracketDropdown:Show()
                     else
                         frame.bracketDropdown:Hide()

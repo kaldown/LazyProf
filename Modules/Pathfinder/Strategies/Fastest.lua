@@ -49,7 +49,7 @@ LazyProf.PathfinderStrategies.fastest = {
                 local craftCost = 0
                 for _, reagent in ipairs(recipe.reagents) do
                     local price = prices[reagent.itemId] or 0
-                    local owned = LazyProf.db.profile.useOwnedMaterials and (simulatedInventory[reagent.itemId] or 0) or 0
+                    local owned = simulatedInventory[reagent.itemId] or 0
                     local toBuy = math.max(0, reagent.count - owned)
                     craftCost = craftCost + (price * toBuy)
                 end

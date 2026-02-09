@@ -4,9 +4,14 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **Removed "Use owned materials as free" setting**: Pathfinder now always scores recipes at market price, producing consistently optimal paths. Owned materials (bags, bank, alts) are subtracted in the shopping list instead, so you still see what you actually need to buy. The "Include bank items" and "Include alt characters" settings now work independently under a new "Shopping List" section.
+
 ### Fixed
 - **Skill-up probability now uses accurate continuous formula** ([#6](https://github.com/kaldown/LazyProf/issues/6)): Replaced flat per-color probabilities (yellow=50%, green=25%) with the actual WoW formula: `(gray - skill) / (gray - yellow)`. Deep green recipes near gray previously showed 25% when real chance was 1-5%, causing massively underestimated craft counts. Early yellow recipes were undervalued at 50% when real chance was ~100%.
 - **Dynamic step size cap prevents over-committing to low-probability recipes**: The pathfinder now limits step size proportionally to skillup chance (e.g., 25 crafts at 20% instead of 100), forcing re-evaluation sooner so cheaper alternatives can win after owned materials are depleted.
+- **Bank scanning now works**: `ScanBank()` was calling `Syndicator.API.GetCurrentCharacter()` and treating the returned character name as a data object. Bank items were silently ignored since the feature was introduced. Now correctly fetches character data via `GetByCharacterFullName()`.
+- **Shopping list no longer double-subtracts bag items**: Materials in your bags were subtracted twice (once during aggregation, once during categorization), causing the shopping list to under-report quantities you actually need to buy.
 
 ## [0.4.1] - 2026-02-09
 

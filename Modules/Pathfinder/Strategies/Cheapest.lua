@@ -50,7 +50,7 @@ LazyProf.PathfinderStrategies.cheapest = {
                 local craftCost = 0
                 for _, reagent in ipairs(recipe.reagents) do
                     local price = prices[reagent.itemId] or 0
-                    local owned = LazyProf.db.profile.useOwnedMaterials and (simulatedInventory[reagent.itemId] or 0) or 0
+                    local owned = simulatedInventory[reagent.itemId] or 0
                     local toBuy = math.max(0, reagent.count - owned)
                     craftCost = craftCost + (price * toBuy)
                 end
@@ -204,13 +204,7 @@ LazyProf.PathfinderStrategies.cheapest = {
             end
 
             local needed = reagent.count
-            local owned = 0
-
-            -- Only consider owned materials if useOwnedMaterials is enabled
-            if LazyProf.db.profile.useOwnedMaterials then
-                owned = inventory[reagent.itemId] or 0
-            end
-
+            local owned = inventory[reagent.itemId] or 0
             local toBuy = math.max(0, needed - owned)
 
             theoreticalCost = theoreticalCost + (price * needed)
