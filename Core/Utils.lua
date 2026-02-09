@@ -67,6 +67,37 @@ function Utils.FormatMoney(copper)
     return str:trim()
 end
 
+-- Skill-up probability: continuous linear interpolation from yellow to gray.
+--
+-- Formula: chance = (gray - effectiveSkill) / (gray - yellow), clamped to [0, 1]
+--
+-- This replaces the old flat model (orange=100%, yellow=50%, green=25%, gray=0%).
+-- The real WoW formula is a smooth linear decline: 100% at the yellow threshold,
+-- ~50% at the green threshold, and 0% at gray. No discrete color-band steps.
+--
+-- Source: Wowpedia "Profession" article, AzerothCore issue #14518,
+--         Wowhead comment #479890 on spell 56462.
+--
+-- effectiveSkill: player's current skill minus any racial bonus (caller handles this)
+-- skillRange: recipe's { orange, yellow, green, gray } threshold table
+-- Returns: 0.0 to 1.0 (probability of gaining a skill point per craft)
+function Utils.GetSkillUpChance(effectiveSkill, skillRange)
+    local gray = skillRange.gray
+    local yellow = skillRange.yellow
+
+    -- Guard: degenerate recipe where yellow >= gray has no valid skillup range
+    if yellow >= gray then
+        return 0
+    end
+
+    local chance = (gray - effectiveSkill) / (gray - yellow)
+
+    -- Clamp to [0, 1]:
+    --   > 1.0 in orange range (effectiveSkill < yellow) -> 100%
+    --   < 0.0 in gray range (effectiveSkill >= gray)    -> 0%
+    return math.max(0, math.min(1, chance))
+end
+
 -- Get skill color based on current skill vs recipe ranges
 function Utils.GetSkillColor(currentSkill, skillRange)
     if currentSkill < skillRange.orange then

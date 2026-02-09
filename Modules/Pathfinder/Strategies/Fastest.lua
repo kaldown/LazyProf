@@ -222,13 +222,12 @@ LazyProf.PathfinderStrategies.fastest = {
         return totalSkillups, totalCost
     end,
 
-    -- Get expected skillups based on color
+    -- Get expected skillups using continuous linear formula
     -- racialBonus: extends color ranges (e.g., Gnome +15 Engineering)
     GetExpectedSkillups = function(self, recipe, currentSkill, racialBonus)
         racialBonus = racialBonus or 0
         local effectiveSkill = currentSkill - racialBonus
-        local color = Utils.GetSkillColor(effectiveSkill, recipe.skillRange)
-        return Constants.SKILLUP_CHANCE[color] or 0
+        return Utils.GetSkillUpChance(effectiveSkill, recipe.skillRange)
     end,
 
     -- Calculate how many crafts until next breakpoint
@@ -255,8 +254,9 @@ LazyProf.PathfinderStrategies.fastest = {
             end
         end
 
-        -- Check for color changes of current recipe (yellow and green boundaries)
-        -- Only consider boundaries above current skill
+        -- Color-change breakpoints: even though skill-up probability is now continuous
+        -- (no discrete jump at yellow/green), we still re-evaluate at these boundaries
+        -- because a different recipe may become more cost-effective after a color transition.
         if yellowAt > currentSkill and yellowAt < nextBreakpoint then
             nextBreakpoint = yellowAt
         end

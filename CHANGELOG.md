@@ -2,6 +2,11 @@
 
 All notable changes to LazyProf will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **Skill-up probability now uses accurate continuous formula** ([#6](https://github.com/kaldown/LazyProf/issues/6)): Replaced flat per-color probabilities (yellow=50%, green=25%) with the actual WoW formula: `(gray - skill) / (gray - yellow)`. Deep green recipes near gray previously showed 25% when real chance was 1-5%, causing massively underestimated craft counts. Early yellow recipes were undervalued at 50% when real chance was ~100%.
+
 ## [0.4.1] - 2026-02-09
 
 ### Fixed

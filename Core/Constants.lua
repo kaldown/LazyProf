@@ -5,14 +5,6 @@ LazyProf.Constants = {
     -- Skill milestones (when you need to train next rank)
     MILESTONES = {75, 150, 225, 300, 375},
 
-    -- Skill-up probability by color
-    SKILLUP_CHANCE = {
-        orange = 1.0,
-        yellow = 0.5,
-        green = 0.25,
-        gray = 0,
-    },
-
     -- Recipe source types
     SOURCE_TYPE = {
         TRAINER = "trainer",
