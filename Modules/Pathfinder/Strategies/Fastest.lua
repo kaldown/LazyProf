@@ -65,15 +65,21 @@ LazyProf.PathfinderStrategies.fastest = {
             -- Sort by score (lowest = best first)
             table.sort(alternatives, function(a, b) return a.score < b.score end)
 
-            -- Select best recipe (alternatives[1]), respecting pins
-            local best = alternatives[1] and alternatives[1].recipe
-            local bestScore = alternatives[1] and alternatives[1].score
+            -- Select best available recipe (skip unavailable for auto-selection)
+            local best, bestScore
+            for _, alt in ipairs(alternatives) do
+                if not alt.recipe._isUnavailable then
+                    best = alt.recipe
+                    bestScore = alt.score
+                    break
+                end
+            end
 
             -- Check for pinned recipe override
             local pinnedId = pinnedRecipes[simulatedSkill]
             if pinnedId then
                 for _, alt in ipairs(alternatives) do
-                    if alt.recipe.id == pinnedId and alt.score < math.huge then
+                    if alt.recipe.id == pinnedId then
                         best = alt.recipe
                         bestScore = alt.score
                         LazyProf:Debug("scoring", ">>> PINNED: " .. best.name .. " (overriding optimizer)")
@@ -122,17 +128,28 @@ LazyProf.PathfinderStrategies.fastest = {
             if currentSkill >= recipe.skillRequired then
                 -- Not gray yet? (uses effective skill for color check)
                 if effectiveSkill < recipe.skillRange.gray then
-                    -- Already learned - always include
                     if recipe.learned then
+                        -- Already learned - always available
+                        recipe._isUnavailable = nil
+                        recipe._sourceInfo = nil
                         table.insert(candidates, recipe)
-                    elseif LazyProf.db.profile.suggestUnlearnedRecipes then
-                        -- Unlearned - check availability
-                        local isAvailable, sourceInfo = LazyProf.RecipeAvailability:IsRecipeAvailable(recipe)
-                        if isAvailable then
-                            -- Attach source info for tooltip display
-                            recipe._sourceInfo = sourceInfo
-                            table.insert(candidates, recipe)
+                    else
+                        -- Unlearned: check availability if setting enabled
+                        if LazyProf.db.profile.suggestUnlearnedRecipes then
+                            local isAvailable, sourceInfo = LazyProf.RecipeAvailability:IsRecipeAvailable(recipe)
+                            if isAvailable then
+                                recipe._sourceInfo = sourceInfo
+                                recipe._isUnavailable = nil
+                            else
+                                recipe._sourceInfo = nil
+                                recipe._isUnavailable = true
+                            end
+                        else
+                            -- Setting off: include for display but mark unavailable
+                            recipe._sourceInfo = nil
+                            recipe._isUnavailable = true
                         end
+                        table.insert(candidates, recipe)
                     end
                 end
             end
@@ -148,6 +165,12 @@ LazyProf.PathfinderStrategies.fastest = {
     ScoreRecipe = function(self, recipe, currentSkill, targetSkill, racialBonus)
         racialBonus = racialBonus or 0
         local effectiveSkill = currentSkill - racialBonus
+
+        -- Unavailable recipes: display-only in alternatives, never auto-selected
+        if recipe._isUnavailable then
+            return math.huge
+        end
+
         local expected = self:GetExpectedSkillups(recipe, currentSkill, racialBonus)
 
         if expected <= 0 then

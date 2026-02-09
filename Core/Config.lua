@@ -10,7 +10,6 @@ LazyProf.defaults = {
         materialResolution = Constants.MATERIAL_RESOLUTION.COST_COMPARE,
         useIntermediates = true,
         suggestUnlearnedRecipes = true,
-        includeDropRecipes = false,
 
         -- Display
         displayMode = Constants.DISPLAY_MODE.ARROW_TOOLTIP,

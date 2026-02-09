@@ -4,6 +4,15 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **Alternatives now show all recipes regardless of availability**: Drop, reputation, and quest recipes that were previously hidden when not on the Auction House now appear in the alternatives list
+  - Unavailable recipes are visually dimmed and sorted to the bottom
+  - Tooltip shows source info (e.g., "Cenarion Expedition (Honored)") with "Not currently obtainable" note
+  - Users can pin unavailable recipes they plan to obtain
+  - Auto-selected path is unchanged - only available recipes are auto-picked
+- **Alternative row click now opens Recipe Details**: Click a row to see full recipe info before deciding; use the `[>]` pin indicator to toggle pins
+- Removed unused `includeDropRecipes` config setting
+
 ## [0.4.0] - 2026-02-08
 
 ### Added

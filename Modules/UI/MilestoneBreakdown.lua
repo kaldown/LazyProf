@@ -735,9 +735,12 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
         row:SetBackdropColor(0.1, 0.12, 0.18, 0.4)
     end
 
-    -- Pin indicator
-    row.pin = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    row.pin:SetPoint("LEFT", 2, 0)
+    -- Pin indicator button (clickable separately from row)
+    row.pinBtn = CreateFrame("Button", nil, row)
+    row.pinBtn:SetSize(18, ALTERNATIVE_ROW_HEIGHT)
+    row.pinBtn:SetPoint("LEFT", 0, 0)
+    row.pin = row.pinBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.pin:SetPoint("CENTER", row.pinBtn, "CENTER", 0, 0)
     if isThisPinned then
         row.pin:SetText("[*]")
         row.pin:SetTextColor(0.4, 0.7, 1)
@@ -745,6 +748,25 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
         row.pin:SetText("[>]")
         row.pin:SetTextColor(0.4, 0.4, 0.5)
     end
+
+    -- Pin button click: toggle pin
+    row.pinBtn:SetScript("OnClick", function()
+        if isThisPinned then
+            LazyProf.Pathfinder:UnpinRecipe(skillLevel)
+        else
+            LazyProf.Pathfinder:PinRecipe(skillLevel, alt.recipe.id)
+        end
+        self:Refresh()
+    end)
+    row.pinBtn:SetScript("OnEnter", function()
+        row.pin:SetTextColor(0.6, 0.8, 1)
+        -- Propagate hover to parent row for background highlight
+        row:GetScript("OnEnter")(row)
+    end)
+    row.pinBtn:SetScript("OnLeave", function()
+        row.pin:SetTextColor(isThisPinned and 0.4 or 0.4, isThisPinned and 0.7 or 0.4, isThisPinned and 1 or 0.5)
+        row:GetScript("OnLeave")(row)
+    end)
 
     -- Rank
     row.rank = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -783,16 +805,19 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
     end
     row.cost:SetTextColor(1, 1, 1)
 
-    -- Click to pin/unpin
+    -- Dim unavailable recipes visually
+    if alt.recipe._isUnavailable then
+        row.rank:SetAlpha(0.5)
+        row.recipe:SetAlpha(0.5)
+        row.skillup:SetAlpha(0.5)
+        row.cost:SetAlpha(0.5)
+    end
+
+    -- Click row to show recipe details
     row:SetScript("OnClick", function()
-        if isThisPinned then
-            -- Unpin
-            LazyProf.Pathfinder:UnpinRecipe(skillLevel)
-        else
-            -- Pin this recipe
-            LazyProf.Pathfinder:PinRecipe(skillLevel, alt.recipe.id)
+        if LazyProf.RecipeDetails then
+            LazyProf.RecipeDetails:Toggle(alt.recipe)
         end
-        self:Refresh()
     end)
 
     -- Hover effects
@@ -810,6 +835,9 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
         if isUnlearned then
             local sourceDesc = Utils.GetSourceDescription(alt.recipe.source)
             GameTooltip:AddLine("[!] Unlearned: " .. sourceDesc, 1, 0.53, 0)
+            if alt.recipe._isUnavailable then
+                GameTooltip:AddLine("    Not currently obtainable", 1, 0.3, 0.3)
+            end
         end
         GameTooltip:AddLine(string.format("Difficulty: %s (%d%% skillup chance)", alt.color, alt.expectedSkillups * 100), 0.7, 0.7, 0.7)
         if alt.score < math.huge then
@@ -833,10 +861,13 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
             GameTooltip:AddLine(string.format("  %dx %s", reagent.count, reagent.name or "Unknown"), 0.8, 0.8, 0.8)
         end
         GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Click for recipe details", 0.5, 0.5, 0.5)
         if isThisPinned then
-            GameTooltip:AddLine("Click to unpin", 0.5, 0.5, 0.5)
+            GameTooltip:AddLine("Click [*] to unpin", 0.5, 0.5, 0.5)
+        elseif alt.recipe._isUnavailable then
+            GameTooltip:AddLine("Click [>] to pin (you will need to obtain this recipe)", 0.5, 0.5, 0.5)
         else
-            GameTooltip:AddLine("Click to pin (then Recalculate)", 0.5, 0.5, 0.5)
+            GameTooltip:AddLine("Click [>] to pin (then Recalculate)", 0.5, 0.5, 0.5)
         end
         GameTooltip:Show()
     end)
