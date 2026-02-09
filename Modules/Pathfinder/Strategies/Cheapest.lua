@@ -375,8 +375,12 @@ LazyProf.PathfinderStrategies.cheapest = {
             nextBreakpoint = greenAt
         end
 
+        -- Dynamic cap: ~5 expected skill points per step before re-evaluation
+        local initialExpected = self:GetExpectedSkillups(recipe, currentSkill, racialBonus)
+        local maxQuantity = math.max(5, math.min(50, math.ceil(5 / math.max(0.01, initialExpected))))
+
         -- Craft until breakpoint, target, or max iterations
-        while simSkill < targetSkill and simSkill < nextBreakpoint and quantity < 100 do
+        while simSkill < targetSkill and simSkill < nextBreakpoint and quantity < maxQuantity do
             quantity = quantity + 1
             local expected = self:GetExpectedSkillups(recipe, simSkill, racialBonus)
             simSkill = simSkill + expected
