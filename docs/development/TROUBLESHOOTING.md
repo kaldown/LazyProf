@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-This guide helps you diagnose issues and capture information to share with Claude for debugging.
+This guide helps you diagnose issues and capture information for bug reports.
 
 ---
 
@@ -47,7 +47,7 @@ Enable debug mode in LazyProf settings to see detailed logging.
    - Click **"Copy Filtered"** - copies only messages matching current filter
    - Click **"Copy All"** - copies everything
 
-6. **Paste to Claude** - share the copied logs
+6. **Include in bug report** - share the copied logs
 
 ### What to Include When Reporting Issues
 
@@ -85,7 +85,7 @@ grep -A 5 "LazyProf" "/Volumes/kaldown/battlenet/world of warcraft/_anniversary_
 
 ---
 
-## Extracting Data for Claude
+## Extracting Debug Data
 
 ### SavedVariables (Database State)
 
@@ -229,7 +229,7 @@ Verify CraftLib is loaded and has profession data:
 
 ---
 
-## Sharing Information with Claude
+## Sharing Debug Information
 
 When reporting an issue, provide:
 

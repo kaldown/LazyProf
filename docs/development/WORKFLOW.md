@@ -162,6 +162,5 @@ This avoids burning version numbers on CI fixes.
 
 LazyProf depends on CraftLib. When CraftLib adds features:
 
-1. Check `~/.claude/NOTES.md` in LazyProf for pending CraftLib features
+1. Check CraftLib CHANGELOG.md for new features relevant to LazyProf
 2. Update LazyProf to use new CraftLib APIs when available
-3. Mark feature as used in NOTES.md
