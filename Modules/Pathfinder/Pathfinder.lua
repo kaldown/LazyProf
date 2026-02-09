@@ -582,15 +582,23 @@ function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, currentSkill,
     racialBonus = racialBonus or 0
     local breakdown = {}
 
+    -- Simulate inventory consumption: each step uses materials, reducing what's available for later steps
+    local remainingInventory = {}
+    for k, v in pairs(inventory) do remainingInventory[k] = v end
+
     for _, step in ipairs(steps) do
         -- Calculate materials for this step only
         local materials = {}
         for _, reagent in ipairs(step.recipe.reagents) do
             local need = reagent.count * step.quantity
-            local have = inventory[reagent.itemId] or 0
-            local missing = math.max(0, need - have)
+            local have = remainingInventory[reagent.itemId] or 0
+            local used = math.min(need, have)
+            local missing = need - used
             local name, link, icon = Utils.GetItemInfo(reagent.itemId)
             local price = prices[reagent.itemId] or 0
+
+            -- Consume from remaining inventory so later steps don't double-count
+            remainingInventory[reagent.itemId] = have - used
 
             -- Fallback to CraftLib's reagent name if GetItemInfo hasn't cached the item
             name = name or reagent.name or "Unknown"

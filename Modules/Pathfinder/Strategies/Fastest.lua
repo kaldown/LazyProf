@@ -19,6 +19,7 @@ LazyProf.PathfinderStrategies.fastest = {
         local path = {}
         local simulatedSkill = currentSkill
         local simulatedInventory = Utils.DeepCopy(inventory)
+        local purchasedRecipes = {}  -- Track recipes we've "bought" in simulation
 
         while simulatedSkill < targetSkill do
             -- Get craftable recipes that can still give skillups
@@ -95,7 +96,7 @@ LazyProf.PathfinderStrategies.fastest = {
 
             -- Calculate how many to craft (pass recipes for breakpoint detection)
             local quantity = self:CalculateQuantity(best, simulatedSkill, targetSkill, recipes, racialBonus)
-            local totalSkillups, totalCost = self:CalculateTotalCostAndSkillups(best, simulatedSkill, quantity, simulatedInventory, prices, racialBonus)
+            local totalSkillups, totalCost = self:CalculateTotalCostAndSkillups(best, simulatedSkill, quantity, simulatedInventory, prices, racialBonus, purchasedRecipes)
 
             -- Add step to path (with alternatives for UI)
             table.insert(path, {
@@ -106,6 +107,11 @@ LazyProf.PathfinderStrategies.fastest = {
                 totalCost = totalCost,
                 alternatives = alternatives,
             })
+
+            -- Mark recipe as purchased in simulation (so future steps don't re-add cost)
+            if not best.learned and best._sourceInfo then
+                purchasedRecipes[best.id] = true
+            end
 
             -- Update simulation
             simulatedSkill = path[#path].skillEnd
@@ -188,8 +194,10 @@ LazyProf.PathfinderStrategies.fastest = {
 
     -- Calculate total cost and skillups for a given quantity
     -- racialBonus: extends color ranges (e.g., Gnome +15 Engineering)
-    CalculateTotalCostAndSkillups = function(self, recipe, currentSkill, quantity, inventory, prices, racialBonus)
+    -- purchasedRecipes: table of recipe IDs already "bought" in this simulation (skip their acquisition cost)
+    CalculateTotalCostAndSkillups = function(self, recipe, currentSkill, quantity, inventory, prices, racialBonus, purchasedRecipes)
         racialBonus = racialBonus or 0
+        purchasedRecipes = purchasedRecipes or {}
         -- Calculate total cost (still track it for display)
         local totalCost = 0
         for _, reagent in ipairs(recipe.reagents) do
@@ -201,7 +209,8 @@ LazyProf.PathfinderStrategies.fastest = {
         end
 
         -- Add recipe acquisition cost (one-time, not per craft)
-        if not recipe.learned and recipe._sourceInfo then
+        -- Skip if already purchased in a prior step of this simulation
+        if not recipe.learned and not purchasedRecipes[recipe.id] and recipe._sourceInfo then
             local srcType = recipe._sourceInfo.type
             if srcType == "trainer" or srcType == "vendor" then
                 totalCost = totalCost + (recipe._sourceInfo.cost or 0)

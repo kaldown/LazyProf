@@ -12,6 +12,10 @@ All notable changes to LazyProf will be documented in this file.
   - Guild bank scanning available via new "Include guild bank" toggle (disabled by default)
   - New shopping list sections: "Check Mail", "Cancel from AH", "From Guild Bank"
 
+### Fixed
+- **Milestone breakdown no longer double-counts inventory**: Previously, each step independently subtracted owned materials (e.g., 3 Essence of Fire deducted from every step instead of only the first). Now simulates inventory consumption step-by-step so materials are allocated once.
+- **Recipe acquisition cost no longer inflated across steps**: Unlearned recipes spanning multiple steps (e.g., Lifelike Mechanical Toad across 4 steps) previously charged the recipe purchase cost on every step. Now charges once on the first step only. Scoring was already correct; only displayed totals were affected.
+
 ### Changed
 - **Scanner refactored to registry pattern**: Inventory sources are now modular - adding future sources requires only a new scan function and registry entry
 - **CalculateMissingMaterials simplified**: Source categorization uses waterfall pattern (bags, bank, mail, auctions, guild bank, alts, AH) with unified sourceBreakdown data
