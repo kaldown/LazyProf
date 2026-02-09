@@ -11,9 +11,10 @@ RecipeDetails.currentRecipe = nil
 RecipeDetails.showAllFactions = false
 
 local PANEL_WIDTH = 280
-local PANEL_HEIGHT = 350
+local PANEL_HEIGHT = 410
 local ROW_HEIGHT = 18
 local SECTION_SPACING = 12
+local THRESHOLD_ROW_HEIGHT = 13
 
 -- Initialize the recipe details panel
 function RecipeDetails:Initialize()
@@ -124,15 +125,24 @@ function RecipeDetails:CreateRecipeHeader()
     content.diffLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     content.diffLabel:SetPoint("LEFT", content.diffBg, "RIGHT", 8, 0)
     content.diffLabel:SetTextColor(0.7, 0.7, 0.7)
+
+    -- Difficulty threshold rows (orange, yellow, green, gray)
+    content.thresholdRows = {}
+    for i = 1, 4 do
+        local row = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        row:SetPoint("TOPLEFT", 4, -50 - (i - 1) * THRESHOLD_ROW_HEIGHT)
+        row:SetJustifyH("LEFT")
+        content.thresholdRows[i] = row
+    end
 end
 
 -- Create reagents section
 function RecipeDetails:CreateReagentsSection()
     local content = self.frame.content
 
-    -- Reagents header
+    -- Reagents header (shifted down to accommodate threshold rows)
     content.reagentsHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    content.reagentsHeader:SetPoint("TOPLEFT", 0, -58)
+    content.reagentsHeader:SetPoint("TOPLEFT", 0, -110)
     content.reagentsHeader:SetText("Reagents:")
     content.reagentsHeader:SetTextColor(1, 0.82, 0)
 
@@ -141,7 +151,7 @@ function RecipeDetails:CreateReagentsSection()
     for i = 1, 8 do
         local row = CreateFrame("Frame", nil, content)
         row:SetSize(PANEL_WIDTH - 24, ROW_HEIGHT)
-        row:SetPoint("TOPLEFT", 8, -58 - SECTION_SPACING - (i - 1) * ROW_HEIGHT)
+        row:SetPoint("TOPLEFT", 8, -110 - SECTION_SPACING - (i - 1) * ROW_HEIGHT)
 
         row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.text:SetPoint("LEFT", 0, 0)
@@ -156,16 +166,16 @@ end
 function RecipeDetails:CreateSourceSection()
     local content = self.frame.content
 
-    -- Source header
+    -- Source header (shifted down to accommodate threshold rows)
     content.sourceHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    content.sourceHeader:SetPoint("TOPLEFT", 0, -180)
+    content.sourceHeader:SetPoint("TOPLEFT", 0, -232)
     content.sourceHeader:SetText("Learn from:")
     content.sourceHeader:SetTextColor(1, 0.82, 0)
 
     -- Show all factions checkbox
     content.factionToggle = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
     content.factionToggle:SetSize(20, 20)
-    content.factionToggle:SetPoint("TOPRIGHT", -4, -178)
+    content.factionToggle:SetPoint("TOPRIGHT", -4, -230)
     content.factionToggle:SetChecked(self.showAllFactions)
     content.factionToggle:SetScript("OnClick", function(btn)
         self.showAllFactions = btn:GetChecked()
@@ -184,7 +194,7 @@ function RecipeDetails:CreateSourceSection()
     for i = 1, 6 do
         local row = CreateFrame("Frame", nil, content)
         row:SetSize(PANEL_WIDTH - 24, ROW_HEIGHT)
-        row:SetPoint("TOPLEFT", 8, -180 - SECTION_SPACING - (i - 1) * ROW_HEIGHT)
+        row:SetPoint("TOPLEFT", 8, -232 - SECTION_SPACING - (i - 1) * ROW_HEIGHT)
 
         row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.text:SetPoint("LEFT", 0, 0)
@@ -227,7 +237,8 @@ function RecipeDetails:CreateWowheadSection()
 end
 
 -- Show recipe details
-function RecipeDetails:Show(recipe)
+-- atSkillLevel: optional skill level for difficulty display (e.g., step's starting skill from milestone)
+function RecipeDetails:Show(recipe, atSkillLevel)
     if not recipe then return end
     if not self.frame then self:Initialize() end
 
@@ -245,7 +256,7 @@ function RecipeDetails:Show(recipe)
     content.skill:SetText("Requires: " .. (recipe.skillRequired or "?"))
 
     -- Update difficulty bar
-    self:UpdateDifficultyBar(recipe)
+    self:UpdateDifficultyBar(recipe, atSkillLevel)
 
     -- Update reagents
     self:UpdateReagentsSection(recipe)
@@ -269,25 +280,54 @@ function RecipeDetails:Show(recipe)
     self.frame:Show()
 end
 
--- Update difficulty bar based on current skill
-function RecipeDetails:UpdateDifficultyBar(recipe)
+-- Color name to display properties (bar color, width, capitalized label)
+local DIFFICULTY_DISPLAY = {
+    orange = { color = {1, 0.5, 0, 1}, width = 100, label = "Orange" },
+    yellow = { color = {1, 1, 0, 1}, width = 75, label = "Yellow" },
+    green  = { color = {0, 1, 0, 1}, width = 50, label = "Green" },
+    gray   = { color = {0.5, 0.5, 0.5, 1}, width = 25, label = "Gray" },
+}
+
+-- Ordered threshold keys matching thresholdRows[1..4]
+local THRESHOLD_ORDER = {
+    { key = "orange", label = "Orange" },
+    { key = "yellow", label = "Yellow" },
+    { key = "green",  label = "Green" },
+    { key = "gray",   label = "Gray" },
+}
+
+-- Update difficulty bar and threshold rows based on skill level
+-- atSkillLevel: optional explicit skill level (already includes racial bonus);
+--               when nil, uses current profession skill from TradeSkill API
+function RecipeDetails:UpdateDifficultyBar(recipe, atSkillLevel)
     local content = self.frame.content
     local range = recipe.skillRange
     local skillRequired = recipe.skillRequired
 
+    -- Hide thresholds if no range data
     if not range then
         content.diffBar:SetVertexColor(0.5, 0.5, 0.5, 1)
         content.diffBar:SetWidth(50)
         content.diffLabel:SetText("Unknown")
+        for _, row in ipairs(content.thresholdRows) do
+            row:SetText("")
+        end
         return
     end
 
-    -- Get current profession skill from TradeSkill API
-    local _, currentSkill = GetTradeSkillLine()
+    -- Determine skill to evaluate against
+    local currentSkill = atSkillLevel
+    if not currentSkill then
+        local _, apiSkill = GetTradeSkillLine()
+        currentSkill = apiSkill
+    end
     if not currentSkill then
         content.diffBar:SetVertexColor(0.5, 0.5, 0.5, 1)
         content.diffBar:SetWidth(50)
         content.diffLabel:SetText("Unknown")
+        for _, row in ipairs(content.thresholdRows) do
+            row:SetText("")
+        end
         return
     end
 
@@ -295,7 +335,10 @@ function RecipeDetails:UpdateDifficultyBar(recipe)
     if skillRequired and currentSkill < skillRequired then
         content.diffBg:Hide()
         content.diffBar:Hide()
-        content.diffLabel:SetText("")  -- "Requires: X" already shows the info
+        content.diffLabel:SetText("")
+        for _, row in ipairs(content.thresholdRows) do
+            row:SetText("")
+        end
         return
     end
 
@@ -305,27 +348,41 @@ function RecipeDetails:UpdateDifficultyBar(recipe)
     content.diffLabel:ClearAllPoints()
     content.diffLabel:SetPoint("LEFT", content.diffBg, "RIGHT", 8, 0)
 
-    local color, label
-    if currentSkill < range.yellow then
-        color = {1, 0.5, 0, 1} -- Orange
-        label = "Orange"
-        content.diffBar:SetWidth(100)
-    elseif currentSkill < range.green then
-        color = {1, 1, 0, 1} -- Yellow
-        label = "Yellow"
-        content.diffBar:SetWidth(75)
-    elseif currentSkill < range.gray then
-        color = {0, 1, 0, 1} -- Green
-        label = "Green"
-        content.diffBar:SetWidth(50)
-    else
-        color = {0.5, 0.5, 0.5, 1} -- Gray
-        label = "Gray"
-        content.diffBar:SetWidth(25)
-    end
+    -- Subtract racial bonus for color calculation (same as pathfinder)
+    local racialBonus = Utils.GetRacialProfessionBonus(LazyProf.Professions and LazyProf.Professions.active)
+    local effectiveSkill = currentSkill - racialBonus
+    local colorName = Utils.GetSkillColor(effectiveSkill, range)
+    local display = DIFFICULTY_DISPLAY[colorName] or DIFFICULTY_DISPLAY.gray
 
-    content.diffBar:SetVertexColor(unpack(color))
-    content.diffLabel:SetText(label)
+    content.diffBar:SetVertexColor(unpack(display.color))
+    content.diffBar:SetWidth(display.width)
+    content.diffLabel:SetText(display.label)
+
+    -- Populate threshold rows with colored difficulty levels
+    for i, t in ipairs(THRESHOLD_ORDER) do
+        local threshold = range[t.key]
+        local rowDisplay = DIFFICULTY_DISPLAY[t.key]
+        local isActive = (t.key == colorName)
+
+        -- Format: "Orange: 240" or "Orange: 240 [255]" with racial
+        local text = string.format("%s: %d", t.label, threshold)
+        if racialBonus > 0 then
+            text = text .. string.format(" [%d]", threshold + racialBonus)
+        end
+        if isActive then
+            text = "> " .. text
+        else
+            text = "  " .. text
+        end
+
+        content.thresholdRows[i]:SetText(text)
+        local r, g, b = rowDisplay.color[1], rowDisplay.color[2], rowDisplay.color[3]
+        if isActive then
+            content.thresholdRows[i]:SetTextColor(r, g, b)
+        else
+            content.thresholdRows[i]:SetTextColor(r * 0.5, g * 0.5, b * 0.5)
+        end
+    end
 end
 
 -- Update reagents section
@@ -439,10 +496,10 @@ function RecipeDetails:Hide()
 end
 
 -- Toggle visibility
-function RecipeDetails:Toggle(recipe)
+function RecipeDetails:Toggle(recipe, atSkillLevel)
     if self.frame and self.frame:IsVisible() and self.currentRecipe == recipe then
         self:Hide()
     else
-        self:Show(recipe)
+        self:Show(recipe, atSkillLevel)
     end
 end

@@ -492,13 +492,14 @@ function MilestonePanelClass:CreateUnlearnedIndicator(step, yOffset, contentWidt
     local sourceDesc = Utils.GetSourceDescription(step.recipe.source)
     row.text:SetText(string.format("|cFFFF8800[!] Unlearned:|r %s", sourceDesc))
 
-    -- Store recipe reference for click handler
+    -- Store recipe reference and skill level for click handler
     row.recipe = step.recipe
+    row.skillLevel = step.from
 
     -- Click to show recipe details panel
     row:SetScript("OnClick", function(self)
         if LazyProf.RecipeDetails then
-            LazyProf.RecipeDetails:Toggle(self.recipe)
+            LazyProf.RecipeDetails:Toggle(self.recipe, self.skillLevel)
         end
     end)
 
@@ -813,10 +814,10 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
         row.cost:SetAlpha(0.5)
     end
 
-    -- Click row to show recipe details
+    -- Click row to show recipe details (pass step skill level for accurate difficulty)
     row:SetScript("OnClick", function()
         if LazyProf.RecipeDetails then
-            LazyProf.RecipeDetails:Toggle(alt.recipe)
+            LazyProf.RecipeDetails:Toggle(alt.recipe, skillLevel)
         end
     end)
 

@@ -4,6 +4,13 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **Recipe Details difficulty bar now accounts for racial profession bonus**: Previously showed incorrect color (e.g., gray instead of green for gnomes with +15 Engineering)
+- **Recipe Details difficulty matches milestone context**: When opened from milestone breakdown, shows difficulty at the step's skill level rather than current skill
+
+### Added
+- **Difficulty thresholds in Recipe Details**: Shows all four difficulty levels (orange, yellow, green, gray) with their skill values, active level marked with `>`, and racial-adjusted thresholds in square brackets (e.g., `Green: 270 [285]`)
+
 ### Changed
 - **Alternatives now show all recipes regardless of availability**: Drop, reputation, and quest recipes that were previously hidden when not on the Auction House now appear in the alternatives list
   - Unavailable recipes are visually dimmed and sorted to the bottom
