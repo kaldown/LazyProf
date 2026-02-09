@@ -4,6 +4,18 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Extended inventory scanning**: Shopping list now checks mailbox, active AH listings, and guild bank for materials via Syndicator
+  - Mail items are always scanned (current character + alts when enabled)
+  - Active AH listings are always scanned, shown as "Cancel from AH" with distinct orange styling
+  - Guild bank scanning available via new "Include guild bank" toggle (disabled by default)
+  - New shopping list sections: "Check Mail", "Cancel from AH", "From Guild Bank"
+
+### Changed
+- **Scanner refactored to registry pattern**: Inventory sources are now modular - adding future sources requires only a new scan function and registry entry
+- **CalculateMissingMaterials simplified**: Source categorization uses waterfall pattern (bags, bank, mail, auctions, guild bank, alts, AH) with unified sourceBreakdown data
+- **Pathfinder debug logging improved**: `Calculate()` and `Recalculate()` now log what triggered them (e.g., "trade skill opened", "setting changed", "recalculate button (2 dirty pins)"). Active pins are logged before path calculation starts.
+
 ## [0.4.2] - 2026-02-09
 
 ### Changed

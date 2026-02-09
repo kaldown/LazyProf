@@ -313,14 +313,14 @@ function MilestonePanelClass:UpdateShoppingList(path, filteredBreakdown, bracket
     end
 
     -- Recalculate missing materials from filtered steps
-    local inventory, bankInventory, altInventory, altItemsByCharacter = LazyProf.Inventory:ScanAll()
+    local inventory, sourceBreakdown = LazyProf.Inventory:ScanAll()
     local prices = {}
     for itemId, cached in pairs(LazyProf.PriceManager.cache) do
         prices[itemId] = cached.price
     end
 
     local missingMaterials = LazyProf.Pathfinder:CalculateMissingMaterials(
-        filteredSteps, inventory, bankInventory, altInventory, altItemsByCharacter, prices
+        filteredSteps, inventory, sourceBreakdown, prices
     )
 
     local bracketLabel = bracket and bracket.name or nil
@@ -1125,18 +1125,21 @@ function MilestonePanelClass:CreateRecalculateButton(dirtyCount)
             -- Use THIS panel's stored path (not the global Pathfinder.currentPath)
             local currentPath = self.currentPath
             if currentPath then
+                local pinCount = LazyProf.Pathfinder:GetDirtyPinCount()
+                local reason = string.format("recalculate button (%d dirty pin%s)", pinCount, pinCount ~= 1 and "s" or "")
                 if currentPath.professionKey then
                     -- Planning mode - recalculate and update this panel
                     local path = LazyProf.Pathfinder:CalculateForProfession(
                         currentPath.professionKey,
-                        currentPath.currentSkill
+                        currentPath.currentSkill,
+                        reason
                     )
                     if path then
                         self:Update(path)
                     end
                 else
                     -- Active profession mode - recalculate and update all UI
-                    LazyProf.Pathfinder:Calculate()
+                    LazyProf.Pathfinder:Calculate(reason)
                     LazyProf:UpdateDisplay()
                 end
             end

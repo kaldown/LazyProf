@@ -14,7 +14,8 @@ Pathfinder.currentPath = nil
 Pathfinder.pinnedRecipes = {}
 
 -- Calculate optimal path for active profession
-function Pathfinder:Calculate()
+-- reason: optional string describing what triggered this calculation
+function Pathfinder:Calculate(reason)
     -- Get active profession
     local profData = LazyProf.Professions:GetActive()
     if not profData then
@@ -39,19 +40,31 @@ function Pathfinder:Calculate()
     -- Determine target skill (next milestone or max)
     local targetSkill = self:GetTargetSkill(startSkill, profData.milestones)
 
-    LazyProf:Debug("pathfinder", string.format("Calculating path: %s %d -> %d (actual skill: %d)",
-        skillName, startSkill, targetSkill, currentSkill))
+    LazyProf:Debug("pathfinder", string.format("Calculating path: %s %d -> %d (actual skill: %d)%s",
+        skillName, startSkill, targetSkill, currentSkill,
+        reason and (" [" .. reason .. "]") or ""))
     LazyProf:Debug("pathfinder", string.format("Settings: strategy=%s, fromCurrentSkill=%s, bank=%s, alts=%s",
         LazyProf.db.profile.strategy,
         tostring(LazyProf.db.profile.calculateFromCurrentSkill),
         tostring(LazyProf.db.profile.includeBankItems),
         tostring(LazyProf.db.profile.includeAltCharacters)))
 
+    -- Log active pins if any
+    local pinCount = 0
+    for _ in pairs(self.pinnedRecipes) do pinCount = pinCount + 1 end
+    if pinCount > 0 then
+        local pinDetails = {}
+        for skill, recipeId in pairs(self.pinnedRecipes) do
+            table.insert(pinDetails, string.format("skill %d -> recipe %s", skill, tostring(recipeId)))
+        end
+        LazyProf:Debug("pathfinder", string.format("Active pins (%d): %s", pinCount, table.concat(pinDetails, ", ")))
+    end
+
     -- Get recipes with learned status
     local recipes = LazyProf.Professions:GetRecipesWithLearnedStatus(LazyProf.Professions.active)
 
-    -- Get inventory (bags + optional bank + optional alts)
-    local inventory, bankInventory, altInventory, altItemsByCharacter = LazyProf.Inventory:ScanAll()
+    -- Get inventory (bags + all enabled sources)
+    local inventory, sourceBreakdown = LazyProf.Inventory:ScanAll()
 
     -- Get prices for all reagents (and potential source materials for resolution)
     local reagentIds = {}
@@ -114,7 +127,7 @@ function Pathfinder:Calculate()
         racialBonus = racialBonus,
         steps = steps,
         totalCost = Utils.Sum(steps, "totalCost"),
-        missingMaterials = self:CalculateMissingMaterials(steps, inventory, bankInventory, altInventory, altItemsByCharacter, prices),
+        missingMaterials = self:CalculateMissingMaterials(steps, inventory, sourceBreakdown, prices),
         milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, startSkill, inventory, prices, racialBonus),
     }
 
@@ -127,7 +140,8 @@ end
 -- Calculate path for a specific profession (for planning mode)
 -- profKey: profession key like "alchemy", "engineering"
 -- skillLevel: current skill (0 if not learned)
-function Pathfinder:CalculateForProfession(profKey, skillLevel)
+-- reason: optional string describing what triggered this calculation
+function Pathfinder:CalculateForProfession(profKey, skillLevel, reason)
     local profData = LazyProf.Professions:Get(profKey)
     if not profData then
         LazyProf:Debug("pathfinder", "Profession not found: " .. tostring(profKey))
@@ -139,7 +153,9 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel)
     skillLevel = math.max(1, skillLevel or 0)
     local targetSkill = self:GetTargetSkill(skillLevel, profData.milestones)
 
-    LazyProf:Debug("pathfinder", string.format("Planning path: %s %d -> %d", profData.name, skillLevel, targetSkill))
+    LazyProf:Debug("pathfinder", string.format("Planning path: %s %d -> %d%s",
+        profData.name, skillLevel, targetSkill,
+        reason and (" [" .. reason .. "]") or ""))
 
     -- Get all recipes with cached learned status for planning mode
     local recipes = LazyProf.Utils.DeepCopy(profData.recipes)
@@ -148,8 +164,8 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel)
         recipe.learned = cachedLearned[recipe.id] or false
     end
 
-    -- Get inventory (bags + optional bank + optional alts)
-    local inventory, bankInventory, altInventory, altItemsByCharacter = LazyProf.Inventory:ScanAll()
+    -- Get inventory (bags + all enabled sources)
+    local inventory, sourceBreakdown = LazyProf.Inventory:ScanAll()
 
     -- Get prices for all reagents
     local reagentIds = {}
@@ -213,7 +229,7 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel)
         racialBonus = racialBonus,
         steps = steps,
         totalCost = Utils.Sum(steps, "totalCost"),
-        missingMaterials = self:CalculateMissingMaterials(steps, inventory, bankInventory, altInventory, altItemsByCharacter, prices),
+        missingMaterials = self:CalculateMissingMaterials(steps, inventory, sourceBreakdown, prices),
         milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, skillLevel, inventory, prices, racialBonus),
     }
 
@@ -235,8 +251,8 @@ function Pathfinder:GetTargetSkill(currentSkill, milestones)
 end
 
 -- Calculate total missing materials for entire path
--- Returns { fromBank = {...}, fromAlts = {...}, toCraft = {...}, fromAH = {...} }
-function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, altInventory, altItemsByCharacter, prices)
+-- Returns { fromBank, fromMail, fromAuctions, fromGuildBank, fromAlts, toCraft, fromAH, recipeCosts }
+function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown, prices)
     local needed = {}
 
     -- Sum up all reagents needed (preserve name from CraftLib as fallback)
@@ -278,7 +294,6 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
             if resolution.shouldCraft and resolution.craftRecipe then
                 -- Add to toCraft list
                 local name, link, icon = Utils.GetItemInfo(itemId)
-                -- Fallback to CraftLib's reagent name if GetItemInfo hasn't cached the item
                 name = name or data.nameFromData or "Unknown"
                 icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark"
                 local recipeName = resolution.craftRecipe.name or "Unknown Recipe"
@@ -293,7 +308,6 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
                     sourceFromAH = sourceFromAH + source.toBuy
                     sourceMaterialName = source.name or "Unknown"
 
-                    -- Add source materials to resolvedNeeded (preserve name fallback)
                     if not resolvedNeeded[source.itemId] then
                         resolvedNeeded[source.itemId] = { count = 0, nameFromData = source.name, firstUsedAtSkill = data.firstUsedAtSkill }
                     else
@@ -301,7 +315,6 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
                     end
                     resolvedNeeded[source.itemId].count = resolvedNeeded[source.itemId].count + source.totalNeeded
 
-                    -- Track bank purpose for source materials
                     if source.fromInventory > 0 then
                         bankPurpose[source.itemId] = string.format("for %s", recipeName:lower())
                     end
@@ -312,9 +325,9 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
                 local sourceDesc = string.format("%dx %s", totalSourceNeeded, sourceMaterialName)
                 local usingDesc = ""
                 if sourceFromBank > 0 and sourceFromAH > 0 then
-                    usingDesc = string.format("%dx from bank + %dx from AH", sourceFromBank, sourceFromAH)
+                    usingDesc = string.format("%dx from inventory + %dx from AH", sourceFromBank, sourceFromAH)
                 elseif sourceFromBank > 0 then
-                    usingDesc = string.format("%dx from bank", sourceFromBank)
+                    usingDesc = string.format("%dx from inventory", sourceFromBank)
                 else
                     usingDesc = string.format("%dx from AH", sourceFromAH)
                 end
@@ -334,8 +347,6 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
                     firstUsedAtSkill = data.firstUsedAtSkill,
                 })
             else
-                -- Not crafting - add directly to resolvedNeeded with full need
-                -- (bag subtraction happens in pass 2 below)
                 if not resolvedNeeded[itemId] then
                     resolvedNeeded[itemId] = { count = 0, nameFromData = data.nameFromData, firstUsedAtSkill = data.firstUsedAtSkill }
                 else
@@ -344,8 +355,6 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
                 resolvedNeeded[itemId].count = resolvedNeeded[itemId].count + need
             end
         elseif afterBags > 0 then
-            -- No MaterialResolver or no resolution needed - add full need
-            -- (bag subtraction happens in pass 2 below)
             if not resolvedNeeded[itemId] then
                 resolvedNeeded[itemId] = { count = 0, nameFromData = data.nameFromData, firstUsedAtSkill = data.firstUsedAtSkill }
             else
@@ -355,55 +364,98 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
         end
     end
 
-    -- Categorize resolved materials by source: bank vs alts vs AH
+    -- Categorize resolved materials by source (waterfall: most accessible first)
     local fromBank = {}
+    local fromMail = {}
+    local fromAuctions = {}
+    local fromGuildBank = {}
     local fromAlts = {}
     local fromAH = {}
 
+    -- Helper: get per-source count from sourceBreakdown
+    local function getSourceCount(itemId, sourceKey)
+        local bd = sourceBreakdown and sourceBreakdown[itemId]
+        if not bd then return 0 end
+        return bd[sourceKey] or 0
+    end
+
+    -- Helper: get total alt count for an item across all sources
+    local function getAltTotal(itemId)
+        local bd = sourceBreakdown and sourceBreakdown[itemId]
+        if not bd or not bd.alts then return 0 end
+        local total = 0
+        for _, charSources in pairs(bd.alts) do
+            for _, count in pairs(charSources) do
+                total = total + count
+            end
+        end
+        return total
+    end
+
     for itemId, data in pairs(resolvedNeeded) do
         local need = data.count
-        local inBags = LazyProf.Inventory:ScanBags()[itemId] or 0
-        local inBank = bankInventory and bankInventory[itemId] or 0
-        local inAlts = altInventory and altInventory[itemId] or 0
+        local inBags = getSourceCount(itemId, "bags")
         local totalHave = inventory[itemId] or 0
 
         -- How many do we still need after bags?
-        local afterBags = math.max(0, need - inBags)
+        local remaining = math.max(0, need - inBags)
 
-        if afterBags > 0 then
+        if remaining > 0 then
             local name, link, icon = Utils.GetItemInfo(itemId)
             local price = prices[itemId] or 0
-
-            -- Fallback to CraftLib's reagent name if GetItemInfo hasn't cached the item
             name = name or data.nameFromData or "Unknown"
             icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark"
 
-            -- How many can come from bank?
-            local fromBankCount = math.min(afterBags, inBank)
-            local afterBank = math.max(0, afterBags - inBank)
+            -- Waterfall: bank -> mail -> auctions -> guildBank -> alts -> AH
 
-            -- How many can come from alts?
+            -- 1. Bank
+            local inBank = getSourceCount(itemId, "bank")
+            local fromBankCount = math.min(remaining, inBank)
+            remaining = remaining - fromBankCount
+
+            -- 2. Mail
+            local inMail = getSourceCount(itemId, "mail")
+            local fromMailCount = math.min(remaining, inMail)
+            remaining = remaining - fromMailCount
+
+            -- 3. Auctions (active AH listings)
+            local inAuctions = getSourceCount(itemId, "auctions")
+            local fromAuctionsCount = math.min(remaining, inAuctions)
+            remaining = remaining - fromAuctionsCount
+
+            -- 4. Guild bank
+            local inGuildBank = getSourceCount(itemId, "guildBank")
+            local fromGuildBankCount = math.min(remaining, inGuildBank)
+            remaining = remaining - fromGuildBankCount
+
+            -- 5. Alts (with per-character breakdown)
             local fromAltCount = 0
             local altCharacters = {}
-            if afterBank > 0 and altItemsByCharacter and altItemsByCharacter[itemId] then
-                local remaining = afterBank
-                for charName, charCount in pairs(altItemsByCharacter[itemId]) do
-                    local useFromChar = math.min(remaining, charCount)
+            local bd = sourceBreakdown and sourceBreakdown[itemId]
+            if remaining > 0 and bd and bd.alts then
+                local altRemaining = remaining
+                for charName, charSources in pairs(bd.alts) do
+                    local charTotal = 0
+                    for _, count in pairs(charSources) do
+                        charTotal = charTotal + count
+                    end
+                    local useFromChar = math.min(altRemaining, charTotal)
                     if useFromChar > 0 then
                         fromAltCount = fromAltCount + useFromChar
-                        remaining = remaining - useFromChar
+                        altRemaining = altRemaining - useFromChar
                         table.insert(altCharacters, { name = charName, count = useFromChar })
                     end
-                    if remaining <= 0 then break end
+                    if altRemaining <= 0 then break end
                 end
+                remaining = remaining - fromAltCount
             end
-            local afterAlts = math.max(0, afterBank - fromAltCount)
 
-            -- How many must come from AH?
-            local fromAHCount = afterAlts
+            -- 6. AH (remainder)
+            local fromAHCount = remaining
 
+            -- Build result entries for each source
             if fromBankCount > 0 then
-                local purpose = bankPurpose[itemId] -- e.g., "for smelting"
+                local purpose = bankPurpose[itemId]
                 table.insert(fromBank, {
                     itemId = itemId,
                     name = name,
@@ -412,8 +464,44 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
                     have = inBank,
                     need = fromBankCount,
                     missing = fromBankCount,
-                    estimatedCost = 0, -- Bank items are free
-                    purpose = purpose, -- Annotation for UI
+                    estimatedCost = 0,
+                    purpose = purpose,
+                    firstUsedAtSkill = data.firstUsedAtSkill,
+                })
+            end
+
+            if fromMailCount > 0 then
+                table.insert(fromMail, {
+                    itemId = itemId,
+                    name = name,
+                    icon = icon,
+                    link = link,
+                    have = inMail,
+                    missing = fromMailCount,
+                    firstUsedAtSkill = data.firstUsedAtSkill,
+                })
+            end
+
+            if fromAuctionsCount > 0 then
+                table.insert(fromAuctions, {
+                    itemId = itemId,
+                    name = name,
+                    icon = icon,
+                    link = link,
+                    have = inAuctions,
+                    missing = fromAuctionsCount,
+                    firstUsedAtSkill = data.firstUsedAtSkill,
+                })
+            end
+
+            if fromGuildBankCount > 0 then
+                table.insert(fromGuildBank, {
+                    itemId = itemId,
+                    name = name,
+                    icon = icon,
+                    link = link,
+                    have = inGuildBank,
+                    missing = fromGuildBankCount,
                     firstUsedAtSkill = data.firstUsedAtSkill,
                 })
             end
@@ -425,8 +513,8 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
                     icon = icon,
                     link = link,
                     missing = fromAltCount,
-                    have = inAlts,
-                    characters = altCharacters,  -- Which alts have this item
+                    have = getAltTotal(itemId),
+                    characters = altCharacters,
                     firstUsedAtSkill = data.firstUsedAtSkill,
                 })
             end
@@ -454,9 +542,12 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
         end
         return (a.name or "") < (b.name or "")
     end
-    table.sort(fromAH, sortBySkillThenName)
     table.sort(fromBank, sortBySkillThenName)
+    table.sort(fromMail, sortBySkillThenName)
+    table.sort(fromAuctions, sortBySkillThenName)
+    table.sort(fromGuildBank, sortBySkillThenName)
     table.sort(fromAlts, sortBySkillThenName)
+    table.sort(fromAH, sortBySkillThenName)
     table.sort(toCraft, sortBySkillThenName)
 
     -- Calculate recipe acquisition costs (one-time costs for unlearned recipes)
@@ -474,7 +565,16 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, bankInventory, a
         end
     end
 
-    return { fromBank = fromBank, fromAlts = fromAlts, toCraft = toCraft, fromAH = fromAH, recipeCosts = recipeCosts }
+    return {
+        fromBank = fromBank,
+        fromMail = fromMail,
+        fromAuctions = fromAuctions,
+        fromGuildBank = fromGuildBank,
+        fromAlts = fromAlts,
+        toCraft = toCraft,
+        fromAH = fromAH,
+        recipeCosts = recipeCosts,
+    }
 end
 
 -- Break down path by individual steps (step-by-step format)

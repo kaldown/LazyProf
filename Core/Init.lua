@@ -93,7 +93,7 @@ function LazyProf:SlashCommand(input)
 end
 
 function LazyProf:OnTradeSkillShow()
-    self:ScheduleRecalculation()
+    self:ScheduleRecalculation("trade skill opened")
     self:HookTradeSkillScroll()
 end
 
@@ -128,7 +128,7 @@ function LazyProf:OnTradeSkillUpdate()
     -- DO NOT REVERT THIS to unconditional ScheduleRecalculation() - it causes FPS hitches.
     local _, currentSkill = GetTradeSkillLine()
     if currentSkill and currentSkill ~= self.lastCalculatedSkill then
-        self:ScheduleRecalculation()
+        self:ScheduleRecalculation("skill changed")
     end
 end
 
@@ -160,11 +160,11 @@ end
 
 -- Debounced recalculation
 local recalcTimer = nil
-function LazyProf:ScheduleRecalculation()
+function LazyProf:ScheduleRecalculation(reason)
     if recalcTimer then return end
     recalcTimer = C_Timer.After(0.5, function()
         recalcTimer = nil
-        LazyProf:Recalculate()
+        LazyProf:Recalculate(reason)
     end)
 end
 
@@ -191,7 +191,7 @@ function LazyProf:RefreshShoppingList()
     end
 
     -- Rescan inventory
-    local inventory, bankInventory, altInventory, altItemsByCharacter = self.Inventory:ScanAll()
+    local inventory, sourceBreakdown = self.Inventory:ScanAll()
 
     -- Extract prices from cache (avoid re-querying price providers)
     local prices = {}
@@ -201,7 +201,7 @@ function LazyProf:RefreshShoppingList()
 
     -- Recalculate only the missing materials using cached path
     path.missingMaterials = self.Pathfinder:CalculateMissingMaterials(
-        path.steps, inventory, bankInventory, altInventory, altItemsByCharacter, prices
+        path.steps, inventory, sourceBreakdown, prices
     )
 
     -- Update shopping list through bracket filter if available
@@ -215,7 +215,7 @@ function LazyProf:RefreshShoppingList()
     end
 end
 
-function LazyProf:Recalculate()
+function LazyProf:Recalculate(reason)
     -- Track skill level for OnTradeSkillUpdate optimization (Issue #3)
     local _, currentSkill = GetTradeSkillLine()
     self.lastCalculatedSkill = currentSkill
@@ -225,7 +225,7 @@ function LazyProf:Recalculate()
         self.ArrowManager:InvalidateCache()
     end
 
-    local path = self.Pathfinder:Calculate()
+    local path = self.Pathfinder:Calculate(reason)
     if path then
         self:UpdateDisplay()
     else

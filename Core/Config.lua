@@ -18,6 +18,7 @@ LazyProf.defaults = {
         calculateFromCurrentSkill = false,
         includeBankItems = false,
         includeAltCharacters = false,
+        includeGuildBank = false,
 
         -- Minimap button
         minimap = {
@@ -81,7 +82,7 @@ LazyProf.options = {
                     get = function() return LazyProf.db.profile.strategy end,
                     set = function(_, v)
                         LazyProf.db.profile.strategy = v
-                        LazyProf:Recalculate()
+                        LazyProf:Recalculate("setting changed")
                     end,
                 },
                 strategyWarning = {
@@ -104,7 +105,7 @@ LazyProf.options = {
                     get = function() return LazyProf.db.profile.materialResolution end,
                     set = function(_, v)
                         LazyProf.db.profile.materialResolution = v
-                        LazyProf:Recalculate()
+                        LazyProf:Recalculate("setting changed")
                     end,
                 },
                 materialResolutionNote = {
@@ -122,7 +123,7 @@ LazyProf.options = {
                     get = function() return LazyProf.db.profile.useIntermediates end,
                     set = function(_, v)
                         LazyProf.db.profile.useIntermediates = v
-                        LazyProf:Recalculate()
+                        LazyProf:Recalculate("setting changed")
                     end,
                 },
                 suggestUnlearnedRecipes = {
@@ -134,7 +135,7 @@ LazyProf.options = {
                     get = function() return LazyProf.db.profile.suggestUnlearnedRecipes end,
                     set = function(_, v)
                         LazyProf.db.profile.suggestUnlearnedRecipes = v
-                        LazyProf:Recalculate()
+                        LazyProf:Recalculate("setting changed")
                     end,
                 },
             },
@@ -213,7 +214,7 @@ LazyProf.options = {
                     get = function() return LazyProf.db.profile.calculateFromCurrentSkill end,
                     set = function(_, v)
                         LazyProf.db.profile.calculateFromCurrentSkill = v
-                        LazyProf:Recalculate()
+                        LazyProf:Recalculate("setting changed")
                     end,
                 },
                 shoppingListHeader = {
@@ -235,13 +236,14 @@ LazyProf.options = {
                     get = function() return LazyProf.db.profile.includeBankItems end,
                     set = function(_, v)
                         LazyProf.db.profile.includeBankItems = v
-                        LazyProf:Recalculate()
+                        LazyProf:Recalculate("setting changed")
                     end,
                 },
                 includeAltCharacters = {
                     name = "Include alt characters",
-                    desc = "When enabled, materials on ALL your characters (bags and " ..
-                           "banks) are subtracted from the shopping list.\n\n" ..
+                    desc = "When enabled, materials on ALL your characters (bags, " ..
+                           "banks, mail, and AH listings) are subtracted from the " ..
+                           "shopping list.\n\n" ..
                            "Requires: Syndicator addon installed.\n\n" ..
                            "Example: Your alt has 200 Silk Cloth. The shopping list " ..
                            "will show 200 fewer Silk Cloth to buy from the AH.\n\n" ..
@@ -256,7 +258,30 @@ LazyProf.options = {
                     get = function() return LazyProf.db.profile.includeAltCharacters end,
                     set = function(_, v)
                         LazyProf.db.profile.includeAltCharacters = v
-                        LazyProf:Recalculate()
+                        LazyProf:Recalculate("setting changed")
+                    end,
+                },
+                includeGuildBank = {
+                    name = "Include guild bank",
+                    desc = "When enabled, materials in your guild bank are subtracted " ..
+                           "from the shopping list.\n\n" ..
+                           "Requires: Syndicator addon installed.\n\n" ..
+                           "Guild bank data is cached from your last visit. Only " ..
+                           "tabs you have permission to view are included.\n\n" ..
+                           "Example: Your guild bank has 50 Thorium Bars. The " ..
+                           "shopping list shows 50 fewer to buy from the AH.\n\n" ..
+                           "Note: This is a shared resource - other guild members " ..
+                           "may also need these materials.",
+                    type = "toggle",
+                    order = 8,
+                    width = "full",
+                    disabled = function()
+                        return not Syndicator
+                    end,
+                    get = function() return LazyProf.db.profile.includeGuildBank end,
+                    set = function(_, v)
+                        LazyProf.db.profile.includeGuildBank = v
+                        LazyProf:Recalculate("setting changed")
                     end,
                 },
             },
@@ -307,7 +332,7 @@ LazyProf.options = {
                         if LazyProf.PriceManager then
                             LazyProf.PriceManager:ClearCache()
                         end
-                        LazyProf:Recalculate()
+                        LazyProf:Recalculate("setting changed")
                     end,
                 },
                 tsmPriceDesc = {

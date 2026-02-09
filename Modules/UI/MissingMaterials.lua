@@ -139,7 +139,6 @@ function MissingPanel:RefreshLayout()
 end
 
 -- Update panel with missing materials
--- missingMaterials is now { fromBank = {...}, toCraft = {...}, fromAH = {...} }
 -- bracketLabel: optional string like "225-300 (Artisan)" to show in title
 function MissingPanel:Update(missingMaterials, bracketLabel)
     if not LazyProf.db.profile.showMissingMaterials then
@@ -153,13 +152,16 @@ function MissingPanel:Update(missingMaterials, bracketLabel)
     end
     self.rows = {}
 
-    -- Handle structure { fromBank, fromAlts, toCraft, fromAH }
     local fromBank = missingMaterials and missingMaterials.fromBank or {}
+    local fromMail = missingMaterials and missingMaterials.fromMail or {}
+    local fromAuctions = missingMaterials and missingMaterials.fromAuctions or {}
+    local fromGuildBank = missingMaterials and missingMaterials.fromGuildBank or {}
     local fromAlts = missingMaterials and missingMaterials.fromAlts or {}
     local toCraft = missingMaterials and missingMaterials.toCraft or {}
     local fromAH = missingMaterials and missingMaterials.fromAH or {}
 
-    if #fromBank == 0 and #fromAlts == 0 and #toCraft == 0 and #fromAH == 0 then
+    if #fromBank == 0 and #fromMail == 0 and #fromAuctions == 0 and #fromGuildBank == 0
+            and #fromAlts == 0 and #toCraft == 0 and #fromAH == 0 then
         if bracketLabel then
             self.frame.title:SetText("All Materials Ready! (" .. bracketLabel .. ")")
         else
@@ -183,20 +185,33 @@ function MissingPanel:Update(missingMaterials, bracketLabel)
     local yOffset = 0
     local totalCost = 0
 
-    -- 1. Show bank section first (if any)
-    if #fromBank > 0 then
-        local headerRow = self:CreateSectionHeader("From Bank", yOffset, contentWidth)
+    -- Helper to render a simple material section
+    local function renderSection(headerText, items, rowType)
+        if #items == 0 then return end
+        local headerRow = self:CreateSectionHeader(headerText, yOffset, contentWidth)
         table.insert(self.rows, headerRow)
         yOffset = yOffset + ROW_HEIGHT
 
-        for _, mat in ipairs(fromBank) do
-            local row = self:CreateMaterialRow(mat, yOffset, contentWidth, "bank")
+        for _, mat in ipairs(items) do
+            local row = self:CreateMaterialRow(mat, yOffset, contentWidth, rowType)
             table.insert(self.rows, row)
             yOffset = yOffset + ROW_HEIGHT
         end
     end
 
-    -- 2. Show alts section (if any)
+    -- 1. From Bank
+    renderSection("From Bank", fromBank, "bank")
+
+    -- 2. Check Mail
+    renderSection("Check Mail", fromMail, "mail")
+
+    -- 3. Cancel from AH (your active listings)
+    renderSection("Cancel from AH", fromAuctions, "auctions")
+
+    -- 4. From Guild Bank
+    renderSection("From Guild Bank", fromGuildBank, "guildBank")
+
+    -- 5. From Alts
     if #fromAlts > 0 then
         local headerRow = self:CreateSectionHeader("From Alts", yOffset, contentWidth)
         table.insert(self.rows, headerRow)
@@ -209,19 +224,17 @@ function MissingPanel:Update(missingMaterials, bracketLabel)
         end
     end
 
-    -- 3. Show "To Craft" section (if any)
+    -- 6. To Craft
     if #toCraft > 0 then
         local headerRow = self:CreateSectionHeader("To Craft", yOffset, contentWidth)
         table.insert(self.rows, headerRow)
         yOffset = yOffset + ROW_HEIGHT
 
         for _, craft in ipairs(toCraft) do
-            -- Main craft row
             local row = self:CreateCraftRow(craft, yOffset, contentWidth)
             table.insert(self.rows, row)
             yOffset = yOffset + ROW_HEIGHT
 
-            -- Sub-row showing material breakdown
             local subRow = self:CreateCraftSubRow(craft, yOffset, contentWidth)
             table.insert(self.rows, subRow)
             yOffset = yOffset + ROW_HEIGHT
@@ -230,7 +243,7 @@ function MissingPanel:Update(missingMaterials, bracketLabel)
         end
     end
 
-    -- 4. Show AH section (if any)
+    -- 7. Buy from AH
     if #fromAH > 0 then
         local headerRow = self:CreateSectionHeader("From AH", yOffset, contentWidth)
         table.insert(self.rows, headerRow)
@@ -281,20 +294,55 @@ function MissingPanel:CreateSectionHeader(text, yOffset, contentWidth)
     return row
 end
 
+-- Row type styling: color, tooltip text, and cost display
+local ROW_STYLES = {
+    bank = {
+        color = "|cFF66FF66",     -- green
+        tooltipLine = function(mat) return string.format("In bank: %d | Grab: %d", mat.have, mat.missing) end,
+        tooltipRGB = { 0.4, 1, 0.4 },
+        showCost = false,
+    },
+    mail = {
+        color = "|cFF66CCFF",     -- cyan
+        tooltipLine = function(mat) return string.format("In mail: %d | Grab: %d", mat.have, mat.missing) end,
+        tooltipRGB = { 0.4, 0.8, 1 },
+        showCost = false,
+    },
+    auctions = {
+        color = "|cFFFF9933",     -- orange
+        tooltipLine = function(mat) return string.format("Listed on AH: %d | Cancel: %d", mat.have, mat.missing) end,
+        tooltipRGB = { 1, 0.6, 0.2 },
+        tooltipWarning = "Requires cancelling your auction",
+        showCost = false,
+    },
+    guildBank = {
+        color = "|cFF33CCCC",     -- teal
+        tooltipLine = function(mat) return string.format("In guild bank: %d | Withdraw: %d", mat.have, mat.missing) end,
+        tooltipRGB = { 0.2, 0.8, 0.8 },
+        tooltipWarning = "Shared resource - others may need these",
+        showCost = false,
+    },
+    ah = {
+        color = "|cFFFF6666",     -- red
+        tooltipLine = function(mat) return string.format("Have: %d | Need: %d | Buy: %d", mat.have, mat.need, mat.missing) end,
+        tooltipRGB = { 1, 1, 1 },
+        showCost = true,
+    },
+}
+
 -- Create a material row
--- rowType: "bank" for bank items (green), "ah" for AH items (red with price)
+-- rowType: "bank", "mail", "auctions", "guildBank", "ah"
 function MissingPanel:CreateMaterialRow(mat, yOffset, contentWidth, rowType)
     local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
     row:SetSize(contentWidth, ROW_HEIGHT)
     row:SetPoint("TOPLEFT", 0, -yOffset)
 
-    -- Row background for hover
     row:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
     })
     row:SetBackdropColor(0.15, 0.15, 0.15, 0.5)
 
-    local isBank = (rowType == "bank")
+    local style = ROW_STYLES[rowType] or ROW_STYLES.ah
 
     -- Icon
     row.icon = row:CreateTexture(nil, "ARTWORK")
@@ -302,16 +350,15 @@ function MissingPanel:CreateMaterialRow(mat, yOffset, contentWidth, rowType)
     row.icon:SetPoint("LEFT", 4, 0)
     row.icon:SetTexture(mat.icon)
 
-    -- Count and name (green for bank, red for AH) with optional purpose annotation
+    -- Count and name
     row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     row.text:SetPoint("LEFT", 26, 0)
     row.text:SetPoint("RIGHT", row, "RIGHT", -80, 0)
     row.text:SetJustifyH("LEFT")
-    local countColor = isBank and "|cFF66FF66" or "|cFFFF6666"
-    local displayText = string.format("%s%dx|r %s", countColor, mat.missing, mat.name or "Unknown")
+    local displayText = string.format("%s%dx|r %s", style.color, mat.missing, mat.name or "Unknown")
 
     -- Add purpose annotation for bank items (e.g., "for smelting")
-    if isBank and mat.purpose then
+    if rowType == "bank" and mat.purpose then
         displayText = displayText .. string.format(" |cFF888888(%s)|r", mat.purpose)
     end
     row.text:SetText(displayText)
@@ -319,15 +366,17 @@ function MissingPanel:CreateMaterialRow(mat, yOffset, contentWidth, rowType)
     -- Cost (only for AH items)
     row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     row.cost:SetPoint("RIGHT", -8, 0)
-    if isBank then
-        row.cost:SetText("")
-    elseif mat.estimatedCost > 0 then
-        row.cost:SetText(Utils.FormatMoney(mat.estimatedCost))
+    if style.showCost then
+        if mat.estimatedCost and mat.estimatedCost > 0 then
+            row.cost:SetText(Utils.FormatMoney(mat.estimatedCost))
+        else
+            row.cost:SetText("|cFF666666No price|r")
+        end
     else
-        row.cost:SetText("|cFF666666No price|r")
+        row.cost:SetText("")
     end
 
-    -- Shift-click to link (works with chat, AH, Auctionator, etc.)
+    -- Shift-click to link
     row:SetScript("OnClick", function()
         if IsShiftKeyDown() and mat.link then
             HandleModifiedItemClick(mat.link)
@@ -341,13 +390,13 @@ function MissingPanel:CreateMaterialRow(mat, yOffset, contentWidth, rowType)
             GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
             GameTooltip:SetItemByID(mat.itemId)
             GameTooltip:AddLine(" ")
-            if isBank then
-                GameTooltip:AddLine(string.format("In bank: %d | Grab: %d", mat.have, mat.missing), 0.4, 1, 0.4)
-                if mat.purpose then
-                    GameTooltip:AddLine("Purpose: " .. mat.purpose, 0.6, 0.6, 0.6)
-                end
-            else
-                GameTooltip:AddLine(string.format("Have: %d | Need: %d | Buy: %d", mat.have, mat.need, mat.missing), 1, 1, 1)
+            local r, g, b = unpack(style.tooltipRGB)
+            GameTooltip:AddLine(style.tooltipLine(mat), r, g, b)
+            if rowType == "bank" and mat.purpose then
+                GameTooltip:AddLine("Purpose: " .. mat.purpose, 0.6, 0.6, 0.6)
+            end
+            if style.tooltipWarning then
+                GameTooltip:AddLine(style.tooltipWarning, 0.6, 0.6, 0.6)
             end
             GameTooltip:AddLine("Shift-click to link", 0.5, 0.5, 0.5)
             GameTooltip:Show()

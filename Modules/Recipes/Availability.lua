@@ -89,37 +89,45 @@ function Availability:GetRecipeItemId(recipe)
     return nil
 end
 
--- Find a recipe item in player's inventory (bags, bank, alts)
+-- Find a recipe item in player's inventory (bags, bank, mail, alts, etc.)
 -- Returns: location info table or nil
--- location = { type = "bags|bank|alt", count = N, character = "Name" (for alts) }
+-- location = { type = "bags|bank|mail|alt", count = N, character = "Name" (for alts) }
 function Availability:FindRecipeInInventory(itemId)
     if not itemId then
         return nil
     end
 
-    -- Check bags first (always available)
-    local bagCount = GetItemCount(itemId, false)  -- false = bags only
-    if bagCount and bagCount > 0 then
-        return { type = "bags", count = bagCount }
+    -- Use ScanAll to check all enabled sources at once
+    local combined, sourceBreakdown = LazyProf.Inventory:ScanAll()
+
+    if not combined[itemId] or combined[itemId] <= 0 then
+        return nil
     end
 
-    -- Check bank (requires Syndicator and setting enabled)
-    if LazyProf.db.profile.includeBankItems then
-        local bankItems = LazyProf.Inventory:ScanBank()
-        if bankItems[itemId] and bankItems[itemId] > 0 then
-            return { type = "bank", count = bankItems[itemId] }
-        end
+    -- Check sourceBreakdown to find WHERE the item is
+    local bd = sourceBreakdown[itemId]
+    if not bd then
+        return nil
     end
 
-    -- Check alts (requires Syndicator and setting enabled)
-    if LazyProf.db.profile.includeAltCharacters then
-        local _, itemsByCharacter = LazyProf.Inventory:ScanAlts()
-        if itemsByCharacter[itemId] then
-            -- Find first alt with this item
-            for charName, count in pairs(itemsByCharacter[itemId]) do
-                if count > 0 then
-                    return { type = "alt", count = count, character = charName }
-                end
+    -- Return the first source that has the item (priority order)
+    if (bd.bags or 0) > 0 then
+        return { type = "bags", count = bd.bags }
+    end
+    if (bd.bank or 0) > 0 then
+        return { type = "bank", count = bd.bank }
+    end
+    if (bd.mail or 0) > 0 then
+        return { type = "mail", count = bd.mail }
+    end
+    if bd.alts then
+        for charName, charSources in pairs(bd.alts) do
+            local charTotal = 0
+            for _, count in pairs(charSources) do
+                charTotal = charTotal + count
+            end
+            if charTotal > 0 then
+                return { type = "alt", count = charTotal, character = charName }
             end
         end
     end
