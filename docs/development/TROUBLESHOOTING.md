@@ -259,8 +259,9 @@ WoW Client: <Retail/Classic/TBC/Anniversary>
 ```
 
 ## Settings (if relevant)
+- Strategy: Cheapest/Fastest
 - Calculate from current skill: yes/no
-- Use owned materials as free: yes/no
+- Include bank/alts/guild bank: yes/no
 - Price source: TSM/Auctionator/Vendor
 ```
 

@@ -5,6 +5,7 @@ All notable changes to LazyProf will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Bracket filter for milestone panel and shopping list**: Dropdown on milestone panel filters steps by skill bracket (Apprentice 1-75 through Master 300-375). Defaults to current skill bracket and auto-advances on recalculate. Shopping list shows only materials for the selected bracket range.
 - **Extended inventory scanning**: Shopping list now checks mailbox, active AH listings, and guild bank for materials via Syndicator
   - Mail items are always scanned (current character + alts when enabled)
   - Active AH listings are always scanned, shown as "Cancel from AH" with distinct orange styling

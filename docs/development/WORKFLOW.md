@@ -48,7 +48,6 @@ docs: update architecture overview
 - [ ] `README.md` - Updated if features or dependencies changed
 - [ ] `CURSEFORGE.md` - Synced with README.md
 - [ ] Architecture docs updated if design changed
-- [ ] Completed plans moved to `docs/plans/completed/`
 
 ### Commit Commands
 
@@ -73,20 +72,15 @@ git status && git log --oneline -1
 
 ## Plan Management
 
-### Directory Structure
+### Directory
 
-```
-docs/plans/
-├── active/              # Plans in progress
-├── completed/           # Implemented plans
-└── backlog/             # Future work ideas
-```
+Plans live in `docs/plans/` (gitignored - local working documents only).
 
 ### Plan Lifecycle
 
-1. **Create**: Write plan in `docs/plans/active/` or root `docs/plans/`
+1. **Create**: Write plan in `docs/plans/` with date prefix (e.g., `2026-02-03-feature-name.md`)
 2. **Implement**: Follow plan, update as needed
-3. **Complete**: Move to `docs/plans/completed/` when done
+3. **Complete**: Remove or archive when implemented
 
 ## Release Process
 

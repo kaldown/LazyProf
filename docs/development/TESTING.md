@@ -50,9 +50,23 @@ After making changes, run `/reload` and verify:
 3. Shopping list should show "From Bags" for owned materials
 
 **With Syndicator:**
-1. Enable Syndicator
+1. Enable "Include bank items" in settings
 2. Put materials in bank
 3. Shopping list should show "From Bank" for bank materials
+
+**Extended inventory sources (all require Syndicator):**
+- Mail items on current character always scanned - verify "Check Mail" section appears
+- Active AH listings always scanned - verify "Cancel from AH" section with orange styling
+- Enable "Include guild bank" - verify "From Guild Bank" section appears
+- Enable "Include alt characters" - verify "From Alts" section with character names
+
+### Testing Bracket Filter
+
+1. Open profession with a calculated path spanning multiple brackets
+2. Use bracket filter dropdown on milestone panel (1-75, 75-150, etc.)
+3. Verify milestone breakdown shows only steps in selected bracket
+4. Verify shopping list updates to show only materials for filtered brackets
+5. Select "Full Path" to restore complete view
 
 ### Testing Alternative Recipes & Pinning
 
