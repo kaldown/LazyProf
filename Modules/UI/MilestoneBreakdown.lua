@@ -29,10 +29,11 @@ function MilestonePanelClass:New(config)
     instance.config = config or {}
     instance.rows = {}
     instance.expandedRows = {}
-    instance.expandedAlternatives = {}  -- [stepIndex] = true/false (main alternatives spoiler)
-    instance.expandedAltGroups = {}     -- [stepIndex][groupIndex] = true/false
+    instance.expandedAlternatives = {}  -- [stepKey] = true/false (main alternatives spoiler)
+    instance.expandedAltGroups = {}     -- [stepKey][groupIndex] = true/false
     instance.currentPath = nil
     instance.frame = nil
+    instance.selectedBracketIndex = nil  -- nil="current bracket", number=specific, "all"=full path
     return instance
 end
 
@@ -100,7 +101,8 @@ function MilestonePanelClass:Initialize()
 
         -- Title
         self.frame.title = self.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        self.frame.title:SetPoint("TOP", 0, -10)
+        self.frame.title:SetPoint("TOPLEFT", 12, -10)
+        self.frame.title:SetJustifyH("LEFT")
         self.frame.title:SetText("Milestone Breakdown")
         self.frame.title:SetTextColor(1, 0.82, 0)
 
@@ -108,6 +110,9 @@ function MilestonePanelClass:Initialize()
         self.frame.closeBtn = CreateFrame("Button", nil, self.frame, "UIPanelCloseButton")
         self.frame.closeBtn:SetPoint("TOPRIGHT", -2, -2)
         self.frame.closeBtn:SetSize(20, 20)
+
+        -- Bracket filter dropdown
+        self:CreateBracketDropdown(frameName, config)
 
         -- Resize handle
         self.frame.resizeBtn = CreateFrame("Button", nil, self.frame)
@@ -145,11 +150,12 @@ function MilestonePanelClass:Initialize()
     local scrollName = frameName .. "ScrollFrame"
     self.frame.scrollFrame = CreateFrame("ScrollFrame", scrollName, self.frame, "UIPanelScrollFrameTemplate")
 
+    local scrollTopOffset = self.frame.bracketDropdown and -56 or -32
     if config.embedded then
-        self.frame.scrollFrame:SetPoint("TOPLEFT", 4, -4)
+        self.frame.scrollFrame:SetPoint("TOPLEFT", 4, -28)
         self.frame.scrollFrame:SetPoint("BOTTOMRIGHT", -24, 28)
     else
-        self.frame.scrollFrame:SetPoint("TOPLEFT", 8, -32)
+        self.frame.scrollFrame:SetPoint("TOPLEFT", 8, scrollTopOffset)
         self.frame.scrollFrame:SetPoint("BOTTOMRIGHT", -28, 32)
     end
 
@@ -178,12 +184,163 @@ function MilestonePanelClass:Refresh()
     end
 end
 
+-- Get the effective bracket for display filtering
+-- Returns {min, max, name} or nil (nil = show all steps)
+function MilestonePanelClass:GetEffectiveBracket()
+    if self.selectedBracketIndex == "all" then
+        return nil  -- no filtering
+    end
+
+    local brackets = LazyProf.skillBrackets
+    if type(self.selectedBracketIndex) == "number" then
+        return brackets[self.selectedBracketIndex]
+    end
+
+    -- nil = auto-detect from current path skill
+    if self.currentPath and self.currentPath.currentSkill then
+        for _, bracket in ipairs(brackets) do
+            if self.currentPath.currentSkill >= bracket.min and self.currentPath.currentSkill < bracket.max then
+                return bracket
+            end
+        end
+    end
+    return nil  -- fallback: show all
+end
+
+-- Get display label for the bracket dropdown
+function MilestonePanelClass:GetBracketLabel()
+    if self.selectedBracketIndex == "all" then
+        return "Full Path"
+    end
+
+    local bracket = self:GetEffectiveBracket()
+    if not bracket then
+        return "Full Path"
+    end
+
+    if self.selectedBracketIndex == nil then
+        return "Current (" .. bracket.name .. ")"
+    end
+    return bracket.name
+end
+
+-- Filter breakdown steps to only those within the effective bracket
+function MilestonePanelClass:FilterBreakdownByBracket(breakdown)
+    local bracket = self:GetEffectiveBracket()
+    if not bracket then
+        return breakdown  -- no filtering
+    end
+
+    local filtered = {}
+    for _, step in ipairs(breakdown) do
+        if step.from >= bracket.min and step.from < bracket.max then
+            table.insert(filtered, step)
+        end
+    end
+    return filtered
+end
+
+-- Create the bracket filter dropdown
+function MilestonePanelClass:CreateBracketDropdown(frameName, config)
+    local dropdownName = frameName .. "BracketDropdown"
+    self.frame.bracketDropdown = CreateFrame("Frame", dropdownName, self.frame, "UIDropDownMenuTemplate")
+    self.frame.bracketDropdown:SetPoint("TOPLEFT", -8, -26)
+    UIDropDownMenu_SetWidth(self.frame.bracketDropdown, 160)
+
+    local panel = self
+    local function BracketDropdown_Initialize(dropdown, level)
+        local info = UIDropDownMenu_CreateInfo()
+
+        -- "Current Bracket" option (auto-detect)
+        info.text = "Current Bracket"
+        info.value = "current"
+        info.checked = (panel.selectedBracketIndex == nil)
+        info.func = function()
+            panel.selectedBracketIndex = nil
+            UIDropDownMenu_SetText(dropdown, panel:GetBracketLabel())
+            panel:Refresh()
+        end
+        UIDropDownMenu_AddButton(info, level)
+
+        -- Individual brackets
+        for i, bracket in ipairs(LazyProf.skillBrackets) do
+            info = UIDropDownMenu_CreateInfo()
+            info.text = bracket.name
+            info.value = i
+            info.checked = (panel.selectedBracketIndex == i)
+            info.func = function()
+                panel.selectedBracketIndex = i
+                UIDropDownMenu_SetText(dropdown, panel:GetBracketLabel())
+                panel:Refresh()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+
+        -- "Full Path" option
+        info = UIDropDownMenu_CreateInfo()
+        info.text = "Full Path"
+        info.value = "all"
+        info.checked = (panel.selectedBracketIndex == "all")
+        info.func = function()
+            panel.selectedBracketIndex = "all"
+            UIDropDownMenu_SetText(dropdown, "Full Path")
+            panel:Refresh()
+        end
+        UIDropDownMenu_AddButton(info, level)
+    end
+
+    UIDropDownMenu_Initialize(self.frame.bracketDropdown, BracketDropdown_Initialize)
+    UIDropDownMenu_SetText(self.frame.bracketDropdown, self:GetBracketLabel())
+end
+
+-- Update shopping list with bracket-filtered data
+function MilestonePanelClass:UpdateShoppingList(path, filteredBreakdown, bracket)
+    local panel = LazyProf.MissingMaterialsPanel
+    if not panel then return end
+
+    -- Extract the step objects that match the filtered breakdown
+    local filteredSteps = {}
+    if path.steps then
+        local filteredFromSet = {}
+        for _, bd in ipairs(filteredBreakdown) do
+            filteredFromSet[bd.from] = true
+        end
+        for _, step in ipairs(path.steps) do
+            if filteredFromSet[step.skillStart] then
+                table.insert(filteredSteps, step)
+            end
+        end
+    end
+
+    -- Recalculate missing materials from filtered steps
+    local inventory, bankInventory, altInventory, altItemsByCharacter = LazyProf.Inventory:ScanAll()
+    local prices = {}
+    for itemId, cached in pairs(LazyProf.PriceManager.cache) do
+        prices[itemId] = cached.price
+    end
+
+    local missingMaterials = LazyProf.Pathfinder:CalculateMissingMaterials(
+        filteredSteps, inventory, bankInventory, altInventory, altItemsByCharacter, prices
+    )
+
+    local bracketLabel = bracket and bracket.name or nil
+    panel:Update(missingMaterials, bracketLabel)
+end
+
 -- Update the panel with path data
 -- path: full path object with milestoneBreakdown, totalCost, currentSkill
 function MilestonePanelClass:Update(path)
     LazyProf:Debug("ui", "=== MilestonePanel:Update (" .. (self.config.name or "unnamed") .. ") ===")
     LazyProf:Debug("ui", "  config.embedded: " .. tostring(self.config.embedded))
     LazyProf:Debug("ui", "  path: " .. (path and "exists" or "NIL"))
+
+    -- Auto-advance: reset bracket and expanded state when a new path arrives
+    if path ~= self.currentPath then
+        self.selectedBracketIndex = nil
+        self.expandedRows = {}
+        self.expandedAlternatives = {}
+        self.expandedAltGroups = {}
+    end
 
     -- Store the path for refresh and click handlers
     self.currentPath = path
@@ -201,13 +358,23 @@ function MilestonePanelClass:Update(path)
     end
     self.rows = {}
 
-    local breakdown = path and path.milestoneBreakdown
-    LazyProf:Debug("ui", "  breakdown: " .. (breakdown and ("#" .. #breakdown .. " steps") or "NIL"))
+    local fullBreakdown = path and path.milestoneBreakdown
+    LazyProf:Debug("ui", "  breakdown: " .. (fullBreakdown and ("#" .. #fullBreakdown .. " steps") or "NIL"))
 
-    if not breakdown or #breakdown == 0 then
+    if not fullBreakdown or #fullBreakdown == 0 then
         LazyProf:Debug("ui", "  HIDING - no breakdown data")
         self:Hide()
         return
+    end
+
+    -- Apply bracket filter
+    local bracket = self:GetEffectiveBracket()
+    local breakdown = self:FilterBreakdownByBracket(fullBreakdown)
+    LazyProf:Debug("ui", "  bracket filter: " .. self:GetBracketLabel() .. " (" .. #breakdown .. " of " .. #fullBreakdown .. " steps)")
+
+    -- Update bracket dropdown text
+    if self.frame.bracketDropdown then
+        UIDropDownMenu_SetText(self.frame.bracketDropdown, self:GetBracketLabel())
     end
 
     LazyProf:Debug("ui", "  frame: " .. (self.frame and tostring(self.frame:GetName()) or "NIL"))
@@ -227,14 +394,44 @@ function MilestonePanelClass:Update(path)
     local yOffset = 0
     local lastMilestone = nil
 
-    for i, step in ipairs(breakdown) do
+    -- Handle empty bracket
+    if #breakdown == 0 then
+        local emptyRow = CreateFrame("Frame", nil, self.frame.content)
+        emptyRow:SetSize(contentWidth, STEP_ROW_HEIGHT)
+        emptyRow:SetPoint("TOPLEFT", 0, 0)
+        emptyRow.text = emptyRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        emptyRow.text:SetPoint("CENTER", 0, 0)
+        emptyRow.text:SetText("No steps in " .. (bracket and bracket.name or "this bracket"))
+        emptyRow.text:SetTextColor(0.5, 0.5, 0.5)
+        emptyRow:Show()
+        table.insert(self.rows, emptyRow)
+        yOffset = STEP_ROW_HEIGHT
+
+        self.frame.total:SetText("")
+        self.frame.content:SetHeight(math.max(yOffset + 10, self.frame:GetHeight() - 70))
+
+        if not self.config.embedded then
+            if TradeSkillFrame and TradeSkillFrame:IsVisible() and not self.manuallyMoved then
+                self.frame:ClearAllPoints()
+                self.frame:SetPoint("TOPLEFT", TradeSkillFrame, "TOPRIGHT", 10, 0)
+            end
+        end
+
+        self:Show()
+        -- Update shopping list with empty bracket
+        self:UpdateShoppingList(path, breakdown, bracket)
+        return
+    end
+
+    for _, step in ipairs(breakdown) do
+        local stepKey = step.from
         -- Create step row
-        local row = self:CreateStepRow(step, i, yOffset, contentWidth)
+        local row = self:CreateStepRow(step, stepKey, yOffset, contentWidth)
         table.insert(self.rows, row)
         yOffset = yOffset + STEP_ROW_HEIGHT
 
         -- If expanded, show unlearned indicator, ingredients, then alternatives
-        if self.expandedRows[i] then
+        if self.expandedRows[stepKey] then
             -- Show unlearned indicator if recipe not learned
             if step.recipe and not step.recipe.learned then
                 local unlearnedRow = self:CreateUnlearnedIndicator(step, yOffset, contentWidth)
@@ -266,8 +463,8 @@ function MilestonePanelClass:Update(path)
                 local totalAlts = #filteredAlts
                 if totalAlts > 0 then
                     -- Main "Alternatives" spoiler header with separator lines
-                    local isAltExpanded = self.expandedAlternatives[i]
-                    local altHeader = self:CreateAlternativesSpoiler(totalAlts, isAltExpanded, i, yOffset, contentWidth)
+                    local isAltExpanded = self.expandedAlternatives[stepKey]
+                    local altHeader = self:CreateAlternativesSpoiler(totalAlts, isAltExpanded, stepKey, yOffset, contentWidth)
                     table.insert(self.rows, altHeader)
                     yOffset = yOffset + MILESTONE_SEPARATOR_HEIGHT
 
@@ -276,8 +473,8 @@ function MilestonePanelClass:Update(path)
                         local bestScore = step.alternatives[1] and step.alternatives[1].score or 0
 
                         -- Initialize group state for this step
-                        if not self.expandedAltGroups[i] then
-                            self.expandedAltGroups[i] = {}
+                        if not self.expandedAltGroups[stepKey] then
+                            self.expandedAltGroups[stepKey] = {}
                         end
 
                         -- Split into groups of ALT_GROUP_SIZE
@@ -289,9 +486,9 @@ function MilestonePanelClass:Update(path)
                             local lastRank = filteredAlts[endIdx].rank
 
                             -- Group header
-                            local isGroupExpanded = self.expandedAltGroups[i][groupIndex]
+                            local isGroupExpanded = self.expandedAltGroups[stepKey][groupIndex]
                             local headerRow = self:CreateAltGroupHeader(
-                                firstRank, lastRank, isGroupExpanded, i, groupIndex, yOffset, contentWidth
+                                firstRank, lastRank, isGroupExpanded, stepKey, groupIndex, yOffset, contentWidth
                             )
                             table.insert(self.rows, headerRow)
                             yOffset = yOffset + ALT_GROUP_HEADER_HEIGHT
@@ -322,12 +519,12 @@ function MilestonePanelClass:Update(path)
         end
     end
 
-    -- Show recalculate button if there are dirty pins (compare against THIS panel's path, not the global one)
+    -- Show recalculate button if there are dirty pins (use FULL breakdown for pin check)
     if self.frame.recalcBtn then
         self.frame.recalcBtn:Hide()
     end
     local dirtyCount = 0
-    for _, step in ipairs(breakdown) do
+    for _, step in ipairs(fullBreakdown) do
         local pinned = LazyProf.Pathfinder.pinnedRecipes[step.from]
         if pinned and pinned ~= step.recipe.id then
             dirtyCount = dirtyCount + 1
@@ -337,8 +534,17 @@ function MilestonePanelClass:Update(path)
         self:CreateRecalculateButton(dirtyCount)
     end
 
-    -- Update total
-    self.frame.total:SetText("Total: " .. Utils.FormatMoney(path.totalCost))
+    -- Update total - show bracket cost vs full path cost when filtered
+    if bracket then
+        local bracketCost = 0
+        for _, step in ipairs(breakdown) do
+            bracketCost = bracketCost + (step.cost or 0)
+        end
+        self.frame.total:SetText(string.format("Bracket: %s  |cFF888888|  Full: %s|r",
+            Utils.FormatMoney(bracketCost), Utils.FormatMoney(path.totalCost)))
+    else
+        self.frame.total:SetText("Total: " .. Utils.FormatMoney(path.totalCost))
+    end
 
     -- Update content height for scrolling
     self.frame.content:SetHeight(math.max(yOffset + 10, self.frame:GetHeight() - 70))
@@ -365,6 +571,9 @@ function MilestonePanelClass:Update(path)
             firstRow:GetLeft() or -1,
             firstRow:GetTop() or -1))
     end
+
+    -- Update shopping list with bracket-filtered data
+    self:UpdateShoppingList(path, breakdown, bracket)
 end
 
 -- Create a step row (single recipe step)

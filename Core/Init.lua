@@ -204,8 +204,13 @@ function LazyProf:RefreshShoppingList()
         path.steps, inventory, bankInventory, altInventory, altItemsByCharacter, prices
     )
 
-    -- Update only the shopping list panel (skip arrow and milestone panels)
-    if self.MissingMaterialsPanel then
+    -- Update shopping list through bracket filter if available
+    if self.MilestonePanel and self.MilestonePanel.currentPath then
+        local mp = self.MilestonePanel
+        local breakdown = mp:FilterBreakdownByBracket(path.milestoneBreakdown or {})
+        local bracket = mp:GetEffectiveBracket()
+        mp:UpdateShoppingList(path, breakdown, bracket)
+    elseif self.MissingMaterialsPanel then
         self.MissingMaterialsPanel:Update(path.missingMaterials)
     end
 end
@@ -253,9 +258,10 @@ function LazyProf:UpdateDisplay()
             self.ArrowManager:Update(path)
         end
         if self.MilestonePanel then
+            -- MilestonePanel:Update orchestrates shopping list via bracket filter
             self.MilestonePanel:Update(path)
-        end
-        if self.MissingMaterialsPanel then
+        elseif self.MissingMaterialsPanel then
+            -- Fallback if no milestone panel
             self.MissingMaterialsPanel:Update(path.missingMaterials)
         end
     end

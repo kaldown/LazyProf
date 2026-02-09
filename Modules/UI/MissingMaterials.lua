@@ -122,16 +122,26 @@ function MissingPanel:Initialize()
     end)
 end
 
--- Refresh layout after resize
+-- Refresh layout after resize (routes through bracket filter if available)
 function MissingPanel:RefreshLayout()
-    if LazyProf.Pathfinder and LazyProf.Pathfinder.currentPath then
-        self:Update(LazyProf.Pathfinder.currentPath.missingMaterials)
+    local path = LazyProf.Pathfinder and LazyProf.Pathfinder.currentPath
+    if not path then return end
+
+    -- Route through milestone panel's bracket filter
+    if LazyProf.MilestonePanel and LazyProf.MilestonePanel.currentPath then
+        local mp = LazyProf.MilestonePanel
+        local breakdown = mp:FilterBreakdownByBracket(path.milestoneBreakdown or {})
+        local bracket = mp:GetEffectiveBracket()
+        mp:UpdateShoppingList(path, breakdown, bracket)
+    else
+        self:Update(path.missingMaterials)
     end
 end
 
 -- Update panel with missing materials
 -- missingMaterials is now { fromBank = {...}, toCraft = {...}, fromAH = {...} }
-function MissingPanel:Update(missingMaterials)
+-- bracketLabel: optional string like "225-300 (Artisan)" to show in title
+function MissingPanel:Update(missingMaterials, bracketLabel)
     if not LazyProf.db.profile.showMissingMaterials then
         self:Hide()
         return
@@ -150,7 +160,11 @@ function MissingPanel:Update(missingMaterials)
     local fromAH = missingMaterials and missingMaterials.fromAH or {}
 
     if #fromBank == 0 and #fromAlts == 0 and #toCraft == 0 and #fromAH == 0 then
-        self.frame.title:SetText("All Materials Ready!")
+        if bracketLabel then
+            self.frame.title:SetText("All Materials Ready! (" .. bracketLabel .. ")")
+        else
+            self.frame.title:SetText("All Materials Ready!")
+        end
         self.frame.title:SetTextColor(0.4, 1, 0.4)
         self.frame.total:SetText("")
         self.frame:SetHeight(70)
@@ -158,7 +172,11 @@ function MissingPanel:Update(missingMaterials)
         return
     end
 
-    self.frame.title:SetText("Shopping List")
+    local titleText = "Shopping List"
+    if bracketLabel then
+        titleText = "Shopping List (" .. bracketLabel .. ")"
+    end
+    self.frame.title:SetText(titleText)
     self.frame.title:SetTextColor(1, 0.82, 0)
 
     local contentWidth = self.frame:GetWidth() - 40
