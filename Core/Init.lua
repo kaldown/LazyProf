@@ -276,6 +276,15 @@ LazyProf.debugCategoryNames = {
     arrow = "Arrow",
 }
 
+LazyProf.debugScoringBracket = nil  -- nil = show all, or bracket index
+LazyProf.skillBrackets = {
+    {min = 1, max = 75, name = "1-75 (Apprentice)"},
+    {min = 75, max = 150, name = "75-150 (Journeyman)"},
+    {min = 150, max = 225, name = "150-225 (Expert)"},
+    {min = 225, max = 300, name = "225-300 (Artisan)"},
+    {min = 300, max = 375, name = "300-375 (Master)"},
+}
+
 function LazyProf:Debug(category, msg)
     -- Backwards compatibility: single arg = message with "pathfinder" category
     if msg == nil then
@@ -314,9 +323,25 @@ end
 -- Get filtered debug log entries
 function LazyProf:GetFilteredDebugLog()
     local filtered = {}
+    local currentSkill = nil
     for _, entry in ipairs(self.debugLog) do
         if not self.debugFilter or entry.category == self.debugFilter then
-            table.insert(filtered, entry)
+            -- Apply scoring bracket filter if active
+            if self.debugFilter == "scoring" and self.debugScoringBracket then
+                local bracket = self.skillBrackets[self.debugScoringBracket]
+                if bracket then
+                    local skill = tonumber(entry.message:match("Scoring candidates at skill (%d+%.?%d*)"))
+                        or tonumber(entry.message:match("No candidates at skill (%d+%.?%d*)"))
+                    if skill then
+                        currentSkill = math.floor(skill)
+                    end
+                    if currentSkill and currentSkill >= bracket.min and currentSkill <= bracket.max then
+                        table.insert(filtered, entry)
+                    end
+                end
+            else
+                table.insert(filtered, entry)
+            end
         end
     end
     return filtered
@@ -341,7 +366,12 @@ function LazyProf:UpdateDebugWindowContent()
 
     if text == "" then
         if self.debugFilter then
-            text = "(No messages in category: " .. (self.debugCategoryNames[self.debugFilter] or self.debugFilter) .. ")"
+            local catName = self.debugCategoryNames[self.debugFilter] or self.debugFilter
+            if self.debugScoringBracket and self.skillBrackets[self.debugScoringBracket] then
+                text = "(No messages in " .. catName .. " for skill " .. self.skillBrackets[self.debugScoringBracket].name .. ")"
+            else
+                text = "(No messages in category: " .. catName .. ")"
+            end
         else
             text = "(No debug messages yet. Enable debug mode and perform actions.)"
         end
@@ -430,6 +460,11 @@ function LazyProf:CreateDebugFrame()
         info.func = function()
             LazyProf.debugFilter = nil
             UIDropDownMenu_SetText(dropdown, "All Categories")
+            LazyProf.debugScoringBracket = nil
+            if frame.bracketDropdown then
+                frame.bracketDropdown:Hide()
+                UIDropDownMenu_SetText(frame.bracketDropdown, "All Skill Levels")
+            end
             LazyProf:UpdateDebugWindowContent()
         end
         UIDropDownMenu_AddButton(info, level)
@@ -450,6 +485,15 @@ function LazyProf:CreateDebugFrame()
             info.func = function()
                 LazyProf.debugFilter = cat
                 UIDropDownMenu_SetText(dropdown, LazyProf.debugCategoryNames[cat])
+                if frame.bracketDropdown then
+                    if cat == "scoring" then
+                        frame.bracketDropdown:Show()
+                    else
+                        frame.bracketDropdown:Hide()
+                        LazyProf.debugScoringBracket = nil
+                        UIDropDownMenu_SetText(frame.bracketDropdown, "All Skill Levels")
+                    end
+                end
                 LazyProf:UpdateDebugWindowContent()
             end
             UIDropDownMenu_AddButton(info, level)
@@ -458,6 +502,42 @@ function LazyProf:CreateDebugFrame()
 
     UIDropDownMenu_Initialize(frame.filterDropdown, FilterDropdown_Initialize)
     UIDropDownMenu_SetText(frame.filterDropdown, "All Categories")
+
+    -- Skill bracket dropdown (visible only when Pathfinder Scoring filter is active)
+    frame.bracketDropdown = CreateFrame("Frame", "LazyProfDebugBracketDropdown", frame, "UIDropDownMenuTemplate")
+    frame.bracketDropdown:SetPoint("LEFT", frame.filterDropdown, "RIGHT", -15, 0)
+    UIDropDownMenu_SetWidth(frame.bracketDropdown, 150)
+
+    local function BracketDropdown_Initialize(dropdown, level)
+        local info = UIDropDownMenu_CreateInfo()
+
+        info.text = "All Skill Levels"
+        info.value = nil
+        info.checked = (LazyProf.debugScoringBracket == nil)
+        info.func = function()
+            LazyProf.debugScoringBracket = nil
+            UIDropDownMenu_SetText(dropdown, "All Skill Levels")
+            LazyProf:UpdateDebugWindowContent()
+        end
+        UIDropDownMenu_AddButton(info, level)
+
+        for i, bracket in ipairs(LazyProf.skillBrackets) do
+            info = UIDropDownMenu_CreateInfo()
+            info.text = bracket.name
+            info.value = i
+            info.checked = (LazyProf.debugScoringBracket == i)
+            info.func = function()
+                LazyProf.debugScoringBracket = i
+                UIDropDownMenu_SetText(dropdown, bracket.name)
+                LazyProf:UpdateDebugWindowContent()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end
+
+    UIDropDownMenu_Initialize(frame.bracketDropdown, BracketDropdown_Initialize)
+    UIDropDownMenu_SetText(frame.bracketDropdown, "All Skill Levels")
+    frame.bracketDropdown:Hide()
 
     -- Message count display
     frame.countText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
