@@ -455,9 +455,9 @@ function MilestonePanelClass:Update(path)
                         table.insert(filteredAlts, { alt = alt, rank = rank })
                     end
                 end
-                -- Sort alphabetically for easier browsing when pinning
+                -- Sort by score rank (best first)
                 table.sort(filteredAlts, function(a, b)
-                    return (a.alt.recipe.name or "") < (b.alt.recipe.name or "")
+                    return a.rank < b.rank
                 end)
 
                 local totalAlts = #filteredAlts
