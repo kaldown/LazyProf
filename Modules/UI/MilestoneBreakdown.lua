@@ -322,11 +322,17 @@ function MilestonePanelClass:Update(path)
         end
     end
 
-    -- Show recalculate button if there are dirty pins
+    -- Show recalculate button if there are dirty pins (compare against THIS panel's path, not the global one)
     if self.frame.recalcBtn then
         self.frame.recalcBtn:Hide()
     end
-    local dirtyCount = LazyProf.Pathfinder:GetDirtyPinCount()
+    local dirtyCount = 0
+    for _, step in ipairs(breakdown) do
+        local pinned = LazyProf.Pathfinder.pinnedRecipes[step.from]
+        if pinned and pinned ~= step.recipe.id then
+            dirtyCount = dirtyCount + 1
+        end
+    end
     if dirtyCount > 0 then
         self:CreateRecalculateButton(dirtyCount)
     end
@@ -907,13 +913,14 @@ function MilestonePanelClass:CreateRecalculateButton(dirtyCount)
         self.frame.recalcBtn.text:SetTextColor(1, 1, 1)
 
         self.frame.recalcBtn:SetScript("OnClick", function()
-            -- Trigger recalculation with current pins
-            if LazyProf.Pathfinder.currentPath then
-                if LazyProf.Pathfinder.currentPath.professionKey then
+            -- Use THIS panel's stored path (not the global Pathfinder.currentPath)
+            local currentPath = self.currentPath
+            if currentPath then
+                if currentPath.professionKey then
                     -- Planning mode - recalculate and update this panel
                     local path = LazyProf.Pathfinder:CalculateForProfession(
-                        LazyProf.Pathfinder.currentPath.professionKey,
-                        LazyProf.Pathfinder.currentPath.currentSkill
+                        currentPath.professionKey,
+                        currentPath.currentSkill
                     )
                     if path then
                         self:Update(path)
