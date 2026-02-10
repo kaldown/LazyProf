@@ -145,7 +145,11 @@ LazyProf.PathfinderStrategies.cheapest = {
             if currentSkill >= recipe.skillRequired then
                 -- Not gray yet? (uses effective skill for color check)
                 if effectiveSkill < recipe.skillRange.gray then
-                    if recipe.learned then
+                    -- Skip green recipes unless setting enabled
+                    local color = Utils.GetSkillColor(effectiveSkill, recipe.skillRange)
+                    if color == "green" and not LazyProf.db.profile.includeGreenRecipes then
+                        -- Green recipes excluded by setting
+                    elseif recipe.learned then
                         -- Already learned - always available
                         recipe._isUnavailable = nil
                         recipe._sourceInfo = nil

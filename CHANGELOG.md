@@ -4,6 +4,9 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Exclude green recipes setting**: Green recipes are now excluded from pathfinder suggestions by default. No proven formula exists for green skillup probability - the commonly cited linear formula significantly overestimates actual rates. Users can opt in via "Include green recipes" in settings at their own risk.
+
 ## [0.4.3] - 2026-02-10
 
 ### Added

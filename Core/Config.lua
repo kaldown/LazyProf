@@ -10,6 +10,7 @@ LazyProf.defaults = {
         materialResolution = Constants.MATERIAL_RESOLUTION.COST_COMPARE,
         useIntermediates = true,
         suggestUnlearnedRecipes = true,
+        includeGreenRecipes = false,
 
         -- Display
         displayMode = Constants.DISPLAY_MODE.ARROW_TOOLTIP,
@@ -135,6 +136,27 @@ LazyProf.options = {
                     get = function() return LazyProf.db.profile.suggestUnlearnedRecipes end,
                     set = function(_, v)
                         LazyProf.db.profile.suggestUnlearnedRecipes = v
+                        LazyProf:Recalculate("setting changed")
+                    end,
+                },
+                includeGreenRecipes = {
+                    name = "Include green recipes",
+                    desc = "When enabled, recipes with green difficulty (low skillup " ..
+                           "chance) are included in path calculations.\n\n" ..
+                           "|cFFFF6666Warning:|r Green skillup rates are unreliable. " ..
+                           "There is no proven formula for how WoW calculates green " ..
+                           "skillup probability. The displayed percentage may be " ..
+                           "significantly higher than the actual in-game rate.\n\n" ..
+                           "Enable at your own risk. You may waste gold crafting " ..
+                           "items that never give a skillup.\n\n" ..
+                           "Example: A green recipe showing 50% chance may in " ..
+                           "practice give 0 skillups across 10+ crafts.",
+                    type = "toggle",
+                    order = 5,
+                    width = "full",
+                    get = function() return LazyProf.db.profile.includeGreenRecipes end,
+                    set = function(_, v)
+                        LazyProf.db.profile.includeGreenRecipes = v
                         LazyProf:Recalculate("setting changed")
                     end,
                 },
