@@ -15,6 +15,23 @@ local PANEL_HEIGHT = 410
 local ROW_HEIGHT = 18
 local SECTION_SPACING = 12
 local THRESHOLD_ROW_HEIGHT = 13
+local ICON_SIZE = 16
+
+-- Helper: set up item tooltip handlers on a frame
+-- Frame must have .itemId set before tooltip fires
+local function SetupItemTooltip(frame)
+    frame:EnableMouse(true)
+    frame:SetScript("OnEnter", function(self)
+        if self.itemId then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetItemByID(self.itemId)
+            GameTooltip:Show()
+        end
+    end)
+    frame:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+end
 
 -- Initialize the recipe details panel
 function RecipeDetails:Initialize()
@@ -24,13 +41,34 @@ function RecipeDetails:Initialize()
     self.frame:SetFrameStrata("HIGH")
     self.frame:SetFrameLevel(20)
 
-    -- Register for item info received event to update icon when data is loaded
+    -- Register for item info received event to update icons when data is loaded
     self.frame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
-    self.frame:SetScript("OnEvent", function(_, event, itemId)
-        if event == "GET_ITEM_INFO_RECEIVED" and self.currentRecipe and self.currentRecipe.itemId == itemId then
-            local _, _, _, _, _, _, _, _, _, itemIcon = GetItemInfo(itemId)
-            if itemIcon then
-                self.frame.content.icon:SetTexture(itemIcon)
+    self.frame:SetScript("OnEvent", function(_, event, receivedItemId)
+        if event ~= "GET_ITEM_INFO_RECEIVED" or not self.currentRecipe then return end
+        local _, _, _, _, _, _, _, _, _, itemIcon = GetItemInfo(receivedItemId)
+        if not itemIcon then return end
+
+        -- Update crafted item icon
+        if self.currentRecipe.itemId == receivedItemId then
+            self.frame.content.icon:SetTexture(itemIcon)
+        end
+
+        -- Update reagent icons
+        if self.currentRecipe.reagents then
+            for i, reagent in ipairs(self.currentRecipe.reagents) do
+                if reagent.itemId == receivedItemId and self.frame.content.reagentRows[i] then
+                    self.frame.content.reagentRows[i].icon:SetTexture(itemIcon)
+                end
+            end
+        end
+
+        -- Update recipe source item icon
+        local source = self.currentRecipe.source
+        if source and source.itemId == receivedItemId then
+            self.frame.content.recipeItemRow.icon:SetTexture(itemIcon)
+            local itemName = GetItemInfo(receivedItemId)
+            if itemName then
+                self.frame.content.recipeItemRow.text:SetText(itemName)
             end
         end
     end)
@@ -95,6 +133,13 @@ function RecipeDetails:CreateRecipeHeader()
     content.icon:SetSize(32, 32)
     content.icon:SetPoint("TOPLEFT", 0, 0)
 
+    -- Icon tooltip overlay (textures can't receive mouse events)
+    content.iconOverlay = CreateFrame("Frame", nil, content)
+    content.iconOverlay:SetSize(32, 32)
+    content.iconOverlay:SetPoint("TOPLEFT", 0, 0)
+    content.iconOverlay:SetFrameLevel(content:GetFrameLevel() + 1)
+    SetupItemTooltip(content.iconOverlay)
+
     -- Recipe name
     content.name = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     content.name:SetPoint("TOPLEFT", 40, -2)
@@ -146,16 +191,22 @@ function RecipeDetails:CreateReagentsSection()
     content.reagentsHeader:SetText("Reagents:")
     content.reagentsHeader:SetTextColor(1, 0.82, 0)
 
-    -- Reagent rows container
+    -- Reagent rows container (with item icons and tooltips)
     content.reagentRows = {}
     for i = 1, 8 do
         local row = CreateFrame("Frame", nil, content)
         row:SetSize(PANEL_WIDTH - 24, ROW_HEIGHT)
         row:SetPoint("TOPLEFT", 8, -110 - SECTION_SPACING - (i - 1) * ROW_HEIGHT)
 
+        row.icon = row:CreateTexture(nil, "ARTWORK")
+        row.icon:SetSize(ICON_SIZE, ICON_SIZE)
+        row.icon:SetPoint("LEFT", 0, 0)
+
         row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.text:SetPoint("LEFT", 0, 0)
+        row.text:SetPoint("LEFT", row.icon, "RIGHT", 4, 0)
         row.text:SetJustifyH("LEFT")
+
+        SetupItemTooltip(row)
 
         row:Hide()
         content.reagentRows[i] = row
@@ -188,6 +239,23 @@ function RecipeDetails:CreateSourceSection()
     content.factionToggleLabel:SetPoint("RIGHT", content.factionToggle, "LEFT", -2, 0)
     content.factionToggleLabel:SetText("All factions")
     content.factionToggleLabel:SetTextColor(0.7, 0.7, 0.7)
+
+    -- Recipe item row (for vendor/drop/quest/rep recipes with source.itemId)
+    content.recipeItemRow = CreateFrame("Frame", nil, content)
+    content.recipeItemRow:SetSize(PANEL_WIDTH - 24, ROW_HEIGHT)
+    content.recipeItemRow:SetPoint("TOPLEFT", 8, -232 - SECTION_SPACING)
+
+    content.recipeItemRow.icon = content.recipeItemRow:CreateTexture(nil, "ARTWORK")
+    content.recipeItemRow.icon:SetSize(ICON_SIZE, ICON_SIZE)
+    content.recipeItemRow.icon:SetPoint("LEFT", 0, 0)
+
+    content.recipeItemRow.text = content.recipeItemRow:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    content.recipeItemRow.text:SetPoint("LEFT", content.recipeItemRow.icon, "RIGHT", 4, 0)
+    content.recipeItemRow.text:SetPoint("RIGHT", -8, 0)
+    content.recipeItemRow.text:SetJustifyH("LEFT")
+
+    SetupItemTooltip(content.recipeItemRow)
+    content.recipeItemRow:Hide()
 
     -- Vendor/source rows container
     content.sourceRows = {}
@@ -252,6 +320,7 @@ function RecipeDetails:Show(recipe, atSkillLevel)
         icon = itemIcon
     end
     content.icon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+    content.iconOverlay.itemId = recipe.itemId
     content.name:SetText(recipe.name or "Unknown Recipe")
     content.skill:SetText("Requires: " .. (recipe.skillRequired or "?"))
 
@@ -399,6 +468,15 @@ function RecipeDetails:UpdateReagentsSection(recipe)
     for i, reagent in ipairs(recipe.reagents) do
         if i > #content.reagentRows then break end
         local row = content.reagentRows[i]
+        row.itemId = reagent.itemId
+
+        -- Set icon from item cache (falls back to question mark if not cached yet)
+        local itemIcon
+        if reagent.itemId then
+            itemIcon = select(10, GetItemInfo(reagent.itemId))
+        end
+        row.icon:SetTexture(itemIcon or "Interface\\Icons\\INV_Misc_QuestionMark")
+
         row.text:SetText(string.format("%dx %s", reagent.count or 1, reagent.name or "Unknown"))
         row:Show()
     end
@@ -411,6 +489,27 @@ function RecipeDetails:UpdateSourceSection(recipe)
     -- Hide all rows first
     for _, row in ipairs(content.sourceRows) do
         row:Hide()
+    end
+    content.recipeItemRow:Hide()
+
+    -- Show recipe item row if source has an itemId (vendor/drop/quest/rep recipes)
+    local hasRecipeItem = false
+    if recipe.source and recipe.source.itemId then
+        local sourceItemId = recipe.source.itemId
+        content.recipeItemRow.itemId = sourceItemId
+
+        local itemName, _, _, _, _, _, _, _, _, itemIcon = GetItemInfo(sourceItemId)
+        content.recipeItemRow.icon:SetTexture(itemIcon or "Interface\\Icons\\INV_Misc_QuestionMark")
+        content.recipeItemRow.text:SetText(itemName or ("Item #" .. sourceItemId))
+        content.recipeItemRow:Show()
+        hasRecipeItem = true
+    end
+
+    -- Reposition source rows based on whether recipe item row is shown
+    local rowOffset = hasRecipeItem and 1 or 0
+    for i, row in ipairs(content.sourceRows) do
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", 8, -232 - SECTION_SPACING - (i - 1 + rowOffset) * ROW_HEIGHT)
     end
 
     if not recipe.source then

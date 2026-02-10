@@ -4,6 +4,9 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Interactive item tooltips in Recipe Details**: Hovering the crafted product icon, reagent icons, or the recipe source item now shows the full GameTooltip with addon overlays (TSM/Auctionator pricing, etc.). Reagents and recipe source items display 16x16 item icons.
+
 ## [0.4.4] - 2026-02-10
 
 ### Added
