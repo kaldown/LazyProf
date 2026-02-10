@@ -69,9 +69,6 @@ function PlanningWindow:Initialize()
     self.frame.closeBtn:SetSize(24, 24)
     self.frame.closeBtn:SetScript("OnClick", function() self:Hide() end)
 
-    -- Mode dropdown (Fast/Optimal)
-    self:CreateModeDropdown()
-
     -- Status banner
     self.frame.statusBg = self.frame:CreateTexture(nil, "ARTWORK")
     self.frame.statusBg:SetTexture("Interface\\Buttons\\WHITE8x8")
@@ -89,10 +86,12 @@ function PlanningWindow:Initialize()
     self.frame.contentContainer:SetPoint("TOPLEFT", 4, -62)
     self.frame.contentContainer:SetPoint("BOTTOMRIGHT", -4, 4)
 
-    -- Create embedded MilestonePanel instance
+    -- Create embedded MilestonePanel instance (with bracket dropdown and mode toggle)
     self.milestonePanel = LazyProf.MilestonePanelClass:New({
         name = "Planning",
         embedded = true,
+        showBracketDropdown = true,
+        showModeToggle = true,
         parent = self.frame.contentContainer
     })
     self.milestonePanel:Initialize()
@@ -125,45 +124,6 @@ function PlanningWindow:Initialize()
     tinsert(UISpecialFrames, "LazyProfPlanningWindow")
 end
 
-function PlanningWindow:CreateModeDropdown()
-    self.frame.modeBtn = CreateFrame("Button", nil, self.frame, "BackdropTemplate")
-    self.frame.modeBtn:SetSize(80, 20)
-    self.frame.modeBtn:SetPoint("RIGHT", self.frame.closeBtn, "LEFT", -4, 0)
-    self.frame.modeBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    self.frame.modeBtn:SetBackdropColor(0.2, 0.2, 0.2, 1)
-    self.frame.modeBtn:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-
-    self.frame.modeBtn.text = self.frame.modeBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    self.frame.modeBtn.text:SetPoint("CENTER")
-    self.frame.modeBtn.text:SetText("Cheapest")
-
-    self.frame.modeBtn:SetScript("OnClick", function()
-        local current = LazyProf.db.profile.strategy
-        local newStrategy = (current == Constants.STRATEGY.CHEAPEST) and Constants.STRATEGY.FASTEST or Constants.STRATEGY.CHEAPEST
-        LazyProf.db.profile.strategy = newStrategy
-        self.frame.modeBtn.text:SetText(newStrategy == Constants.STRATEGY.CHEAPEST and "Cheapest" or "Fastest")
-        if self.currentProfession then
-            self:LoadProfession(self.currentProfession)
-        end
-    end)
-
-    self.frame.modeBtn:SetScript("OnEnter", function(btn)
-        btn:SetBackdropColor(0.3, 0.3, 0.3, 1)
-        GameTooltip:SetOwner(btn, "ANCHOR_BOTTOM")
-        GameTooltip:AddLine("Strategy")
-        GameTooltip:AddLine("Click to toggle between Cheapest and Fastest", 0.7, 0.7, 0.7, true)
-        GameTooltip:Show()
-    end)
-    self.frame.modeBtn:SetScript("OnLeave", function(btn)
-        btn:SetBackdropColor(0.2, 0.2, 0.2, 1)
-        GameTooltip:Hide()
-    end)
-end
-
 function PlanningWindow:Open(profKey)
     if not self.frame then
         self:Initialize()
@@ -186,10 +146,6 @@ function PlanningWindow:LoadProfession(profKey)
 
     -- Update title
     self.frame.title:SetText("Planning: " .. profInfo.name)
-
-    -- Update mode button text
-    local strategy = LazyProf.db.profile.strategy
-    self.frame.modeBtn.text:SetText(strategy == Constants.STRATEGY.CHEAPEST and "Cheapest" or "Fastest")
 
     -- Check if player has this profession
     local actualSkillLevel = self:GetPlayerSkillLevel(profKey)

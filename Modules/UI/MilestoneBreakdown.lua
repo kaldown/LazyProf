@@ -50,6 +50,13 @@ function MilestonePanelClass:Initialize()
         -- Embedded mode: fill parent, no chrome
         -- Don't set strata - inherit from parent so we're not drawn behind it
         self.frame:SetAllPoints(parent)
+        -- Optionally add bracket dropdown and mode toggle in embedded mode
+        if config.showBracketDropdown then
+            self:CreateBracketDropdown(frameName, config)
+        end
+        if config.showModeToggle then
+            self:CreateModeToggle()
+        end
     else
         -- Standalone mode: own size, position, chrome
         self.frame:SetSize(DEFAULT_WIDTH, 200)
@@ -111,8 +118,9 @@ function MilestonePanelClass:Initialize()
         self.frame.closeBtn:SetPoint("TOPRIGHT", -2, -2)
         self.frame.closeBtn:SetSize(20, 20)
 
-        -- Bracket filter dropdown
+        -- Bracket filter dropdown and mode toggle
         self:CreateBracketDropdown(frameName, config)
+        self:CreateModeToggle()
 
         -- Resize handle
         self.frame.resizeBtn = CreateFrame("Button", nil, self.frame)
@@ -152,7 +160,9 @@ function MilestonePanelClass:Initialize()
 
     local scrollTopOffset = self.frame.bracketDropdown and -56 or -32
     if config.embedded then
-        self.frame.scrollFrame:SetPoint("TOPLEFT", 4, -28)
+        local hasTopControls = self.frame.bracketDropdown or self.frame.modeBtn
+        local embeddedTop = hasTopControls and -30 or -28
+        self.frame.scrollFrame:SetPoint("TOPLEFT", 4, embeddedTop)
         self.frame.scrollFrame:SetPoint("BOTTOMRIGHT", -24, 28)
     else
         self.frame.scrollFrame:SetPoint("TOPLEFT", 8, scrollTopOffset)
@@ -244,7 +254,11 @@ end
 function MilestonePanelClass:CreateBracketDropdown(frameName, config)
     local dropdownName = frameName .. "BracketDropdown"
     self.frame.bracketDropdown = CreateFrame("Frame", dropdownName, self.frame, "UIDropDownMenuTemplate")
-    self.frame.bracketDropdown:SetPoint("TOPLEFT", -8, -26)
+    if self.config.embedded then
+        self.frame.bracketDropdown:SetPoint("TOPLEFT", -8, 0)
+    else
+        self.frame.bracketDropdown:SetPoint("TOPLEFT", -8, -26)
+    end
     UIDropDownMenu_SetWidth(self.frame.bracketDropdown, 160)
 
     local panel = self
@@ -291,6 +305,80 @@ function MilestonePanelClass:CreateBracketDropdown(frameName, config)
 
     UIDropDownMenu_Initialize(self.frame.bracketDropdown, BracketDropdown_Initialize)
     UIDropDownMenu_SetText(self.frame.bracketDropdown, self:GetBracketLabel())
+end
+
+-- Create the mode toggle button (Cheapest/Fastest)
+function MilestonePanelClass:CreateModeToggle()
+    self.frame.modeBtn = CreateFrame("Button", nil, self.frame, "BackdropTemplate")
+    self.frame.modeBtn:SetSize(80, 20)
+    self.frame.modeBtn:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    self.frame.modeBtn:SetBackdropColor(0.2, 0.2, 0.2, 1)
+    self.frame.modeBtn:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+
+    self.frame.modeBtn.text = self.frame.modeBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    self.frame.modeBtn.text:SetPoint("CENTER")
+
+    local strategy = LazyProf.db.profile.strategy
+    self.frame.modeBtn.text:SetText(strategy == "cheapest" and "Cheapest" or "Fastest")
+
+    if self.config.embedded then
+        self.frame.modeBtn:SetPoint("TOPRIGHT", -4, -4)
+    else
+        self.frame.modeBtn:SetPoint("TOPRIGHT", self.frame.closeBtn, "TOPLEFT", -4, 0)
+    end
+
+    local panel = self
+    self.frame.modeBtn:SetScript("OnClick", function()
+        local current = LazyProf.db.profile.strategy
+        local newStrategy = (current == "cheapest") and "fastest" or "cheapest"
+        LazyProf.db.profile.strategy = newStrategy
+
+        -- Strategy is global - update BOTH panels.
+        -- Clicked panel runs last so its shopping list wins.
+        local pw = LazyProf.PlanningWindow
+
+        if panel.config.embedded then
+            -- Planning toggle: update standalone first, then planning last
+            if LazyProf.Pathfinder.currentPath then
+                LazyProf.Pathfinder:Calculate("strategy change")
+                LazyProf:UpdateDisplay()
+            end
+            local currentPath = panel.currentPath
+            if currentPath and currentPath.professionKey then
+                local path = LazyProf.Pathfinder:CalculateForProfession(
+                    currentPath.professionKey,
+                    currentPath.currentSkill,
+                    "strategy change"
+                )
+                if path then
+                    panel:Update(path)
+                end
+            end
+        else
+            -- Standalone toggle: update planning first, then standalone last
+            if pw and pw:IsVisible() and pw.currentProfession then
+                pw:LoadProfession(pw.currentProfession)
+            end
+            LazyProf.Pathfinder:Calculate("strategy change")
+            LazyProf:UpdateDisplay()
+        end
+    end)
+
+    self.frame.modeBtn:SetScript("OnEnter", function(btn)
+        btn:SetBackdropColor(0.3, 0.3, 0.3, 1)
+        GameTooltip:SetOwner(btn, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Strategy")
+        GameTooltip:AddLine("Click to toggle between Cheapest and Fastest", 0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    self.frame.modeBtn:SetScript("OnLeave", function(btn)
+        btn:SetBackdropColor(0.2, 0.2, 0.2, 1)
+        GameTooltip:Hide()
+    end)
 end
 
 -- Update shopping list with bracket-filtered data
@@ -375,6 +463,12 @@ function MilestonePanelClass:Update(path)
     -- Update bracket dropdown text
     if self.frame.bracketDropdown then
         UIDropDownMenu_SetText(self.frame.bracketDropdown, self:GetBracketLabel())
+    end
+
+    -- Update mode toggle text
+    if self.frame.modeBtn then
+        local strategy = LazyProf.db.profile.strategy
+        self.frame.modeBtn.text:SetText(strategy == "cheapest" and "Cheapest" or "Fastest")
     end
 
     LazyProf:Debug("ui", "  frame: " .. (self.frame and tostring(self.frame:GetName()) or "NIL"))
