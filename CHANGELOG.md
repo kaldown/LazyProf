@@ -4,6 +4,8 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-02-10
+
 ### Added
 - **Bracket filter for milestone panel and shopping list**: Dropdown on milestone panel filters steps by skill bracket (Apprentice 1-75 through Master 300-375). Defaults to current skill bracket and auto-advances on recalculate. Shopping list shows only materials for the selected bracket range.
 - **Extended inventory scanning**: Shopping list now checks mailbox, active AH listings, and guild bank for materials via Syndicator
@@ -11,6 +13,7 @@ All notable changes to LazyProf will be documented in this file.
   - Active AH listings are always scanned, shown as "Cancel from AH" with distinct orange styling
   - Guild bank scanning available via new "Include guild bank" toggle (disabled by default)
   - New shopping list sections: "Check Mail", "Cancel from AH", "From Guild Bank"
+- **TSM Recent Value price source**: Added DBRecent (72-hour rolling average) as a pricing option alongside DBMarket. Useful when DBMarket lags behind current prices.
 
 ### Fixed
 - **Milestone breakdown no longer double-counts inventory**: Previously, each step independently subtracted owned materials (e.g., 3 Essence of Fire deducted from every step instead of only the first). Now simulates inventory consumption step-by-step so materials are allocated once.
