@@ -27,6 +27,7 @@ LazyProf.PriceProviders.tsm = {
         if not price or price == 0 then
             -- Try other sources as fallback
             local fallbacks = {
+                Constants.TSM_PRICE_SOURCE.RECENT,
                 Constants.TSM_PRICE_SOURCE.MIN_BUYOUT,
                 Constants.TSM_PRICE_SOURCE.MARKET,
                 Constants.TSM_PRICE_SOURCE.REGION_AVG,

@@ -32,7 +32,7 @@ LazyProf.defaults = {
             Constants.PRICE_SOURCE.SCANNER,
             Constants.PRICE_SOURCE.VENDOR,
         },
-        tsmPriceSource = Constants.TSM_PRICE_SOURCE.MIN_BUYOUT, -- Default to current AH prices
+        tsmPriceSource = Constants.TSM_PRICE_SOURCE.RECENT, -- Default to current AH prices (outliers removed)
 
         -- Debug
         debug = false,
@@ -322,8 +322,9 @@ LazyProf.options = {
                     width = "double",
                     hidden = function() return not TSM_API end,
                     values = {
-                        [Constants.TSM_PRICE_SOURCE.MIN_BUYOUT] = "Min Buyout (current AH prices)",
-                        [Constants.TSM_PRICE_SOURCE.MARKET] = "Market Value (realm average)",
+                        [Constants.TSM_PRICE_SOURCE.MIN_BUYOUT] = "Min Buyout (cheapest listing)",
+                        [Constants.TSM_PRICE_SOURCE.RECENT] = "Recent Value (current prices, cleaned)",
+                        [Constants.TSM_PRICE_SOURCE.MARKET] = "Market Value (14-day average)",
                         [Constants.TSM_PRICE_SOURCE.REGION_AVG] = "Region Average (cross-realm)",
                     },
                     get = function() return LazyProf.db.profile.tsmPriceSource end,
@@ -336,7 +337,7 @@ LazyProf.options = {
                     end,
                 },
                 tsmPriceDesc = {
-                    name = "|cFF888888Min Buyout = what you can buy right now on AH\nMarket Value = recent average on your realm\nRegion Average = average across all realms (stable but may differ from local)|r",
+                    name = "|cFF888888Min Buyout = cheapest single listing on AH\nRecent Value = current prices with outliers removed\nMarket Value = 14-day weighted average on your realm\nRegion Average = average across all realms (stable but may differ from local)|r",
                     type = "description",
                     order = 4,
                     hidden = function() return not TSM_API end,
