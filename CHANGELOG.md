@@ -8,6 +8,9 @@ All notable changes to LazyProf will be documented in this file.
 - **Exclude green recipes setting**: Green recipes are now excluded from pathfinder suggestions by default. No proven formula exists for green skillup probability - the commonly cited linear formula significantly overestimates actual rates. Users can opt in via "Include green recipes" in settings at their own risk.
 - **Extended debug logging**: Pathfinder debug now logs owned materials inventory, active settings (including green recipe filter), and out-of-pocket cost comparisons showing when alternatives are cheaper due to owned materials.
 
+### Removed
+- **Dead "Calculate intermediate crafts" setting**: This toggle was visible in settings but had no effect on any code path. The working material resolution feature uses the separate "Material Resolution" dropdown instead.
+
 ## [0.4.3] - 2026-02-10
 
 ### Added

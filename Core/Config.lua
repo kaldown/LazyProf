@@ -8,7 +8,6 @@ LazyProf.defaults = {
         -- Pathfinding
         strategy = Constants.STRATEGY.CHEAPEST,
         materialResolution = Constants.MATERIAL_RESOLUTION.COST_COMPARE,
-        useIntermediates = true,
         suggestUnlearnedRecipes = true,
         includeGreenRecipes = false,
 
@@ -115,23 +114,11 @@ LazyProf.options = {
                     order = 5,
                     hidden = function() return LazyProf.db.profile.strategy == Constants.STRATEGY.CHEAPEST end,
                 },
-                useIntermediates = {
-                    name = "Calculate intermediate crafts",
-                    desc = "Include sub-component costs in path calculation (e.g., craft Heavy Blasting Powder for Heavy Dynamite)",
-                    type = "toggle",
-                    order = 3,
-                    width = "full",
-                    get = function() return LazyProf.db.profile.useIntermediates end,
-                    set = function(_, v)
-                        LazyProf.db.profile.useIntermediates = v
-                        LazyProf:Recalculate("setting changed")
-                    end,
-                },
                 suggestUnlearnedRecipes = {
                     name = "Suggest unlearned recipes",
                     desc = "Include recipes you haven't learned yet in path calculation",
                     type = "toggle",
-                    order = 4,
+                    order = 3,
                     width = "full",
                     get = function() return LazyProf.db.profile.suggestUnlearnedRecipes end,
                     set = function(_, v)
@@ -152,7 +139,7 @@ LazyProf.options = {
                            "Example: A green recipe showing 50% chance may in " ..
                            "practice give 0 skillups across 10+ crafts.",
                     type = "toggle",
-                    order = 5,
+                    order = 4,
                     width = "full",
                     get = function() return LazyProf.db.profile.includeGreenRecipes end,
                     set = function(_, v)
