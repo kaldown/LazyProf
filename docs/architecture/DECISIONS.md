@@ -300,6 +300,39 @@ score = (reagent_cost + amortized_cost) / expected_skillup
 
 ---
 
+## ADR-012: Inventory-Adjusted Cost Display (Display Only)
+
+**Date**: 2026-02-10
+
+**Status**: Accepted
+
+**Context**: The milestone breakdown and alternatives list showed only market-price costs, ignoring what the player already owns. Pinning a recipe the player has materials for showed a higher cost (market price) even though their actual out-of-pocket cost was lower or zero. This made it hard to identify good pin candidates.
+
+**Decision**: Fix the display layer only. Show out-of-pocket costs (accounting for owned materials) prominently in green, with dimmed market price for reference. Do not change the scoring algorithm.
+
+**Implementation**:
+- `CalculateMilestoneBreakdown` sums per-material `estimatedCost` (already inventory-adjusted) into `outOfPocketCost` per step
+- Each alternative gets `outOfPocketCost` computed against `remainingInventory` at that step (read-only, no consumption)
+- Alternatives sorted by out-of-pocket cost (cheapest-for-you first)
+- UI shows green OOP cost + dimmed market price when different; normal white when identical
+- Path objects carry `outOfPocketTotal` for totals display
+
+**Alternatives Considered**:
+- Modify scoring to use owned materials: Rejected per ADR-008 (greedy algorithm produces worse paths with owned=free)
+- Badge system (owned/partial/none): Rejected as out-of-pocket cost encodes this information in a single number
+- Wait for DP pathfinder: Rejected because display improvement is independent and immediately useful
+
+**Trade-offs Accepted**:
+- Alternative OOP costs are per-single-craft (don't account for quantity needed across the full step)
+- Alternatives use read-only inventory check (don't simulate consumption), so two alternatives may both show "0g" even if inventory only covers one
+
+**Consequences**:
+- Players can identify money-saving pin candidates at a glance
+- Scoring remains stable and consistent (market-price, empty inventory)
+- DP pathfinder (future) will make this display even more accurate with globally optimal inventory allocation
+
+---
+
 ## Template for New ADRs
 
 ```markdown

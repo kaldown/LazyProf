@@ -450,15 +450,19 @@ function MilestonePanelClass:Update(path)
             if step.alternatives and #step.alternatives > 1 then
                 -- Build filtered list (exclude current recipe)
                 local filteredAlts = {}
-                for rank, alt in ipairs(step.alternatives) do
+                for _, alt in ipairs(step.alternatives) do
                     if alt.recipe.id ~= step.recipe.id then
-                        table.insert(filteredAlts, { alt = alt, rank = rank })
+                        table.insert(filteredAlts, { alt = alt })
                     end
                 end
-                -- Sort by score rank (best first)
+                -- Sort by out-of-pocket cost (cheapest-for-you first)
                 table.sort(filteredAlts, function(a, b)
-                    return a.rank < b.rank
+                    return (a.alt.outOfPocketCost or a.alt.craftCost) < (b.alt.outOfPocketCost or b.alt.craftCost)
                 end)
+                -- Assign display rank after sort
+                for i, entry in ipairs(filteredAlts) do
+                    entry.rank = i
+                end
 
                 local totalAlts = #filteredAlts
                 if totalAlts > 0 then
@@ -534,16 +538,30 @@ function MilestonePanelClass:Update(path)
         self:CreateRecalculateButton(dirtyCount)
     end
 
-    -- Update total - show bracket cost vs full path cost when filtered
+    -- Update total - show out-of-pocket cost (inventory-adjusted)
     if bracket then
-        local bracketCost = 0
+        local bracketOopCost = 0
+        local bracketMarketCost = 0
         for _, step in ipairs(breakdown) do
-            bracketCost = bracketCost + (step.cost or 0)
+            bracketOopCost = bracketOopCost + (step.outOfPocketCost or step.cost or 0)
+            bracketMarketCost = bracketMarketCost + (step.cost or 0)
         end
-        self.frame.total:SetText(string.format("Bracket: %s  |cFF888888|  Full: %s|r",
-            Utils.FormatMoney(bracketCost), Utils.FormatMoney(path.totalCost)))
+        local fullOopCost = path.outOfPocketTotal or path.totalCost
+        if bracketOopCost < bracketMarketCost then
+            self.frame.total:SetText(string.format("|cFF66FF66%s|r |cFF666666%s|r  |cFF888888|  Full: %s|r",
+                Utils.FormatMoney(bracketOopCost), Utils.FormatMoney(bracketMarketCost), Utils.FormatMoney(fullOopCost)))
+        else
+            self.frame.total:SetText(string.format("Bracket: %s  |cFF888888|  Full: %s|r",
+                Utils.FormatMoney(bracketOopCost), Utils.FormatMoney(fullOopCost)))
+        end
     else
-        self.frame.total:SetText("Total: " .. Utils.FormatMoney(path.totalCost))
+        local oopTotal = path.outOfPocketTotal or path.totalCost
+        if oopTotal < path.totalCost then
+            self.frame.total:SetText(string.format("Total: |cFF66FF66%s|r |cFF666666%s|r",
+                Utils.FormatMoney(oopTotal), Utils.FormatMoney(path.totalCost)))
+        else
+            self.frame.total:SetText("Total: " .. Utils.FormatMoney(path.totalCost))
+        end
     end
 
     -- Update content height for scrolling
@@ -633,11 +651,19 @@ function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
     row.materials:SetText("- " .. matSummary)
     row.materials:SetTextColor(0.7, 0.7, 0.7)
 
-    -- Cost
+    -- Cost (out-of-pocket primary, market price dimmed if different)
     row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     row.cost:SetPoint("RIGHT", -4, 0)
-    row.cost:SetText(Utils.FormatMoney(step.cost))
-    row.cost:SetTextColor(1, 1, 1)
+    local oopCost = step.outOfPocketCost or step.cost
+    local marketCost = step.cost or 0
+    if oopCost < marketCost then
+        row.cost:SetText(string.format("%s |cFF666666%s|r",
+            Utils.FormatMoney(oopCost), Utils.FormatMoney(marketCost)))
+        row.cost:SetTextColor(0.4, 1, 0.4)
+    else
+        row.cost:SetText(Utils.FormatMoney(marketCost))
+        row.cost:SetTextColor(1, 1, 1)
+    end
 
     -- Click to expand/collapse (uses stored self.currentPath)
     row:SetScript("OnClick", function()
@@ -1011,15 +1037,24 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
     row.skillup:SetText(string.format("%.0f%%", alt.expectedSkillups * 100))
     row.skillup:SetTextColor(0.7, 0.7, 0.7)
 
-    -- Cost per craft
+    -- Cost per craft (out-of-pocket primary, market price dimmed if different)
     row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     row.cost:SetPoint("RIGHT", row, "RIGHT", -4, 0)
     if alt.score < math.huge then
-        row.cost:SetText(Utils.FormatMoney(alt.craftCost))
+        local oopCost = alt.outOfPocketCost or alt.craftCost
+        local marketCost = alt.craftCost
+        if oopCost < marketCost then
+            row.cost:SetText(string.format("%s |cFF666666%s|r",
+                Utils.FormatMoney(oopCost), Utils.FormatMoney(marketCost)))
+            row.cost:SetTextColor(0.4, 1, 0.4)
+        else
+            row.cost:SetText(Utils.FormatMoney(marketCost))
+            row.cost:SetTextColor(1, 1, 1)
+        end
     else
         row.cost:SetText("|cFF666666N/A|r")
+        row.cost:SetTextColor(1, 1, 1)
     end
-    row.cost:SetTextColor(1, 1, 1)
 
     -- Dim unavailable recipes visually
     if alt.recipe._isUnavailable then
@@ -1057,7 +1092,13 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
         end
         GameTooltip:AddLine(string.format("Difficulty: %s (%d%% skillup chance)", alt.color, alt.expectedSkillups * 100), 0.7, 0.7, 0.7)
         if alt.score < math.huge then
-            GameTooltip:AddLine(string.format("Cost per craft: %s", Utils.FormatMoney(alt.craftCost)), 1, 1, 1)
+            local tooltipOopCost = alt.outOfPocketCost or alt.craftCost
+            if tooltipOopCost < alt.craftCost then
+                GameTooltip:AddLine(string.format("Cost per craft: %s (market: %s)",
+                    Utils.FormatMoney(tooltipOopCost), Utils.FormatMoney(alt.craftCost)), 0.4, 1, 0.4)
+            else
+                GameTooltip:AddLine(string.format("Cost per craft: %s", Utils.FormatMoney(alt.craftCost)), 1, 1, 1)
+            end
             -- Score details only in debug mode
             if LazyProf.db.profile.debug then
                 GameTooltip:AddLine(string.format("Score: %.2f", alt.score), 0.5, 0.5, 0.5)

@@ -131,6 +131,13 @@ function Pathfinder:Calculate(reason)
         milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, startSkill, inventory, prices, racialBonus),
     }
 
+    -- Compute out-of-pocket total from milestone breakdown
+    local outOfPocketTotal = 0
+    for _, mb in ipairs(self.currentPath.milestoneBreakdown) do
+        outOfPocketTotal = outOfPocketTotal + (mb.outOfPocketCost or 0)
+    end
+    self.currentPath.outOfPocketTotal = outOfPocketTotal
+
     LazyProf:Debug("pathfinder", string.format("Path calculated: %d steps, %s total",
         #steps, Utils.FormatMoney(self.currentPath.totalCost)))
 
@@ -232,6 +239,13 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel, reason)
         missingMaterials = self:CalculateMissingMaterials(steps, inventory, sourceBreakdown, prices),
         milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, skillLevel, inventory, prices, racialBonus),
     }
+
+    -- Compute out-of-pocket total from milestone breakdown
+    local outOfPocketTotal = 0
+    for _, mb in ipairs(path.milestoneBreakdown) do
+        outOfPocketTotal = outOfPocketTotal + (mb.outOfPocketCost or 0)
+    end
+    path.outOfPocketTotal = outOfPocketTotal
 
     LazyProf:Debug("pathfinder", string.format("Planning path calculated: %d steps, %s total",
         #steps, Utils.FormatMoney(path.totalCost)))
@@ -616,10 +630,52 @@ function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, currentSkill,
             })
         end
 
+        -- Sum out-of-pocket cost (inventory-adjusted) for this step
+        local outOfPocketCost = 0
+        for _, mat in ipairs(materials) do
+            outOfPocketCost = outOfPocketCost + mat.estimatedCost
+        end
+
         -- Build materials summary string
         local materialParts = {}
         for _, mat in ipairs(materials) do
             table.insert(materialParts, string.format("%dx %s", mat.need, mat.name))
+        end
+
+        -- Compute inventory-adjusted cost for each alternative (read-only against remainingInventory)
+        local adjustedAlternatives = {}
+        if step.alternatives then
+            for _, alt in ipairs(step.alternatives) do
+                local altOopCost = 0
+                for _, reagent in ipairs(alt.recipe.reagents) do
+                    local price = prices[reagent.itemId] or 0
+                    local have = remainingInventory[reagent.itemId] or 0
+                    local need = reagent.count  -- per single craft
+                    local missing = math.max(0, need - have)
+                    altOopCost = altOopCost + (price * missing)
+                end
+                -- Add recipe acquisition cost if not learned
+                if not alt.recipe.learned and alt.recipe._sourceInfo then
+                    local srcType = alt.recipe._sourceInfo.type
+                    if srcType == "trainer" or srcType == "vendor" then
+                        altOopCost = altOopCost + (alt.recipe._sourceInfo.cost or 0)
+                    elseif srcType == "ah" then
+                        altOopCost = altOopCost + (alt.recipe._sourceInfo.price or 0)
+                    end
+                end
+                table.insert(adjustedAlternatives, {
+                    recipe = alt.recipe,
+                    score = alt.score,
+                    color = alt.color,
+                    expectedSkillups = alt.expectedSkillups,
+                    craftCost = alt.craftCost,
+                    outOfPocketCost = altOopCost,
+                })
+            end
+            -- Sort by outOfPocketCost (cheapest-for-you first)
+            table.sort(adjustedAlternatives, function(a, b)
+                return a.outOfPocketCost < b.outOfPocketCost
+            end)
         end
 
         -- Calculate recipe color at step's starting skill (with racial bonus)
@@ -632,10 +688,11 @@ function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, currentSkill,
             recipe = step.recipe,
             quantity = step.quantity,
             cost = step.totalCost,
+            outOfPocketCost = outOfPocketCost,
             materials = materials,
             materialsSummary = table.concat(materialParts, ", "),
             color = color,  -- Pre-calculated color for UI display
-            alternatives = step.alternatives,  -- All scored candidates at this skill level
+            alternatives = adjustedAlternatives,
             -- Check if this step crosses a trainer milestone
             trainerMilestoneAfter = self:GetMilestoneBetween(step.skillStart, step.skillEnd, milestones),
         })

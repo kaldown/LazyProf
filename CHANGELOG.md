@@ -17,6 +17,9 @@ All notable changes to LazyProf will be documented in this file.
 - **Recipe acquisition cost no longer inflated across steps**: Unlearned recipes spanning multiple steps (e.g., Lifelike Mechanical Toad across 4 steps) previously charged the recipe purchase cost on every step. Now charges once on the first step only. Scoring was already correct; only displayed totals were affected.
 
 ### Changed
+- **Milestone breakdown shows out-of-pocket cost**: Step rows and totals now show inventory-adjusted cost (green) alongside dimmed market price when you own materials. Helps identify which steps save money.
+- **Alternative recipes sorted by out-of-pocket cost**: Alternatives list now sorts cheapest-for-you first instead of by market price score. Recipes you have materials for rise to the top.
+- **Arrow tooltip shows inventory-adjusted total**: Hover tooltip displays out-of-pocket total when inventory savings exist.
 - **Scanner refactored to registry pattern**: Inventory sources are now modular - adding future sources requires only a new scan function and registry entry
 - **CalculateMissingMaterials simplified**: Source categorization uses waterfall pattern (bags, bank, mail, auctions, guild bank, alts, AH) with unified sourceBreakdown data
 - **Pathfinder debug logging improved**: `Calculate()` and `Recalculate()` now log what triggered them (e.g., "trade skill opened", "setting changed", "recalculate button (2 dirty pins)"). Active pins are logged before path calculation starts.

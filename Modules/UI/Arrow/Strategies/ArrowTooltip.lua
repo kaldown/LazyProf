@@ -117,12 +117,22 @@ LazyProf.ArrowStrategies.arrowWithTooltip = {
         end
 
         GameTooltip:AddLine(" ")
-        GameTooltip:AddDoubleLine(
-            "Total Cost:",
-            Utils.FormatMoney(path.totalCost),
-            1, 1, 1,
-            1, 0.82, 0
-        )
+        local oopTotal = path.outOfPocketTotal or path.totalCost
+        if oopTotal < path.totalCost then
+            GameTooltip:AddDoubleLine(
+                "Estimated Cost:",
+                string.format("%s (market: %s)", Utils.FormatMoney(oopTotal), Utils.FormatMoney(path.totalCost)),
+                1, 1, 1,
+                0.4, 1, 0.4
+            )
+        else
+            GameTooltip:AddDoubleLine(
+                "Total Cost:",
+                Utils.FormatMoney(path.totalCost),
+                1, 1, 1,
+                1, 0.82, 0
+            )
+        end
 
         if LazyProf.PriceManager:ArePricesStale() then
             GameTooltip:AddLine(" ")
