@@ -43,11 +43,12 @@ function Pathfinder:Calculate(reason)
     LazyProf:Debug("pathfinder", string.format("Calculating path: %s %d -> %d (actual skill: %d)%s",
         skillName, startSkill, targetSkill, currentSkill,
         reason and (" [" .. reason .. "]") or ""))
-    LazyProf:Debug("pathfinder", string.format("Settings: strategy=%s, fromCurrentSkill=%s, bank=%s, alts=%s",
+    LazyProf:Debug("pathfinder", string.format("Settings: strategy=%s, fromCurrentSkill=%s, bank=%s, alts=%s, greenRecipes=%s",
         LazyProf.db.profile.strategy,
         tostring(LazyProf.db.profile.calculateFromCurrentSkill),
         tostring(LazyProf.db.profile.includeBankItems),
-        tostring(LazyProf.db.profile.includeAltCharacters)))
+        tostring(LazyProf.db.profile.includeAltCharacters),
+        tostring(LazyProf.db.profile.includeGreenRecipes)))
 
     -- Log active pins if any
     local pinCount = 0
@@ -65,6 +66,25 @@ function Pathfinder:Calculate(reason)
 
     -- Get inventory (bags + all enabled sources)
     local inventory, sourceBreakdown = LazyProf.Inventory:ScanAll()
+
+    -- Log owned materials summary
+    local ownedCount = 0
+    local ownedParts = {}
+    for itemId, qty in pairs(inventory) do
+        if qty > 0 then
+            ownedCount = ownedCount + 1
+            if ownedCount <= 15 then
+                local name = Utils.GetItemInfo(itemId)
+                table.insert(ownedParts, string.format("%dx %s", qty, name or itemId))
+            end
+        end
+    end
+    if ownedCount > 0 then
+        local suffix = ownedCount > 15 and string.format(" ... and %d more", ownedCount - 15) or ""
+        LazyProf:Debug("pathfinder", string.format("Owned materials (%d items): %s%s", ownedCount, table.concat(ownedParts, ", "), suffix))
+    else
+        LazyProf:Debug("pathfinder", "Owned materials: none")
+    end
 
     -- Get prices for all reagents (and potential source materials for resolution)
     local reagentIds = {}
@@ -676,6 +696,32 @@ function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, currentSkill,
             table.sort(adjustedAlternatives, function(a, b)
                 return a.outOfPocketCost < b.outOfPocketCost
             end)
+        end
+
+        -- Log OOP cost comparison for this step
+        local marketCost = step.totalCost
+        if outOfPocketCost ~= marketCost then
+            LazyProf:Debug("pathfinder", string.format("[OOP] %s x%d: market=%s, oop=%s (you save %s)",
+                step.recipe.name, step.quantity, Utils.FormatMoney(marketCost),
+                Utils.FormatMoney(outOfPocketCost), Utils.FormatMoney(marketCost - outOfPocketCost)))
+        end
+        -- Log top alternatives with OOP vs market when they differ
+        if #adjustedAlternatives > 0 then
+            local oopBetter = {}
+            for i, alt in ipairs(adjustedAlternatives) do
+                if i > 5 then break end
+                if alt.outOfPocketCost < alt.craftCost then
+                    table.insert(oopBetter, string.format("  %s: market=%s, oop=%s (%d%% skillup)",
+                        alt.recipe.name, Utils.FormatMoney(alt.craftCost),
+                        Utils.FormatMoney(alt.outOfPocketCost), alt.expectedSkillups * 100))
+                end
+            end
+            if #oopBetter > 0 then
+                LazyProf:Debug("pathfinder", "[OOP] Cheaper alternatives with owned materials:")
+                for _, line in ipairs(oopBetter) do
+                    LazyProf:Debug("pathfinder", line)
+                end
+            end
         end
 
         -- Calculate recipe color at step's starting skill (with racial bonus)
