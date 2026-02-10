@@ -538,7 +538,7 @@ function MilestonePanelClass:Update(path)
         self:CreateRecalculateButton(dirtyCount)
     end
 
-    -- Update total - show out-of-pocket cost (inventory-adjusted)
+    -- Update total - show out-of-pocket cost (green when inventory saves money)
     if bracket then
         local bracketOopCost = 0
         local bracketMarketCost = 0
@@ -547,18 +547,15 @@ function MilestonePanelClass:Update(path)
             bracketMarketCost = bracketMarketCost + (step.cost or 0)
         end
         local fullOopCost = path.outOfPocketTotal or path.totalCost
-        if bracketOopCost < bracketMarketCost then
-            self.frame.total:SetText(string.format("|cFF66FF66%s|r |cFF666666%s|r  |cFF888888|  Full: %s|r",
-                Utils.FormatMoney(bracketOopCost), Utils.FormatMoney(bracketMarketCost), Utils.FormatMoney(fullOopCost)))
-        else
-            self.frame.total:SetText(string.format("Bracket: %s  |cFF888888|  Full: %s|r",
-                Utils.FormatMoney(bracketOopCost), Utils.FormatMoney(fullOopCost)))
-        end
+        local bracketColor = bracketOopCost < bracketMarketCost and "|cFF66FF66" or ""
+        local bracketColorEnd = bracketOopCost < bracketMarketCost and "|r" or ""
+        self.frame.total:SetText(string.format("Bracket: %s%s%s  |cFF888888|  Full: %s|r",
+            bracketColor, Utils.FormatMoney(bracketOopCost), bracketColorEnd, Utils.FormatMoney(fullOopCost)))
     else
         local oopTotal = path.outOfPocketTotal or path.totalCost
         if oopTotal < path.totalCost then
-            self.frame.total:SetText(string.format("Total: |cFF66FF66%s|r |cFF666666%s|r",
-                Utils.FormatMoney(oopTotal), Utils.FormatMoney(path.totalCost)))
+            self.frame.total:SetText(string.format("Total: |cFF66FF66%s|r",
+                Utils.FormatMoney(oopTotal)))
         else
             self.frame.total:SetText("Total: " .. Utils.FormatMoney(path.totalCost))
         end
@@ -651,17 +648,15 @@ function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
     row.materials:SetText("- " .. matSummary)
     row.materials:SetTextColor(0.7, 0.7, 0.7)
 
-    -- Cost (out-of-pocket primary, market price dimmed if different)
+    -- Cost (out-of-pocket; green when inventory reduces cost)
     row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     row.cost:SetPoint("RIGHT", -4, 0)
     local oopCost = step.outOfPocketCost or step.cost
     local marketCost = step.cost or 0
+    row.cost:SetText(Utils.FormatMoney(oopCost))
     if oopCost < marketCost then
-        row.cost:SetText(string.format("%s |cFF666666%s|r",
-            Utils.FormatMoney(oopCost), Utils.FormatMoney(marketCost)))
         row.cost:SetTextColor(0.4, 1, 0.4)
     else
-        row.cost:SetText(Utils.FormatMoney(marketCost))
         row.cost:SetTextColor(1, 1, 1)
     end
 
@@ -684,6 +679,14 @@ function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
         for _, mat in ipairs(step.materials) do
             local color = mat.missing > 0 and "|cFFFF6666" or "|cFF66FF66"
             GameTooltip:AddLine(string.format("  %s%dx|r %s", color, mat.need, mat.name), 1, 1, 1)
+        end
+        GameTooltip:AddLine(" ")
+        if oopCost < marketCost then
+            GameTooltip:AddLine(string.format("You pay: %s", Utils.FormatMoney(oopCost)), 0.4, 1, 0.4)
+            GameTooltip:AddLine(string.format("Market price: %s", Utils.FormatMoney(marketCost)), 0.5, 0.5, 0.5)
+            GameTooltip:AddLine(string.format("Saving: %s", Utils.FormatMoney(marketCost - oopCost)), 0.4, 1, 0.4)
+        else
+            GameTooltip:AddLine(string.format("Cost: %s", Utils.FormatMoney(marketCost)), 1, 1, 1)
         end
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("Click to expand/collapse", 0.5, 0.5, 0.5)
@@ -1037,18 +1040,15 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
     row.skillup:SetText(string.format("%.0f%%", alt.expectedSkillups * 100))
     row.skillup:SetTextColor(0.7, 0.7, 0.7)
 
-    -- Cost per craft (out-of-pocket primary, market price dimmed if different)
+    -- Cost per craft (out-of-pocket; green when inventory reduces cost)
     row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     row.cost:SetPoint("RIGHT", row, "RIGHT", -4, 0)
     if alt.score < math.huge then
-        local oopCost = alt.outOfPocketCost or alt.craftCost
-        local marketCost = alt.craftCost
-        if oopCost < marketCost then
-            row.cost:SetText(string.format("%s |cFF666666%s|r",
-                Utils.FormatMoney(oopCost), Utils.FormatMoney(marketCost)))
+        local altOopCost = alt.outOfPocketCost or alt.craftCost
+        row.cost:SetText(Utils.FormatMoney(altOopCost))
+        if altOopCost < alt.craftCost then
             row.cost:SetTextColor(0.4, 1, 0.4)
         else
-            row.cost:SetText(Utils.FormatMoney(marketCost))
             row.cost:SetTextColor(1, 1, 1)
         end
     else
