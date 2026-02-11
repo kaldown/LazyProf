@@ -4,8 +4,14 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-02-11
+
 ### Added
 - **Interactive item tooltips in Recipe Details**: Hovering the crafted product icon, reagent icons, or the recipe source item now shows the full GameTooltip with addon overlays (TSM/Auctionator pricing, etc.). Reagents and recipe source items display 16x16 item icons.
+- **Training cost display**: Trainer-sourced recipes now show the training cost inline in the Recipe Details source section (e.g., "Any Alchemy Trainer (5g)").
+
+### Changed
+- Updated CraftLib to v0.3.0 (adds training cost data for trainer recipes)
 
 ## [0.4.4] - 2026-02-10
 

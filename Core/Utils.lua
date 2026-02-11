@@ -243,7 +243,7 @@ function Utils.GetSourceDetails(source, showAllFactions)
     elseif source.type == "trainer" then
         details.trainer = {
             npcName = source.npcName,
-            cost = source.cost,
+            cost = source.trainingCost or source.cost,
             note = source.note,
         }
     end

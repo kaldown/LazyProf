@@ -39,7 +39,7 @@ function Availability:IsRecipeAvailable(recipe)
         if self:MeetsTrainerRequirements(source) then
             return true, {
                 type = "trainer",
-                cost = source.cost,
+                cost = source.trainingCost or source.cost,
                 npcName = source.npcName
             }
         end

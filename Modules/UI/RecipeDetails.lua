@@ -558,6 +558,9 @@ function RecipeDetails:UpdateSourceSection(recipe)
         content.factionToggleLabel:Hide()
 
         local text = source.npcName or "Any Trainer"
+        if source.trainingCost and source.trainingCost > 0 then
+            text = text .. " (" .. Utils.FormatMoney(source.trainingCost) .. ")"
+        end
         if source.note then
             text = text .. "\n|cFF888888" .. source.note .. "|r"
         end
