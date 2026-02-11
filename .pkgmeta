@@ -1,4 +1,5 @@
 package-as: LazyProf
+license-output: LICENSE
 
 externals:
   Libs/LibDataBroker-1.1: https://github.com/kaldown/LibDataBroker-1.1
