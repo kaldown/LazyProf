@@ -1,3 +1,9 @@
+[![PayPal](https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white)](https://www.paypal.com/donate/?hosted_button_id=FG4KES3HNPLVG)
+
+If you find this useful, consider [supporting development](https://www.paypal.com/donate/?hosted_button_id=FG4KES3HNPLVG).
+
+---
+
 Tired of wasting gold leveling professions? LazyProf figures out the cheapest crafting path so you don't have to.
 
 **Requires [CraftLib](https://www.curseforge.com/wow/addons/craftlib)** - Install both addons together.

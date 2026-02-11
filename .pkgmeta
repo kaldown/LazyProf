@@ -12,10 +12,6 @@ ignore:
   - scripts
   - releases
   - Makefile
-  - README.md
-  - CONTRIBUTING.md
-  - CURSEFORGE.md
-  - CHANGELOG.md
   - "*.md"
   - Libs/Ace3/tests
 
