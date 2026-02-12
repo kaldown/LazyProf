@@ -569,6 +569,7 @@ function MilestonePanelClass:Update(path)
                     -- Only show groups if the main spoiler is expanded
                     if isAltExpanded then
                         local bestScore = step.alternatives[1] and step.alternatives[1].score or 0
+                        local skillsNeeded = step.to - step.from
 
                         -- Initialize group state for this step
                         if not self.expandedAltGroups[stepKey] then
@@ -596,7 +597,7 @@ function MilestonePanelClass:Update(path)
                                 for idx = startIdx, endIdx do
                                     local entry = filteredAlts[idx]
                                     local altRow = self:CreateAlternativeRow(
-                                        entry.alt, entry.rank, bestScore, step.from, yOffset, contentWidth
+                                        entry.alt, entry.rank, bestScore, step.from, skillsNeeded, yOffset, contentWidth
                                     )
                                     table.insert(self.rows, altRow)
                                     yOffset = yOffset + ALTERNATIVE_ROW_HEIGHT
@@ -732,22 +733,29 @@ function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
     -- Materials summary (truncated)
     row.materials = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     row.materials:SetPoint("LEFT", 180, 0)
-    row.materials:SetPoint("RIGHT", row, "RIGHT", -55, 0)
+    row.materials:SetPoint("RIGHT", row, "RIGHT", -120, 0)
     row.materials:SetJustifyH("LEFT")
     row.materials:SetWordWrap(false)
     local matSummary = step.materialsSummary or ""
-    if #matSummary > 40 then
-        matSummary = matSummary:sub(1, 37) .. "..."
+    if #matSummary > 25 then
+        matSummary = matSummary:sub(1, 22) .. "..."
     end
     row.materials:SetText("- " .. matSummary)
     row.materials:SetTextColor(0.7, 0.7, 0.7)
 
-    -- Cost (out-of-pocket; green when inventory reduces cost)
+    -- Cost (per-craft first, total in parens; green when inventory reduces cost)
     row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     row.cost:SetPoint("RIGHT", -4, 0)
     local oopCost = step.outOfPocketCost or step.cost
     local marketCost = step.cost or 0
-    row.cost:SetText(Utils.FormatMoney(oopCost))
+    local perCraft = step.quantity > 0 and math.floor(oopCost / step.quantity + 0.5) or oopCost
+    local costText
+    if step.quantity > 1 then
+        costText = string.format("%s ea |cFF888888(%s)|r", Utils.FormatMoney(perCraft), Utils.FormatMoney(oopCost))
+    else
+        costText = Utils.FormatMoney(oopCost)
+    end
+    row.cost:SetText(costText)
     if oopCost < marketCost then
         row.cost:SetTextColor(0.4, 1, 0.4)
     else
@@ -775,12 +783,23 @@ function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
             GameTooltip:AddLine(string.format("  %s%dx|r %s", color, mat.need, mat.name), 1, 1, 1)
         end
         GameTooltip:AddLine(" ")
+        local tooltipPerCraft = step.quantity > 0 and math.floor(oopCost / step.quantity + 0.5) or oopCost
         if oopCost < marketCost then
-            GameTooltip:AddLine(string.format("You pay: %s", Utils.FormatMoney(oopCost)), 0.4, 1, 0.4)
+            GameTooltip:AddLine(string.format("Per craft: %s", Utils.FormatMoney(tooltipPerCraft)), 0.4, 1, 0.4)
+            if step.quantity > 1 then
+                GameTooltip:AddLine(string.format("Total (%d crafts): %s", step.quantity, Utils.FormatMoney(oopCost)), 0.4, 1, 0.4)
+            end
             GameTooltip:AddLine(string.format("Market price: %s", Utils.FormatMoney(marketCost)), 0.5, 0.5, 0.5)
             GameTooltip:AddLine(string.format("Saving: %s", Utils.FormatMoney(marketCost - oopCost)), 0.4, 1, 0.4)
         else
-            GameTooltip:AddLine(string.format("Cost: %s", Utils.FormatMoney(marketCost)), 1, 1, 1)
+            GameTooltip:AddLine(string.format("Per craft: %s", Utils.FormatMoney(tooltipPerCraft)), 1, 1, 1)
+            if step.quantity > 1 then
+                GameTooltip:AddLine(string.format("Total (%d crafts): %s", step.quantity, Utils.FormatMoney(oopCost)), 1, 1, 1)
+            end
+        end
+        local skillsGained = step.to - step.from
+        if skillsGained > 0 then
+            GameTooltip:AddLine(string.format("Cost per skill-up: %s", Utils.FormatMoney(math.floor(oopCost / skillsGained + 0.5))), 1, 0.82, 0)
         end
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("Click to expand/collapse", 0.5, 0.5, 0.5)
@@ -1055,7 +1074,8 @@ end
 -- rank: position in sorted alternatives (1 = best)
 -- bestScore: score of the #1 alternative for delta calculation
 -- skillLevel: the step's starting skill level (for pinning)
-function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLevel, yOffset, contentWidth)
+-- skillsNeeded: number of skill points this step covers (for projected total)
+function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLevel, skillsNeeded, yOffset, contentWidth)
     local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
     row:SetSize(contentWidth - 16, ALTERNATIVE_ROW_HEIGHT)
     row:SetPoint("TOPLEFT", 16, -yOffset)
@@ -1118,7 +1138,7 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
     local isUnlearned = not alt.recipe.learned
     row.recipe = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     row.recipe:SetPoint("LEFT", 40, 0)
-    row.recipe:SetPoint("RIGHT", row, "RIGHT", -120, 0)
+    row.recipe:SetPoint("RIGHT", row, "RIGHT", -185, 0)
     row.recipe:SetJustifyH("LEFT")
     row.recipe:SetWordWrap(false)
     local displayName = alt.recipe.name or "Unknown"
@@ -1130,16 +1150,24 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
 
     -- Skillup rate
     row.skillup = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    row.skillup:SetPoint("RIGHT", row, "RIGHT", -70, 0)
+    row.skillup:SetPoint("RIGHT", row, "RIGHT", -155, 0)
     row.skillup:SetText(string.format("%.0f%%", alt.expectedSkillups * 100))
     row.skillup:SetTextColor(0.7, 0.7, 0.7)
 
-    -- Cost per craft (out-of-pocket; green when inventory reduces cost)
+    -- Cost per craft + projected total (out-of-pocket; green when inventory reduces cost)
     row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     row.cost:SetPoint("RIGHT", row, "RIGHT", -4, 0)
     if alt.score < math.huge then
         local altOopCost = alt.outOfPocketCost or alt.craftCost
-        row.cost:SetText(Utils.FormatMoney(altOopCost))
+        local projectedCrafts = (alt.expectedSkillups > 0 and skillsNeeded > 0) and math.ceil(skillsNeeded / alt.expectedSkillups) or 1
+        local projectedTotal = altOopCost * projectedCrafts
+        local altCostText
+        if projectedCrafts > 1 then
+            altCostText = string.format("%s ea |cFF888888(~%s for %d)|r", Utils.FormatMoney(altOopCost), Utils.FormatMoney(projectedTotal), projectedCrafts)
+        else
+            altCostText = Utils.FormatMoney(altOopCost)
+        end
+        row.cost:SetText(altCostText)
         if altOopCost < alt.craftCost then
             row.cost:SetTextColor(0.4, 1, 0.4)
         else
@@ -1188,10 +1216,18 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
         if alt.score < math.huge then
             local tooltipOopCost = alt.outOfPocketCost or alt.craftCost
             if tooltipOopCost < alt.craftCost then
-                GameTooltip:AddLine(string.format("Cost per craft: %s (market: %s)",
+                GameTooltip:AddLine(string.format("Per craft: %s (market: %s)",
                     Utils.FormatMoney(tooltipOopCost), Utils.FormatMoney(alt.craftCost)), 0.4, 1, 0.4)
             else
-                GameTooltip:AddLine(string.format("Cost per craft: %s", Utils.FormatMoney(alt.craftCost)), 1, 1, 1)
+                GameTooltip:AddLine(string.format("Per craft: %s", Utils.FormatMoney(alt.craftCost)), 1, 1, 1)
+            end
+            local ttProjCrafts = (alt.expectedSkillups > 0 and skillsNeeded > 0) and math.ceil(skillsNeeded / alt.expectedSkillups) or 1
+            if ttProjCrafts > 1 then
+                local ttProjTotal = tooltipOopCost * ttProjCrafts
+                GameTooltip:AddLine(string.format("Estimated total (~%d crafts): ~%s", ttProjCrafts, Utils.FormatMoney(ttProjTotal)), 0.7, 0.7, 0.7)
+            end
+            if alt.expectedSkillups > 0 then
+                GameTooltip:AddLine(string.format("Cost per skill-up: %s", Utils.FormatMoney(math.floor(tooltipOopCost / alt.expectedSkillups + 0.5))), 1, 0.82, 0)
             end
             -- Score details only in debug mode
             if LazyProf.db.profile.debug then
