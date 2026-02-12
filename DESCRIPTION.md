@@ -5,7 +5,10 @@
 
 If you find this useful, consider [supporting development](https://www.paypal.com/donate/?hosted_button_id=FG4KES3HNPLVG).
 
-Other addons: [Silencer](https://www.curseforge.com/wow/addons/silencer-whispers) - Whisper gatekeeper | [CraftLib](https://www.curseforge.com/wow/addons/craftlib) - Recipe database
+Other addons:
+- [VendorSniper](https://www.curseforge.com/wow/addons/vendorsniper) - Vendor restock sniper
+- [Silencer](https://www.curseforge.com/wow/addons/silencer-whispers) - Whisper gatekeeper
+- [CraftLib](https://www.curseforge.com/wow/addons/craftlib) - Recipe database
 
 ---
 
