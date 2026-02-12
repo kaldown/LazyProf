@@ -1,6 +1,11 @@
+[![CurseForge](https://img.shields.io/badge/CurseForge-LazyProf-orange)](https://www.curseforge.com/wow/addons/lazyprof)
+[![Wago](https://img.shields.io/badge/Wago-LazyProf-c1272d)](https://addons.wago.io/addons/lazyprof)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PayPal](https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white)](https://www.paypal.com/donate/?hosted_button_id=FG4KES3HNPLVG)
 
 If you find this useful, consider [supporting development](https://www.paypal.com/donate/?hosted_button_id=FG4KES3HNPLVG).
+
+Other addons: [Silencer](https://www.curseforge.com/wow/addons/silencer-whispers) - Whisper gatekeeper | [CraftLib](https://www.curseforge.com/wow/addons/craftlib) - Recipe database
 
 ---
 
@@ -25,11 +30,13 @@ See [CraftLib's profession coverage](https://github.com/kaldown/CraftLib#profess
 - **Planning mode** - Plan any profession's leveling path without learning it first
 - **Extended inventory** - Checks bags, bank, mailbox, active AH listings, guild bank, and alt characters (with Syndicator)
 
-## Price Sources (Priority Order)
+## Pricing
 
-1. **TSM** - Uses configurable TSM pricing (MinBuyout, Market, or Regional)
-2. **Auctionator** - Falls back to Auctionator scan prices
-3. **Vendor prices** - Works standalone without any AH addon
+**Vendor prices always come first** - reagents sold by NPCs (dyes, threads, vials, flux, etc.) use their fixed vendor price, sourced from TSM or Auctionator's recorded merchant data. This prevents AH markup from inflating recipe costs.
+
+For non-vendor items, market sources are checked in order:
+1. **TSM** - Configurable pricing (Recent, MinBuyout, Market, or Regional)
+2. **Auctionator** - Auctionator scan prices
 
 **Recommended:** Install [TSM](https://www.curseforge.com/wow/addons/tradeskill-master) + TSM Desktop App for the most accurate pricing.
 
