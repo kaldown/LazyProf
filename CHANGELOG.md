@@ -4,6 +4,8 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-02-12
+
 ### Fixed
 - **Vendor-sold reagents priced from AH instead of vendor**: Items like Blue Dye, vials, and flux were priced at AH market value because the vendor provider was checked last in the priority chain. Vendor prices are now checked first using TSM and Auctionator's recorded merchant data, so reagents sold by NPCs always use their fixed vendor price.
 
