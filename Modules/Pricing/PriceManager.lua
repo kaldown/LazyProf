@@ -12,14 +12,22 @@ PriceManager.cache = {}
 function PriceManager:Initialize()
     self.providers = {}
 
-    -- Load providers in priority order
+    -- Load market providers in priority order (vendor handled separately)
     local priority = LazyProf.db.profile.priceSourcePriority
     for _, name in ipairs(priority) do
-        local provider = LazyProf.PriceProviders and LazyProf.PriceProviders[name]
-        if provider and provider:IsAvailable() then
-            table.insert(self.providers, provider)
-            LazyProf:Debug("pricing", "Price provider enabled: " .. name)
+        if name ~= "vendor" then
+            local provider = LazyProf.PriceProviders and LazyProf.PriceProviders[name]
+            if provider and provider:IsAvailable() then
+                table.insert(self.providers, provider)
+                LazyProf:Debug("pricing", "Price provider enabled: " .. name)
+            end
         end
+    end
+
+    -- Log vendor availability separately
+    local vendor = LazyProf.PriceProviders and LazyProf.PriceProviders.vendor
+    if vendor and vendor:IsAvailable() then
+        LazyProf:Debug("pricing", "Vendor price provider enabled (checked first)")
     end
 end
 
@@ -31,7 +39,22 @@ function PriceManager:GetPrice(itemId)
         return cached.price, cached.source
     end
 
-    -- Query providers in order
+    -- Vendor prices are authoritative: guaranteed supply at fixed price.
+    -- Always check before market prices so AH listings don't override them.
+    local vendor = LazyProf.PriceProviders and LazyProf.PriceProviders.vendor
+    if vendor then
+        local price = vendor:GetPrice(itemId)
+        if price and price > 0 then
+            self.cache[itemId] = {
+                price = price,
+                source = vendor.name,
+                timestamp = time(),
+            }
+            return price, vendor.name
+        end
+    end
+
+    -- Query market providers in priority order
     for _, provider in ipairs(self.providers) do
         local price = provider:GetPrice(itemId)
         if price and price > 0 then

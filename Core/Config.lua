@@ -30,7 +30,6 @@ LazyProf.defaults = {
             Constants.PRICE_SOURCE.TSM,
             Constants.PRICE_SOURCE.AUCTIONATOR,
             Constants.PRICE_SOURCE.SCANNER,
-            Constants.PRICE_SOURCE.VENDOR,
         },
         tsmPriceSource = Constants.TSM_PRICE_SOURCE.RECENT, -- Default to current AH prices (outliers removed)
 
@@ -301,7 +300,7 @@ LazyProf.options = {
             order = 3,
             args = {
                 desc = {
-                    name = "Price sources are checked in order. First available price is used.",
+                    name = "Vendor prices (from TSM/Auctionator merchant data) are always used first when available. Market sources below are checked in order for non-vendor items.",
                     type = "description",
                     order = 1,
                 },

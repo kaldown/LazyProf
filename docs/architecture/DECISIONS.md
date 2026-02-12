@@ -59,26 +59,27 @@
 
 **Date**: 2026-01-20
 
-**Status**: Accepted
+**Status**: Accepted (updated 2026-02-11: vendor-first priority)
 
-**Context**: Users have different pricing addons installed.
+**Context**: Users have different pricing addons installed. Vendor-sold reagents (dyes, threads, vials, flux) were priced at AH market value because the vendor provider was checked last in the priority chain, causing inflated recipe costs.
 
-**Decision**: Support TSM, Auctionator, and vendor prices with graceful fallback.
+**Decision**: Vendor prices are always checked first as an authoritative source. Market providers are checked in configurable priority order for non-vendor items.
 
-**Priority Order**:
-1. TSM (if available)
-2. Auctionator (if available)
-3. Vendor prices (always available)
+**Pricing Order**:
+1. Vendor prices (TSM `vendorbuy` / Auctionator merchant data) - checked first, always
+2. TSM market prices (if available) - configurable source
+3. Auctionator AH prices (if available)
 
 **Rationale**:
-- TSM has most accurate market data
-- Auctionator is common alternative
-- Vendor prices ensure addon always works
+- Vendor prices are fixed and guaranteed (unlimited NPC supply)
+- No rational player would pay AH markup for vendor-sold items
+- TSM and Auctionator automatically record vendor buy prices when visiting merchants
+- Market source priority only matters for non-vendor items
 
 **Consequences**:
-- Must handle all three APIs
-- Price accuracy varies by source
-- Users without AH addons get vendor-only prices
+- Vendor-sold reagents always priced correctly when TSM or Auctionator is installed
+- Users must have visited a merchant selling the item for vendor data to be available
+- Market provider priority is user-configurable; vendor priority is not (by design)
 
 ---
 

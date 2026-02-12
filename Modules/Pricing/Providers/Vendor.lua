@@ -1,29 +1,37 @@
 -- Modules/Pricing/Providers/Vendor.lua
+-- Queries vendor buy prices from TSM and Auctionator, which record
+-- prices automatically when the player visits a merchant.
 local ADDON_NAME, LazyProf = ...
 
 LazyProf.PriceProviders = LazyProf.PriceProviders or {}
-
--- Vendor-sold items with their prices (in copper)
-local VendorPrices = {
-    -- Thread/dyes used by Tailoring (not First Aid, but for future)
-    [2320] = 10,      -- Coarse Thread
-    [2321] = 100,     -- Fine Thread
-    [4291] = 500,     -- Silken Thread
-    [8343] = 2500,    -- Heavy Silken Thread
-    [14341] = 5000,   -- Rune Thread
-
-    -- Note: Cloth is not vendor-sold, so First Aid materials
-    -- will rely on AH prices or show as "no price data"
-}
 
 LazyProf.PriceProviders.vendor = {
     name = "Vendor",
 
     IsAvailable = function(self)
-        return true -- Always available as fallback
+        return TSM_API ~= nil
+            or (Auctionator and Auctionator.API and Auctionator.API.v1
+                and Auctionator.API.v1.GetVendorPriceByItemID)
     end,
 
     GetPrice = function(self, itemId)
-        return VendorPrices[itemId]
+        -- TSM tracks vendor buy prices when players visit merchants
+        if TSM_API then
+            local price = TSM_API.GetCustomPriceValue("vendorbuy", "i:" .. itemId)
+            if price and price > 0 then
+                return price
+            end
+        end
+
+        -- Auctionator also tracks vendor prices from merchant visits
+        if Auctionator and Auctionator.API and Auctionator.API.v1
+                and Auctionator.API.v1.GetVendorPriceByItemID then
+            local price = Auctionator.API.v1.GetVendorPriceByItemID("LazyProf", itemId)
+            if price and price > 0 then
+                return price
+            end
+        end
+
+        return nil
     end,
 }
