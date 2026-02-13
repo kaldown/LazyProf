@@ -17,8 +17,8 @@ local SECTION_SPACING = 12
 local THRESHOLD_ROW_HEIGHT = 13
 local ICON_SIZE = 16
 
--- Helper: set up item tooltip handlers on a frame
--- Frame must have .itemId set before tooltip fires
+-- Helper: set up item tooltip and shift-click linking on a frame
+-- Frame must have .itemId set before tooltip/linking fires
 local function SetupItemTooltip(frame)
     frame:EnableMouse(true)
     frame:SetScript("OnEnter", function(self)
@@ -30,6 +30,14 @@ local function SetupItemTooltip(frame)
     end)
     frame:SetScript("OnLeave", function()
         GameTooltip:Hide()
+    end)
+    frame:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" and IsShiftKeyDown() and self.itemId then
+            local itemLink = select(2, GetItemInfo(self.itemId))
+            if itemLink then
+                HandleModifiedItemClick(itemLink)
+            end
+        end
     end)
 end
 
@@ -232,6 +240,7 @@ function RecipeDetails:CreateSourceSection()
         self.showAllFactions = btn:GetChecked()
         if self.currentRecipe then
             self:UpdateSourceSection(self.currentRecipe)
+            self:LayoutContent()
         end
     end)
 
@@ -304,6 +313,71 @@ function RecipeDetails:CreateWowheadSection()
     end)
 end
 
+-- Reposition all content elements based on actual name height (handles multi-line wrapping)
+function RecipeDetails:LayoutContent()
+    local content = self.frame.content
+
+    -- Calculate extra height from name wrapping (0 for single line)
+    local nameHeight = content.name:GetStringHeight() or 16
+    local extraHeight = math.max(0, nameHeight - 16)
+
+    -- Skill requirement
+    content.skill:ClearAllPoints()
+    content.skill:SetPoint("TOPLEFT", 40, -(18 + extraHeight))
+
+    -- Difficulty bar
+    content.diffBg:ClearAllPoints()
+    content.diffBg:SetPoint("TOPLEFT", 0, -(40 + extraHeight))
+
+    -- Threshold rows
+    for i, row in ipairs(content.thresholdRows) do
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", 4, -(50 + extraHeight) - (i - 1) * THRESHOLD_ROW_HEIGHT)
+    end
+
+    -- Reagents header
+    content.reagentsHeader:ClearAllPoints()
+    content.reagentsHeader:SetPoint("TOPLEFT", 0, -(110 + extraHeight))
+
+    -- Reagent rows
+    for i, row in ipairs(content.reagentRows) do
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", 8, -(110 + extraHeight) - SECTION_SPACING - (i - 1) * ROW_HEIGHT)
+    end
+
+    -- Source header
+    content.sourceHeader:ClearAllPoints()
+    content.sourceHeader:SetPoint("TOPLEFT", 0, -(232 + extraHeight))
+
+    -- Faction toggle
+    content.factionToggle:ClearAllPoints()
+    content.factionToggle:SetPoint("TOPRIGHT", -4, -(230 + extraHeight))
+
+    -- Recipe item row
+    content.recipeItemRow:ClearAllPoints()
+    content.recipeItemRow:SetPoint("TOPLEFT", 8, -(232 + extraHeight) - SECTION_SPACING)
+
+    -- Source rows
+    local hasRecipeItem = content.recipeItemRow:IsShown()
+    local rowOffset = hasRecipeItem and 1 or 0
+    for i, row in ipairs(content.sourceRows) do
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", 8, -(232 + extraHeight) - SECTION_SPACING - (i - 1 + rowOffset) * ROW_HEIGHT)
+    end
+
+    -- Wowhead section
+    local wowheadY = 232 + extraHeight + SECTION_SPACING + (rowOffset + math.max(1, #content.sourceRows)) * ROW_HEIGHT + SECTION_SPACING
+    content.wowheadHeader:ClearAllPoints()
+    content.wowheadHeader:SetPoint("TOPLEFT", 0, -wowheadY)
+    content.urlBox:ClearAllPoints()
+    content.urlBox:SetPoint("TOPLEFT", 0, -(wowheadY + 16))
+    content.copyBtn:ClearAllPoints()
+    content.copyBtn:SetPoint("LEFT", content.urlBox, "RIGHT", 4, 0)
+
+    -- Resize panel to fit content
+    self.frame:SetHeight(PANEL_HEIGHT + extraHeight)
+end
+
 -- Show recipe details
 -- atSkillLevel: optional skill level for difficulty display (e.g., step's starting skill from milestone)
 function RecipeDetails:Show(recipe, atSkillLevel)
@@ -347,6 +421,7 @@ function RecipeDetails:Show(recipe, atSkillLevel)
     end
 
     self.frame:Show()
+    self:LayoutContent()
 end
 
 -- Color name to display properties (bar color, width, capitalized label)
@@ -503,13 +578,6 @@ function RecipeDetails:UpdateSourceSection(recipe)
         content.recipeItemRow.text:SetText(itemName or ("Item #" .. sourceItemId))
         content.recipeItemRow:Show()
         hasRecipeItem = true
-    end
-
-    -- Reposition source rows based on whether recipe item row is shown
-    local rowOffset = hasRecipeItem and 1 or 0
-    for i, row in ipairs(content.sourceRows) do
-        row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", 8, -232 - SECTION_SPACING - (i - 1 + rowOffset) * ROW_HEIGHT)
     end
 
     if not recipe.source then

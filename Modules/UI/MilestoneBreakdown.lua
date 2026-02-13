@@ -751,7 +751,7 @@ function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
     local perCraft = step.quantity > 0 and math.floor(oopCost / step.quantity + 0.5) or oopCost
     local costText
     if step.quantity > 1 then
-        costText = string.format("%s ea |cFF888888(%s)|r", Utils.FormatMoney(perCraft), Utils.FormatMoney(oopCost))
+        costText = string.format("%s |cFF888888(%s for %d)|r", Utils.FormatMoney(perCraft), Utils.FormatMoney(oopCost), step.quantity)
     else
         costText = Utils.FormatMoney(oopCost)
     end
@@ -1138,7 +1138,7 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
     local isUnlearned = not alt.recipe.learned
     row.recipe = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     row.recipe:SetPoint("LEFT", 40, 0)
-    row.recipe:SetPoint("RIGHT", row, "RIGHT", -185, 0)
+    row.recipe:SetPoint("RIGHT", row, "RIGHT", -150, 0)
     row.recipe:SetJustifyH("LEFT")
     row.recipe:SetWordWrap(false)
     local displayName = alt.recipe.name or "Unknown"
@@ -1148,11 +1148,11 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
     row.recipe:SetText(displayName)
     row.recipe:SetTextColor(recipeColor.r, recipeColor.g, recipeColor.b)
 
-    -- Skillup rate
-    row.skillup = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    row.skillup:SetPoint("RIGHT", row, "RIGHT", -155, 0)
-    row.skillup:SetText(string.format("%.0f%%", alt.expectedSkillups * 100))
-    row.skillup:SetTextColor(0.7, 0.7, 0.7)
+    -- Skillup rate (commented out: overlaps with cost column at narrow widths)
+    -- row.skillup = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    -- row.skillup:SetPoint("RIGHT", row, "RIGHT", -155, 0)
+    -- row.skillup:SetText(string.format("%.0f%%", alt.expectedSkillups * 100))
+    -- row.skillup:SetTextColor(0.7, 0.7, 0.7)
 
     -- Cost per craft + projected total (out-of-pocket; green when inventory reduces cost)
     row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1163,7 +1163,7 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
         local projectedTotal = altOopCost * projectedCrafts
         local altCostText
         if projectedCrafts > 1 then
-            altCostText = string.format("%s ea |cFF888888(~%s for %d)|r", Utils.FormatMoney(altOopCost), Utils.FormatMoney(projectedTotal), projectedCrafts)
+            altCostText = string.format("%s |cFF888888(~%s for %d)|r", Utils.FormatMoney(altOopCost), Utils.FormatMoney(projectedTotal), projectedCrafts)
         else
             altCostText = Utils.FormatMoney(altOopCost)
         end
@@ -1182,7 +1182,7 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
     if alt.recipe._isUnavailable then
         row.rank:SetAlpha(0.5)
         row.recipe:SetAlpha(0.5)
-        row.skillup:SetAlpha(0.5)
+        -- row.skillup:SetAlpha(0.5)
         row.cost:SetAlpha(0.5)
     end
 

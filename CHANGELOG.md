@@ -4,6 +4,16 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-02-13
+
+### Fixed
+- **Alternatives column overlap**: Skillup % column overlapped with cost column in narrow panels. Commented out % display (still visible in tooltip on hover) and widened recipe name column.
+- **Recipe Details layout overlap**: Long recipe names that wrap to two lines no longer overlap with skill requirement and difficulty bar. Panel now dynamically repositions all elements based on actual text height.
+- **Confusing "ea" abbreviation in costs**: Replaced unclear "5g ea (25g)" format with "5g (25g for 5)" showing total cost and craft count.
+
+### Added
+- **Shift-click item linking in Recipe Details**: Shift-clicking the crafted item icon, reagent icons, or recipe source item now pastes the item link into chat or AH search.
+
 ## [0.4.6] - 2026-02-12
 
 ### Fixed
