@@ -2,11 +2,11 @@
 ## Title: LazyProf
 ## Notes: Optimal profession leveling path calculator
 ## Author: Kaldown
-## Version: 0.4.7
+## Version: 0.5.0
 ## IconTexture: Interface\AddOns\LazyProf\icon
 ## SavedVariables: LazyProfDB
 ## OptionalDeps: TradeSkillMaster, Auctionator, Syndicator, CraftLib
-## X-License: MIT
+## X-License: All Rights Reserved
 ## X-Curse-Project-ID: 1438767
 ## X-Wago-ID: RNLkkEGo
 

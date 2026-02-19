@@ -4,6 +4,10 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-02-19
+
+### Changed
+- License changed from MIT to All Rights Reserved
 ## [0.4.7] - 2026-02-13
 
 ### Fixed

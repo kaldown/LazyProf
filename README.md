@@ -9,9 +9,11 @@
 If you find this useful, consider supporting development via [PayPal](https://www.paypal.com/donate/?hosted_button_id=FG4KES3HNPLVG) or [Buy Me a Coffee](https://buymeacoffee.com/kaldown).
 
 Other addons:
-- [VendorSniper](https://www.curseforge.com/wow/addons/vendorsniper) - Vendor restock sniper
+- [VendorSniper](https://addons.wago.io/addons/vendorsniper) - Vendor restock sniper
 - [Silencer](https://www.curseforge.com/wow/addons/silencer-whispers) - Whisper gatekeeper
 - [CraftLib](https://www.curseforge.com/wow/addons/craftlib) - Recipe database
+- [PickMe](https://www.curseforge.com/wow/addons/pickme) - LFG listing browser
+- [EyesOnMe](https://www.curseforge.com/wow/addons/eyesonme) - PvP targeting awareness
 
 Calculate the cheapest path to level your professions in World of Warcraft.
 

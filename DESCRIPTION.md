@@ -10,6 +10,8 @@ Other addons:
 - [VendorSniper](https://addons.wago.io/addons/vendorsniper) - Vendor restock sniper
 - [Silencer](https://www.curseforge.com/wow/addons/silencer-whispers) - Whisper gatekeeper
 - [CraftLib](https://www.curseforge.com/wow/addons/craftlib) - Recipe database
+- [PickMe](https://www.curseforge.com/wow/addons/pickme) - LFG listing browser
+- [EyesOnMe](https://www.curseforge.com/wow/addons/eyesonme) - PvP targeting awareness
 
 ---
 
