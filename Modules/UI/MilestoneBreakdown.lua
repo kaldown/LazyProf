@@ -152,6 +152,11 @@ function MilestonePanelClass:Initialize()
         end)
     end
 
+    -- Combat lockdown: auto-hide during combat, restore after (standalone only)
+    if not config.embedded then
+        Utils.AddCombatLockdown(self.frame)
+    end
+
     self.frame:Hide()
 
     -- Create scroll frame for content
@@ -1335,11 +1340,13 @@ end
 
 -- Show the panel
 function MilestonePanelClass:Show()
+    if InCombatLockdown() then return end
     self.frame:Show()
 end
 
 -- Hide the panel
 function MilestonePanelClass:Hide()
+    if InCombatLockdown() then return end
     if self.frame then
         self.frame:Hide()
     end

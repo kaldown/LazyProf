@@ -130,6 +130,9 @@ function RecipeDetails:Initialize()
     self:CreateReagentsSection()
     self:CreateSourceSection()
     self:CreateWowheadSection()
+
+    -- Combat lockdown: auto-hide during combat, restore after
+    Utils.AddCombatLockdown(self.frame)
 end
 
 -- Create recipe header (icon, name, skill info)
@@ -381,6 +384,7 @@ end
 -- Show recipe details
 -- atSkillLevel: optional skill level for difficulty display (e.g., step's starting skill from milestone)
 function RecipeDetails:Show(recipe, atSkillLevel)
+    if InCombatLockdown() then return end
     if not recipe then return end
     if not self.frame then self:Initialize() end
 
@@ -659,6 +663,7 @@ end
 
 -- Hide the panel
 function RecipeDetails:Hide()
+    if InCombatLockdown() then return end
     if self.frame then
         self.frame:Hide()
     end
@@ -667,6 +672,7 @@ end
 
 -- Toggle visibility
 function RecipeDetails:Toggle(recipe, atSkillLevel)
+    if InCombatLockdown() then return end
     if self.frame and self.frame:IsVisible() and self.currentRecipe == recipe then
         self:Hide()
     else

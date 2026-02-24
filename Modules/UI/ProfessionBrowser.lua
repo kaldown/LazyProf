@@ -1,5 +1,6 @@
 -- Modules/UI/ProfessionBrowser.lua
 local ADDON_NAME, LazyProf = ...
+local Utils = LazyProf.Utils
 local Constants = LazyProf.Constants
 
 LazyProf.ProfessionBrowser = {}
@@ -56,6 +57,9 @@ function Browser:Initialize()
     self.frame:SetScript("OnHide", function()
         self.frame:SetScript("OnUpdate", nil)
     end)
+
+    -- Combat lockdown: auto-hide during combat, restore after
+    Utils.AddCombatLockdown(self.frame)
 end
 
 function Browser:CreateProfessionRow(profKey, index)
@@ -118,6 +122,8 @@ function Browser:CreateProfessionRow(profKey, index)
 end
 
 function Browser:Toggle(anchorFrame)
+    if InCombatLockdown() then return end
+
     if not self.frame then
         self:Initialize()
     end
@@ -130,6 +136,8 @@ function Browser:Toggle(anchorFrame)
 end
 
 function Browser:Show(anchorFrame)
+    if InCombatLockdown() then return end
+
     if not self.frame then
         self:Initialize()
     end
@@ -143,6 +151,7 @@ function Browser:Show(anchorFrame)
 end
 
 function Browser:Hide()
+    if InCombatLockdown() then return end
     if self.frame then
         self.frame:Hide()
     end

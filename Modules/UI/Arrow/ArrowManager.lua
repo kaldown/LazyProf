@@ -1,5 +1,6 @@
 -- Modules/UI/Arrow/ArrowManager.lua
 local ADDON_NAME, LazyProf = ...
+local Utils = LazyProf.Utils
 
 LazyProf.ArrowManager = {}
 local ArrowManager = LazyProf.ArrowManager
@@ -44,6 +45,10 @@ function ArrowManager:Initialize()
     self.frame:EnableMouse(true)
     self.frame:SetScript("OnEnter", function() self:OnEnter() end)
     self.frame:SetScript("OnLeave", function() self:OnLeave() end)
+
+    -- Combat lockdown: auto-hide during combat, restore after
+    Utils.AddCombatLockdown(self.frame)
+    Utils.AddCombatLockdown(self.highlight)
 
     -- Load strategies
     self:LoadStrategies()
@@ -97,6 +102,7 @@ end
 
 -- Show arrow and highlight
 function ArrowManager:Show()
+    if InCombatLockdown() then return end
     self.frame:Show()
     if self.highlight then
         self.highlight:Show()
@@ -105,6 +111,7 @@ end
 
 -- Hide arrow and highlight
 function ArrowManager:Hide()
+    if InCombatLockdown() then return end
     self.frame:Hide()
     if self.highlight then
         self.highlight:Hide()

@@ -15,6 +15,7 @@ function MinimapButton:Initialize()
         type = "launcher",
         icon = "Interface\\AddOns\\LazyProf\\icon",
         OnClick = function(frame, button)
+            if InCombatLockdown() then return end
             if button == "LeftButton" then
                 if LazyProf.ProfessionBrowser then
                     LazyProf.ProfessionBrowser:Toggle(frame)

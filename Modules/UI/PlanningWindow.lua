@@ -212,9 +212,14 @@ function PlanningWindow:Initialize()
 
     -- Make closable with Escape
     tinsert(UISpecialFrames, "LazyProfPlanningWindow")
+
+    -- Combat lockdown: auto-hide during combat, restore after
+    Utils.AddCombatLockdown(self.frame)
 end
 
 function PlanningWindow:Open(profKey)
+    if InCombatLockdown() then return end
+
     if not self.frame then
         self:Initialize()
     end
@@ -323,6 +328,8 @@ function PlanningWindow:GetPlayerSkillLevel(profKey)
 end
 
 function PlanningWindow:Hide()
+    if InCombatLockdown() then return end
+
     if self.frame then
         self.frame:Hide()
     end

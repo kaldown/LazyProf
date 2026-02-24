@@ -411,6 +411,8 @@ function LazyProf:ClearDebugLog()
 end
 
 function LazyProf:ShowDebugLog()
+    if InCombatLockdown() then return end
+
     if not self.debugFrame then
         self:CreateDebugFrame()
     end
@@ -628,5 +630,9 @@ function LazyProf:CreateDebugFrame()
     frame.scrollFrame:SetScrollChild(frame.editBox)
 
     tinsert(UISpecialFrames, "LazyProfDebugFrame")
+
+    -- Combat lockdown: auto-hide during combat, restore after
+    self.Utils.AddCombatLockdown(frame)
+
     self.debugFrame = frame
 end

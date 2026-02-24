@@ -280,6 +280,27 @@ function Utils.GetPlayerRace()
     return race
 end
 
+-- Add combat lockdown handling to a frame.
+-- Registers PLAYER_REGEN_DISABLED/ENABLED to auto-hide during combat and restore after.
+-- Call once after the frame is created.
+function Utils.AddCombatLockdown(frame)
+    frame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    frame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    frame:HookScript("OnEvent", function(self, event)
+        if event == "PLAYER_REGEN_DISABLED" then
+            if self:IsShown() then
+                self._wasShownBeforeCombat = true
+                self:Hide()
+            end
+        elseif event == "PLAYER_REGEN_ENABLED" then
+            if self._wasShownBeforeCombat then
+                self._wasShownBeforeCombat = nil
+                self:Show()
+            end
+        end
+    end)
+end
+
 -- Get item info with caching
 local itemCache = {}
 function Utils.GetItemInfo(itemId)

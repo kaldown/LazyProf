@@ -120,6 +120,9 @@ function MissingPanel:Initialize()
             self.frame.content:SetWidth(width - 40)
         end
     end)
+
+    -- Combat lockdown: auto-hide during combat, restore after
+    Utils.AddCombatLockdown(self.frame)
 end
 
 -- Refresh layout after resize (routes through bracket filter if available)
@@ -573,10 +576,12 @@ end
 
 -- Show panel
 function MissingPanel:Show()
+    if InCombatLockdown() then return end
     self.frame:Show()
 end
 
 -- Hide panel
 function MissingPanel:Hide()
+    if InCombatLockdown() then return end
     self.frame:Hide()
 end
