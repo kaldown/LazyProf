@@ -4,6 +4,8 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-02-24
+
 ### Added
 - Recipe search in Planning Window - type to filter all profession recipes by name, click to view details
 
