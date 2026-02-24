@@ -81,9 +81,95 @@ function PlanningWindow:Initialize()
     self.frame.status:SetPoint("LEFT", self.frame.statusBg, "LEFT", 8, 0)
     self.frame.status:SetTextColor(0.7, 0.7, 0.7)
 
+    -- Search box
+    self.frame.searchBox = CreateFrame("EditBox", nil, self.frame, "InputBoxTemplate")
+    self.frame.searchBox:SetSize(DEFAULT_WIDTH - 52, 22)
+    self.frame.searchBox:SetPoint("TOPLEFT", 12, -64)
+    self.frame.searchBox:SetPoint("RIGHT", self.frame, "RIGHT", -40, 0)
+    self.frame.searchBox:SetAutoFocus(false)
+    self.frame.searchBox:SetFontObject("GameFontHighlightSmall")
+    self.frame.searchBox:SetMaxLetters(50)
+
+    -- Placeholder text
+    self.frame.searchBox.placeholder = self.frame.searchBox:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    self.frame.searchBox.placeholder:SetPoint("LEFT", self.frame.searchBox, "LEFT", 6, 0)
+    self.frame.searchBox.placeholder:SetText("Search recipes...")
+    self.frame.searchBox.placeholder:SetTextColor(0.5, 0.5, 0.5)
+
+    -- Clear button
+    self.frame.clearBtn = CreateFrame("Button", nil, self.frame)
+    self.frame.clearBtn:SetSize(20, 20)
+    self.frame.clearBtn:SetPoint("LEFT", self.frame.searchBox, "RIGHT", 4, 0)
+    self.frame.clearBtn.text = self.frame.clearBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    self.frame.clearBtn.text:SetPoint("CENTER")
+    self.frame.clearBtn.text:SetText("x")
+    self.frame.clearBtn.text:SetTextColor(0.7, 0.7, 0.7)
+    self.frame.clearBtn:Hide()
+
+    self.frame.clearBtn:SetScript("OnClick", function()
+        self.frame.searchBox:SetText("")
+        self.frame.searchBox:ClearFocus()
+    end)
+
+    -- Search box scripts
+    self.frame.searchBox:SetScript("OnTextChanged", function(editBox, userInput)
+        local text = editBox:GetText()
+        local hasText = text and text ~= ""
+        self.frame.searchBox.placeholder:SetShown(not hasText)
+        self.frame.clearBtn:SetShown(hasText)
+        if userInput then
+            self:UpdateSearchResults(text)
+        end
+    end)
+
+    self.frame.searchBox:SetScript("OnEscapePressed", function(editBox)
+        if editBox:GetText() ~= "" then
+            editBox:SetText("")
+        end
+        editBox:ClearFocus()
+    end)
+
+    -- Search results container (sibling to contentContainer, same anchoring)
+    self.frame.searchContainer = CreateFrame("Frame", nil, self.frame)
+    self.frame.searchContainer:SetPoint("TOPLEFT", 4, -90)
+    self.frame.searchContainer:SetPoint("BOTTOMRIGHT", -4, 4)
+    self.frame.searchContainer:Hide()
+
+    -- Search results scroll frame
+    self.frame.searchScroll = CreateFrame("ScrollFrame", "LazyProfPlanningSearchScroll", self.frame.searchContainer, "UIPanelScrollFrameTemplate")
+    self.frame.searchScroll:SetPoint("TOPLEFT", 4, -4)
+    self.frame.searchScroll:SetPoint("BOTTOMRIGHT", -24, 28)
+
+    -- Search results content frame
+    self.frame.searchContent = CreateFrame("Frame", nil, self.frame.searchScroll)
+    self.frame.searchContent:SetSize(DEFAULT_WIDTH - 40, 400)
+    self.frame.searchScroll:SetScrollChild(self.frame.searchContent)
+
+    -- Footer bar for result count
+    self.frame.searchFooterBg = self.frame.searchContainer:CreateTexture(nil, "ARTWORK")
+    self.frame.searchFooterBg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    self.frame.searchFooterBg:SetVertexColor(0.15, 0.15, 0.15, 1)
+    self.frame.searchFooterBg:SetPoint("BOTTOMLEFT", 4, 4)
+    self.frame.searchFooterBg:SetPoint("BOTTOMRIGHT", -4, 4)
+    self.frame.searchFooterBg:SetHeight(24)
+
+    self.frame.searchFooter = self.frame.searchContainer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    self.frame.searchFooter:SetPoint("BOTTOMRIGHT", -12, 12)
+    self.frame.searchFooter:SetTextColor(0.5, 0.5, 0.5)
+
+    -- "No results" message
+    self.frame.searchEmpty = self.frame.searchContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    self.frame.searchEmpty:SetPoint("CENTER", self.frame.searchContainer, "CENTER", 0, 20)
+    self.frame.searchEmpty:SetText("No recipes found")
+    self.frame.searchEmpty:SetTextColor(0.5, 0.5, 0.5)
+    self.frame.searchEmpty:Hide()
+
+    -- Row pool for search results
+    self.searchRows = {}
+
     -- Container frame for embedded MilestonePanel
     self.frame.contentContainer = CreateFrame("Frame", nil, self.frame)
-    self.frame.contentContainer:SetPoint("TOPLEFT", 4, -62)
+    self.frame.contentContainer:SetPoint("TOPLEFT", 4, -90)
     self.frame.contentContainer:SetPoint("BOTTOMRIGHT", -4, 4)
 
     -- Create embedded MilestonePanel instance (with bracket dropdown and mode toggle)
@@ -118,6 +204,10 @@ function PlanningWindow:Initialize()
         if self.milestonePanel then
             self.milestonePanel:Refresh()
         end
+        -- Update search content width on resize
+        if self.frame.searchContent then
+            self.frame.searchContent:SetWidth(self.frame:GetWidth() - 40)
+        end
     end)
 
     -- Make closable with Escape
@@ -137,6 +227,12 @@ end
 
 function PlanningWindow:LoadProfession(profKey)
     self.currentProfession = profKey
+
+    -- Clear any active search
+    if self.frame and self.frame.searchBox then
+        self.frame.searchBox:SetText("")
+        self.frame.searchBox:ClearFocus()
+    end
 
     local profInfo = Constants.PROFESSIONS[profKey]
     if not profInfo then
@@ -237,4 +333,121 @@ end
 
 function PlanningWindow:IsVisible()
     return self.frame and self.frame:IsVisible()
+end
+
+local SEARCH_ROW_HEIGHT = 20
+
+-- Create or reuse a search result row
+function PlanningWindow:GetSearchRow(index)
+    if self.searchRows[index] then
+        self.searchRows[index]:SetWidth(self.frame.searchContent:GetWidth())
+        return self.searchRows[index]
+    end
+
+    local row = CreateFrame("Button", nil, self.frame.searchContent)
+    row:SetSize(self.frame.searchContent:GetWidth(), SEARCH_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -(index - 1) * SEARCH_ROW_HEIGHT)
+
+    -- Hover highlight
+    row.highlight = row:CreateTexture(nil, "BACKGROUND")
+    row.highlight:SetAllPoints()
+    row.highlight:SetTexture("Interface\\Buttons\\WHITE8x8")
+    row.highlight:SetVertexColor(0.3, 0.3, 0.3, 0.5)
+    row.highlight:Hide()
+
+    -- Recipe name (left)
+    row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.name:SetPoint("LEFT", 8, 0)
+    row.name:SetPoint("RIGHT", row, "RIGHT", -100, 0)
+    row.name:SetJustifyH("LEFT")
+    row.name:SetWordWrap(false)
+
+    -- Skill requirement (right)
+    row.skill = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.skill:SetPoint("RIGHT", -8, 0)
+    row.skill:SetJustifyH("RIGHT")
+    row.skill:SetTextColor(0.6, 0.6, 0.6)
+
+    row:SetScript("OnEnter", function(self)
+        self.highlight:Show()
+    end)
+    row:SetScript("OnLeave", function(self)
+        self.highlight:Hide()
+    end)
+
+    row:SetScript("OnClick", function(self)
+        if self.recipe and LazyProf.RecipeDetails then
+            LazyProf.RecipeDetails:Show(self.recipe)
+        end
+    end)
+
+    self.searchRows[index] = row
+    return row
+end
+
+function PlanningWindow:UpdateSearchResults(query)
+    if not query or query == "" then
+        -- Clear search: show milestones, hide results
+        self.frame.searchContainer:Hide()
+        self.frame.contentContainer:Show()
+        if self.milestonePanel and self.milestonePanel.frame then
+            self.milestonePanel.frame:Show()
+        end
+        return
+    end
+
+    -- Query CraftLib
+    local profKey = self.currentProfession
+    if not profKey then return end
+
+    local CraftLib = _G.CraftLib
+    if not CraftLib then return end
+
+    -- Hide milestones, show search (after validation so we don't blank the screen)
+    self.frame.contentContainer:Hide()
+    self.frame.searchContainer:Show()
+
+    local allRecipes = CraftLib:GetRecipes(profKey)
+    local queryLower = query:lower()
+
+    -- Filter and sort
+    local matches = {}
+    for _, recipe in ipairs(allRecipes) do
+        if recipe.name and string.find(recipe.name:lower(), queryLower, 1, true) then
+            table.insert(matches, recipe)
+        end
+    end
+
+    table.sort(matches, function(a, b)
+        return (a.skillRequired or 0) < (b.skillRequired or 0)
+    end)
+
+    -- Hide all existing rows
+    for _, row in ipairs(self.searchRows) do
+        row:Hide()
+    end
+
+    -- Show "no results" or populate rows
+    if #matches == 0 then
+        self.frame.searchEmpty:Show()
+        self.frame.searchScroll:Hide()
+        self.frame.searchFooter:SetText("")
+    else
+        self.frame.searchEmpty:Hide()
+        self.frame.searchScroll:Show()
+
+        for i, recipe in ipairs(matches) do
+            local row = self:GetSearchRow(i)
+            row.recipe = recipe
+            row.name:SetText(recipe.name)
+            row.skill:SetText("Requires " .. (recipe.skillRequired or "?"))
+            row:Show()
+        end
+
+        -- Update content height for scrolling
+        self.frame.searchContent:SetHeight(#matches * SEARCH_ROW_HEIGHT)
+
+        -- Footer
+        self.frame.searchFooter:SetText(#matches .. " result" .. (#matches ~= 1 and "s" or ""))
+    end
 end
