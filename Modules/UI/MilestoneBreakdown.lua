@@ -206,7 +206,7 @@ function MilestonePanelClass:GetEffectiveBracket()
         return nil  -- no filtering
     end
 
-    local brackets = LazyProf.skillBrackets
+    local brackets = LazyProf:GetSkillBrackets()
     if type(self.selectedBracketIndex) == "number" then
         return brackets[self.selectedBracketIndex]
     end
@@ -282,7 +282,7 @@ function MilestonePanelClass:CreateBracketDropdown(frameName, config)
         UIDropDownMenu_AddButton(info, level)
 
         -- Individual brackets
-        for i, bracket in ipairs(LazyProf.skillBrackets) do
+        for i, bracket in ipairs(LazyProf:GetSkillBrackets()) do
             info = UIDropDownMenu_CreateInfo()
             info.text = bracket.name
             info.value = i

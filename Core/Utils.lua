@@ -121,6 +121,21 @@ function Utils.Contains(tbl, value)
     return false
 end
 
+-- Build neutral min-max skill brackets from a profession's milestones.
+-- {75,150,225,300} -> {{min=1,max=75,name="1-75"}, {min=75,max=150,name="75-150"}, ...}
+-- Labels are plain "min-max" (no rank names, no Unicode) so phased caps render correctly.
+function Utils.BuildSkillBrackets(milestones)
+    local brackets = {}
+    local prev = 1
+    for _, m in ipairs(milestones or {}) do
+        if m > prev then
+            table.insert(brackets, { min = prev, max = m, name = prev .. "-" .. m })
+            prev = m
+        end
+    end
+    return brackets
+end
+
 -- Get player faction ("Alliance" or "Horde")
 function Utils.GetPlayerFaction()
     local _, race = UnitRace("player")

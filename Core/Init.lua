@@ -283,13 +283,29 @@ LazyProf.debugCategoryNames = {
 }
 
 LazyProf.debugScoringBracket = nil  -- nil = show all, or bracket index
-LazyProf.skillBrackets = {
-    {min = 1, max = 75, name = "1-75 (Apprentice)"},
-    {min = 75, max = 150, name = "75-150 (Journeyman)"},
-    {min = 150, max = 225, name = "150-225 (Expert)"},
-    {min = 225, max = 300, name = "225-300 (Artisan)"},
-    {min = 300, max = 375, name = "300-375 (Master)"},
-}
+-- Skill brackets are derived per active profession from its CraftLib milestones,
+-- with neutral min-max labels (no TBC rank names) so phased SoD caps (150/225/300)
+-- render correctly. Falls back to a flavor-appropriate default when no profession
+-- is active (SoD caps at 300; DEFAULT includes the TBC 375 tier).
+function LazyProf:GetSkillBrackets()
+    local milestones
+    local active = self.Professions and self.Professions.active
+    if active and self.Professions.registry[active] then
+        milestones = self.Professions.registry[active].milestones
+    end
+
+    if not milestones or #milestones == 0 then
+        local CraftLib = _G.CraftLib
+        local flavor = (CraftLib and CraftLib.GetActiveFlavor and CraftLib:GetActiveFlavor()) or "DEFAULT"
+        if flavor == "SOD" then
+            milestones = {75, 150, 225, 300}
+        else
+            milestones = {75, 150, 225, 300, 375}
+        end
+    end
+
+    return self.Utils.BuildSkillBrackets(milestones)
+end
 
 function LazyProf:Debug(category, msg)
     -- Backwards compatibility: single arg = message with "pathfinder" category
@@ -334,7 +350,7 @@ function LazyProf:GetFilteredDebugLog()
         if not self.debugFilter or entry.category == self.debugFilter then
             -- Apply scoring bracket filter if active
             if self.debugFilter == "scoring" and self.debugScoringBracket then
-                local bracket = self.skillBrackets[self.debugScoringBracket]
+                local bracket = self:GetSkillBrackets()[self.debugScoringBracket]
                 if bracket then
                     local skill = tonumber(entry.message:match("Scoring candidates at skill (%d+%.?%d*)"))
                         or tonumber(entry.message:match("No candidates at skill (%d+%.?%d*)"))
@@ -373,8 +389,9 @@ function LazyProf:UpdateDebugWindowContent()
     if text == "" then
         if self.debugFilter then
             local catName = self.debugCategoryNames[self.debugFilter] or self.debugFilter
-            if self.debugScoringBracket and self.skillBrackets[self.debugScoringBracket] then
-                text = "(No messages in " .. catName .. " for skill " .. self.skillBrackets[self.debugScoringBracket].name .. ")"
+            local brackets = self:GetSkillBrackets()
+            if self.debugScoringBracket and brackets[self.debugScoringBracket] then
+                text = "(No messages in " .. catName .. " for skill " .. brackets[self.debugScoringBracket].name .. ")"
             else
                 text = "(No messages in category: " .. catName .. ")"
             end
@@ -497,9 +514,10 @@ function LazyProf:CreateDebugFrame()
                     if cat == "scoring" then
                         -- Auto-select bracket matching current skill level
                         local autoIndex = nil
+                        local brackets = LazyProf:GetSkillBrackets()
                         local path = LazyProf.Pathfinder and LazyProf.Pathfinder.currentPath
                         if path and path.currentSkill then
-                            for i, bracket in ipairs(LazyProf.skillBrackets) do
+                            for i, bracket in ipairs(brackets) do
                                 if path.currentSkill >= bracket.min and path.currentSkill < bracket.max then
                                     autoIndex = i
                                     break
@@ -508,7 +526,7 @@ function LazyProf:CreateDebugFrame()
                         end
                         LazyProf.debugScoringBracket = autoIndex
                         if autoIndex then
-                            UIDropDownMenu_SetText(frame.bracketDropdown, LazyProf.skillBrackets[autoIndex].name)
+                            UIDropDownMenu_SetText(frame.bracketDropdown, brackets[autoIndex].name)
                         else
                             UIDropDownMenu_SetText(frame.bracketDropdown, "All Skill Levels")
                         end
@@ -546,7 +564,7 @@ function LazyProf:CreateDebugFrame()
         end
         UIDropDownMenu_AddButton(info, level)
 
-        for i, bracket in ipairs(LazyProf.skillBrackets) do
+        for i, bracket in ipairs(LazyProf:GetSkillBrackets()) do
             info = UIDropDownMenu_CreateInfo()
             info.text = bracket.name
             info.value = i
