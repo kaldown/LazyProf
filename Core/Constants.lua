@@ -2,9 +2,6 @@
 local ADDON_NAME, LazyProf = ...
 
 LazyProf.Constants = {
-    -- Skill milestones (when you need to train next rank)
-    MILESTONES = {75, 150, 225, 300, 375},
-
     -- Recipe source types
     SOURCE_TYPE = {
         TRAINER = "trainer",
