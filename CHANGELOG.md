@@ -4,6 +4,10 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Season of Discovery support: racial profession bonuses, skill brackets, and Wowhead links now adapt to the running client via `CraftLib:GetActiveFlavor()`. On a SoD/Classic Era client, TBC-only races are excluded, skill brackets follow the profession's actual milestone caps with neutral labels, and Wowhead links point at `/classic/`.
+
 ## [0.6.0] - 2026-02-24
 
 ### Added

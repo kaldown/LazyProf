@@ -52,7 +52,7 @@ local function AddSourceTooltipLines(tooltip, recipe)
     -- Add Wowhead link for recipe item
     if sourceInfo.itemId then
         tooltip:AddLine(" ")
-        tooltip:AddLine("Wowhead: wowhead.com/item=" .. sourceInfo.itemId, 0.4, 0.6, 1)
+        tooltip:AddLine("Wowhead: " .. Utils.GetWowheadItemUrl(sourceInfo.itemId), 0.4, 0.6, 1)
     end
 end
 

@@ -163,9 +163,21 @@ function Utils.GetVendorCount(source)
     return #source.vendors
 end
 
--- Get Wowhead TBC URL for a spell
+-- Wowhead site branch for the active flavor: SoD lives on /classic/, Vanilla/TBC on /tbc/.
+local function WowheadBranch()
+    local CraftLib = _G.CraftLib
+    local flavor = (CraftLib and CraftLib.GetActiveFlavor and CraftLib:GetActiveFlavor()) or "DEFAULT"
+    return (flavor == "SOD") and "classic" or "tbc"
+end
+
+-- Get the Wowhead URL for a spell, on the flavor-correct site branch.
 function Utils.GetWowheadUrl(spellId)
-    return "https://www.wowhead.com/tbc/spell=" .. tostring(spellId)
+    return "https://www.wowhead.com/" .. WowheadBranch() .. "/spell=" .. tostring(spellId)
+end
+
+-- Get the Wowhead URL for an item, on the flavor-correct site branch.
+function Utils.GetWowheadItemUrl(itemId)
+    return "https://www.wowhead.com/" .. WowheadBranch() .. "/item=" .. tostring(itemId)
 end
 
 -- Get human-readable description for recipe source (short version for list display)
