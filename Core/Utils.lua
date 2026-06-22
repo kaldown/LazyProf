@@ -251,12 +251,19 @@ function Utils.GetSourceDetails(source, showAllFactions)
     return details
 end
 
--- Racial profession bonuses (TBC)
--- These bonuses extend how long recipes stay orange/yellow/green
+-- Racial profession bonuses by client flavor.
+-- These bonuses extend how long recipes stay orange/yellow/green.
+-- DEFAULT (Vanilla/TBC): includes the TBC races. SOD/Classic Era: TBC races
+-- (Draenei, Blood Elf) do not exist, so only Classic-race bonuses apply.
 local RACIAL_PROFESSION_BONUSES = {
-    Gnome = { profession = "engineering", bonus = 15 },
-    BloodElf = { profession = "enchanting", bonus = 10 },
-    Draenei = { profession = "jewelcrafting", bonus = 5 },
+    DEFAULT = {
+        Gnome = { profession = "engineering", bonus = 15 },
+        BloodElf = { profession = "enchanting", bonus = 10 },
+        Draenei = { profession = "jewelcrafting", bonus = 5 },
+    },
+    SOD = {
+        Gnome = { profession = "engineering", bonus = 15 },
+    },
 }
 
 -- Get racial profession bonus for current player and profession
@@ -264,8 +271,12 @@ local RACIAL_PROFESSION_BONUSES = {
 function Utils.GetRacialProfessionBonus(professionKey)
     if not professionKey then return 0 end
 
+    local CraftLib = _G.CraftLib
+    local flavor = (CraftLib and CraftLib.GetActiveFlavor and CraftLib:GetActiveFlavor()) or "DEFAULT"
+    local byRace = RACIAL_PROFESSION_BONUSES[flavor] or RACIAL_PROFESSION_BONUSES.DEFAULT
+
     local _, race = UnitRace("player")
-    local racialData = RACIAL_PROFESSION_BONUSES[race]
+    local racialData = byRace[race]
 
     if racialData and racialData.profession == professionKey:lower() then
         return racialData.bonus
