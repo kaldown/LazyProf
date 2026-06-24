@@ -4,6 +4,8 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-24
+
 ### Fixed
 
 - **Recipe selection was arbitrary with no auction house data**: With no TSM/Auctionator prices (e.g. no AH access), gathered materials like leather had no price, so the Cheapest strategy scored every recipe as infinite cost and picked one effectively at random - suggesting a 2-leather recipe over a 1-leather one even when both were orange. Materials with no market price now fall back to their vendor sell value (read from the game, no AH needed), so the cheapest-by-materials recipe is chosen correctly. New "Estimate from vendor sell value when no AH price" toggle (Pricing settings, on by default) controls this.
