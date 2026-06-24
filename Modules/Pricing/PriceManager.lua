@@ -67,6 +67,35 @@ function PriceManager:GetPrice(itemId)
         end
     end
 
+    -- Last-resort floor: vendor SELL value (always available offline, no AH).
+    -- Without this, any reagent that no market source can price (e.g. gathered
+    -- leather/ore/herbs with no AH) returns nil, which makes the Cheapest
+    -- strategy score every recipe as math.huge and pick arbitrarily. The sell
+    -- value scales with material quantity and tier, so it ranks fewer/cheaper
+    -- materials correctly. Disable with useVendorSellFallback = false to keep
+    -- strict market-only behavior.
+    if LazyProf.db.profile.useVendorSellFallback ~= false then
+        local sellProvider = LazyProf.PriceProviders and LazyProf.PriceProviders.vendorsell
+        if sellProvider then
+            local price = sellProvider:GetPrice(itemId)
+            if price and price > 0 then
+                self.cache[itemId] = {
+                    price = price,
+                    source = sellProvider.name,
+                    timestamp = time(),
+                }
+                return price, sellProvider.name
+            end
+        end
+
+        -- Item not cached yet (GetItemInfo pending) or non-sellable. Return the
+        -- absolute floor WITHOUT caching, and remember it so the addon can
+        -- refine the value once GET_ITEM_INFO_RECEIVED delivers the real price.
+        self.flooredItems = self.flooredItems or {}
+        self.flooredItems[itemId] = true
+        return Constants.MIN_REAGENT_PRICE, "floor"
+    end
+
     return nil, "none"
 end
 
@@ -82,6 +111,7 @@ end
 -- Clear price cache
 function PriceManager:ClearCache()
     self.cache = {}
+    self.flooredItems = {}
     LazyProf:Print("Price cache cleared.")
 end
 

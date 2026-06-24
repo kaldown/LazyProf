@@ -17,7 +17,14 @@ LazyProf.Constants = {
         AUCTIONATOR = "auctionator",
         SCANNER = "scanner",
         VENDOR = "vendor",
+        VENDOR_SELL = "vendorsell",
     },
+
+    -- Minimum reagent price (copper) used as a last-resort floor when neither a
+    -- market source nor a vendor SELL price is known. Guarantees every reagent
+    -- has a non-zero price so cost-per-skillup scoring never degenerates to
+    -- math.huge (which makes recipe selection arbitrary when no AH data exists).
+    MIN_REAGENT_PRICE = 1,
 
     -- TSM price source options
     TSM_PRICE_SOURCE = {

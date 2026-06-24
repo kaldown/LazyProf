@@ -4,6 +4,10 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Recipe selection was arbitrary with no auction house data**: With no TSM/Auctionator prices (e.g. no AH access), gathered materials like leather had no price, so the Cheapest strategy scored every recipe as infinite cost and picked one effectively at random - suggesting a 2-leather recipe over a 1-leather one even when both were orange. Materials with no market price now fall back to their vendor sell value (read from the game, no AH needed), so the cheapest-by-materials recipe is chosen correctly. New "Estimate from vendor sell value when no AH price" toggle (Pricing settings, on by default) controls this.
+
 ### Changed
 
 - Season of Discovery support: racial profession bonuses, skill brackets, and Wowhead links now adapt to the running client via `CraftLib:GetActiveFlavor()`. On a SoD/Classic Era client, TBC-only races are excluded, skill brackets follow the profession's actual milestone caps with neutral labels, and Wowhead links point at `/classic/`.

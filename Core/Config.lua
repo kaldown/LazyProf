@@ -32,6 +32,7 @@ LazyProf.defaults = {
             Constants.PRICE_SOURCE.SCANNER,
         },
         tsmPriceSource = Constants.TSM_PRICE_SOURCE.RECENT, -- Default to current AH prices (outliers removed)
+        useVendorSellFallback = true, -- Floor every reagent at its vendor sell value when no market price exists (lets scoring work with no AH)
 
         -- Debug
         debug = false,
@@ -315,6 +316,21 @@ LazyProf.options = {
                     type = "description",
                     order = 1.5,
                     hidden = function() return TSM_API ~= nil end,
+                },
+                useVendorSellFallback = {
+                    name = "Estimate from vendor sell value when no AH price",
+                    desc = "When enabled, any material with no TSM/Auctionator price is valued at its vendor sell price (the gray 'sell to vendor' value, read from the game itself). This lets the Cheapest strategy still rank recipes correctly when you have no auction house data - a 1-leather recipe will beat a 2-leather recipe.\n\nWhen disabled, materials with no market price are treated as unpriced, which makes every recipe tie and the picked recipe effectively arbitrary. Leave enabled unless you only ever play with full TSM/Auctionator data.",
+                    type = "toggle",
+                    width = "full",
+                    order = 1.7,
+                    get = function() return LazyProf.db.profile.useVendorSellFallback ~= false end,
+                    set = function(_, v)
+                        LazyProf.db.profile.useVendorSellFallback = v
+                        if LazyProf.PriceManager then
+                            LazyProf.PriceManager:ClearCache()
+                        end
+                        LazyProf:Recalculate("setting changed")
+                    end,
                 },
                 tsmHeader = {
                     name = "TSM Settings",

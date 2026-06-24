@@ -62,6 +62,7 @@ Modules\Inventory\Scanner.lua
 Modules\Pricing\Providers\TSM.lua
 Modules\Pricing\Providers\Auctionator.lua
 Modules\Pricing\Providers\Vendor.lua
+Modules\Pricing\Providers\VendorSell.lua
 Modules\Pricing\PriceManager.lua
 
 # Modules - Recipes

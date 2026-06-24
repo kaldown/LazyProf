@@ -69,6 +69,20 @@ function LazyProf:OnEnable()
     self:RegisterEvent("TRADE_SKILL_UPDATE", "OnTradeSkillUpdate")
     self:RegisterEvent("TRADE_SKILL_CLOSE", "OnTradeSkillClose")
     self:RegisterEvent("BAG_UPDATE", "OnBagUpdate")
+    self:RegisterEvent("GET_ITEM_INFO_RECEIVED", "OnItemInfoReceived")
+end
+
+-- When a reagent we could only price with the absolute floor (because its
+-- GetItemInfo data had not arrived yet) finishes caching, drop the floor and
+-- recalculate so the path reflects the real vendor sell value.
+function LazyProf:OnItemInfoReceived(event, itemId, success)
+    if not success then return end
+    local pm = self.PriceManager
+    if pm and pm.flooredItems and pm.flooredItems[itemId] then
+        pm.flooredItems[itemId] = nil
+        pm.cache[itemId] = nil
+        self:ScheduleRecalculation("item info received")
+    end
 end
 
 function LazyProf:SlashCommand(input)
