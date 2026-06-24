@@ -282,8 +282,13 @@ function LazyProf:UpdateDisplay()
 end
 
 -- Debug log buffer
+-- Sized to hold a full single-profession scoring trace (1-300 is well under
+-- this). The buffer is NOT cleared between recalculations, so several runs can
+-- accumulate; to capture one clean run, use the Clear button first, then
+-- trigger a single recalculation. The buffer is runtime-only (never saved).
 LazyProf.debugLog = {}
-LazyProf.debugLogMax = 500
+LazyProf.debugLogMax = 5000
+LazyProf.debugLogOverflowed = false  -- true once oldest lines have been dropped
 LazyProf.debugFilter = nil  -- nil = show all, or category name
 
 -- Category display names for UI
@@ -347,13 +352,28 @@ function LazyProf:Debug(category, msg)
     })
     if #self.debugLog > self.debugLogMax then
         table.remove(self.debugLog, 1)
+        self.debugLogOverflowed = true
     end
 
-    -- Auto-update debug window if visible
+    -- Auto-update debug window if visible (debounced: a verbose scoring run
+    -- emits hundreds of lines, and rebuilding the full EditBox text on every
+    -- one is O(n^2). Coalesce rapid updates into one refresh.)
     if self.debugFrame and self.debugFrame:IsShown() then
-        self:UpdateDebugWindowContent()
+        self:ScheduleDebugWindowUpdate()
     end
     -- No chat output - use /lp log to view logs
+end
+
+-- Debounced debug-window refresh (see Debug()).
+local debugWindowTimer = nil
+function LazyProf:ScheduleDebugWindowUpdate()
+    if debugWindowTimer then return end
+    debugWindowTimer = C_Timer.After(0.2, function()
+        debugWindowTimer = nil
+        if LazyProf.debugFrame and LazyProf.debugFrame:IsShown() then
+            LazyProf:UpdateDebugWindowContent()
+        end
+    end)
 end
 
 -- Get filtered debug log entries
@@ -414,6 +434,18 @@ function LazyProf:UpdateDebugWindowContent()
         end
     end
 
+    -- Warn when the ring buffer dropped older lines so the start of a long run
+    -- (e.g. a full 1-300 scoring pass) is no longer present. To capture an
+    -- early range, narrow the scope: filter by category/bracket above, or
+    -- calculate a smaller skill range, then re-run.
+    if self.debugLogOverflowed then
+        local hint = string.format(
+            "|cFFFFCC00[Log full: oldest lines dropped - only the last %d are kept.]|r\n"
+            .. "|cFFFFCC00[Not all logs are present. To see an earlier range, filter by category/bracket or calculate a smaller skill range, then re-run.]|r",
+            self.debugLogMax)
+        text = hint .. "\n" .. text
+    end
+
     self.debugFrame.editBox:SetText(text)
 
     -- Update count display
@@ -435,6 +467,7 @@ end
 
 function LazyProf:ClearDebugLog()
     wipe(self.debugLog)
+    self.debugLogOverflowed = false
     if self.debugFrame and self.debugFrame:IsShown() then
         self:UpdateDebugWindowContent()
     end

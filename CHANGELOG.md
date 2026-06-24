@@ -11,6 +11,7 @@ All notable changes to LazyProf will be documented in this file.
 ### Changed
 
 - Season of Discovery support: racial profession bonuses, skill brackets, and Wowhead links now adapt to the running client via `CraftLib:GetActiveFlavor()`. On a SoD/Classic Era client, TBC-only races are excluded, skill brackets follow the profession's actual milestone caps with neutral labels, and Wowhead links point at `/classic/`.
+- Debug log buffer raised from 500 to 5000 entries so a full single-profession scoring trace (1-300) fits without dropping the early skill ranges. The window now shows a notice at the top when older lines are still dropped (e.g. after several recalculations), and the per-line window refresh is debounced to stay responsive during verbose scoring runs. To capture one clean run, use Clear, then trigger a single recalculation.
 
 ## [0.6.0] - 2026-02-24
 
