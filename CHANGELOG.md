@@ -4,6 +4,12 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-06-25
+
+### Changed
+
+- Updated bundled CraftLib to v0.7.0, which adds Season of Discovery Mining (smelting) recipes. SoD profession coverage is now complete.
+
 ## [0.7.0] - 2026-06-24
 
 ### Fixed
