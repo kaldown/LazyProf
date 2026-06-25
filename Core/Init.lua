@@ -282,12 +282,18 @@ function LazyProf:UpdateDisplay()
 end
 
 -- Debug log buffer
--- Sized to hold a full single-profession scoring trace (1-300 is well under
--- this). The buffer is NOT cleared between recalculations, so several runs can
--- accumulate; to capture one clean run, use the Clear button first, then
--- trigger a single recalculation. The buffer is runtime-only (never saved).
+-- Bounded in-memory trace. To keep insertion amortized O(1), the buffer is
+-- allowed to overshoot debugLogMax by debugLogSlack, then the oldest entries
+-- are dropped in a single batch shift -- instead of table.remove(t, 1) on every
+-- line, which is O(n) once the buffer is full. The window renders only the last
+-- debugRenderMax lines so a large buffer never forces a multi-thousand-line
+-- EditBox:SetText layout pass on the UI thread. The buffer is NOT cleared
+-- between recalculations and is runtime-only (never saved); use the Clear
+-- button to start a fresh capture.
 LazyProf.debugLog = {}
-LazyProf.debugLogMax = 5000
+LazyProf.debugLogMax = 2000          -- newest entries retained in memory
+LazyProf.debugLogSlack = 512         -- overshoot tolerated before one batch trim
+LazyProf.debugRenderMax = 400        -- max lines drawn into the window per refresh
 LazyProf.debugLogOverflowed = false  -- true once oldest lines have been dropped
 LazyProf.debugFilter = nil  -- nil = show all, or category name
 
@@ -345,13 +351,25 @@ function LazyProf:Debug(category, msg)
     local timestamp = date("%H:%M:%S")
 
     -- Store with category for filtering
-    table.insert(self.debugLog, {
+    local log = self.debugLog
+    log[#log + 1] = {
         timestamp = timestamp,
         category = category,
         message = msg,
-    })
-    if #self.debugLog > self.debugLogMax then
-        table.remove(self.debugLog, 1)
+    }
+    -- Amortized O(1) trim: only compact once the buffer overshoots by the slack
+    -- margin, then drop the oldest entries in a single batch shift. This avoids
+    -- table.remove(log, 1) (an O(n) front shift) running on every line once the
+    -- buffer is full. Keeps the newest debugLogMax entries in chronological order.
+    if #log > self.debugLogMax + self.debugLogSlack then
+        local removeCount = #log - self.debugLogMax
+        local n = #log
+        for i = 1, n - removeCount do
+            log[i] = log[i + removeCount]
+        end
+        for i = n - removeCount + 1, n do
+            log[i] = nil
+        end
         self.debugLogOverflowed = true
     end
 
@@ -380,18 +398,23 @@ end
 function LazyProf:GetFilteredDebugLog()
     local filtered = {}
     local currentSkill = nil
+    -- Hoisted out of the loop: the selected bracket is identical for every entry,
+    -- so derive it once instead of rebuilding the bracket table per entry.
+    local scoringBracket = nil
+    if self.debugFilter == "scoring" and self.debugScoringBracket then
+        scoringBracket = self:GetSkillBrackets()[self.debugScoringBracket]
+    end
     for _, entry in ipairs(self.debugLog) do
         if not self.debugFilter or entry.category == self.debugFilter then
             -- Apply scoring bracket filter if active
             if self.debugFilter == "scoring" and self.debugScoringBracket then
-                local bracket = self:GetSkillBrackets()[self.debugScoringBracket]
-                if bracket then
+                if scoringBracket then
                     local skill = tonumber(entry.message:match("Scoring candidates at skill (%d+%.?%d*)"))
                         or tonumber(entry.message:match("No candidates at skill (%d+%.?%d*)"))
                     if skill then
                         currentSkill = math.floor(skill)
                     end
-                    if currentSkill and currentSkill >= bracket.min and currentSkill <= bracket.max then
+                    if currentSkill and currentSkill >= scoringBracket.min and currentSkill <= scoringBracket.max then
                         table.insert(filtered, entry)
                     end
                 end
@@ -403,14 +426,28 @@ function LazyProf:GetFilteredDebugLog()
     return filtered
 end
 
--- Format debug log entries as text
+-- Format debug log entries as text (full set; used by the Copy buttons).
 function LazyProf:FormatDebugLog(entries)
-    local lines = {}
-    for _, entry in ipairs(entries) do
-        local catDisplay = self.debugCategoryNames[entry.category] or entry.category
-        table.insert(lines, string.format("[%s] [%s] %s", entry.timestamp, catDisplay, entry.message))
+    return (self:FormatDebugLogTail(entries, nil))
+end
+
+-- Format only the last `maxLines` entries. Returns (text, truncated, total).
+-- A huge EditBox:SetText forces a full FontString layout pass on the UI thread,
+-- so the live window renders only the tail; the complete trace stays in
+-- self.debugLog and is reachable via the category/bracket filters or Copy All.
+function LazyProf:FormatDebugLogTail(entries, maxLines)
+    local total = #entries
+    local startIdx = 1
+    if maxLines and total > maxLines then
+        startIdx = total - maxLines + 1
     end
-    return table.concat(lines, "\n")
+    local lines = {}
+    for i = startIdx, total do
+        local entry = entries[i]
+        local catDisplay = self.debugCategoryNames[entry.category] or entry.category
+        lines[#lines + 1] = string.format("[%s] [%s] %s", entry.timestamp, catDisplay, entry.message)
+    end
+    return table.concat(lines, "\n"), (startIdx > 1), total
 end
 
 -- Update debug window content (respects filter)
@@ -418,7 +455,7 @@ function LazyProf:UpdateDebugWindowContent()
     if not self.debugFrame then return end
 
     local filtered = self:GetFilteredDebugLog()
-    local text = self:FormatDebugLog(filtered)
+    local text, viewTruncated, total = self:FormatDebugLogTail(filtered, self.debugRenderMax)
 
     if text == "" then
         if self.debugFilter then
@@ -432,6 +469,17 @@ function LazyProf:UpdateDebugWindowContent()
         else
             text = "(No debug messages yet. Enable debug mode and perform actions.)"
         end
+    end
+
+    -- View cap: only the last debugRenderMax lines are drawn, so a large buffer
+    -- never forces a multi-thousand-line EditBox layout pass. The full trace is
+    -- still in memory - narrow the category/bracket filter to surface an earlier
+    -- range, or use Copy All / Copy Filtered to export everything.
+    if viewTruncated then
+        local note = string.format(
+            "|cFF888888[Showing last %d of %d lines. Use the category/bracket filter above to view earlier ranges.]|r",
+            self.debugRenderMax, total)
+        text = note .. "\n" .. text
     end
 
     -- Warn when the ring buffer dropped older lines so the start of a long run

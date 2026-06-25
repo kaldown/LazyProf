@@ -4,6 +4,10 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Debug log window no longer stalls the game for a few seconds during verbose scoring runs (affects users who enable debug mode and keep the log window open). The log buffer now trims in amortized O(1) batches instead of shifting the entire buffer on every line, the window draws only the most recent lines (the full trace stays in memory and is reachable via the category/bracket filters or Copy All), and the skill-bracket lookup is no longer rebuilt per line. The in-memory buffer cap was right-sized from 5000 to 2000 entries.
+
 ## [0.7.1] - 2026-06-25
 
 ### Changed
