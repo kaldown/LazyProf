@@ -4,6 +4,8 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-06-25
+
 ### Fixed
 
 - Opening a profession for the first time in a session no longer hitches the game. Cold reagents whose item data had not yet downloaded were re-triggering a full path recalculation for each one as the data streamed in (up to ~20 recalculations in a couple of seconds). Those are now coalesced into a single recalculation once the item data settles.
