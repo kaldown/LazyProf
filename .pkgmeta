@@ -8,7 +8,6 @@ externals:
 ignore:
   - .git
   - .github
-  - .claude
   - docs
   - scripts
   - releases
