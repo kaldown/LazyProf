@@ -67,23 +67,26 @@ function Pathfinder:Calculate(reason)
     -- Get inventory (bags + all enabled sources)
     local inventory, sourceBreakdown = LazyProf.Inventory:ScanAll()
 
-    -- Log owned materials summary
-    local ownedCount = 0
-    local ownedParts = {}
-    for itemId, qty in pairs(inventory) do
-        if qty > 0 then
-            ownedCount = ownedCount + 1
-            if ownedCount <= 15 then
-                local name = Utils.GetItemInfo(itemId)
-                table.insert(ownedParts, string.format("%dx %s", qty, name or itemId))
+    -- Log owned materials summary (guarded: GetItemInfo + string building per
+    -- owned item runs every recalc and is wasted when debug logging is off)
+    if LazyProf:IsDebugEnabled("pathfinder") then
+        local ownedCount = 0
+        local ownedParts = {}
+        for itemId, qty in pairs(inventory) do
+            if qty > 0 then
+                ownedCount = ownedCount + 1
+                if ownedCount <= 15 then
+                    local name = Utils.GetItemInfo(itemId)
+                    table.insert(ownedParts, string.format("%dx %s", qty, name or itemId))
+                end
             end
         end
-    end
-    if ownedCount > 0 then
-        local suffix = ownedCount > 15 and string.format(" ... and %d more", ownedCount - 15) or ""
-        LazyProf:Debug("pathfinder", string.format("Owned materials (%d items): %s%s", ownedCount, table.concat(ownedParts, ", "), suffix))
-    else
-        LazyProf:Debug("pathfinder", "Owned materials: none")
+        if ownedCount > 0 then
+            local suffix = ownedCount > 15 and string.format(" ... and %d more", ownedCount - 15) or ""
+            LazyProf:Debug("pathfinder", string.format("Owned materials (%d items): %s%s", ownedCount, table.concat(ownedParts, ", "), suffix))
+        else
+            LazyProf:Debug("pathfinder", "Owned materials: none")
+        end
     end
 
     -- Get prices for all reagents (and potential source materials for resolution)
@@ -137,7 +140,11 @@ function Pathfinder:Calculate(reason)
 
     -- Calculate path with empty inventory so scoring uses market prices only
     -- (owned materials are handled separately by the shopping list)
+    -- Memoize recipe availability for the duration of this synchronous scoring
+    -- pass (IsRecipeAvailable is called per unlearned candidate per step).
+    LazyProf.RecipeAvailability:BeginRecalc()
     local steps = strategy:Calculate(startSkill, targetSkill, recipes, {}, prices, racialBonus, self.pinnedRecipes)
+    LazyProf.RecipeAvailability:EndRecalc()
 
     -- Build result
     self.currentPath = {
@@ -245,7 +252,9 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel, reason)
 
     -- Calculate path with empty inventory so scoring uses market prices only
     -- (owned materials are handled separately by the shopping list)
+    LazyProf.RecipeAvailability:BeginRecalc()
     local steps = strategy:Calculate(skillLevel, targetSkill, recipes, {}, prices, racialBonus, self.pinnedRecipes)
+    LazyProf.RecipeAvailability:EndRecalc()
 
     -- Build result (similar to Calculate() but stored separately)
     local path = {
@@ -698,28 +707,31 @@ function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, currentSkill,
             end)
         end
 
-        -- Log OOP cost comparison for this step
-        local marketCost = step.totalCost
-        if outOfPocketCost ~= marketCost then
-            LazyProf:Debug("pathfinder", string.format("[OOP] %s x%d: market=%s, oop=%s (you save %s)",
-                step.recipe.name, step.quantity, Utils.FormatMoney(marketCost),
-                Utils.FormatMoney(outOfPocketCost), Utils.FormatMoney(marketCost - outOfPocketCost)))
-        end
-        -- Log top alternatives with OOP vs market when they differ
-        if #adjustedAlternatives > 0 then
-            local oopBetter = {}
-            for i, alt in ipairs(adjustedAlternatives) do
-                if i > 5 then break end
-                if alt.outOfPocketCost < alt.craftCost then
-                    table.insert(oopBetter, string.format("  %s: market=%s, oop=%s (%d%% skillup)",
-                        alt.recipe.name, Utils.FormatMoney(alt.craftCost),
-                        Utils.FormatMoney(alt.outOfPocketCost), alt.expectedSkillups * 100))
-                end
+        -- Log OOP cost comparison for this step (guarded: per-step + per-alternative
+        -- FormatMoney building runs even with debug off without this gate)
+        if LazyProf:IsDebugEnabled("pathfinder") then
+            local marketCost = step.totalCost
+            if outOfPocketCost ~= marketCost then
+                LazyProf:Debug("pathfinder", string.format("[OOP] %s x%d: market=%s, oop=%s (you save %s)",
+                    step.recipe.name, step.quantity, Utils.FormatMoney(marketCost),
+                    Utils.FormatMoney(outOfPocketCost), Utils.FormatMoney(marketCost - outOfPocketCost)))
             end
-            if #oopBetter > 0 then
-                LazyProf:Debug("pathfinder", "[OOP] Cheaper alternatives with owned materials:")
-                for _, line in ipairs(oopBetter) do
-                    LazyProf:Debug("pathfinder", line)
+            -- Log top alternatives with OOP vs market when they differ
+            if #adjustedAlternatives > 0 then
+                local oopBetter = {}
+                for i, alt in ipairs(adjustedAlternatives) do
+                    if i > 5 then break end
+                    if alt.outOfPocketCost < alt.craftCost then
+                        table.insert(oopBetter, string.format("  %s: market=%s, oop=%s (%d%% skillup)",
+                            alt.recipe.name, Utils.FormatMoney(alt.craftCost),
+                            Utils.FormatMoney(alt.outOfPocketCost), alt.expectedSkillups * 100))
+                    end
+                end
+                if #oopBetter > 0 then
+                    LazyProf:Debug("pathfinder", "[OOP] Cheaper alternatives with owned materials:")
+                    for _, line in ipairs(oopBetter) do
+                        LazyProf:Debug("pathfinder", line)
+                    end
                 end
             end
         end

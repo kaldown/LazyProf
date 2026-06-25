@@ -5,10 +5,43 @@ local ADDON_NAME, LazyProf = ...
 LazyProf.RecipeAvailability = {}
 local Availability = LazyProf.RecipeAvailability
 
+-- Per-calculation availability memo. IsRecipeAvailable is called for every
+-- unlearned candidate at every simulated step of a path calculation (60-100
+-- steps), and its source/AH lookups (GetAHPrice -> TSM/Auctionator) are not
+-- otherwise cached. Availability is invariant within one synchronous
+-- calculation, so we memoize by recipe id and reset between calculations.
+Availability._memo = nil  -- nil = disabled (active only between Begin/EndRecalc)
+
+function Availability:BeginRecalc()
+    self._memo = {}
+end
+
+function Availability:EndRecalc()
+    self._memo = nil
+end
+
+-- Memoizing front for IsRecipeAvailableUncached (see BeginRecalc/EndRecalc).
+-- Returns: isAvailable (boolean), sourceInfo (table or nil)
+function Availability:IsRecipeAvailable(recipe)
+    local memo = self._memo
+    local key = recipe and recipe.id
+    if memo and key ~= nil then
+        local cached = memo[key]
+        if cached ~= nil then
+            return cached.isAvailable, cached.sourceInfo
+        end
+    end
+    local isAvailable, sourceInfo = self:IsRecipeAvailableUncached(recipe)
+    if memo and key ~= nil then
+        memo[key] = { isAvailable = isAvailable, sourceInfo = sourceInfo }
+    end
+    return isAvailable, sourceInfo
+end
+
 -- Check if a recipe is available to obtain
 -- Returns: isAvailable (boolean), sourceInfo (table or nil)
 -- sourceInfo contains details for tooltip display
-function Availability:IsRecipeAvailable(recipe)
+function Availability:IsRecipeAvailableUncached(recipe)
     -- 1. Already learned - always available
     if recipe.learned then
         return true, { type = "learned" }

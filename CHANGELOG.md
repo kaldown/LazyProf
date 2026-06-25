@@ -6,6 +6,9 @@ All notable changes to LazyProf will be documented in this file.
 
 ### Fixed
 
+- Opening a profession for the first time in a session no longer hitches the game. Cold reagents whose item data had not yet downloaded were re-triggering a full path recalculation for each one as the data streamed in (up to ~20 recalculations in a couple of seconds). Those are now coalesced into a single recalculation once the item data settles.
+- Recipe availability is now cached for the duration of a single path calculation instead of being re-checked (including live auction-house lookups) for every candidate at every step.
+- Verbose debug log lines are no longer built when debug logging is turned off (the cost was previously paid on every recalculation regardless), which also removes the freeze and "script execution limit" warnings when leveling a profession with the debug window open.
 - Debug log window no longer stalls the game for a few seconds during verbose scoring runs (affects users who enable debug mode and keep the log window open). The log buffer now trims in amortized O(1) batches instead of shifting the entire buffer on every line, the window draws only the most recent lines (the full trace stays in memory and is reachable via the category/bracket filters or Copy All), and the skill-bracket lookup is no longer rebuilt per line. The in-memory buffer cap was right-sized from 5000 to 2000 entries.
 
 ## [0.7.1] - 2026-06-25

@@ -39,7 +39,9 @@ LazyProf.PathfinderStrategies.cheapest = {
 
             -- Score all candidates and build alternatives list (also used for debug logging)
             local effectiveSkill = simulatedSkill - racialBonus
-            LazyProf:Debug("scoring", "=== Scoring candidates at skill " .. simulatedSkill .. " (effective: " .. effectiveSkill .. ") ===")
+            if LazyProf:IsDebugEnabled("scoring") then
+                LazyProf:Debug("scoring", "=== Scoring candidates at skill " .. simulatedSkill .. " (effective: " .. effectiveSkill .. ") ===")
+            end
             local alternatives = {}
             for _, recipe in ipairs(candidates) do
                 local score = self:ScoreRecipe(recipe, simulatedSkill, targetSkill, simulatedInventory, prices, racialBonus, purchasedRecipes)
@@ -66,11 +68,14 @@ LazyProf.PathfinderStrategies.cheapest = {
             -- Sort by score (lowest = best first)
             table.sort(alternatives, function(a, b) return a.score < b.score end)
 
-            -- Debug: log top 10
-            for i = 1, math.min(10, #alternatives) do
-                local d = alternatives[i]
-                LazyProf:Debug("scoring", string.format("  #%d: %s | score=%.2f | color=%s | skillup=%.2f | cost=%s",
-                    i, d.recipe.name, d.score, d.color, d.expectedSkillups, Utils.FormatMoney(d.craftCost)))
+            -- Debug: log top 10 (guarded - this string + FormatMoney building is the
+            -- bulk of the eager debug cost and would otherwise run even with debug off)
+            if LazyProf:IsDebugEnabled("scoring") then
+                for i = 1, math.min(10, #alternatives) do
+                    local d = alternatives[i]
+                    LazyProf:Debug("scoring", string.format("  #%d: %s | score=%.2f | color=%s | skillup=%.2f | cost=%s",
+                        i, d.recipe.name, d.score, d.color, d.expectedSkillups, Utils.FormatMoney(d.craftCost)))
+                end
             end
 
             -- Select best available recipe (skip unavailable for auto-selection)
@@ -101,7 +106,7 @@ LazyProf.PathfinderStrategies.cheapest = {
                 break
             end
 
-            if not pinnedId then
+            if not pinnedId and LazyProf:IsDebugEnabled("scoring") then
                 LazyProf:Debug("scoring", ">>> WINNER: " .. best.name .. " with score " .. string.format("%.2f", bestScore))
             end
 

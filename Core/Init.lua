@@ -81,7 +81,7 @@ function LazyProf:OnItemInfoReceived(event, itemId, success)
     if pm and pm.flooredItems and pm.flooredItems[itemId] then
         pm.flooredItems[itemId] = nil
         pm.cache[itemId] = nil
-        self:ScheduleRecalculation("item info received")
+        self:ScheduleItemInfoRecalc()
     end
 end
 
@@ -179,6 +179,39 @@ function LazyProf:ScheduleRecalculation(reason)
     recalcTimer = C_Timer.After(0.5, function()
         recalcTimer = nil
         LazyProf:Recalculate(reason)
+    end)
+end
+
+-- Coalesced recalculation for streaming item-info.
+-- On the first open of a profession, hundreds of reagents are not yet in the
+-- client item cache, so GetItemInfo returns nil and PriceManager "floors" them.
+-- As the data streams back, GET_ITEM_INFO_RECEIVED fires once per item; a plain
+-- first-wins debounce re-arms on every arrival and produces a recalc storm
+-- (many full Pathfinder:Calculate passes that hitch the game / trip the script
+-- execution watchdog). This is a TRAILING debounce: it fires a single recalc
+-- only after item-info has been quiet for ITEMINFO_QUIET seconds, with
+-- ITEMINFO_MAX_WAIT as a hard cap so a slow stream cannot starve it.
+local ITEMINFO_QUIET = 0.5
+local ITEMINFO_MAX_WAIT = 3.0
+local itemInfoToken = 0
+local itemInfoDeadline = nil
+function LazyProf:ScheduleItemInfoRecalc()
+    local now = GetTime()
+    if not itemInfoDeadline then
+        itemInfoDeadline = now + ITEMINFO_MAX_WAIT
+    end
+    itemInfoToken = itemInfoToken + 1
+    local myToken = itemInfoToken
+    local delay = math.max(0, math.min(ITEMINFO_QUIET, itemInfoDeadline - now))
+    C_Timer.After(delay, function()
+        -- Only the most recently scheduled callback fires once the stream goes
+        -- quiet; the max-wait deadline forces a fire even mid-stream.
+        if myToken ~= itemInfoToken and (itemInfoDeadline == nil or GetTime() < itemInfoDeadline) then
+            return
+        end
+        itemInfoToken = 0
+        itemInfoDeadline = nil
+        LazyProf:Recalculate("item info settled")
     end)
 end
 
@@ -380,6 +413,20 @@ function LazyProf:Debug(category, msg)
         self:ScheduleDebugWindowUpdate()
     end
     -- No chat output - use /lp log to view logs
+end
+
+-- Cheap predicate mirroring Debug()'s gate so hot code paths can skip building
+-- expensive debug strings. Lua evaluates Debug()'s message argument eagerly, so
+-- an unguarded LazyProf:Debug(cat, string.format(...)) pays the full format cost
+-- even when debug is disabled; wrap such hot sites in this check.
+function LazyProf:IsDebugEnabled(category)
+    if not self.db or not self.db.profile.debug then
+        return false
+    end
+    if category and not self.db.profile.debugCategories[category] then
+        return false
+    end
+    return true
 end
 
 -- Debounced debug-window refresh (see Debug()).
