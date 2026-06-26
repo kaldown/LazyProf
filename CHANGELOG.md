@@ -4,6 +4,12 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-06-26
+
+### Fixed
+
+- Bundled CraftLib 0.8.0: Season of Discovery recipe sources previously shown as trainer-taught (drop, vendor, and quest patterns) now display their real source. Classic/TBC behavior is unchanged.
+
 ## [0.7.2] - 2026-06-25
 
 ### Fixed
