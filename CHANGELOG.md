@@ -4,6 +4,12 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-06-27
+
+### Fixed
+
+- Bundled CraftLib 0.9.0: nine Season of Discovery Phase-8 recipes that were previously missing now appear with their real source - five quest-taught (the Specklefin Feast and Grand Lobster Banquet feasts, and the Teleport / Nitro Boosts / Magnetic Displacement tinkers) and four learned by discovery (the Grand Crusader, Grand Arcanist, Grand Sorceror, and Grand Inquisitor weapon enchants). Classic/TBC behavior is unchanged.
+
 ## [0.7.4] - 2026-06-26
 
 ### Fixed
