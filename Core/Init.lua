@@ -358,9 +358,11 @@ function LazyProf:GetSkillBrackets()
 
     if not milestones or #milestones == 0 then
         local CraftLib = _G.CraftLib
-        local flavor = (CraftLib and CraftLib.GetActiveFlavor and CraftLib:GetActiveFlavor()) or "DEFAULT"
-        if flavor == "SOD" then
+        local profile = (CraftLib and CraftLib.GetActiveProfile and CraftLib:GetActiveProfile()) or "TBC"
+        if profile == "SOD" or profile == "VANILLA" then
             milestones = {75, 150, 225, 300}
+        elseif profile == "WOTLK" then
+            milestones = {75, 150, 225, 300, 375, 450}
         else
             milestones = {75, 150, 225, 300, 375}
         end

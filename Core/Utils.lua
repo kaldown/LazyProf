@@ -281,18 +281,21 @@ function Utils.GetSourceDetails(source, showAllFactions)
     return details
 end
 
--- Racial profession bonuses by client flavor.
--- These bonuses extend how long recipes stay orange/yellow/green.
--- DEFAULT (Vanilla/TBC): includes the TBC races. SOD/Classic Era: TBC races
--- (Draenei, Blood Elf) do not exist, so only Classic-race bonuses apply.
+-- Racial profession bonuses by client profile. TBC races (Draenei, Blood Elf) do
+-- not exist on Vanilla/SoD, so those profiles get only the Classic-race bonus.
+-- WotLK adds no new playable races, so WOTLK == TBC here.
 local RACIAL_PROFESSION_BONUSES = {
-    DEFAULT = {
+    VANILLA = { Gnome = { profession = "engineering", bonus = 15 } },
+    SOD     = { Gnome = { profession = "engineering", bonus = 15 } },
+    TBC = {
         Gnome = { profession = "engineering", bonus = 15 },
         BloodElf = { profession = "enchanting", bonus = 10 },
         Draenei = { profession = "jewelcrafting", bonus = 5 },
     },
-    SOD = {
+    WOTLK = {
         Gnome = { profession = "engineering", bonus = 15 },
+        BloodElf = { profession = "enchanting", bonus = 10 },
+        Draenei = { profession = "jewelcrafting", bonus = 5 },
     },
 }
 
@@ -302,8 +305,8 @@ function Utils.GetRacialProfessionBonus(professionKey)
     if not professionKey then return 0 end
 
     local CraftLib = _G.CraftLib
-    local flavor = (CraftLib and CraftLib.GetActiveFlavor and CraftLib:GetActiveFlavor()) or "DEFAULT"
-    local byRace = RACIAL_PROFESSION_BONUSES[flavor] or RACIAL_PROFESSION_BONUSES.DEFAULT
+    local profile = (CraftLib and CraftLib.GetActiveProfile and CraftLib:GetActiveProfile()) or "TBC"
+    local byRace = RACIAL_PROFESSION_BONUSES[profile] or RACIAL_PROFESSION_BONUSES.TBC
 
     local _, race = UnitRace("player")
     local racialData = byRace[race]
