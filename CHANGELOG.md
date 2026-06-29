@@ -4,6 +4,13 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-30
+
+### Added
+
+- Wrath of the Lich King Classic support: LazyProf now plans leveling paths on WotLK Classic clients (interface 30403), capping each profession at 450 and including Inscription. Wowhead links open on the WotLK site, and racial profession bonuses apply correctly per client.
+- One install now serves every live Classic-family client - Classic Era / Vanilla, Season of Discovery, TBC, and WotLK Classic - each using recipe data built from its own game version (via the bundled CraftLib).
+
 ## [0.7.6] - 2026-06-29
 
 ### Fixed
