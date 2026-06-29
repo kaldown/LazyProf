@@ -99,10 +99,14 @@ function LazyProf:SlashCommand(input)
         self:Print("Database reset.")
     elseif cmd == "log" then
         self:ShowDebugLog()
+    elseif cmd == "diag" then
+        self:Print("Diagnostics: /lp diag learned - dumps learned-recipe detection state to a copyable window.")
+    elseif cmd == "diag learned" then
+        self:RunLearnedDiagnostic()
     elseif self.configRegistered then
         LibStub("AceConfigDialog-3.0"):Open("LazyProf")
     else
-        self:Print("Commands: /lp | /lp browse | /lp reset | /lp log")
+        self:Print("Commands: /lp | /lp browse | /lp reset | /lp log | /lp diag")
     end
 end
 
@@ -427,6 +431,246 @@ function LazyProf:IsDebugEnabled(category)
         return false
     end
     return true
+end
+
+-- Debug pipeline: /lp diag learned. Dumps learned-recipe detection state to a
+-- copyable popup so a "known recipe shows [!] Unlearned" report can be diagnosed
+-- without game access (chat cannot be copied out of the client). It contrasts
+-- what each id-resolution path sees: the legacy recipe-link scan (parsedIds),
+-- the active filter/header state, CraftLib match counts, the real resolver's
+-- learned/total result, and the C_TradeSkillUI capability probe. Read-only: no
+-- frame Show/Hide; the only state touched is the same learnedRecipes cache the
+-- normal scan already writes. Output lines are documented in
+-- docs/development/TROUBLESHOOTING.md (Diagnostic Commands).
+function LazyProf:RunLearnedDiagnostic()
+    -- Accumulate lines, then show them in a copyable popup (chat cannot be
+    -- copied out of the client). p() appends one line.
+    local out = {}
+    local p = function(s) out[#out + 1] = s end
+
+    if not (TradeSkillFrame and TradeSkillFrame:IsVisible()) then
+        self:Print("diag learned: open a profession window first.")
+        return
+    end
+
+    local profKey = self.Professions:DetectActive()
+    local profData = profKey and self.Professions:Get(profKey)
+    local lineName, curSkill, maxSkill = GetTradeSkillLine()
+    p(string.format("diag learned: %s (key=%s) skill=%s/%s",
+        tostring(lineName), tostring(profKey), tostring(curSkill), tostring(maxSkill)))
+
+    -- 1. Replicate the production scan and gather counts.
+    local knownSpellIds = {}
+    local numSkills = GetNumTradeSkills() or 0
+    local headers, rows, parsed, unparsed = 0, 0, 0, 0
+    for i = 1, numSkills do
+        local _, skillType = GetTradeSkillInfo(i)
+        if skillType == "header" then
+            headers = headers + 1
+        else
+            rows = rows + 1
+            local link = GetTradeSkillRecipeLink(i)
+            local spellId = link and tonumber(link:match("enchant:(%d+)") or link:match("spell:(%d+)"))
+            if spellId then
+                knownSpellIds[spellId] = true
+                parsed = parsed + 1
+            else
+                unparsed = unparsed + 1
+            end
+        end
+    end
+    p(string.format("scan: GetNumTradeSkills=%d  headers=%d  recipeRows=%d  parsedIds=%d  unparsed=%d",
+        numSkills, headers, rows, parsed, unparsed))
+
+    -- 1b. Raw row detail: WHY the per-row parse yields no spell id (link nil vs
+    -- unexpected format). Pipes are doubled so the link shows literally instead
+    -- of rendering as a clickable hyperlink in the EditBox.
+    p(string.format("api: GetTradeSkillRecipeLink=%s GetTradeSkillItemLink=%s",
+        tostring(GetTradeSkillRecipeLink ~= nil), tostring(GetTradeSkillItemLink ~= nil)))
+    local function esc(s) return s and (tostring(s):gsub("|", "||")) or "nil" end
+    local shown = 0
+    for i = 1, numSkills do
+        local sName, sType, numAvail = GetTradeSkillInfo(i)
+        if sType ~= "header" and shown < 8 then
+            shown = shown + 1
+            local rLink = GetTradeSkillRecipeLink and GetTradeSkillRecipeLink(i)
+            local iLink = GetTradeSkillItemLink and GetTradeSkillItemLink(i)
+            p(string.format("row[%d] %s type=%s avail=%s", i, tostring(sName), tostring(sType), tostring(numAvail)))
+            p("  recipeLink=" .. esc(rLink))
+            p("  itemLink=" .. esc(iLink))
+        end
+    end
+
+    -- 2. Active filter signals (whichever are queryable on this client; all guarded).
+    local nameFilter = GetTradeSkillItemNameFilter and GetTradeSkillItemNameFilter()
+    p(string.format("filter: nameFilter=%q", tostring(nameFilter or "")))
+    local haveMatsBtn = _G["TradeSkillFrameAvailableFilterCheckButton"]
+    if haveMatsBtn and haveMatsBtn.GetChecked then
+        p(string.format("filter: haveMaterialsChecked=%s", tostring(haveMatsBtn:GetChecked() and true or false)))
+    else
+        p("filter: haveMaterials checkbox not found by name (version-specific)")
+    end
+    p(string.format("filter: hasSubClassFilter=%s hasInvSlotFilter=%s",
+        tostring(GetTradeSkillSubClassFilter ~= nil), tostring(GetTradeSkillInvSlotFilter ~= nil)))
+
+    -- 3. CraftLib match stats for the active profession.
+    if profData and profData.recipes then
+        local total, learnedCount = 0, 0
+        local craftlibIds = {}
+        local sampleUnlearned = {}
+        for _, recipe in ipairs(profData.recipes) do
+            total = total + 1
+            craftlibIds[recipe.id] = true
+            if knownSpellIds[recipe.id] then
+                learnedCount = learnedCount + 1
+            elseif #sampleUnlearned < 8 then
+                sampleUnlearned[#sampleUnlearned + 1] =
+                    string.format("%s(id=%s)", tostring(recipe.name), tostring(recipe.id))
+            end
+        end
+        p(string.format("craftlib: recipes=%d  matchedLearned=%d  flaggedUnlearned=%d",
+            total, learnedCount, total - learnedCount))
+        if #sampleUnlearned > 0 then
+            p("craftlib: sample flagged-unlearned: " .. table.concat(sampleUnlearned, ", "))
+        end
+        -- Scanned ids that match NO CraftLib recipe id (the H2 direction).
+        local unmatched, sampleUnmatched = 0, {}
+        for spellId in pairs(knownSpellIds) do
+            if not craftlibIds[spellId] then
+                unmatched = unmatched + 1
+                if #sampleUnmatched < 8 then sampleUnmatched[#sampleUnmatched + 1] = tostring(spellId) end
+            end
+        end
+        p(string.format("craftlib: scannedIdsWithNoCraftLibMatch=%d", unmatched))
+        if #sampleUnmatched > 0 then
+            p("craftlib: sample unmatched scanned ids: " .. table.concat(sampleUnmatched, ", "))
+        end
+    else
+        p("craftlib: no active profession data (DetectActive returned nil)")
+    end
+
+    -- 3b. Production result. Sections 1/3 above replicate the LEGACY recipe-link
+    -- scan (so parsedIds documents WHY the old path failed). This line calls the
+    -- real resolver, which now also maps via crafted-item id and name - post-fix
+    -- it should report a healthy learned count, not 0.
+    if profKey then
+        local resolved = self.Professions:GetRecipesWithLearnedStatus(profKey)
+        local rTotal, rLearned = 0, 0
+        for _, recipe in ipairs(resolved) do
+            rTotal = rTotal + 1
+            if recipe.learned then rLearned = rLearned + 1 end
+        end
+        p(string.format("result: GetRecipesWithLearnedStatus -> %d/%d learned", rLearned, rTotal))
+    end
+
+    -- 4. Capability probe: filter-immune C_TradeSkillUI path.
+    local hasCTSU = C_TradeSkillUI ~= nil
+    local hasGetAll = hasCTSU and C_TradeSkillUI.GetAllRecipeIDs ~= nil
+    local hasGetInfo = hasCTSU and C_TradeSkillUI.GetRecipeInfo ~= nil
+    p(string.format("probe: C_TradeSkillUI=%s GetAllRecipeIDs=%s GetRecipeInfo=%s",
+        tostring(hasCTSU), tostring(hasGetAll), tostring(hasGetInfo)))
+    if hasGetAll then
+        local ok, ids = pcall(C_TradeSkillUI.GetAllRecipeIDs)
+        if ok and type(ids) == "table" then
+            local ctsuKnown = 0
+            if hasGetInfo then
+                for _, rid in ipairs(ids) do
+                    local okI, info = pcall(C_TradeSkillUI.GetRecipeInfo, rid)
+                    if okI and type(info) == "table" and info.learned then
+                        ctsuKnown = ctsuKnown + 1
+                    end
+                end
+            end
+            p(string.format("probe: GetAllRecipeIDs=%d learnedPerGetRecipeInfo=%d (vs legacy parsedIds=%d)",
+                #ids, ctsuKnown, parsed))
+        else
+            p("probe: GetAllRecipeIDs call failed or returned non-table")
+        end
+    end
+
+    self:Print("diag learned: output ready - copy it from the window that opened.")
+    self:ShowDiagnosticOutput(table.concat(out, "\n"))
+end
+
+-- Debug pipeline primitive (used by /lp diag commands). A copyable popup modeled
+-- on the debug-log window: lazily-built, reused, ESC-closable, combat-safe. Holds
+-- any text in a selectable multi-line EditBox so a player or dev can Ctrl+C
+-- diagnostic output out of the client (chat is not copyable). Reuse this for any
+-- future /lp diag <topic> command - build a lines table and hand it the joined text.
+function LazyProf:ShowDiagnosticOutput(text)
+    if InCombatLockdown() then
+        self:Print("diag learned: cannot open the output window in combat.")
+        return
+    end
+
+    if not self.diagFrame then
+        local frame = CreateFrame("Frame", "LazyProfDiagFrame", UIParent, "BackdropTemplate")
+        frame:SetSize(700, 450)
+        frame:SetPoint("CENTER")
+        frame:SetFrameStrata("DIALOG")
+        frame:SetMovable(true)
+        frame:SetClampedToScreen(true)
+        frame:EnableMouse(true)
+        frame:RegisterForDrag("LeftButton")
+        frame:SetScript("OnDragStart", frame.StartMoving)
+        frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+
+        frame:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 16,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 }
+        })
+        frame:SetBackdropColor(0.1, 0.1, 0.1, 0.95)
+        frame:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+
+        frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        frame.title:SetPoint("TOPLEFT", 10, -10)
+        frame.title:SetText("LazyProf Learned Diagnostic")
+        frame.title:SetTextColor(1, 0.82, 0)
+
+        frame.closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+        frame.closeBtn:SetPoint("TOPRIGHT", -2, -2)
+
+        frame.hint = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        frame.hint:SetPoint("TOPLEFT", 12, -32)
+        frame.hint:SetText("Click Select All (or click in the box and Ctrl+A), then Ctrl+C to copy.")
+        frame.hint:SetTextColor(0.7, 0.7, 0.7)
+
+        frame.selectBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+        frame.selectBtn:SetSize(90, 22)
+        frame.selectBtn:SetPoint("BOTTOMRIGHT", -10, 10)
+        frame.selectBtn:SetText("Select All")
+        frame.selectBtn:SetScript("OnClick", function()
+            frame.editBox:SetFocus()
+            frame.editBox:HighlightText()
+        end)
+
+        frame.scrollFrame = CreateFrame("ScrollFrame", "LazyProfDiagScrollFrame", frame, "UIPanelScrollFrameTemplate")
+        frame.scrollFrame:SetPoint("TOPLEFT", 10, -50)
+        frame.scrollFrame:SetPoint("BOTTOMRIGHT", -30, 40)
+
+        -- Selectable, copyable multi-line text (same approach as the debug window).
+        frame.editBox = CreateFrame("EditBox", nil, frame.scrollFrame)
+        frame.editBox:SetMultiLine(true)
+        frame.editBox:SetFontObject(GameFontHighlightSmall)
+        frame.editBox:SetWidth(frame.scrollFrame:GetWidth())
+        frame.editBox:SetAutoFocus(false)
+        frame.editBox:EnableMouse(true)
+        frame.editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+        frame.scrollFrame:SetScrollChild(frame.editBox)
+
+        tinsert(UISpecialFrames, "LazyProfDiagFrame")
+        self.Utils.AddCombatLockdown(frame)
+        self.diagFrame = frame
+    end
+
+    self.diagFrame.editBox:SetText(text or "")
+    self.diagFrame:Show()
+    self.diagFrame.scrollFrame:SetVerticalScroll(0)
+    self.diagFrame.editBox:SetCursorPosition(0)
+    self.diagFrame.editBox:SetFocus()
+    self.diagFrame.editBox:HighlightText()
 end
 
 -- Debounced debug-window refresh (see Debug()).
