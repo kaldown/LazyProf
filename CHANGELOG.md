@@ -4,6 +4,16 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-06-29
+
+### Fixed
+
+- Recipes you have already learned are no longer shown as "[!] Unlearned" in the milestone breakdown, the alternatives list, and the arrow tooltip. On some clients (including Season of Discovery and Classic Anniversary) the game does not expose recipe spell links, so the learned-status scan saw nothing and treated every recipe as unlearned. LazyProf now identifies learned recipes by their crafted item, falling back to the recipe name for enchants - both in the live profession view and in Planning mode.
+
+### Added
+
+- New `/lp diag learned` command that reports learned-recipe detection details (scan counts, active filters, and how many recipes were matched) in a copyable window, to help diagnose recipe-status issues. Type `/lp diag` to list available diagnostics.
+
 ## [0.7.5] - 2026-06-27
 
 ### Fixed
