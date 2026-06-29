@@ -163,11 +163,14 @@ function Utils.GetVendorCount(source)
     return #source.vendors
 end
 
--- Wowhead site branch for the active flavor: SoD lives on /classic/, Vanilla/TBC on /tbc/.
+-- Wowhead site branch for the active profile: Vanilla/SoD live on /classic, TBC on
+-- /tbc, WotLK on /wotlk. Falls back to /tbc if CraftLib is somehow unavailable.
 local function WowheadBranch()
     local CraftLib = _G.CraftLib
-    local flavor = (CraftLib and CraftLib.GetActiveFlavor and CraftLib:GetActiveFlavor()) or "DEFAULT"
-    return (flavor == "SOD") and "classic" or "tbc"
+    local profile = (CraftLib and CraftLib.GetActiveProfile and CraftLib:GetActiveProfile()) or "TBC"
+    if profile == "SOD" or profile == "VANILLA" then return "classic"
+    elseif profile == "WOTLK" then return "wotlk"
+    else return "tbc" end
 end
 
 -- Get the Wowhead URL for a spell, on the flavor-correct site branch.
