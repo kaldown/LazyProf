@@ -67,6 +67,7 @@ Modules\Pricing\PriceManager.lua
 
 # Modules - Recipes
 Modules\Recipes\Availability.lua
+Modules\Recipes\SelfFound.lua
 
 # Modules - Pathfinding
 Modules\Pathfinder\Strategies\Cheapest.lua
