@@ -4,6 +4,11 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-06-30
+
+### Fixed
+- Corrected the WotLK 3.3.5a client interface from 30305 to 30300, so LazyProf is no longer flagged out of date on 3.3.5a realms.
+
 ## [0.8.1] - 2026-06-30
 
 ### Added
