@@ -51,6 +51,8 @@ LazyProf.defaults = {
         lastAHScan = 0,
         -- Cached learned recipes per profession (for planning mode)
         learnedRecipes = {},
+        -- Self-found mode: only suggest recipes obtainable without AH/trade (per character)
+        selfFoundMode = false,
     },
 }
 
@@ -144,6 +146,25 @@ LazyProf.options = {
                     get = function() return LazyProf.db.profile.includeGreenRecipes end,
                     set = function(_, v)
                         LazyProf.db.profile.includeGreenRecipes = v
+                        LazyProf:Recalculate("setting changed")
+                    end,
+                },
+                selfFoundMode = {
+                    name = "Self-Found mode",
+                    desc = "When enabled, the path only suggests recipes you can complete " ..
+                           "without the Auction House or trading with other players.\n\n" ..
+                           "A recipe is excluded if any reagent can only be obtained from the " ..
+                           "AH or another player - for example an Alchemy elixir when you are " ..
+                           "not an Alchemist. Allowed: items you own, vendor-sold reagents, " ..
+                           "gathered materials, and anything you can craft with a profession " ..
+                           "you have.\n\n" ..
+                           "This setting is per character.",
+                    type = "toggle",
+                    order = 6,
+                    width = "full",
+                    get = function() return LazyProf.db.char.selfFoundMode end,
+                    set = function(_, v)
+                        LazyProf.db.char.selfFoundMode = v
                         LazyProf:Recalculate("setting changed")
                     end,
                 },
