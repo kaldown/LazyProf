@@ -183,3 +183,32 @@ function SelfFound:IsRecipeObtainable(recipe)
     end
     return ok, reason, sourceInfo
 end
+
+-- Apply the self-found availability decision to a candidate recipe that already
+-- has its base learned/availability flags set by GetCandidates. Self-found only
+-- ADDS restrictions: it never makes an unlearned recipe available when "suggest
+-- unlearned recipes" is off. _unavailableReason is always written (or cleared) so
+-- no stale reason survives a toggle or skill change.
+function SelfFound:MarkRecipe(recipe)
+    if not (LazyProf.db and LazyProf.db.char and LazyProf.db.char.selfFoundMode) then
+        recipe._unavailableReason = nil
+        return
+    end
+    -- Don't expand beyond the suggest-unlearned setting.
+    if not recipe.learned
+            and not (LazyProf.db.profile and LazyProf.db.profile.suggestUnlearnedRecipes) then
+        recipe._unavailableReason = nil
+        return
+    end
+
+    local obtainable, reason, sourceInfo = self:IsRecipeObtainable(recipe)
+    if obtainable then
+        recipe._isUnavailable = nil
+        recipe._unavailableReason = nil
+        -- Prefer the real (non-AH) source so cost accounting matches self-found.
+        if sourceInfo then recipe._sourceInfo = sourceInfo end
+    else
+        recipe._isUnavailable = true
+        recipe._unavailableReason = reason
+    end
+end

@@ -154,5 +154,48 @@ do
 end
 SelfFound:EndRecalc()
 
+-- ===========================================================================
+-- Scenario 6: MarkRecipe candidate decision (interaction with the settings)
+-- ===========================================================================
+reset()
+SelfFound:BeginRecalc({})
+do
+    -- self-found ON, obtainable learned recipe -> available, no reason
+    local rOk = recipe(9101, true, nil, { { id = RAW_LEATHER, name = "Light Leather" } })
+    rOk._isUnavailable = nil
+    SelfFound:MarkRecipe(rOk)
+    check("MarkRecipe: obtainable learned recipe stays available", rOk._isUnavailable == nil)
+    check("MarkRecipe: obtainable recipe has no reason", rOk._unavailableReason == nil)
+
+    -- self-found ON, learned recipe needing an elixir -> blocked with reason
+    local rBlock = recipe(9102, true, nil, { { id = ELIXIR, name = "Elixir of Minor Agility" } })
+    rBlock._isUnavailable = nil
+    SelfFound:MarkRecipe(rBlock)
+    check("MarkRecipe: unobtainable recipe blocked", rBlock._isUnavailable == true)
+    check("MarkRecipe: blocked recipe carries the reason",
+        rBlock._unavailableReason == "Needs Alchemy: Elixir of Minor Agility", rBlock._unavailableReason)
+
+    -- self-found ON but suggestUnlearnedRecipes OFF: an unlearned recipe stays
+    -- excluded (self-found never expands beyond the suggest-unlearned setting).
+    addon.db.profile.suggestUnlearnedRecipes = false
+    local rUnlearned = recipe(9103, false, "drop", { { id = RAW_LEATHER, name = "Light Leather" } })
+    rUnlearned._isUnavailable = true     -- as GetCandidates' suggest-off branch sets it
+    SelfFound:MarkRecipe(rUnlearned)
+    check("MarkRecipe: suggest-unlearned off keeps unlearned excluded", rUnlearned._isUnavailable == true)
+    check("MarkRecipe: suggest-off path leaves no stale reason", rUnlearned._unavailableReason == nil)
+    addon.db.profile.suggestUnlearnedRecipes = true
+
+    -- self-found OFF clears any stale reason and does not block
+    addon.db.char.selfFoundMode = false
+    local rOff = recipe(9104, true, nil, { { id = ELIXIR, name = "Elixir of Minor Agility" } })
+    rOff._isUnavailable = nil
+    rOff._unavailableReason = "stale"
+    SelfFound:MarkRecipe(rOff)
+    check("MarkRecipe: mode off does not block", rOff._isUnavailable == nil)
+    check("MarkRecipe: mode off clears stale reason", rOff._unavailableReason == nil)
+    addon.db.char.selfFoundMode = true
+end
+SelfFound:EndRecalc()
+
 print(string.format("\n%d/%d checks passed", total - failures, total))
 os.exit(failures == 0 and 0 or 1)
