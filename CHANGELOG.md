@@ -4,6 +4,12 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-30
+
+### Added
+
+- Self-Found mode: a new per-character toggle (in General settings) that makes the leveling path recommend only recipes you can complete without the Auction House or trading with other players. A recipe is set aside when one of its reagents can only come from the AH or another player - for example an Alchemy elixir when you are not an Alchemist. Items you already own, vendor-sold reagents, gathered materials, and anything you can craft with a profession you have all count as obtainable. Set-aside recipes stay visible but dimmed in the alternatives list, with a short reason such as "Needs Alchemy". As a side effect, when you have no auction-house addon installed, drop, reputation, and quest recipes you can farm yourself are no longer hidden from the path.
+
 ## [0.8.2] - 2026-06-30
 
 ### Fixed
