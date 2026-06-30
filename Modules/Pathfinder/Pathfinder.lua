@@ -143,7 +143,9 @@ function Pathfinder:Calculate(reason)
     -- Memoize recipe availability for the duration of this synchronous scoring
     -- pass (IsRecipeAvailable is called per unlearned candidate per step).
     LazyProf.RecipeAvailability:BeginRecalc()
+    LazyProf.SelfFound:BeginRecalc(inventory)
     local steps = strategy:Calculate(startSkill, targetSkill, recipes, {}, prices, racialBonus, self.pinnedRecipes)
+    LazyProf.SelfFound:EndRecalc()
     LazyProf.RecipeAvailability:EndRecalc()
 
     -- Build result
@@ -253,7 +255,9 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel, reason)
     -- Calculate path with empty inventory so scoring uses market prices only
     -- (owned materials are handled separately by the shopping list)
     LazyProf.RecipeAvailability:BeginRecalc()
+    LazyProf.SelfFound:BeginRecalc(inventory)
     local steps = strategy:Calculate(skillLevel, targetSkill, recipes, {}, prices, racialBonus, self.pinnedRecipes)
+    LazyProf.SelfFound:EndRecalc()
     LazyProf.RecipeAvailability:EndRecalc()
 
     -- Build result (similar to Calculate() but stored separately)
