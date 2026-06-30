@@ -4,6 +4,12 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-06-30
+
+### Added
+
+- Interface support for additional Wrath of the Lich King clients: the WotLK 3.4.5 client and the Titan (3.80) WotLK seasonal client now load LazyProf without an out-of-date warning (uses the WotLK recipe data via CraftLib 0.10.1).
+
 ## [0.8.0] - 2026-06-30
 
 ### Added

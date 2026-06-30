@@ -1,8 +1,8 @@
-## Interface: 11508, 20505, 30403
+## Interface: 11508, 20505, 30305, 30403, 30405, 38001
 ## Title: LazyProf
 ## Notes: Optimal profession leveling path calculator
 ## Author: Kaldown
-## Version: 0.8.0
+## Version: 0.8.1
 ## IconTexture: Interface\AddOns\LazyProf\icon
 ## SavedVariables: LazyProfDB
 ## OptionalDeps: TradeSkillMaster, Auctionator, Syndicator, CraftLib
