@@ -158,6 +158,7 @@ LazyProf.PathfinderStrategies.cheapest = {
                         -- Already learned - always available
                         recipe._isUnavailable = nil
                         recipe._sourceInfo = nil
+                        LazyProf.SelfFound:MarkRecipe(recipe)
                         table.insert(candidates, recipe)
                     else
                         -- Unlearned: check availability if setting enabled
@@ -175,6 +176,7 @@ LazyProf.PathfinderStrategies.cheapest = {
                             recipe._sourceInfo = nil
                             recipe._isUnavailable = true
                         end
+                        LazyProf.SelfFound:MarkRecipe(recipe)
                         table.insert(candidates, recipe)
                     end
                 end
