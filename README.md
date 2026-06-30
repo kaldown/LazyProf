@@ -35,6 +35,7 @@ See [CraftLib's profession coverage](https://github.com/kaldown/CraftLib#profess
 - **Recipe details panel** - View ingredients, difficulty thresholds, vendor locations, and Wowhead links
 - **Planning mode** - Plan any profession's leveling path without learning it first
 - **Extended inventory** - Checks bags, bank, mailbox, active AH listings, guild bank, and alt characters (with Syndicator)
+- **Every Classic expansion** - One install plans correctly on Classic Era / Vanilla, Season of Discovery, The Burning Crusade, and Wrath of the Lich King (including Inscription, skill cap 450) - it detects your client and uses the right recipes, caps, racial bonuses, and Wowhead links automatically
 
 ## Pricing
 
@@ -80,10 +81,13 @@ Access via `/lp` or the Interface Options panel:
 
 ## Supported Game Versions
 
-- Classic Era
-- Season of Discovery
-- Anniversary
-- Hardcore
+One install works on every live Classic-family client - it detects which one you are on (via CraftLib) and plans with the correct recipes and skill cap:
+
+- Classic Era / Anniversary (Vanilla) - cap 300
+- Season of Discovery - cap 300
+- The Burning Crusade Classic - cap 375
+- Wrath of the Lich King Classic - cap 450, includes Inscription (also loads on the Titan 3.80 seasonal client)
+- Hardcore (Classic Era)
 
 ## License
 
