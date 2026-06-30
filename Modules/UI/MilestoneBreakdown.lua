@@ -1213,9 +1213,14 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
         if isUnlearned then
             local sourceDesc = Utils.GetSourceDescription(alt.recipe.source)
             GameTooltip:AddLine("[!] Unlearned: " .. sourceDesc, 1, 0.53, 0)
-            if alt.recipe._isUnavailable then
+            if alt.recipe._isUnavailable and not alt.recipe._unavailableReason then
                 GameTooltip:AddLine("    Not currently obtainable", 1, 0.3, 0.3)
             end
+        end
+        -- Self-found (or other explicit) block reason. Shown for learned recipes
+        -- too: a known recipe can be blocked when a reagent is not self-obtainable.
+        if alt.recipe._unavailableReason then
+            GameTooltip:AddLine(alt.recipe._unavailableReason, 1, 0.3, 0.3)
         end
         GameTooltip:AddLine(string.format("Difficulty: %s (%d%% skillup chance)", alt.color, alt.expectedSkillups * 100), 0.7, 0.7, 0.7)
         if alt.score < math.huge then
