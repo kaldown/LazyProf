@@ -86,13 +86,18 @@ Modules\Pathfinder\Pathfinder.lua
 Modules\Guide\Text.lua
 Modules\Guide\Range.lua
 Modules\Guide\Stages.lua
+Modules\Guide\Views.lua
 
 # Modules - UI
 Modules\UI\Widgets\PanelShell.lua
 Modules\UI\Widgets\RowPool.lua
 Modules\UI\Widgets\Dropdown.lua
+Modules\UI\Widgets\Controls.lua
+Modules\UI\Widgets\Tabs.lua
+Modules\UI\Widgets\RowList.lua
 Modules\UI\Arrow\Strategies\ArrowTooltip.lua
 Modules\UI\Arrow\ArrowManager.lua
+Modules\UI\GuideWindow.lua
 Modules\UI\MilestoneBreakdown.lua
 Modules\UI\MissingMaterials.lua
 Modules\UI\RecipeDetails.lua

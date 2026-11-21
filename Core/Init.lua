@@ -45,8 +45,8 @@ function LazyProf:OnEnable()
     if self.ArrowManager then
         self.ArrowManager:Initialize()
     end
-    if self.MilestonePanel then
-        self.MilestonePanel:Initialize()
+    if self.GuideWindow then
+        self.GuideWindow:Initialize()
     end
     if self.MissingMaterialsPanel then
         self.MissingMaterialsPanel:Initialize()
@@ -182,8 +182,8 @@ function LazyProf:OnTradeSkillClose()
     if self.ArrowManager then
         self.ArrowManager:Hide()
     end
-    if self.MilestonePanel then
-        self.MilestonePanel:Hide()
+    if self.GuideWindow then
+        self.GuideWindow:OnProfessionClosed()
     end
     if self.MissingMaterialsPanel then
         self.MissingMaterialsPanel:Hide()
@@ -278,29 +278,27 @@ function LazyProf:RefreshShoppingList()
         return
     end
 
-    -- Rescan inventory
-    local inventory, sourceBreakdown = self.Inventory:ScanAll()
+    -- Rescan inventory; the stages and the shopping list are drawn from it
+    path.inventory, path.sourceBreakdown = self.Inventory:ScanAll()
 
-    -- Extract prices from cache (avoid re-querying price providers)
-    local prices = {}
-    for itemId, cached in pairs(self.PriceManager.cache) do
-        prices[itemId] = cached.price
+    if self.GuideWindow then
+        self.GuideWindow:Refresh()
     end
+    self:UpdateShoppingPanel()
+end
 
-    -- Recalculate only the missing materials using cached path
+-- The shopping list of the range chosen in the LazyProf window, from the
+-- stages' quantities (so the margin is in it).
+function LazyProf:UpdateShoppingPanel()
+    local panel = self.MissingMaterialsPanel
+    local path = self.Pathfinder.currentPath
+    if not (panel and panel.frame and path and self.GuideWindow) then return end
+    if not self.Client:IsOpen() then return end
+    local steps, rangeName = self.GuideWindow:ShoppingSteps()
+    if not steps then return end
     path.missingMaterials = self.Pathfinder:CalculateMissingMaterials(
-        path.steps, inventory, sourceBreakdown, prices
-    )
-
-    -- Update shopping list through bracket filter if available
-    if self.MilestonePanel and self.MilestonePanel.currentPath then
-        local mp = self.MilestonePanel
-        local breakdown = mp:FilterBreakdownByBracket(path.milestoneBreakdown or {})
-        local bracket = mp:GetEffectiveBracket()
-        mp:UpdateShoppingList(path, breakdown, bracket)
-    elseif self.MissingMaterialsPanel then
-        self.MissingMaterialsPanel:Update(path.missingMaterials)
-    end
+        steps, path.inventory or {}, path.sourceBreakdown or {}, path.prices or {})
+    panel:Update(path.missingMaterials, rangeName)
 end
 
 function LazyProf:Recalculate(reason)
@@ -332,13 +330,13 @@ function LazyProf:Recalculate(reason)
 end
 
 -- The open profession has no recipe data yet (e.g. professions CraftLib holds
--- back on a client): the milestone panel says so in one row instead of
--- showing nothing. No path, arrow or shopping list.
+-- back on a client): the window says so in one row instead of showing
+-- nothing. No path, arrow or shopping list.
 function LazyProf:ShowNoDataNotice()
-    if not (self.MilestonePanel and self.Client:IsOpen()) then return end
+    if not (self.GuideWindow and self.Client:IsOpen()) then return end
     local name = self.Client:NoDataProfessionName()
     if name then
-        self.MilestonePanel:ShowNotice("No recipe data for " .. name .. " yet.")
+        self.GuideWindow:ShowNotice("No recipe data for " .. name .. " yet.")
     end
 end
 
@@ -346,8 +344,8 @@ function LazyProf:HideDisplay()
     if self.ArrowManager then
         self.ArrowManager:Hide()
     end
-    if self.MilestonePanel then
-        self.MilestonePanel:Hide()
+    if self.GuideWindow then
+        self.GuideWindow:Hide()
     end
     if self.MissingMaterialsPanel then
         self.MissingMaterialsPanel:Hide()
@@ -365,13 +363,10 @@ function LazyProf:UpdateDisplay()
         if self.ArrowManager then
             self.ArrowManager:Update(path)
         end
-        if self.MilestonePanel then
-            -- MilestonePanel:Update orchestrates shopping list via bracket filter
-            self.MilestonePanel:Update(path)
-        elseif self.MissingMaterialsPanel then
-            -- Fallback if no milestone panel
-            self.MissingMaterialsPanel:Update(path.missingMaterials)
+        if self.GuideWindow then
+            self.GuideWindow:Update(path)
         end
+        self:UpdateShoppingPanel()
     end
 end
 

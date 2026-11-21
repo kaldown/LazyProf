@@ -127,14 +127,19 @@ function RecipeDetails:Initialize()
     self:CreateWowheadSection()
 
     -- The panel shell owns position, dragging and combat hide/restore.
-    -- Default spot: right of the milestone panel when it is shown; otherwise
-    -- the panel stays where it was (e.g. opened from the Planning window).
+    -- Default spot: right of the LazyProf window when it is shown (below the
+    -- shopping list when that is there too); otherwise the panel stays where
+    -- it was (e.g. opened from the Planning window).
     LazyProf.PanelShell:Attach(self.frame, "recipeDetails", {
         planning = true,   -- the Planning window shows it too
         anchor = function()
-            local milestone = LazyProf.MilestonePanel and LazyProf.MilestonePanel.frame
-            if milestone and milestone:IsShown() then
-                return milestone, "TOPLEFT", "TOPRIGHT", 10, 0
+            local window = LazyProf.GuideWindow and LazyProf.GuideWindow.frame
+            if window and window:IsShown() then
+                local shopping = LazyProf.MissingMaterialsPanel and LazyProf.MissingMaterialsPanel.frame
+                if shopping and shopping:IsShown() then
+                    return shopping, "TOPLEFT", "BOTTOMLEFT", 0, -10
+                end
+                return window, "TOPLEFT", "TOPRIGHT", 10, 0
             end
         end,
     })

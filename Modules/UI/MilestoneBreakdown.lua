@@ -138,12 +138,7 @@ function MilestonePanelClass:Initialize()
         self.frame:SetClampedToScreen(true)
 
         -- Set resize bounds
-        if self.frame.SetResizeBounds then
-            self.frame:SetResizeBounds(MIN_WIDTH, MIN_HEIGHT, 600, 800)
-        else
-            self.frame:SetMinResize(MIN_WIDTH, MIN_HEIGHT)
-            self.frame:SetMaxResize(600, 800)
-        end
+        LazyProf.Widgets.SetResizeBounds(self.frame, MIN_WIDTH, MIN_HEIGHT, 600, 800)
 
         -- Title bar background
         self.frame.titleBg = self.frame:CreateTexture(nil, "ARTWORK")
@@ -1673,7 +1668,3 @@ end
 function MilestonePanelClass:IsVisible()
     return self.frame and self.frame:IsVisible()
 end
-
--- Create the main standalone instance (backwards compatible)
--- Empty name keeps frame as "LazyProfMilestonePanel" for other modules that reference it
-LazyProf.MilestonePanel = MilestonePanelClass:New({ name = "", embedded = false })

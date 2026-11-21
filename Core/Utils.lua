@@ -67,6 +67,26 @@ function Utils.FormatMoney(copper)
     return str:trim()
 end
 
+-- Money for narrow table columns: the two largest units only ("12g 34s",
+-- "34s 5c"), gold alone from 100g up. Rounded to whole copper first.
+function Utils.FormatMoneyShort(copper)
+    if not copper or copper <= 0 then
+        return "0c"
+    end
+    copper = math.floor(copper + 0.5)
+    local gold = math.floor(copper / 10000)
+    local silver = math.floor((copper % 10000) / 100)
+    local cop = copper % 100
+    if gold >= 100 then
+        return gold .. "g"
+    elseif gold > 0 then
+        return silver > 0 and (gold .. "g " .. silver .. "s") or (gold .. "g")
+    elseif silver > 0 then
+        return cop > 0 and (silver .. "s " .. cop .. "c") or (silver .. "s")
+    end
+    return cop .. "c"
+end
+
 -- Skill-up probability: continuous linear interpolation from yellow to gray.
 --
 -- Formula: chance = (gray - effectiveSkill) / (gray - yellow), clamped to [0, 1]

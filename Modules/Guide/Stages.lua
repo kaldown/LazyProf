@@ -316,6 +316,9 @@ function Stages.Build(path, opts)
     end
     for index, stage in ipairs(stages) do
         stage.index = index
+        -- A key that survives a recalculation (expanded rows, the selected card)
+        stage.key = stage.kind .. ":" .. tostring(stage.recipe and stage.recipe.id or stage.cap or "") .. ":"
+            .. tostring(stage.fromDisplay)
         if stage.kind == "craft" then
             local feeInside = stage.feeIncluded and stage.fee or 0
             local before = {}

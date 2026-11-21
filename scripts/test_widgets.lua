@@ -251,6 +251,7 @@ local function load(family, opts)
         "Modules/UI/Widgets/PanelShell.lua",
         "Modules/UI/Widgets/RowPool.lua",
         "Modules/UI/Widgets/Dropdown.lua",
+        "Modules/UI/Widgets/Controls.lua",
         "Modules/UI/MilestoneBreakdown.lua",
         "Modules/UI/MissingMaterials.lua",
     }
@@ -259,6 +260,10 @@ local function load(family, opts)
         assert(loadfile(path))("LazyProf", addon)
     end
     addon.GetSkillBrackets = function() return BRACKETS end
+    -- The live milestone panel is gone (the LazyProf window replaced it); the
+    -- panel class still serves the Planning window, so its rows and dropdown
+    -- are driven here through an instance of their own.
+    addon.MilestonePanel = addon.MilestonePanelClass:New({ name = "", embedded = false })
     if opts.init then
         addon.UpdateDebugWindowContent = function() env.updates = env.updates + 1 end
     end
@@ -685,92 +690,6 @@ section("debug dropdowns classic", function()
     buttons[1].func()
     check(p .. "all categories hides bracket", addon.debugFilter == nil and not bracket.shown
         and env.dd.texts[bracket] == "All Skill Levels")
-end)
-
--- ===========================================================================
--- 6. Default panel spot: the adapter's x offset right of the profession window
---    (Classic 10; Forever 65, past the side tabs)
--- ===========================================================================
-for _, family in ipairs({ "classic", "forever" }) do
-    section("panel anchors " .. family, function()
-        local p = "panel anchors " .. family .. ": "
-        local addon = load(family)
-        local window = newFrame("Frame", "ProfessionWindow")
-        local offset = (family == "forever") and 65 or 10
-        addon.Client.AnchorFrame = function() return window end
-        addon.Client.PanelOffsetX = function() return offset end
-        local milestone = addon.MilestonePanel
-        milestone:Initialize()
-        addon.MissingMaterialsPanel:Initialize()
-
-        local first = milestone.frame.points[1]
-        check(p .. "milestone panel starts at the adapter offset",
-            first and first[2] == window and first[3] == "TOPRIGHT" and first[4] == offset and first[5] == 0,
-            first and tostring(first[4]))
-        local a, point, relPoint, x, y = milestone.frame._shell.anchor()
-        check(p .. "milestone default spot: TOPLEFT to the window TOPRIGHT at the adapter offset",
-            a == window and point == "TOPLEFT" and relPoint == "TOPRIGHT" and x == offset and y == 0,
-            tostring(x))
-
-        milestone.frame:Hide()
-        local list = addon.MissingMaterialsPanel.frame
-        a, point, relPoint, x, y = list._shell.anchor()
-        check(p .. "shopping list default spot (milestone hidden): adapter offset, 220 down",
-            a == window and point == "TOPLEFT" and relPoint == "TOPRIGHT" and x == offset and y == -220,
-            tostring(x))
-        milestone.frame:Show()
-        a, point, relPoint, x, y = list._shell.anchor()
-        check(p .. "shopping list below a shown milestone panel is unchanged",
-            a == milestone.frame and relPoint == "BOTTOMLEFT" and x == 0 and y == -10)
-    end)
-end
-
--- ===========================================================================
--- 7. Milestone panel notice: a profession without recipe data
--- ===========================================================================
-section("milestone notice", function()
-    local p = "milestone notice: "
-    local addon = load("forever")
-    local shopping = addon.MissingMaterialsPanel
-    shopping:Initialize()
-    local listUpdates = 0
-    local realUpdate = shopping.Update
-    shopping.Update = function(...) listUpdates = listUpdates + 1; return realUpdate(...) end
-    local panel = addon.MilestonePanel
-    panel:Initialize()
-    local content = panel.frame.content
-
-    panel:Update(makePath(3, "A"))
-    listUpdates = 0
-    panel:ShowNotice("No recipe data for Engineering yet.")
-    local list = shownChildList(content)
-    check(p .. "one row", #list == 1, #list)
-    check(p .. "row text", list[1] and list[1].text and list[1].text:GetText() == "No recipe data for Engineering yet.",
-        list[1] and list[1].text and list[1].text:GetText())
-    check(p .. "panel shown", panel.frame.shown)
-    check(p .. "no total", panel.frame.total:GetText() == "", panel.frame.total:GetText())
-    check(p .. "no path kept", panel.currentPath == nil)
-    check(p .. "bracket dropdown and mode toggle hidden",
-        not panel.frame.bracketDropdown:IsShown() and not panel.frame.modeBtn:IsShown())
-    check(p .. "plain title", panel.frame.title:GetText() == "Milestone Breakdown", panel.frame.title:GetText())
-    check(p .. "no shopping list update", listUpdates == 0, listUpdates)
-    check(p .. "the shell knows a notice is shown", panel.frame.showsNotice == true)
-
-    panel:Update(makePath(2, "B"))
-    list = shownChildList(content)
-    check(p .. "a path replaces the notice", #list == 2 and list[1].recipe and list[1].recipe:GetText() == "1x B1",
-        #list)
-    check(p .. "controls shown again", panel.frame.bracketDropdown:IsShown() and panel.frame.modeBtn:IsShown())
-    check(p .. "notice flag cleared by a path", panel.frame.showsNotice == nil)
-
-    panel:ShowNotice("No recipe data for Mining yet.")
-    panel:Hide()
-    check(p .. "Hide clears the notice flag", panel.frame.showsNotice == nil and not panel.frame.shown)
-
-    addon.db.profile.showMilestonePanel = false
-    panel:ShowNotice("No recipe data for Mining yet.")
-    check(p .. "milestone panel turned off -> no notice", not panel.frame.shown)
-    addon.db.profile.showMilestonePanel = true
 end)
 
 -- ===========================================================================
