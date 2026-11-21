@@ -67,6 +67,21 @@ LazyProf.Constants = {
         FIRST_AID = 3273,
     },
 
+    -- Profession skill-line ids -> profession keys (CraftLib's profession table
+    -- carries spell ids, not skill lines). Used by the WoW Forever client
+    -- adapter, which identifies the open profession by its skill line.
+    SKILL_LINE_PROFESSION = {
+        [129] = "firstAid",
+        [164] = "blacksmithing",
+        [165] = "leatherworking",
+        [171] = "alchemy",
+        [185] = "cooking",
+        [186] = "mining",
+        [197] = "tailoring",
+        [202] = "engineering",
+        [333] = "enchanting",
+    },
+
     -- Profession display info for browser
     PROFESSIONS = {
         alchemy = {

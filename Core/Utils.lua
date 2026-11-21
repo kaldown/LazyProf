@@ -136,11 +136,11 @@ function Utils.BuildSkillBrackets(milestones)
     return brackets
 end
 
--- Get player faction ("Alliance" or "Horde")
+-- Get player faction ("Alliance" or "Horde") from the client, not from a race
+-- list: WoW Forever adds a playable race (Skyborne) no list here knows.
 function Utils.GetPlayerFaction()
-    local _, race = UnitRace("player")
-    local horde = { Orc = true, Troll = true, Tauren = true, Scourge = true, BloodElf = true }
-    return horde[race] and "Horde" or "Alliance"
+    local faction = UnitFactionGroup("player")
+    return faction
 end
 
 -- Get vendors filtered by faction (returns array)
@@ -163,14 +163,27 @@ function Utils.GetVendorCount(source)
     return #source.vendors
 end
 
--- Wowhead site branch for the active profile: Vanilla/SoD live on /classic, TBC on
--- /tbc, WotLK on /wotlk. Falls back to /tbc if CraftLib is somehow unavailable.
-local function WowheadBranch()
+-- Active CraftLib client profile ("VANILLA", "SOD", "TBC", "WOTLK", "FOREVER"),
+-- nil when CraftLib has no data for this client. The dependency check stops
+-- the addon in that case, so callers below only meet nil in tests.
+local function ActiveProfile()
     local CraftLib = _G.CraftLib
-    local profile = (CraftLib and CraftLib.GetActiveProfile and CraftLib:GetActiveProfile()) or "TBC"
-    if profile == "SOD" or profile == "VANILLA" then return "classic"
-    elseif profile == "WOTLK" then return "wotlk"
-    else return "tbc" end
+    return CraftLib and CraftLib.GetActiveProfile and CraftLib:GetActiveProfile() or nil
+end
+
+-- Wowhead site branch per profile: Vanilla/SoD live on /classic, TBC on /tbc,
+-- WotLK on /wotlk, WoW Forever on /forever. No profile: /classic (no guess
+-- of a later expansion).
+local WOWHEAD_BRANCH = {
+    VANILLA = "classic",
+    SOD = "classic",
+    TBC = "tbc",
+    WOTLK = "wotlk",
+    FOREVER = "forever",
+}
+
+local function WowheadBranch()
+    return WOWHEAD_BRANCH[ActiveProfile()] or "classic"
 end
 
 -- Get the Wowhead URL for a spell, on the flavor-correct site branch.
@@ -303,6 +316,8 @@ end
 -- Racial profession bonuses by client profile. TBC races (Draenei, Blood Elf) do
 -- not exist on Vanilla/SoD, so those profiles get only the Classic-race bonus.
 -- WotLK adds no new playable races, so WOTLK == TBC here.
+-- FOREVER: unverified: 0 until measured in game (which races get a profession
+-- bonus there, including the new Skyborne race, is not known yet).
 local RACIAL_PROFESSION_BONUSES = {
     VANILLA = { Gnome = { profession = "engineering", bonus = 15 } },
     SOD     = { Gnome = { profession = "engineering", bonus = 15 } },
@@ -316,6 +331,7 @@ local RACIAL_PROFESSION_BONUSES = {
         BloodElf = { profession = "enchanting", bonus = 10 },
         Draenei = { profession = "jewelcrafting", bonus = 5 },
     },
+    FOREVER = {},
 }
 
 -- Get racial profession bonus for current player and profession
@@ -323,9 +339,9 @@ local RACIAL_PROFESSION_BONUSES = {
 function Utils.GetRacialProfessionBonus(professionKey)
     if not professionKey then return 0 end
 
-    local CraftLib = _G.CraftLib
-    local profile = (CraftLib and CraftLib.GetActiveProfile and CraftLib:GetActiveProfile()) or "TBC"
-    local byRace = RACIAL_PROFESSION_BONUSES[profile] or RACIAL_PROFESSION_BONUSES.TBC
+    -- No profile (unsupported client): no bonus rather than a guessed table.
+    local byRace = RACIAL_PROFESSION_BONUSES[ActiveProfile()]
+    if not byRace then return 0 end
 
     local _, race = UnitRace("player")
     local racialData = byRace[race]

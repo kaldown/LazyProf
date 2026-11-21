@@ -80,9 +80,36 @@ for _, path in ipairs(files) do
     end
 end
 
+-- The Forever adapter uses only Forever APIs: none of the legacy UI calls,
+-- and never the global item-info call (C_Item.GetItemInfo instead).
+local FOREVER_FILE = "Core/Client/Forever.lua"
+local FOREVER_FORBIDDEN = {
+    "UIDropDownMenu", "EasyMenu", "FauxScrollFrame", "HybridScrollFrame",
+    "InterfaceOptions", "OnTooltipSetItem", "ShowUIPanel", "HideUIPanel",
+}
+local foreverFile = io.open(FOREVER_FILE, "r")
+if not foreverFile then
+    offenders[#offenders + 1] = FOREVER_FILE .. ": missing"
+else
+    foreverFile:close()
+    local n = 0
+    for raw in io.lines(FOREVER_FILE) do
+        n = n + 1
+        local line = strip_comment(raw)
+        for _, name in ipairs(FOREVER_FORBIDDEN) do
+            if line:find(name, 1, true) then
+                offenders[#offenders + 1] = string.format("%s:%d: %s", FOREVER_FILE, n, name)
+            end
+        end
+        if hasBareGetItemInfo(line) then
+            offenders[#offenders + 1] = string.format("%s:%d: GetItemInfo(", FOREVER_FILE, n)
+        end
+    end
+end
+
 if #offenders > 0 then
     for _, o in ipairs(offenders) do print(o) end
-    print(string.format("FAIL: %d client-API use(s) outside the adapter", #offenders))
+    print(string.format("FAIL: %d forbidden client-API use(s) (outside the adapter, or a legacy call in the Forever adapter)", #offenders))
     os.exit(1)
 end
 print(string.format("boundaries: OK (%d files scanned)", #files))

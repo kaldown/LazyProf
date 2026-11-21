@@ -181,6 +181,13 @@ function Client:FindRecipeRow(recipe)
     return button, skillType
 end
 
+-- The Classic trade-skill window has no "show unlearned" filter (it lists
+-- learned recipes only), so the milestone panel's hidden-recipe hint, which
+-- is about that filter, never applies here.
+function Client:UnlearnedHiddenByFilter()
+    return false
+end
+
 -- Hook the trade-skill list scroll frame so the arrow follows scrolling. The
 -- frame belongs to the load-on-demand trade-skill UI, so this runs on open.
 local scrollHooked = false

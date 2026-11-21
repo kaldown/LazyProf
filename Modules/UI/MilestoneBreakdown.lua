@@ -28,6 +28,18 @@ function MilestonePanelClass.GapText(gap)
         math.floor(gap.from), math.floor(gap.to))
 end
 
+-- Hint for the live panel when the recipe the arrow should point at is not
+-- learned and the profession window's filter hides unlearned recipes (so the
+-- arrow has no row to point at). nil when there is nothing to say.
+function MilestonePanelClass.NextRecipeHint(path)
+    local step = LazyProf.Pathfinder:GetArrowStep(path)
+    local recipe = step and step.recipe
+    if not recipe or recipe.learned or not LazyProf.Client:UnlearnedHiddenByFilter() then
+        return nil
+    end
+    return "Next recipe is not learned yet - learn it from " .. Utils.GetSourceDescription(recipe.source)
+end
+
 -- "<qty>x <recipe>", with a suffix when a green recipe bridges a gap.
 function MilestonePanelClass.StepRecipeText(step)
     local name = step.recipe and step.recipe.name or "Unknown"
@@ -538,11 +550,22 @@ function MilestonePanelClass:Update(path)
     local yOffset = 0
     local lastMilestone = nil
 
+    -- Live panel only: the next recipe is unlearned and hidden by the profession
+    -- window's filter, so the arrow cannot show it - say where to learn it.
+    if not self.config.embedded then
+        local hint = MilestonePanelClass.NextRecipeHint(path)
+        if hint then
+            local hintRow = self:CreateHintRow(hint, LazyProf.Pathfinder:GetArrowStep(path), yOffset, contentWidth)
+            table.insert(self.rows, hintRow)
+            yOffset = yOffset + STEP_ROW_HEIGHT
+        end
+    end
+
     -- Handle empty bracket
     if #breakdown == 0 and #gaps == 0 then
-        local emptyRow = self:CreateEmptyRow(bracket, contentWidth)
+        local emptyRow = self:CreateEmptyRow(bracket, yOffset, contentWidth)
         table.insert(self.rows, emptyRow)
-        yOffset = STEP_ROW_HEIGHT
+        yOffset = yOffset + STEP_ROW_HEIGHT
 
         self.frame.total:SetText("")
         self.frame.content:SetHeight(math.max(yOffset + 10, self.frame:GetHeight() - 70))
@@ -736,6 +759,7 @@ local ROW_BUILDERS = {
     empty = "BuildEmptyRow",
     step = "BuildStepRow",
     gap = "BuildGapRow",
+    hint = "BuildHintRow",
     unlearned = "BuildUnlearnedIndicator",
     separator = "BuildMilestoneSeparator",
     ingredient = "BuildIngredientRow",
@@ -755,7 +779,7 @@ local function ClearButtonScripts(row)
 end
 
 local BUTTON_KINDS = {
-    step = true, gap = true, unlearned = true, ingredient = true,
+    step = true, gap = true, hint = true, unlearned = true, ingredient = true,
     altSpoiler = true, altGroup = true, alternative = true,
 }
 
@@ -789,10 +813,10 @@ function MilestonePanelClass:BuildEmptyRow()
     return row
 end
 
-function MilestonePanelClass:CreateEmptyRow(bracket, contentWidth)
+function MilestonePanelClass:CreateEmptyRow(bracket, yOffset, contentWidth)
     local row = self:AcquireRow("empty")
     row:SetSize(contentWidth, STEP_ROW_HEIGHT)
-    row:SetPoint("TOPLEFT", 0, 0)
+    row:SetPoint("TOPLEFT", 0, -yOffset)
     row.text:SetText("No steps in " .. (bracket and bracket.name or "this bracket"))
     row.text:SetTextColor(0.5, 0.5, 0.5)
     row:Show()
@@ -974,6 +998,52 @@ function MilestonePanelClass:CreateGapRow(gap, yOffset, contentWidth)
     end)
     row:SetScript("OnLeave", function()
         row:SetBackdropColor(0.35, 0.1, 0.1, 0.35)
+        GameTooltip:Hide()
+    end)
+
+    row:Show()
+    return row
+end
+
+-- Hint row: the next recipe is unlearned and hidden by the profession window
+-- (text from NextRecipeHint); click opens the recipe details.
+function MilestonePanelClass:BuildHintRow()
+    local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
+    row:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+    })
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.text:SetPoint("LEFT", 4, 0)
+    row.text:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+    row.text:SetJustifyH("LEFT")
+    row.text:SetWordWrap(false)
+    return row
+end
+
+function MilestonePanelClass:CreateHintRow(text, step, yOffset, contentWidth)
+    local row = self:AcquireRow("hint")
+    row:SetSize(contentWidth, STEP_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -yOffset)
+    row:SetBackdropColor(0.2, 0.15, 0, 0.3)
+
+    row.text:SetText(text)
+    row.text:SetTextColor(1, 0.53, 0)
+
+    row:SetScript("OnClick", function()
+        if LazyProf.RecipeDetails then
+            LazyProf.RecipeDetails:Toggle(step.recipe, math.floor(step.skillStart or 0))
+        end
+    end)
+    row:SetScript("OnEnter", function()
+        row:SetBackdropColor(0.3, 0.25, 0.1, 0.5)
+        GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(text, 1, 0.53, 0, true)
+        GameTooltip:AddLine("The profession window hides unlearned recipes, so the arrow cannot point at it.", 0.7, 0.7, 0.7, true)
+        GameTooltip:AddLine("Click for details", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    row:SetScript("OnLeave", function()
+        row:SetBackdropColor(0.2, 0.15, 0, 0.3)
         GameTooltip:Hide()
     end)
 

@@ -354,8 +354,18 @@ LazyProf.debugCategoryNames = {
 LazyProf.debugScoringBracket = nil  -- nil = show all, or bracket index
 -- Skill brackets are derived per active profession from its CraftLib milestones,
 -- with neutral min-max labels (no TBC rank names) so phased SoD caps (150/225/300)
--- render correctly. Falls back to a flavor-appropriate default when no profession
--- is active (SoD caps at 300; DEFAULT includes the TBC 375 tier).
+-- render correctly. Falls back to the profile's cap when no profession is
+-- active: Vanilla/SoD/Forever 300, TBC 375, WotLK 450. No profile (unsupported
+-- client, stopped by the dependency check) uses the 300 tiers, not a guess of a
+-- later expansion.
+local FALLBACK_MILESTONES = {
+    VANILLA = {75, 150, 225, 300},
+    SOD = {75, 150, 225, 300},
+    FOREVER = {75, 150, 225, 300},
+    TBC = {75, 150, 225, 300, 375},
+    WOTLK = {75, 150, 225, 300, 375, 450},
+}
+
 function LazyProf:GetSkillBrackets()
     local milestones
     local active = self.Professions and self.Professions.active
@@ -365,14 +375,8 @@ function LazyProf:GetSkillBrackets()
 
     if not milestones or #milestones == 0 then
         local CraftLib = _G.CraftLib
-        local profile = (CraftLib and CraftLib.GetActiveProfile and CraftLib:GetActiveProfile()) or "TBC"
-        if profile == "SOD" or profile == "VANILLA" then
-            milestones = {75, 150, 225, 300}
-        elseif profile == "WOTLK" then
-            milestones = {75, 150, 225, 300, 375, 450}
-        else
-            milestones = {75, 150, 225, 300, 375}
-        end
+        local profile = CraftLib and CraftLib.GetActiveProfile and CraftLib:GetActiveProfile() or nil
+        milestones = FALLBACK_MILESTONES[profile] or FALLBACK_MILESTONES.VANILLA
     end
 
     return self.Utils.BuildSkillBrackets(milestones)

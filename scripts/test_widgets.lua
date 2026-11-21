@@ -230,10 +230,15 @@ local function load(family, opts)
         },
         char = {},
     }
-    addon.Client = { AnchorFrame = function() return nil end, IsOpen = function() return true end }
+    addon.Client = {
+        AnchorFrame = function() return nil end,
+        IsOpen = function() return true end,
+        UnlearnedHiddenByFilter = function() return env.unlearnedHidden or false end,
+    }
     addon.Pathfinder = {
         pinnedRecipes = {},
         CalculateMissingMaterials = function() return env.missing end,
+        GetArrowStep = function() return env.arrowStep end,
     }
     addon.Inventory = { ScanAll = function() return {}, {} end }
     addon.PriceManager = { cache = {} }
@@ -413,6 +418,28 @@ section("milestone rows", function()
     check(p .. "refresh with the same rows creates no frame", #env.frames == framesBefore, #env.frames - framesBefore)
     check(p .. "reused alternative row is not dimmed", altRow.shown and altRow.rank:GetAlpha() == 1,
         altRow.rank:GetAlpha())
+
+    -- Hint row: next recipe unlearned and hidden by the window's filter
+    env.arrowStep = { skillStart = 1, skillEnd = 2,
+        recipe = { id = 5, name = "Hidden", learned = false,
+                   source = { type = "trainer", npcName = "Any Alchemy Trainer" } } }
+    env.unlearnedHidden = true
+    panel:Update(makePath(2, "G"))
+    list = shownChildList(content)
+    local hintRow
+    for _, f in ipairs(list) do
+        if f.text and f.text.GetText and f.text:GetText() == "Next recipe is not learned yet - learn it from Any Alchemy Trainer" then
+            hintRow = f
+        end
+    end
+    check(p .. "hidden unlearned next recipe adds the hint row", hintRow ~= nil and #list == 3, #list)
+    check(p .. "hint row sits above the steps", hintRow and hintRow.points[1] and hintRow.points[1][3] == 0)
+    framesBefore = #env.frames
+    env.unlearnedHidden = false
+    panel:Update(makePath(2, "H"))
+    check(p .. "no hint when unlearned recipes are shown", #shownChildList(content) == 2 and #env.frames == framesBefore,
+        #shownChildList(content))
+    env.arrowStep, env.unlearnedHidden = nil, nil
 end)
 
 -- ===========================================================================

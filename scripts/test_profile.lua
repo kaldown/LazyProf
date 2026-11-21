@@ -135,13 +135,26 @@ check("1.5 WOTLK full URL shape",
     wotlkUrl == "https://www.wowhead.com/wotlk/spell=99999",
     wotlkUrl)
 
--- CraftLib absent fallback: no CraftLib -> branch should default to /tbc/
+ACTIVE_PROFILE = "FOREVER"
+check("1.7 FOREVER full URL shape",
+    Utils.GetWowheadUrl(2329) == "https://www.wowhead.com/forever/spell=2329",
+    Utils.GetWowheadUrl(2329))
+check("1.8 FOREVER item URL shape",
+    Utils.GetWowheadItemUrl(2454) == "https://www.wowhead.com/forever/item=2454",
+    Utils.GetWowheadItemUrl(2454))
+
+-- No profile (unsupported client; unreachable in practice because the
+-- dependency check stops the addon): no TBC guess, the /classic/ branch.
 local savedCL = _G.CraftLib
 _G.CraftLib = nil
-check("1.6 nil CraftLib defaults to /tbc/ branch",
-    urlBranch(Utils.GetWowheadUrl(1)) == "tbc",
+check("1.6 nil CraftLib -> /classic/ branch (no TBC default)",
+    urlBranch(Utils.GetWowheadUrl(1)) == "classic",
     urlBranch(Utils.GetWowheadUrl(1)))
 _G.CraftLib = savedCL
+ACTIVE_PROFILE = nil
+check("1.9 nil profile -> /classic/ branch",
+    urlBranch(Utils.GetWowheadUrl(1)) == "classic",
+    urlBranch(Utils.GetWowheadUrl(1)))
 
 -- ===========================================================================
 -- Section 2: Utils.GetRacialProfessionBonus - profile-gated racial tables
@@ -193,6 +206,32 @@ local gnome_jc = Utils.GetRacialProfessionBonus("jewelcrafting")
 check("2.7 Gnome JC bonus is 0 (wrong profession for racial)",
     gnome_jc == 0, gnome_jc)
 
+-- FOREVER: racial bonuses unverified on that client -> 0 for every race.
+ACTIVE_PROFILE = "FOREVER"
+check("2.8 Gnome Engineering bonus is 0 under FOREVER (unverified)",
+    Utils.GetRacialProfessionBonus("engineering") == 0,
+    Utils.GetRacialProfessionBonus("engineering"))
+_G.UnitRace = function(_unit) return "Draenei", "Draenei" end
+check("2.9 Draenei JC bonus is 0 under FOREVER",
+    Utils.GetRacialProfessionBonus("jewelcrafting") == 0)
+
+-- No profile: no TBC table guessed -> 0.
+ACTIVE_PROFILE = nil
+check("2.10 Draenei JC bonus is 0 with no profile (no TBC default)",
+    Utils.GetRacialProfessionBonus("jewelcrafting") == 0,
+    Utils.GetRacialProfessionBonus("jewelcrafting"))
+_G.UnitRace = function(_unit) return "Gnome", "Gnome" end
+
+-- Faction comes from the client, not a race list (Forever adds a race).
+_G.UnitFactionGroup = function(_unit) return "Horde", "Horde" end
+_G.UnitRace = function(_unit) return "Skyborne", "Skyborne" end
+check("2.11 GetPlayerFaction uses UnitFactionGroup",
+    Utils.GetPlayerFaction() == "Horde", Utils.GetPlayerFaction())
+_G.UnitFactionGroup = function(_unit) return "Alliance", "Alliance" end
+check("2.12 GetPlayerFaction returns one value",
+    select("#", Utils.GetPlayerFaction()) == 1 and Utils.GetPlayerFaction() == "Alliance")
+_G.UnitRace = function(_unit) return "Gnome", "Gnome" end
+
 -- ===========================================================================
 -- Section 3: LazyProf:GetSkillBrackets - profile-keyed fallback milestones
 --
@@ -240,6 +279,13 @@ check("3.4 WOTLK fallback brackets end at 450",
     lastBracketMax(brackets_wotlk) == 450,
     lastBracketMax(brackets_wotlk))
 
+ACTIVE_PROFILE = "FOREVER"
+local brackets_forever = LP:GetSkillBrackets()
+check("3.8 FOREVER fallback brackets end at 300",
+    lastBracketMax(brackets_forever) == 300,
+    lastBracketMax(brackets_forever))
+ACTIVE_PROFILE = "WOTLK"
+
 -- Verify bracket count for WOTLK (6 milestones -> 6 brackets from 1..75, 75..150, etc.)
 check("3.5 WOTLK fallback produces 6 brackets",
     #brackets_wotlk == 6,
@@ -268,6 +314,42 @@ check("3.7 real milestones bypass fallback (last bracket max = 300, not 450)",
 
 -- Clean up for safety
 addon.Professions = nil
+
+-- ===========================================================================
+-- Section 4: Core/DependencyCheck.lua - the popup names the real problem
+-- ===========================================================================
+local function runDependencyCheck(craftLib)
+    _G.CraftLib = craftLib
+    _G.StaticPopupDialogs = {}
+    local shown = {}
+    _G.StaticPopup_Show = function(name) shown[#shown + 1] = name end
+    local savedTimer = _G.C_Timer
+    _G.C_Timer = { After = function(_d, fn) fn() end }
+    local dep = {}
+    assert(loadfile("Core/DependencyCheck.lua"))("LazyProf", dep)
+    _G.C_Timer = savedTimer
+    local text = shown[1] and _G.StaticPopupDialogs[shown[1]] and _G.StaticPopupDialogs[shown[1]].text
+    return dep, shown, text
+end
+
+local dep, shown, text = runDependencyCheck({
+    IsReady = function() return false end,
+    GetActiveProfile = function() return nil end,
+})
+check("4.1 unsupported client: dependency check fails", dep.dependencyCheckFailed == true)
+check("4.2 unsupported client: popup says CraftLib has no data for this client",
+    text == "LazyProf: CraftLib has no recipe data for this game client.", text)
+
+dep, shown, text = runDependencyCheck(nil)
+check("4.3 CraftLib missing: popup asks to install CraftLib",
+    dep.dependencyCheckFailed == true and text and text:find("requires the CraftLib addon", 1, true) ~= nil, text)
+
+dep, shown, text = runDependencyCheck({
+    IsReady = function() return true end,
+    GetActiveProfile = function() return "FOREVER" end,
+})
+check("4.4 CraftLib ready: no popup", dep.dependencyCheckFailed == false and #shown == 0, #shown)
+_G.CraftLib = savedCL
 
 -- ===========================================================================
 -- Summary

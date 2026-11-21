@@ -198,6 +198,7 @@ LazyProf.options = {
                     type = "toggle",
                     order = 0,
                     width = "full",
+                    hidden = function() return LazyProf.ClientFamily == "forever" end,
                     get = function() return not LazyProf.db.profile.minimap.hide end,
                     set = function(_, v)
                         LazyProf.db.profile.minimap.hide = not v
