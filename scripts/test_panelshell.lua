@@ -37,7 +37,11 @@ local function newFrame(name, strata, level)
         movable = false, showCalls = 0,
     }
     function f:Show() self.shown = true; self.showCalls = self.showCalls + 1 end
-    function f:Hide() self.shown = false end
+    function f:Hide()
+        local was = self.shown
+        self.shown = false
+        if was and self.scripts.OnHide then self.scripts.OnHide(self) end
+    end
     function f:IsShown() return self.shown end
     function f:IsVisible() return self.shown end
     function f:ClearAllPoints() self.points = {} end
@@ -105,10 +109,12 @@ local function fresh()
 end
 
 -- Attach a panel anchored TOPLEFT to the window's TOPRIGHT +10,0.
-local function attach(key, anchorFn)
+-- planning: the panel is shared with the Planning window.
+local function attach(key, anchorFn, planning)
     local f = newFrame(key, "MEDIUM", 10)
     env.shell:Attach(f, key, {
         anchor = anchorFn or function() return env.window, "TOPLEFT", "TOPRIGHT", 10, 0 end,
+        planning = planning,
     })
     env.frames[#env.frames + 1] = f
     return f
@@ -174,6 +180,32 @@ section("position", function()
     f.left, f.top = 123, 456
     f.scripts.OnDragStop(f)
 
+    -- Hidden mid-drag (combat start, window closed): OnDragStop never comes,
+    -- so the hide ends the drag and keeps where it was dropped.
+    env.addon.db.profile.panelPositions.milestone = nil
+    env.shell:Show(f)
+    f.scripts.OnDragStart(f)
+    f.left, f.top = 222, 333
+    enterCombat()
+    saved = env.addon.db.profile.panelPositions.milestone
+    check(p .. "hide mid-drag stops moving", f.moving == false)
+    check(p .. "hide mid-drag clears the drag flag", f._shellDragging == nil)
+    check(p .. "hide mid-drag saves the position", saved and saved.x == 222 and saved.y == 333)
+    leaveCombat()
+    env.addon.db.profile.panelPositions.milestone = nil
+    f:ClearAllPoints()
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    env.shell:Place(f)
+    check(p .. "Place works again after a hide mid-drag", lastPoint(f).rel == env.window)
+    env.shell:Hide(f)
+    f.left, f.top = 123, 456
+    env.addon.db.profile.panelPositions.milestone = { point = "TOPLEFT", relPoint = "BOTTOMLEFT", x = 123, y = 456 }
+    local before = f.moving
+    env.shell:Show(f)
+    env.shell:Hide(f)
+    check(p .. "a plain hide (no drag) saves nothing new and does not stop a move",
+        before == false and env.addon.db.profile.panelPositions.milestone.x == 123)
+
     -- Show places too: saved position survives a Show (the update path).
     env.shell:Show(f)
     pt = lastPoint(f)
@@ -227,11 +259,23 @@ section("raise", function()
         anchor = function() if hasAnchor then return env.window, "TOPLEFT", "TOPRIGHT", 10, 0 end end,
     })
     env.shell:Place(g)
-    check(p .. "anchored: MEDIUM 25", g.strata == "MEDIUM" and g.level == 25, g.strata .. " " .. g.level)
+    check(p .. "anchor below the base strata: never lowered (HIGH 20 kept)",
+        g.strata == "HIGH" and g.level == 20, g.strata .. " " .. g.level)
+    env.window.strata, env.window.level = "DIALOG", 3
+    env.shell:Place(g)
+    check(p .. "anchor above the base strata: raised to it", g.strata == "DIALOG" and g.level == 23,
+        g.strata .. " " .. g.level)
     hasAnchor = false
     env.shell:Place(g)
     check(p .. "no anchor: base strata and level restored", g.strata == "HIGH" and g.level == 20,
         g.strata .. " " .. g.level)
+
+    -- Same strata: anchor level + 20, but never below the base level.
+    fresh()
+    local h = newFrame("high-level", "MEDIUM", 50)
+    env.shell:Attach(h, "hl", { anchor = function() return env.window, "TOPLEFT", "TOPRIGHT", 10, 0 end })
+    env.shell:Place(h)
+    check(p .. "same strata: level never below base", h.strata == "MEDIUM" and h.level == 50, h.level)
 end)
 
 -- ===========================================================================
@@ -420,6 +464,111 @@ section("combat", function()
 end)
 
 -- ===========================================================================
+-- 4b. The Planning window as a second owner of the shopping list and details
+-- ===========================================================================
+section("planning", function()
+    local p = "planning: "
+    local function withPlanning(shown, wasShown)
+        local pf = newFrame("Planning", "HIGH", 100)
+        pf.shown = shown
+        pf._wasShownBeforeCombat = wasShown
+        env.addon.PlanningWindow = { frame = pf }
+        return pf
+    end
+
+    -- Closed state: Planning reopens only the shared panels.
+    fresh()
+    local milestone = attach("milestone")
+    local list = attach("shoppingList", nil, true)
+    local details = attach("recipeDetails", nil, true)
+    env.shell:Close(milestone)
+    env.shell:Close(list)
+    env.shell:Close(details)
+    env.shell:ResetClosedForPlanning()
+    check(p .. "ResetClosedForPlanning clears the shared panels",
+        not list.userClosed and not details.userClosed)
+    check(p .. "ResetClosedForPlanning leaves the milestone panel closed", milestone.userClosed == true)
+
+    -- PlanningWindow:LoadProfession clears it (Open calls LoadProfession).
+    env.shell:Close(list)
+    local addon = env.addon
+    addon.Constants = { PROFESSIONS = { tailoring = { name = "Tailoring" } } }
+    addon.Utils.GetRacialProfessionBonus = function() return 0 end
+    addon.Client.PlayerSkill = function() return 0 end
+    addon.Pathfinder.CalculateForProfession = function() return nil end
+    addon.db.profile.calculateFromCurrentSkill = false
+    assert(loadfile("Modules/UI/PlanningWindow.lua"))("LazyProf", addon)
+    local stubText = { SetText = function() end, SetTextColor = function() end, ClearFocus = function() end }
+    addon.PlanningWindow.frame = { title = stubText, status = stubText, searchBox = stubText }
+    addon.PlanningWindow:LoadProfession("tailoring")
+    check(p .. "Planning LoadProfession reopens the closed shopping list", not list.userClosed)
+    env.shell:Show(list)
+    check(p .. "the shopping list then shows for Planning", list.shown)
+
+    -- After combat: Planning shown, profession window closed, no live path.
+    fresh()
+    milestone = attach("milestone")
+    list = attach("shoppingList", nil, true)
+    env.shell:Show(milestone)
+    env.shell:Show(list)
+    withPlanning(true)
+    enterCombat()
+    env.open = false
+    env.addon.Pathfinder.currentPath = nil
+    leaveCombat()
+    check(p .. "Planning shown: shared panel restored without window or live path", list.shown)
+    check(p .. "Planning shown: the milestone panel is not Planning's", not milestone.shown)
+
+    -- Planning's regen handler has not run yet: it was shown before combat.
+    fresh()
+    list = attach("shoppingList", nil, true)
+    env.shell:Show(list)
+    withPlanning(false, true)
+    enterCombat()
+    env.open = false
+    leaveCombat()
+    check(p .. "Planning shown before combat (not yet restored): shared panel restored", list.shown)
+
+    -- A Show asked for during combat by Planning shows after combat.
+    fresh()
+    list = attach("shoppingList", nil, true)
+    withPlanning(true)
+    env.open = false
+    enterCombat()
+    env.shell:Show(list)
+    leaveCombat()
+    check(p .. "Show in combat with Planning shown -> shown after combat", list.shown)
+
+    -- Planning not shown and the window closed: stays hidden.
+    fresh()
+    list = attach("shoppingList", nil, true)
+    env.shell:Show(list)
+    withPlanning(false, nil)
+    enterCombat()
+    env.open = false
+    leaveCombat()
+    check(p .. "no Planning, window closed -> not restored", not list.shown)
+
+    -- Planning shown, but the user closed the panel or it was hidden in combat.
+    fresh()
+    list = attach("shoppingList", nil, true)
+    withPlanning(true)
+    env.shell:Close(list)
+    enterCombat()
+    env.shell:Show(list)
+    leaveCombat()
+    check(p .. "Planning shown, user-closed panel -> not restored", not list.shown)
+    fresh()
+    list = attach("shoppingList", nil, true)
+    withPlanning(true)
+    env.shell:Show(list)
+    enterCombat()
+    env.shell:Hide(list)
+    leaveCombat()
+    check(p .. "Planning shown, hidden in combat -> not restored", not list.shown)
+end)
+
+-- ===========================================================================
 -- 5. Init.lua wiring
 -- ===========================================================================
 section("init", function()
@@ -548,6 +697,9 @@ section("wiring", function()
     check(p .. "shopping list attaches as 'shoppingList'", mm:find('PanelShell:Attach(self.frame, "shoppingList"', 1, true))
     check(p .. "recipe details attaches as 'recipeDetails'", rd:find('PanelShell:Attach(self.frame, "recipeDetails"', 1, true))
     check(p .. "no manuallyMoved left", not mb:find("manuallyMoved", 1, true))
+    check(p .. "shopping list is shared with Planning", mm:find("planning = true", 1, true))
+    check(p .. "recipe details is shared with Planning", rd:find("planning = true", 1, true))
+    check(p .. "milestone panel is not shared with Planning", not mb:find("planning = true", 1, true))
     check(p .. "milestone close button closes through the shell", mb:find("PanelShell:Close(self.frame)", 1, true))
     check(p .. "shopping list close button closes through the shell", mm:find("PanelShell:Close(self.frame)", 1, true))
     for name, src in pairs({ milestone = mb, shopping = mm, details = rd }) do

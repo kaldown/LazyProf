@@ -7,16 +7,22 @@
 --   user drags a panel, its top-left corner is saved in
 --   db.profile.panelPositions[key] (relative to UIParent's BOTTOMLEFT) and
 --   wins from then on, until "/lp resetpanels" or the options button.
+-- Owners: the profession window owns every panel; the Planning window also
+--   owns the panels attached with opts.planning (shopping list, recipe details).
 -- Closed: the close button sets frame.userClosed. Show does nothing while it
---   is set; ResetClosed (the profession window opened again) clears it.
--- Raise: on Place the panel takes the strata of the frame it anchors to and
---   sits RAISE_LEVELS above it, so that frame never draws over the panel.
---   Without an anchor frame the panel goes back to its own strata and level.
+--   is set. ResetClosed (the profession window opened again) clears it on
+--   every panel, ResetClosedForPlanning (Planning loads a profession) on the
+--   Planning panels.
+-- Raise: on Place the panel sits RAISE_LEVELS above the frame it anchors to,
+--   taking that frame's strata when it is higher than the panel's own. It is
+--   never put below its own strata or level. Without an anchor frame it goes
+--   back to its own strata and level.
 -- Combat (rule 7, ruling L4): panels hide when combat starts. A Show asked for
 --   during combat is remembered instead of shown. When combat ends a panel
---   shows again only if it was shown or asked for, the profession window is
---   still open, a current path exists and the user did not close it. A Hide
---   during combat cancels any restore.
+--   shows again only if it was shown or asked for, the user did not close it,
+--   and an owner is there: the profession window is still open and a current
+--   path exists, or (Planning panels) the Planning window is shown or was shown
+--   before combat. A Hide during combat cancels any restore.
 local ADDON_NAME, LazyProf = ...
 local Utils = LazyProf.Utils
 
@@ -24,6 +30,12 @@ local PanelShell = {}
 LazyProf.PanelShell = PanelShell
 
 local RAISE_LEVELS = 20
+
+-- Draw order of the frame stratas, lowest first.
+local STRATA_RANK = {
+    BACKGROUND = 1, LOW = 2, MEDIUM = 3, HIGH = 4, DIALOG = 5,
+    FULLSCREEN = 6, FULLSCREEN_DIALOG = 7, TOOLTIP = 8,
+}
 
 -- Attached frames in attach order (a panel anchored to another one must be
 -- attached after it, so re-placing in this order settles dependents).
@@ -49,15 +61,41 @@ local function WindowOpen()
     return LazyProf.Client and LazyProf.Client:IsOpen() or false
 end
 
+-- The Planning window is shown, or will be once combat ends: regen handlers
+-- run in no fixed order, so its own restore may not have happened yet.
+local function PlanningShown()
+    local frame = LazyProf.PlanningWindow and LazyProf.PlanningWindow.frame
+    if not frame then return false end
+    return frame:IsShown() or frame._wasShownBeforeCombat == true
+end
+
+-- Strata and level for a panel anchored to anchorFrame (nil: its own).
+local function RaiseTarget(shell, anchorFrame)
+    local strata, level = shell.baseStrata, shell.baseLevel
+    if not anchorFrame then return strata, level end
+    local anchorStrata = anchorFrame:GetFrameStrata()
+    local anchorRank, baseRank = STRATA_RANK[anchorStrata], STRATA_RANK[strata]
+    if not anchorRank then return strata, level end
+    local raised = anchorFrame:GetFrameLevel() + RAISE_LEVELS
+    if not baseRank or anchorRank > baseRank then
+        return anchorStrata, raised
+    elseif anchorRank == baseRank then
+        return strata, math.max(level or 0, raised)
+    end
+    return strata, level   -- own strata already draws above the anchor
+end
+
 -- Attach a panel frame. key names its saved position; opts.anchor is a
 -- function returning (anchorFrame, point, relPoint, x, y) for the default
--- spot, or nil when there is nothing to anchor to. Call after the frame's
--- own strata and level are set (they are the fallback when not anchored).
+-- spot, or nil when there is nothing to anchor to; opts.planning marks a
+-- panel the Planning window also shows. Call after the frame's own strata and
+-- level are set (the floor for the raise and the fallback when not anchored).
 function PanelShell:Attach(frame, key, opts)
     opts = opts or {}
     frame._shell = {
         key = key,
         anchor = opts.anchor,
+        planning = opts.planning and true or false,
         baseStrata = frame:GetFrameStrata(),
         baseLevel = frame:GetFrameLevel(),
     }
@@ -74,6 +112,15 @@ function PanelShell:Attach(frame, key, opts)
         f:StopMovingOrSizing()
         f._shellDragging = nil
         PanelShell:SavePosition(f)
+    end)
+    -- Hidden mid-drag (combat start, window closed): OnDragStop never fires,
+    -- so end the drag here and keep the spot it was dropped at.
+    frame:HookScript("OnHide", function(f)
+        if f._shellDragging then
+            f:StopMovingOrSizing()
+            f._shellDragging = nil
+            PanelShell:SavePosition(f)
+        end
     end)
 
     Utils.AddCombatLockdown(frame, function(f)
@@ -120,11 +167,7 @@ function PanelShell:Place(frame)
         frame:SetPoint(point, anchorFrame, relPoint, x or 0, y or 0)
     end
 
-    local strata, level = shell.baseStrata, shell.baseLevel
-    if anchorFrame then
-        strata = anchorFrame:GetFrameStrata()
-        level = anchorFrame:GetFrameLevel() + RAISE_LEVELS
-    end
+    local strata, level = RaiseTarget(shell, anchorFrame)
     -- Only touch strata when it changes (a strata change re-strata's children).
     if strata and frame:GetFrameStrata() ~= strata then
         frame:SetFrameStrata(strata)
@@ -167,6 +210,15 @@ function PanelShell:ResetClosed()
     end
 end
 
+-- The Planning window loaded a profession: its closed panels may show again.
+function PanelShell:ResetClosedForPlanning()
+    for _, frame in ipairs(shells) do
+        if frame._shell.planning then
+            frame.userClosed = nil
+        end
+    end
+end
+
 -- Forget every saved position; shown panels go back to their default spot.
 function PanelShell:ResetPositions()
     local positions = Positions()
@@ -196,11 +248,15 @@ function PanelShell:RestoreAfterCombat(frame)
     frame._wasShownBeforeCombat = nil
     if not wanted then return end
 
-    local restore = not frame.userClosed and WindowOpen() and HasCurrentPath()
+    local live = WindowOpen() and HasCurrentPath()
+    local planning = frame._shell and frame._shell.planning and PlanningShown() or false
+    local restore = not frame.userClosed and (live or planning)
     if LazyProf:IsDebugEnabled("ui") then
-        LazyProf:Debug("ui", string.format("PanelShell: after combat %s -> %s (closed=%s, window=%s, path=%s)",
+        LazyProf:Debug("ui", string.format(
+            "PanelShell: after combat %s -> %s (closed=%s, window=%s, path=%s, planning=%s)",
             frame._shell and frame._shell.key or "?", restore and "show" or "stay hidden",
-            tostring(frame.userClosed == true), tostring(WindowOpen()), tostring(HasCurrentPath())))
+            tostring(frame.userClosed == true), tostring(WindowOpen()), tostring(HasCurrentPath()),
+            tostring(planning)))
     end
     if not restore then return end
 

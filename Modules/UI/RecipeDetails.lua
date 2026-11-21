@@ -134,6 +134,7 @@ function RecipeDetails:Initialize()
     -- Default spot: right of the milestone panel when it is shown; otherwise
     -- the panel stays where it was (e.g. opened from the Planning window).
     LazyProf.PanelShell:Attach(self.frame, "recipeDetails", {
+        planning = true,   -- the Planning window shows it too
         anchor = function()
             local milestone = LazyProf.MilestonePanel and LazyProf.MilestonePanel.frame
             if milestone and milestone:IsShown() then

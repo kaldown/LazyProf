@@ -126,6 +126,7 @@ function MissingPanel:Initialize()
     -- hide/restore. Default spot: below the milestone panel when it is shown,
     -- else right of the profession window, lower down.
     LazyProf.PanelShell:Attach(self.frame, "shoppingList", {
+        planning = true,   -- the Planning window shows it too
         anchor = function()
             local milestone = LazyProf.MilestonePanel and LazyProf.MilestonePanel.frame
             if milestone and milestone:IsShown() then

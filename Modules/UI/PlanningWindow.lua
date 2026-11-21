@@ -245,6 +245,12 @@ function PlanningWindow:LoadProfession(profKey)
         return
     end
 
+    -- Planning also owns the shopping list and recipe details: a profession
+    -- loaded here may show them again even if they were closed earlier.
+    if LazyProf.PanelShell then
+        LazyProf.PanelShell:ResetClosedForPlanning()
+    end
+
     -- Update title
     self.frame.title:SetText("Planning: " .. profInfo.name)
 
