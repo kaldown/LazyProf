@@ -191,6 +191,8 @@ local function ActiveProfile()
     return CraftLib and CraftLib.GetActiveProfile and CraftLib:GetActiveProfile() or nil
 end
 
+Utils.GetActiveProfile = ActiveProfile
+
 -- Wowhead site branch per profile: Vanilla/SoD live on /classic, TBC on /tbc,
 -- WotLK on /wotlk, WoW Forever on /forever. No profile: /classic (no guess
 -- of a later expansion).

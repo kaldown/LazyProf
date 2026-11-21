@@ -82,7 +82,7 @@ function M.load(family, extraFiles)
         function string.trim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
     end
     local ui = fakeui.install({ family = family })
-    local env = { ui = ui, calls = {}, open = true, cap = 150, hidden = false, recalcs = {} }
+    local env = { ui = ui, calls = {}, open = true, cap = 300, hidden = false, recalcs = {} }
     local function called(name) env.calls[#env.calls + 1] = name end
 
     _G.UnitGUID = function() return "Player-1-WINDOW01" end
@@ -110,6 +110,7 @@ function M.load(family, extraFiles)
         UnlearnedHiddenByFilter = function() return env.hidden end,
         GetItemInfo = function() return nil end,
         PlayerSkill = function() return env.playerSkill or 0 end,
+        ProfessionRank = function() return env.playerSkill or 0, env.playerCap end,
     }
     addon.Pathfinder = {
         currentPath = nil,

@@ -155,24 +155,36 @@ local function ProfessionIndices(...)
     return select("#", ...), { ... }
 end
 
-function Client:PlayerSkill(profKey)
+-- Rank and cap (maxRank, the 4th return: Blizzard_Professions/Camelot/
+-- Blizzard_ProfessionsFrame.lua:48 names every return) of a profession, with
+-- its window closed. 0 and nil when not trained.
+-- Verify in game: this cap equals the open window's maxSkillLevel.
+function Client:ProfessionRank(profKey)
     local skillLine
     for line, key in pairs(LazyProf.Constants.SKILL_LINE_PROFESSION) do
         if key == profKey then skillLine = line end
     end
-    if not skillLine then return 0 end
+    if not skillLine then return 0, nil end
 
     local count, indices = ProfessionIndices(GetProfessions())
     for i = 1, count do
         local index = indices[i]
         if index then
-            local _, _, rank, _, _, _, line = GetProfessionInfo(index)
+            local _, _, rank, maxRank, _, _, line = GetProfessionInfo(index)
             if line == skillLine then
-                return rank or 0
+                rank = rank or 0
+                if type(maxRank) ~= "number" or maxRank < rank or maxRank <= 0 then
+                    maxRank = nil
+                end
+                return rank, maxRank
             end
         end
     end
-    return 0
+    return 0, nil
+end
+
+function Client:PlayerSkill(profKey)
+    return (self:ProfessionRank(profKey))
 end
 
 -- Every return of the client's item-info call (11th = vendor sell price);
