@@ -71,7 +71,17 @@ local recipeInfos = {
 }
 local showUnlearned = false
 local dataSourceChanging = false
+-- Whose list the window shows: nil = the player's own; else "linked",
+-- "guildMember", "guild" or "npc".
+local externalView = nil
 _G.C_TradeSkillUI = {
+    IsTradeSkillLinked = function()
+        if externalView == "linked" then return true, "Otherplayer" end
+        return false
+    end,
+    IsTradeSkillGuildMember = function() return externalView == "guildMember" end,
+    IsTradeSkillGuild = function() return externalView == "guild" end,
+    IsNPCCrafting = function() return externalView == "npc" end,
     GetChildProfessionInfo = function() return childInfo end,
     GetBaseProfessionInfo = function() return baseInfo end,
     GetAllRecipeIDs = function() return { 2329, 2330, 3170 } end,
@@ -101,9 +111,21 @@ function scrollBox:Trigger(event, ...)
 end
 
 local function shown(v) return { visible = v, IsShown = function(self) return self.visible end } end
+-- The recipe page keeps its script hooks so a test can show/hide it the way
+-- the client does (hooks run after the frame's own handler).
+local function makePage()
+    local page = shown(true)
+    page.hooks = { OnShow = {}, OnHide = {} }
+    function page:HookScript(script, fn) table.insert(self.hooks[script], fn) end
+    function page:SetShownForTest(v)
+        self.visible = v
+        for _, fn in ipairs(self.hooks[v and "OnShow" or "OnHide"]) do fn(self) end
+    end
+    return page
+end
 local function makeProfessionsFrame()
     local f = shown(true)
-    f.CraftingPage = shown(true)
+    f.CraftingPage = makePage()
     f.CraftingPage.RecipeList = { ScrollBox = scrollBox }
     return f
 end
@@ -229,6 +251,20 @@ section("forever", function()
     check(p .. "GetLine mapped line without registered profession -> nil key", Client:GetLine() == nil)
     resetProfessionInfo()
 
+    -- Someone else's list (linked, guild member, guild, NPC crafting): no
+    -- profession key, so no path and nothing written to the learned cache.
+    for _, view in ipairs({ "linked", "guildMember", "guild", "npc" }) do
+        externalView = view
+        key = Client:GetLine()
+        check(p .. "GetLine while viewing " .. view .. " -> nil key", key == nil, key)
+        addon.db.char.learnedRecipes = {}
+        check(p .. view .. ": DetectActive -> nil", addon.Professions:DetectActive() == nil)
+        addon.Professions:GetRecipesWithLearnedStatus(addon.Professions.active)
+        check(p .. view .. ": learned cache untouched", next(addon.db.char.learnedRecipes) == nil)
+    end
+    externalView = nil
+    check(p .. "own list again -> alchemy", Client:GetLine() == "alchemy")
+
     -- Known recipes: the full learned set from C_TradeSkillUI, not the rows.
     check(p .. "KnownRecipeIds -> 2329,3170", sortedKeys(Client:KnownRecipeIds("alchemy")) == "2329,3170",
         sortedKeys(Client:KnownRecipeIds("alchemy")))
@@ -288,7 +324,8 @@ end)
 section("start", function()
     local p = "start: "
     local addon = loadAdapter(16001)
-    local counts = { open = 0, close = 0, update = 0, scroll = 0 }
+    local counts = { open = 0, close = 0, update = 0, scroll = 0, display = 0 }
+    function addon:UpdateDisplay() counts.display = counts.display + 1 end
     scrollBox.callbacks, scrollBox.registrations = {}, 0
     _G.ProfessionsFrame = nil
     addon.Client:Start({
@@ -329,8 +366,71 @@ section("start", function()
     dataSourceChanging = false
     addon.events.TRADE_SKILL_DATA_SOURCE_CHANGED("TRADE_SKILL_DATA_SOURCE_CHANGED")
     check(p .. "TRADE_SKILL_DATA_SOURCE_CHANGED -> onUpdate", counts.update == 3, counts.update)
+
+    -- "Show unlearned" toggled: the panels re-render the current path (the
+    -- hint depends on it); no recalculation, and nothing on an unchanged value.
+    showUnlearned = false
+    addon.events.TRADE_SKILL_LIST_UPDATE("TRADE_SKILL_LIST_UPDATE")
+    local display = counts.display
+    showUnlearned = true
+    addon.events.TRADE_SKILL_LIST_UPDATE("TRADE_SKILL_LIST_UPDATE")
+    check(p .. "show-unlearned toggled -> UpdateDisplay once", counts.display == display + 1, counts.display - display)
+    addon.events.TRADE_SKILL_LIST_UPDATE("TRADE_SKILL_LIST_UPDATE")
+    check(p .. "unchanged filter -> no UpdateDisplay", counts.display == display + 1)
+    showUnlearned = false
+    addon.events.TRADE_SKILL_SHOW("TRADE_SKILL_SHOW")
+    display = counts.display
+    addon.events.TRADE_SKILL_LIST_UPDATE("TRADE_SKILL_LIST_UPDATE")
+    check(p .. "first list update of an open only records the filter", counts.display == display)
+    showUnlearned = false
+
+    -- Window closes: the page hides with it, then TRADE_SKILL_CLOSE; one close.
+    local page = _G.ProfessionsFrame.CraftingPage
+    local closes = counts.close
+    page:SetShownForTest(false)
     addon.events.TRADE_SKILL_CLOSE("TRADE_SKILL_CLOSE")
-    check(p .. "TRADE_SKILL_CLOSE -> onClose", counts.close == 1)
+    check(p .. "window close -> onClose once", counts.close == closes + 1, counts.close - closes)
+
+    -- Reopen with the page showing before TRADE_SKILL_SHOW (same frame): one open.
+    local opens = counts.open
+    timers = {}
+    page:SetShownForTest(true)
+    addon.events.TRADE_SKILL_SHOW("TRADE_SKILL_SHOW")
+    runTimers()
+    check(p .. "page shown then TRADE_SKILL_SHOW -> onOpen once", counts.open == opens + 1, counts.open - opens)
+
+    -- Profession-book page: the trade skill stays open, the recipe page hides.
+    closes = counts.close
+    page:SetShownForTest(false)
+    check(p .. "book page -> onClose", counts.close == closes + 1, counts.close - closes)
+    check(p .. "book page -> IsOpen false", addon.Client:IsOpen() == false)
+    addon.events.TRADE_SKILL_CLOSE("TRADE_SKILL_CLOSE")
+    check(p .. "trade skill closing behind the book page -> no second onClose", counts.close == closes + 1)
+
+    -- Back to the recipes (no TRADE_SKILL_SHOW): open after a frame.
+    opens = counts.open
+    timers = {}
+    page:SetShownForTest(true)
+    check(p .. "recipe page back -> open waits a frame", counts.open == opens and #timers == 1 and timers[1].delay == 0)
+    runTimers()
+    check(p .. "recipe page back -> onOpen", counts.open == opens + 1, counts.open - opens)
+
+    -- TRADE_SKILL_SHOW first, then the page shows: one open.
+    page:SetShownForTest(false)
+    opens = counts.open
+    timers = {}
+    addon.events.TRADE_SKILL_SHOW("TRADE_SKILL_SHOW")
+    page:SetShownForTest(true)
+    runTimers()
+    check(p .. "TRADE_SKILL_SHOW then page shown -> onOpen once", counts.open == opens + 1, counts.open - opens)
+
+    -- Switching profession while open still reports an open (recalculation).
+    opens = counts.open
+    addon.events.TRADE_SKILL_SHOW("TRADE_SKILL_SHOW")
+    check(p .. "TRADE_SKILL_SHOW while open -> onOpen", counts.open == opens + 1)
+    closes = counts.close
+    addon.events.TRADE_SKILL_CLOSE("TRADE_SKILL_CLOSE")
+    check(p .. "TRADE_SKILL_CLOSE -> onClose", counts.close == closes + 1, counts.close - closes)
 end)
 
 -- ===========================================================================

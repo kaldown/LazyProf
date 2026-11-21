@@ -71,14 +71,27 @@ local function ProfKeyForSkillLine(skillLine)
     return nil
 end
 
+-- Is the window showing the player's own list? Not when it shows a linked
+-- player's, a guild member's or the guild's list, or NPC crafting - the same
+-- test as Professions.InLocalCraftingMode
+-- (Blizzard_ProfessionsTemplates/Blizzard_Professions.lua:377-383; the calls
+-- are in the client dump, GlobalAPI.lua:4409, 4425-4427).
+local function ShowsOwnList()
+    return not (C_TradeSkillUI.IsNPCCrafting() or C_TradeSkillUI.IsTradeSkillGuild()
+        or C_TradeSkillUI.IsTradeSkillGuildMember() or C_TradeSkillUI.IsTradeSkillLinked())
+end
+
 -- Current profession line: profession key (nil when no registered profession
--- matches), skill level and max skill level. The line is the parent when there
--- is one (Professions.GetEffectiveSkillLineID,
+-- matches, or when the list is someone else's - so no path is built and their
+-- recipes never reach the player's learned cache), skill level and max skill
+-- level. The line is the parent when there is one
+-- (Professions.GetEffectiveSkillLineID,
 -- Blizzard_ProfessionsTemplates/Blizzard_Professions.lua:1678-1681).
 function Client:GetLine()
     local info = ProfessionInfo()
     local skillLine = info.parentProfessionID or info.professionID
-    return ProfKeyForSkillLine(skillLine), info.skillLevel, info.maxSkillLevel
+    local key = ShowsOwnList() and ProfKeyForSkillLine(skillLine) or nil
+    return key, info.skillLevel, info.maxSkillLevel
 end
 
 -- Known recipe spell ids of the open profession: { [spellId] = true }. Every
@@ -173,20 +186,62 @@ function Client:UnlearnedHiddenByFilter()
     return not C_TradeSkillUI.GetShowUnlearned()
 end
 
+-- Open / close reports. TRADE_SKILL_SHOW always reports an open (a new or a
+-- switched trade skill). The recipe page also hides without the trade skill
+-- closing: the Overview tab switches the frame to its profession-book page
+-- (ProfessionsBookRightTabMixin:OnClick,
+-- Blizzard_ProfessionsTemplates/Blizzard_ProfessionsTemplates.lua:975-979 ->
+-- SelectBookPage, Blizzard_Professions/Camelot/Blizzard_ProfessionsFrame.lua:110-112),
+-- and a profession tab switches back (same templates file :983-990). The
+-- page hiding reports a close, its showing again an open. A close is reported
+-- once (page hide and TRADE_SKILL_CLOSE both come when the window closes).
+local reportedOpen = false   -- an open was reported and no close since
+local openSerial = 0         -- number of opens reported
+local lastHidden = nil       -- UnlearnedHiddenByFilter() at this open's last list update
+
+local function ReportOpen(callbacks)
+    reportedOpen = true
+    openSerial = openSerial + 1
+    lastHidden = nil
+    callbacks.onOpen()
+end
+
+local function ReportClose(callbacks)
+    if not reportedOpen then return end
+    reportedOpen = false
+    lastHidden = nil
+    callbacks.onClose()
+end
+
+-- The recipe page showed. When the whole window opens it shows in the same
+-- frame as TRADE_SKILL_SHOW, before or after it; wait one frame so that event
+-- reports the open alone. Shown without that event (back from the book page):
+-- report it here.
+local function OnRecipePageShown(callbacks)
+    if reportedOpen then return end
+    local serial = openSerial
+    C_Timer.After(0, function()
+        if openSerial == serial and not reportedOpen and Client:IsOpen() then
+            ReportOpen(callbacks)
+        end
+    end)
+end
+
 -- Re-point the arrow after the list scrolls or its visible range changes.
 -- OnScroll fires on scrolling (Blizzard_SharedXML/Shared/Scroll/ScrollBox.lua:277);
 -- OnDataRangeChanged when the visible range or the data changes - rebuilt,
 -- sorted, resized or replaced data invalidates the range (ScrollBox.lua:789-793;
 -- ScrollBoxListView.lua:697-699, same folder). Callbacks get (owner, ...)
 -- (Blizzard_SharedXMLBase/CallbackRegistry.lua:112-139, 206-213).
+-- Also hooks the recipe page's show/hide for the reports above.
 -- The professions UI loads on demand on the first TRADE_SKILL_SHOW
 -- (Blizzard_Game/Mainline/EventImplementation.lua:475-477,
 -- Blizzard_Professions/Blizzard_Professions_Bootstrap.lua:3-11), so this runs
 -- from the event handlers until the frame exists, then once.
-local scrollHooked = false
+local frameHooked = false
 local scrollToken = 0
-local function HookScroll(callbacks)
-    if scrollHooked or not ProfessionsFrame then return end
+local function HookFrame(callbacks)
+    if frameHooked or not ProfessionsFrame then return end
 
     local function OnListMoved()
         -- Debounce: only the latest change's callback refreshes.
@@ -202,7 +257,24 @@ local function HookScroll(callbacks)
     local scrollBox = RecipeScrollBox()
     scrollBox:RegisterCallback(BaseScrollBoxEvents.OnScroll, OnListMoved, Client)
     scrollBox:RegisterCallback(ScrollBoxListMixin.Event.OnDataRangeChanged, OnListMoved, Client)
-    scrollHooked = true
+
+    local page = ProfessionsFrame.CraftingPage
+    page:HookScript("OnShow", function() OnRecipePageShown(callbacks) end)
+    page:HookScript("OnHide", function() ReportClose(callbacks) end)
+    frameHooked = true
+end
+
+-- The "show unlearned" filter changed during this open: re-render the
+-- current path (the milestone panel's hint depends on it; nothing to
+-- recalculate). The first list update of an open only records the value, so
+-- a previous profession's path is never redrawn for the one just opened.
+local function CheckUnlearnedFilter()
+    local hidden = Client:UnlearnedHiddenByFilter()
+    local changed = lastHidden ~= nil and hidden ~= lastHidden
+    lastHidden = hidden
+    if changed then
+        LazyProf:UpdateDisplay()
+    end
 end
 
 -- Register the profession-window events (Events.lua:1890-1902) and the list
@@ -213,20 +285,21 @@ end
 -- Verify in game: TRADE_SKILL_LIST_UPDATE fires after a skill-up.
 function Client:Start(callbacks)
     LazyProf:RegisterEvent("TRADE_SKILL_SHOW", function()
-        HookScroll(callbacks)
-        callbacks.onOpen()
+        HookFrame(callbacks)
+        ReportOpen(callbacks)
     end)
     LazyProf:RegisterEvent("TRADE_SKILL_LIST_UPDATE", function()
-        HookScroll(callbacks)
+        HookFrame(callbacks)
         if C_TradeSkillUI.IsDataSourceChanging() then return end
         callbacks.onUpdate()
+        CheckUnlearnedFilter()
     end)
     LazyProf:RegisterEvent("TRADE_SKILL_DATA_SOURCE_CHANGED", function()
-        HookScroll(callbacks)
+        HookFrame(callbacks)
         callbacks.onUpdate()
     end)
     LazyProf:RegisterEvent("TRADE_SKILL_CLOSE", function()
-        callbacks.onClose()
+        ReportClose(callbacks)
     end)
 end
 
