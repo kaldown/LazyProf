@@ -94,9 +94,6 @@ function RecipeDetails:Initialize()
     self.frame:EnableMouse(true)
     self.frame:SetMovable(true)
     self.frame:SetClampedToScreen(true)
-    self.frame:RegisterForDrag("LeftButton")
-    self.frame:SetScript("OnDragStart", function(f) f:StartMoving() end)
-    self.frame:SetScript("OnDragStop", function(f) f:StopMovingOrSizing() end)
 
     self.frame:Hide()
 
@@ -118,6 +115,8 @@ function RecipeDetails:Initialize()
     self.frame.closeBtn = CreateFrame("Button", nil, self.frame, "UIPanelCloseButton")
     self.frame.closeBtn:SetPoint("TOPRIGHT", -2, -2)
     self.frame.closeBtn:SetSize(20, 20)
+    -- A plain hide, not "user closed": this panel only opens on a click, so the
+    -- next click must open it again.
     self.frame.closeBtn:SetScript("OnClick", function() self:Hide() end)
 
     -- Content area
@@ -131,8 +130,17 @@ function RecipeDetails:Initialize()
     self:CreateSourceSection()
     self:CreateWowheadSection()
 
-    -- Combat lockdown: auto-hide during combat, restore after
-    Utils.AddCombatLockdown(self.frame)
+    -- The panel shell owns position, dragging and combat hide/restore.
+    -- Default spot: right of the milestone panel when it is shown; otherwise
+    -- the panel stays where it was (e.g. opened from the Planning window).
+    LazyProf.PanelShell:Attach(self.frame, "recipeDetails", {
+        anchor = function()
+            local milestone = LazyProf.MilestonePanel and LazyProf.MilestonePanel.frame
+            if milestone and milestone:IsShown() then
+                return milestone, "TOPLEFT", "TOPRIGHT", 10, 0
+            end
+        end,
+    })
 end
 
 -- Create recipe header (icon, name, skill info)
@@ -384,7 +392,6 @@ end
 -- Show recipe details
 -- atSkillLevel: optional skill level for difficulty display (e.g., step's starting skill from milestone)
 function RecipeDetails:Show(recipe, atSkillLevel)
-    if InCombatLockdown() then return end
     if not recipe then return end
     if not self.frame then self:Initialize() end
 
@@ -418,13 +425,9 @@ function RecipeDetails:Show(recipe, atSkillLevel)
         content.urlBox:SetText("")
     end
 
-    -- Position near MilestonePanel if visible
-    if LazyProf.MilestonePanel and LazyProf.MilestonePanel.frame and LazyProf.MilestonePanel.frame:IsVisible() then
-        self.frame:ClearAllPoints()
-        self.frame:SetPoint("TOPLEFT", LazyProf.MilestonePanel.frame, "TOPRIGHT", 10, 0)
-    end
-
-    self.frame:Show()
+    -- Placed by the shell (saved spot, else next to the milestone panel);
+    -- during combat the shell shows it once combat ends
+    LazyProf.PanelShell:Show(self.frame)
     self:LayoutContent()
 end
 
@@ -663,9 +666,8 @@ end
 
 -- Hide the panel
 function RecipeDetails:Hide()
-    if InCombatLockdown() then return end
     if self.frame then
-        self.frame:Hide()
+        LazyProf.PanelShell:Hide(self.frame)
     end
     self.currentRecipe = nil
 end

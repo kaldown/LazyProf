@@ -133,17 +133,6 @@ function MilestonePanelClass:Initialize()
         self.frame:SetMovable(true)
         self.frame:SetResizable(true)
         self.frame:SetClampedToScreen(true)
-        self.frame:RegisterForDrag("LeftButton")
-        self.frame:SetScript("OnDragStart", function(f)
-            if f:IsMovable() then
-                f:StartMoving()
-            end
-        end)
-        self.frame:SetScript("OnDragStop", function(f)
-            if f:IsMovable() then
-                f:StopMovingOrSizing()
-            end
-        end)
 
         -- Set resize bounds
         if self.frame.SetResizeBounds then
@@ -172,6 +161,10 @@ function MilestonePanelClass:Initialize()
         self.frame.closeBtn = CreateFrame("Button", nil, self.frame, "UIPanelCloseButton")
         self.frame.closeBtn:SetPoint("TOPRIGHT", -2, -2)
         self.frame.closeBtn:SetSize(20, 20)
+        -- Stays closed until the profession window is reopened
+        self.frame.closeBtn:SetScript("OnClick", function()
+            LazyProf.PanelShell:Close(self.frame)
+        end)
 
         -- Bracket filter dropdown and mode toggle
         self:CreateBracketDropdown(frameName, config)
@@ -207,9 +200,17 @@ function MilestonePanelClass:Initialize()
         end)
     end
 
-    -- Combat lockdown: auto-hide during combat, restore after (standalone only)
+    -- Standalone: the panel shell owns position, dragging, closed state and
+    -- combat hide/restore. Default spot: right of the profession window.
     if not config.embedded then
-        Utils.AddCombatLockdown(self.frame)
+        LazyProf.PanelShell:Attach(self.frame, "milestone", {
+            anchor = function()
+                local anchor = LazyProf.Client:AnchorFrame()
+                if anchor then
+                    return anchor, "TOPLEFT", "TOPRIGHT", 10, 0
+                end
+            end,
+        })
     end
 
     self.frame:Hide()
@@ -567,13 +568,6 @@ function MilestonePanelClass:Update(path)
         self.frame.total:SetText("")
         self.frame.content:SetHeight(math.max(yOffset + 10, self.frame:GetHeight() - 70))
 
-        if not self.config.embedded then
-            if LazyProf.Client:IsOpen() and not self.manuallyMoved then
-                self.frame:ClearAllPoints()
-                self.frame:SetPoint("TOPLEFT", LazyProf.Client:AnchorFrame(), "TOPRIGHT", 10, 0)
-            end
-        end
-
         self:Show()
         -- Update shopping list with empty bracket
         self:UpdateShoppingList(path, breakdown, bracket)
@@ -732,14 +726,6 @@ function MilestonePanelClass:Update(path)
 
     -- Update content height for scrolling
     self.frame.content:SetHeight(math.max(yOffset + 10, self.frame:GetHeight() - 70))
-
-    -- Position standalone panel next to the profession window
-    if not self.config.embedded then
-        if LazyProf.Client:IsOpen() and not self.manuallyMoved then
-            self.frame:ClearAllPoints()
-            self.frame:SetPoint("TOPLEFT", LazyProf.Client:AnchorFrame(), "TOPRIGHT", 10, 0)
-        end
-    end
 
     LazyProf:Debug("ui", string.format("  Created %d rows, content size: %.0fx%.0f",
         #self.rows,
@@ -1403,9 +1389,6 @@ function MilestonePanelClass:CreateRecalculateButton(dirtyCount)
         self.frame.recalcBtn:SetBackdropColor(0.1, 0.4, 0.15, 0.95)
         self.frame.recalcBtn:SetBackdropBorderColor(0.3, 0.8, 0.4, 1)
 
-        -- Ensure button is above scroll content
-        self.frame.recalcBtn:SetFrameLevel(self.frame:GetFrameLevel() + 10)
-
         self.frame.recalcBtn.text = self.frame.recalcBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         self.frame.recalcBtn.text:SetPoint("CENTER", 0, 0)
         self.frame.recalcBtn.text:SetTextColor(1, 1, 1)
@@ -1442,6 +1425,9 @@ function MilestonePanelClass:CreateRecalculateButton(dirtyCount)
         end)
     end
 
+    -- Above the scroll content (re-applied: the shell may have raised the panel)
+    self.frame.recalcBtn:SetFrameLevel(self.frame:GetFrameLevel() + 10)
+
     -- Stretch across the full width, above the total bar
     self.frame.recalcBtn:ClearAllPoints()
     self.frame.recalcBtn:SetPoint("BOTTOMLEFT", self.frame.totalBg, "TOPLEFT", 0, 2)
@@ -1451,18 +1437,25 @@ function MilestonePanelClass:CreateRecalculateButton(dirtyCount)
     self.frame.recalcBtn:Show()
 end
 
--- Show the panel
+-- Show the panel (standalone: placed by the shell, unless the user closed it)
 function MilestonePanelClass:Show()
+    if not self.config.embedded then
+        LazyProf.PanelShell:Show(self.frame)
+        return
+    end
     if InCombatLockdown() then return end
     self.frame:Show()
 end
 
 -- Hide the panel
 function MilestonePanelClass:Hide()
-    if InCombatLockdown() then return end
-    if self.frame then
-        self.frame:Hide()
+    if not self.frame then return end
+    if not self.config.embedded then
+        LazyProf.PanelShell:Hide(self.frame)
+        return
     end
+    if InCombatLockdown() then return end
+    self.frame:Hide()
 end
 
 -- Check if visible

@@ -107,6 +107,11 @@ function LazyProf:SlashCommand(input)
     elseif cmd == "reset" then
         self.db:ResetDB()
         self:Print("Database reset.")
+    elseif cmd == "resetpanels" then
+        if self.PanelShell then
+            self.PanelShell:ResetPositions()
+        end
+        self:Print("Panel positions reset.")
     elseif cmd == "log" then
         self:ShowDebugLog()
     elseif cmd == "diag" then
@@ -116,12 +121,16 @@ function LazyProf:SlashCommand(input)
     elseif self.configRegistered then
         LibStub("AceConfigDialog-3.0"):Open("LazyProf")
     else
-        self:Print("Commands: /lp | /lp browse | /lp reset | /lp log | /lp diag")
+        self:Print("Commands: /lp | /lp browse | /lp reset | /lp resetpanels | /lp log | /lp diag")
     end
 end
 
 -- Profession window opened (the client adapter also hooks list scrolling).
 function LazyProf:OnTradeSkillShow()
+    -- Panels the user closed may show again once the window is reopened.
+    if self.PanelShell then
+        self.PanelShell:ResetClosed()
+    end
     self:ScheduleRecalculation("trade skill opened")
 end
 
@@ -223,6 +232,10 @@ end
 -- entire pathfinding algorithm with recipe scoring.
 -- Called on BAG_UPDATE instead of full recalculation.
 function LazyProf:RefreshShoppingList()
+    -- A refresh queued just before the window closed must not show the list.
+    if not self.Client:IsOpen() then
+        return
+    end
     local path = self.Pathfinder.currentPath
     if not path or not path.steps or #path.steps == 0 then
         return
@@ -267,7 +280,9 @@ function LazyProf:Recalculate(reason)
     if path then
         self:UpdateDisplay()
     else
-        -- No matching profession data - hide panels
+        -- No matching profession data - drop the previous profession's path
+        -- (so nothing redraws it later) and hide panels
+        self.Pathfinder.currentPath = nil
         self:HideDisplay()
     end
 
@@ -290,6 +305,11 @@ function LazyProf:HideDisplay()
 end
 
 function LazyProf:UpdateDisplay()
+    -- The live panels belong to the open profession window; settings changed
+    -- with it closed must not bring them back with an old path.
+    if not self.Client:IsOpen() then
+        return
+    end
     local path = self.Pathfinder.currentPath
     if path then
         if self.ArrowManager then

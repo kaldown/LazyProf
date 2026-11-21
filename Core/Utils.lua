@@ -327,7 +327,9 @@ end
 -- Add combat lockdown handling to a frame.
 -- Registers PLAYER_REGEN_DISABLED/ENABLED to auto-hide during combat and restore after.
 -- Call once after the frame is created.
-function Utils.AddCombatLockdown(frame)
+-- restore: optional function(frame) run when combat ends instead of the plain
+-- "show again if it was shown before combat" (the panel shell passes its own).
+function Utils.AddCombatLockdown(frame, restore)
     frame:RegisterEvent("PLAYER_REGEN_DISABLED")
     frame:RegisterEvent("PLAYER_REGEN_ENABLED")
     frame:HookScript("OnEvent", function(self, event)
@@ -337,7 +339,9 @@ function Utils.AddCombatLockdown(frame)
                 self:Hide()
             end
         elseif event == "PLAYER_REGEN_ENABLED" then
-            if self._wasShownBeforeCombat then
+            if restore then
+                restore(self)
+            elseif self._wasShownBeforeCombat then
                 self._wasShownBeforeCombat = nil
                 self:Show()
             end

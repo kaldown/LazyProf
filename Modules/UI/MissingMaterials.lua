@@ -35,9 +35,6 @@ function MissingPanel:Initialize()
     self.frame:SetMovable(true)
     self.frame:SetResizable(true)
     self.frame:SetClampedToScreen(true)
-    self.frame:RegisterForDrag("LeftButton")
-    self.frame:SetScript("OnDragStart", function(f) f:StartMoving() end)
-    self.frame:SetScript("OnDragStop", function(f) f:StopMovingOrSizing() end)
 
     -- Set resize bounds
     if self.frame.SetResizeBounds then
@@ -67,6 +64,10 @@ function MissingPanel:Initialize()
     self.frame.closeBtn = CreateFrame("Button", nil, self.frame, "UIPanelCloseButton")
     self.frame.closeBtn:SetPoint("TOPRIGHT", -2, -2)
     self.frame.closeBtn:SetSize(20, 20)
+    -- Stays closed until the profession window is reopened
+    self.frame.closeBtn:SetScript("OnClick", function()
+        LazyProf.PanelShell:Close(self.frame)
+    end)
 
     -- Scroll frame for content
     self.frame.scrollFrame = CreateFrame("ScrollFrame", "LazyProfMissingScrollFrame", self.frame, "UIPanelScrollFrameTemplate")
@@ -121,8 +122,21 @@ function MissingPanel:Initialize()
         end
     end)
 
-    -- Combat lockdown: auto-hide during combat, restore after
-    Utils.AddCombatLockdown(self.frame)
+    -- The panel shell owns position, dragging, closed state and combat
+    -- hide/restore. Default spot: below the milestone panel when it is shown,
+    -- else right of the profession window, lower down.
+    LazyProf.PanelShell:Attach(self.frame, "shoppingList", {
+        anchor = function()
+            local milestone = LazyProf.MilestonePanel and LazyProf.MilestonePanel.frame
+            if milestone and milestone:IsShown() then
+                return milestone, "TOPLEFT", "BOTTOMLEFT", 0, -10
+            end
+            local anchor = LazyProf.Client:AnchorFrame()
+            if anchor then
+                return anchor, "TOPLEFT", "TOPRIGHT", 10, -220
+            end
+        end,
+    })
 end
 
 -- Refresh layout after resize (routes through bracket filter if available)
@@ -270,15 +284,6 @@ function MissingPanel:Update(missingMaterials, bracketLabel)
 
     -- Update content height for scrolling
     self.frame.content:SetHeight(math.max(yOffset + 10, self.frame:GetHeight() - 70))
-
-    -- Position below milestone panel
-    if LazyProfMilestonePanel and LazyProfMilestonePanel:IsVisible() then
-        self.frame:ClearAllPoints()
-        self.frame:SetPoint("TOPLEFT", LazyProfMilestonePanel, "BOTTOMLEFT", 0, -10)
-    elseif LazyProf.Client:IsOpen() then
-        self.frame:ClearAllPoints()
-        self.frame:SetPoint("TOPLEFT", LazyProf.Client:AnchorFrame(), "TOPRIGHT", 10, -220)
-    end
 
     self:Show()
 end
@@ -574,14 +579,12 @@ function MissingPanel:CreateCraftSubRow(craft, yOffset, contentWidth)
     return row
 end
 
--- Show panel
+-- Show panel (placed by the shell, unless the user closed it)
 function MissingPanel:Show()
-    if InCombatLockdown() then return end
-    self.frame:Show()
+    LazyProf.PanelShell:Show(self.frame)
 end
 
 -- Hide panel
 function MissingPanel:Hide()
-    if InCombatLockdown() then return end
-    self.frame:Hide()
+    LazyProf.PanelShell:Hide(self.frame)
 end

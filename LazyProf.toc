@@ -79,6 +79,7 @@ Modules\Pathfinder\MaterialResolver.lua
 Modules\Pathfinder\Pathfinder.lua
 
 # Modules - UI
+Modules\UI\Widgets\PanelShell.lua
 Modules\UI\Arrow\Strategies\ArrowTooltip.lua
 Modules\UI\Arrow\ArrowManager.lua
 Modules\UI\MilestoneBreakdown.lua

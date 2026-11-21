@@ -19,6 +19,8 @@ LazyProf.defaults = {
         includeBankItems = false,
         includeAltCharacters = false,
         includeGuildBank = false,
+        -- Side-panel positions the user dragged to: [key] = { point, relPoint, x, y }
+        panelPositions = {},
 
         -- Minimap button
         minimap = {
@@ -245,6 +247,17 @@ LazyProf.options = {
                     set = function(_, v)
                         LazyProf.db.profile.calculateFromCurrentSkill = v
                         LazyProf:Recalculate("setting changed")
+                    end,
+                },
+                resetPanelPositions = {
+                    name = "Reset panel positions",
+                    desc = "Move the milestone, shopping list and recipe details panels " ..
+                           "back next to the profession window.\n\n" ..
+                           "Same as /lp resetpanels",
+                    type = "execute",
+                    order = 4.5,
+                    func = function()
+                        LazyProf.PanelShell:ResetPositions()
                     end,
                 },
                 shoppingListHeader = {
