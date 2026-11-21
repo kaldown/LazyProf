@@ -225,7 +225,7 @@ local function load(family, opts)
     addon.db = {
         profile = {
             showMilestonePanel = true, showMissingMaterials = true, strategy = "cheapest",
-            calculateFromCurrentSkill = true, panelPositions = {}, debug = false,
+            panelPositions = {}, debug = false,
             debugCategories = {},
         },
         char = {},

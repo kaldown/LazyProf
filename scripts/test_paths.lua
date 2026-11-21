@@ -34,6 +34,8 @@ local CASES = {
     { name = "sod_tailoring_1_300", interface = 11508, sod = true, prof = "tailoring", from = 1, to = 300 },
     { name = "forever_tailoring_1_300", interface = 16001, camelot = true, forever = true, prof = "tailoring", from = 1, to = 300 },
     { name = "forever_alchemy_1_300", interface = 16001, camelot = true, forever = true, prof = "alchemy", from = 1, to = 300 },
+    -- A target below the cap (the player's own target skill): the path ends there.
+    { name = "forever_tailoring_1_225", interface = 16001, camelot = true, forever = true, prof = "tailoring", from = 1, to = 225 },
 }
 local STRATEGIES = { "cheapest", "fastest" }
 
@@ -91,6 +93,7 @@ for _, case in ipairs(CASES) do
         if case.forever then
             check(label .. " path non-empty", #steps > 0)
             check(label .. " starts at 1", steps[1] ~= nil and steps[1].skillStart == case.from)
+            check(label .. " never passes its target", lastSkill(steps) <= case.to, lastSkill(steps))
         end
 
         local text = harness.formatSteps(steps, meta)

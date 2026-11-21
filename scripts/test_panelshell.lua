@@ -514,7 +514,6 @@ section("planning", function()
     addon.Utils.GetRacialProfessionBonus = function() return 0 end
     addon.Client.PlayerSkill = function() return 0 end
     addon.Pathfinder.CalculateForProfession = function() return nil end
-    addon.db.profile.calculateFromCurrentSkill = false
     assert(loadfile("Modules/UI/PlanningWindow.lua"))("LazyProf", addon)
     local stubText = { SetText = function() end, SetTextColor = function() end, ClearFocus = function() end }
     local planningShown = false

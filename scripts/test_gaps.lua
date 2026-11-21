@@ -282,7 +282,8 @@ section("pathfinder", function()
     LazyProf.PriceManager = { GetPrices = function() return PRICES end, cache = {} }
     LazyProf.Inventory.ScanBags = function() return {} end
     LazyProf.db.profile.strategy = "cheapest"
-    local path = LazyProf.Pathfinder:CalculateForProfession("testprof", 1)
+    LazyProf.Client.PlayerSkill = function() return 0 end   -- not learned: planned from 1
+    local path = LazyProf.Pathfinder:CalculateForProfession("testprof")
     check(p .. "path built", type(path) == "table")
     check(p .. "path.complete == false", path.complete == false, tostring(path.complete))
     check(p .. "path.gaps stored", type(path.gaps) == "table" and #path.gaps == 2,

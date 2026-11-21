@@ -9,48 +9,70 @@ local Pathfinder = LazyProf.Pathfinder
 -- Current calculated path
 Pathfinder.currentPath = nil
 
--- Calculate optimal path for active profession
--- reason: optional string describing what triggered this calculation
-function Pathfinder:Calculate(reason)
-    -- Get active profession
-    local profData = LazyProf.Professions:GetActive()
-    if not profData then
-        LazyProf:Debug("pathfinder", "No active profession detected")
-        return nil
+-- Prices of every reagent of the recipes, and of what those reagents are
+-- made from (for the craft-or-buy comparison of the shopping list).
+local function CollectPrices(recipes)
+    local reagentIds = {}
+    local seenIds = {}
+    for _, recipe in ipairs(recipes) do
+        for _, reagent in ipairs(recipe.reagents) do
+            if not seenIds[reagent.itemId] then
+                seenIds[reagent.itemId] = true
+                table.insert(reagentIds, reagent.itemId)
+            end
+        end
     end
 
-    -- Get current skill level
-    local _, currentSkill = LazyProf.Client:GetLine()
-    if not currentSkill then
-        LazyProf:Debug("pathfinder", "Could not get current skill")
-        return nil
+    local CraftLib = _G.CraftLib
+    if CraftLib and CraftLib.GetRecipeByProduct then
+        for itemId in pairs(seenIds) do
+            local craftRecipes = CraftLib:GetRecipeByProduct(itemId)
+            if craftRecipes then
+                for _, recipeInfo in ipairs(craftRecipes) do
+                    if recipeInfo.recipe and recipeInfo.recipe.reagents then
+                        for _, reagent in ipairs(recipeInfo.recipe.reagents) do
+                            if not seenIds[reagent.itemId] then
+                                seenIds[reagent.itemId] = true
+                                table.insert(reagentIds, reagent.itemId)
+                            end
+                        end
+                    end
+                end
+            end
+        end
     end
 
-    -- Determine starting skill based on setting
-    local startSkill = currentSkill
-    if not LazyProf.db.profile.calculateFromCurrentSkill then
-        -- Show full leveling path from skill 1
-        startSkill = 1
-    end
+    return LazyProf.PriceManager:GetPrices(reagentIds)
+end
 
-    -- Determine target skill (next milestone or max)
-    local targetSkill = self:GetTargetSkill(startSkill, profData.milestones)
+-- Run the strategy and build the path object.
+-- run: { profKey, profData, recipes, startSkill, actualSkill, reason, planning,
+--        hasProfession, planFromOne }
+-- The path runs from startSkill to the profession's target (GetTargetSkill).
+-- When the start is already at or past the target there is nothing to plan:
+-- no steps, no gaps, path.nothingLeft = true.
+function Pathfinder:BuildPath(run)
+    local profKey, profData = run.profKey, run.profData
+    local startSkill, actualSkill = run.startSkill, run.actualSkill
+    local milestones = profData.milestones
+    local targetSkill = self:GetTargetSkill(profKey, milestones)
 
-    LazyProf:Debug("pathfinder", string.format("Calculating path: %s %d -> %d (actual skill: %d)%s",
-        profData.name, startSkill, targetSkill, currentSkill,
-        reason and (" [" .. reason .. "]") or ""))
-    LazyProf:Debug("pathfinder", string.format("Settings: strategy=%s, fromCurrentSkill=%s, bank=%s, alts=%s, greenRecipes=%s",
+    LazyProf:Debug("pathfinder", string.format("Calculating path: %s %d -> %d (actual skill: %d)%s%s",
+        profData.name, startSkill, targetSkill, actualSkill,
+        run.planning and " (planning)" or "",
+        run.reason and (" [" .. run.reason .. "]") or ""))
+    LazyProf:Debug("pathfinder", string.format("Settings: strategy=%s, bank=%s, alts=%s, greenRecipes=%s",
         LazyProf.db.profile.strategy,
-        tostring(LazyProf.db.profile.calculateFromCurrentSkill),
         tostring(LazyProf.db.profile.includeBankItems),
         tostring(LazyProf.db.profile.includeAltCharacters),
         tostring(LazyProf.db.profile.includeGreenRecipes)))
 
     -- Pins the real skill has passed are done with; the rest override the
     -- optimizer over their skill range.
-    local profKey = LazyProf.Professions.active
     local pins = self:GetPins(profKey)
-    LazyProf.Pins.Prune(pins, currentSkill)
+    if run.hasProfession ~= false then
+        LazyProf.Pins.Prune(pins, actualSkill)
+    end
     if #pins > 0 and LazyProf:IsDebugEnabled("pathfinder") then
         local pinDetails = {}
         for _, pin in ipairs(pins) do
@@ -58,9 +80,6 @@ function Pathfinder:Calculate(reason)
         end
         LazyProf:Debug("pathfinder", string.format("Active pins (%d): %s", #pins, table.concat(pinDetails, ", ")))
     end
-
-    -- Get recipes with learned status
-    local recipes = LazyProf.Professions:GetRecipesWithLearnedStatus(LazyProf.Professions.active)
 
     -- Get inventory (bags + all enabled sources)
     local inventory, sourceBreakdown = LazyProf.Inventory:ScanAll()
@@ -87,53 +106,20 @@ function Pathfinder:Calculate(reason)
         end
     end
 
-    -- Get prices for all reagents (and potential source materials for resolution)
-    local reagentIds = {}
-    local seenIds = {}
-    for _, recipe in ipairs(recipes) do
-        for _, reagent in ipairs(recipe.reagents) do
-            if not seenIds[reagent.itemId] then
-                seenIds[reagent.itemId] = true
-                table.insert(reagentIds, reagent.itemId)
-            end
-        end
-    end
-
-    -- Also get prices for potential source materials (for material resolution)
-    local CraftLib = _G.CraftLib
-    if CraftLib and CraftLib.GetRecipeByProduct then
-        for itemId in pairs(seenIds) do
-            local craftRecipes = CraftLib:GetRecipeByProduct(itemId)
-            if craftRecipes then
-                for _, recipeInfo in ipairs(craftRecipes) do
-                    if recipeInfo.recipe and recipeInfo.recipe.reagents then
-                        for _, reagent in ipairs(recipeInfo.recipe.reagents) do
-                            if not seenIds[reagent.itemId] then
-                                seenIds[reagent.itemId] = true
-                                table.insert(reagentIds, reagent.itemId)
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    local prices = LazyProf.PriceManager:GetPrices(reagentIds)
+    local prices = CollectPrices(run.recipes)
 
     -- Get strategy
     local strategyName = LazyProf.db.profile.strategy
     local strategy = LazyProf.PathfinderStrategies[strategyName]
     if not strategy then
-        LazyProf:Debug("pathfinder", "Unknown strategy: " .. strategyName)
+        LazyProf:Debug("pathfinder", "Unknown strategy: " .. tostring(strategyName))
         return nil
     end
 
     -- Get racial profession bonus
-    local racialBonus = Utils.GetRacialProfessionBonus(LazyProf.Professions.active)
+    local racialBonus = Utils.GetRacialProfessionBonus(profKey)
     if racialBonus > 0 then
-        LazyProf:Debug("pathfinder", string.format("Racial bonus detected: +%d for %s",
-            racialBonus, LazyProf.Professions.active))
+        LazyProf:Debug("pathfinder", string.format("Racial bonus detected: +%d for %s", racialBonus, tostring(profKey)))
     end
 
     -- Calculate path with empty inventory so scoring uses market prices only
@@ -142,146 +128,34 @@ function Pathfinder:Calculate(reason)
     -- pass (IsRecipeAvailable is called per unlearned candidate per step).
     LazyProf.RecipeAvailability:BeginRecalc()
     LazyProf.SelfFound:BeginRecalc(inventory)
-    local steps, meta = strategy:Calculate(startSkill, targetSkill, recipes, {}, prices, racialBonus, pins)
+    local steps, meta = strategy:Calculate(startSkill, targetSkill, run.recipes, {}, prices, racialBonus, pins)
     LazyProf.SelfFound:EndRecalc()
     LazyProf.RecipeAvailability:EndRecalc()
 
     -- Build result (totals cover the steps the path has; gaps add nothing)
-    self.currentPath = {
-        profession = profData.name,
-        professionKey = profKey,
-        currentSkill = startSkill,
-        actualSkill = currentSkill,
-        targetSkill = targetSkill,
-        racialBonus = racialBonus,
-        steps = steps,
-        complete = meta.complete,
-        gaps = meta.gaps,
-        totalCost = Utils.Sum(steps, "totalCost"),
-        missingMaterials = self:CalculateMissingMaterials(steps, inventory, sourceBreakdown, prices),
-        milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, startSkill, inventory, prices, racialBonus),
-    }
-
-    -- Compute out-of-pocket total from milestone breakdown
-    local outOfPocketTotal = 0
-    for _, mb in ipairs(self.currentPath.milestoneBreakdown) do
-        outOfPocketTotal = outOfPocketTotal + (mb.outOfPocketCost or 0)
-    end
-    self.currentPath.outOfPocketTotal = outOfPocketTotal
-
-    if LazyProf:IsDebugEnabled("pathfinder") then
-        LazyProf:Debug("pathfinder", string.format("Path calculated: %d steps, %d gaps, %s total",
-            #steps, #meta.gaps, Utils.FormatMoney(self.currentPath.totalCost)))
-    end
-
-    return self.currentPath
-end
-
--- Calculate path for a specific profession (for planning mode)
--- profKey: profession key like "alchemy", "engineering"
--- skillLevel: current skill (0 if not learned)
--- reason: optional string describing what triggered this calculation
-function Pathfinder:CalculateForProfession(profKey, skillLevel, reason, actualSkill)
-    local profData = LazyProf.Professions:Get(profKey)
-    if not profData then
-        LazyProf:Debug("pathfinder", "Profession not found: " .. tostring(profKey))
-        return nil
-    end
-
-    -- In WoW, you start at skill 1 when learning a profession, not 0
-    -- Use minimum of 1 for planning mode calculations
-    skillLevel = math.max(1, skillLevel or 0)
-    -- The player's real skill (what the bracket and arrow follow); defaults to the path start
-    actualSkill = math.max(1, actualSkill or skillLevel)
-    local targetSkill = self:GetTargetSkill(skillLevel, profData.milestones)
-
-    LazyProf:Debug("pathfinder", string.format("Planning path: %s %d -> %d%s",
-        profData.name, skillLevel, targetSkill,
-        reason and (" [" .. reason .. "]") or ""))
-
-    -- Get all recipes with cached learned status for planning mode
-    local recipes = LazyProf.Utils.DeepCopy(profData.recipes)
-    local cachedLearned = LazyProf.db.char.learnedRecipes and LazyProf.db.char.learnedRecipes[profKey] or {}
-    for _, recipe in ipairs(recipes) do
-        recipe.learned = cachedLearned[recipe.id] or false
-    end
-
-    -- Get inventory (bags + all enabled sources)
-    local inventory, sourceBreakdown = LazyProf.Inventory:ScanAll()
-
-    -- Get prices for all reagents
-    local reagentIds = {}
-    local seenIds = {}
-    for _, recipe in ipairs(recipes) do
-        for _, reagent in ipairs(recipe.reagents) do
-            if not seenIds[reagent.itemId] then
-                seenIds[reagent.itemId] = true
-                table.insert(reagentIds, reagent.itemId)
-            end
-        end
-    end
-
-    -- Also get prices for potential source materials (for material resolution)
-    local CraftLib = _G.CraftLib
-    if CraftLib and CraftLib.GetRecipeByProduct then
-        for itemId in pairs(seenIds) do
-            local craftRecipes = CraftLib:GetRecipeByProduct(itemId)
-            if craftRecipes then
-                for _, recipeInfo in ipairs(craftRecipes) do
-                    if recipeInfo.recipe and recipeInfo.recipe.reagents then
-                        for _, reagent in ipairs(recipeInfo.recipe.reagents) do
-                            if not seenIds[reagent.itemId] then
-                                seenIds[reagent.itemId] = true
-                                table.insert(reagentIds, reagent.itemId)
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    local prices = LazyProf.PriceManager:GetPrices(reagentIds)
-
-    -- Get strategy
-    local strategyName = LazyProf.db.profile.strategy
-    local strategy = LazyProf.PathfinderStrategies[strategyName]
-    if not strategy then
-        LazyProf:Debug("pathfinder", "Unknown strategy: " .. strategyName)
-        return nil
-    end
-
-    -- Get racial profession bonus
-    local racialBonus = Utils.GetRacialProfessionBonus(profKey)
-    if racialBonus > 0 then
-        LazyProf:Debug("pathfinder", string.format("Racial bonus detected: +%d for %s",
-            racialBonus, profKey))
-    end
-
-    -- Calculate path with empty inventory so scoring uses market prices only
-    -- (owned materials are handled separately by the shopping list)
-    LazyProf.RecipeAvailability:BeginRecalc()
-    LazyProf.SelfFound:BeginRecalc(inventory)
-    local pins = self:GetPins(profKey)
-    local steps, meta = strategy:Calculate(skillLevel, targetSkill, recipes, {}, prices, racialBonus, pins)
-    LazyProf.SelfFound:EndRecalc()
-    LazyProf.RecipeAvailability:EndRecalc()
-
-    -- Build result (similar to Calculate() but stored separately;
-    -- totals cover the steps the path has; gaps add nothing)
     local path = {
         profession = profData.name,
         professionKey = profKey,
-        currentSkill = skillLevel,
+        planning = run.planning or nil,
+        hasProfession = run.hasProfession,
+        planFromOne = run.planFromOne or nil,
+        currentSkill = startSkill,
         actualSkill = actualSkill,
         targetSkill = targetSkill,
+        capSkill = milestones[#milestones],
+        milestones = milestones,
         racialBonus = racialBonus,
         steps = steps,
         complete = meta.complete,
         gaps = meta.gaps,
+        nothingLeft = (#steps == 0 and #meta.gaps == 0) or nil,
         totalCost = Utils.Sum(steps, "totalCost"),
+        -- What the stage builder and the shopping list are computed from
+        prices = prices,
+        inventory = inventory,
+        sourceBreakdown = sourceBreakdown,
         missingMaterials = self:CalculateMissingMaterials(steps, inventory, sourceBreakdown, prices),
-        milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, skillLevel, inventory, prices, racialBonus),
+        milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, milestones, startSkill, inventory, prices, racialBonus),
     }
 
     -- Compute out-of-pocket total from milestone breakdown
@@ -292,22 +166,106 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel, reason, actualSk
     path.outOfPocketTotal = outOfPocketTotal
 
     if LazyProf:IsDebugEnabled("pathfinder") then
-        LazyProf:Debug("pathfinder", string.format("Planning path calculated: %d steps, %d gaps, %s total",
+        LazyProf:Debug("pathfinder", string.format("Path calculated: %d steps, %d gaps, %s total",
             #steps, #meta.gaps, Utils.FormatMoney(path.totalCost)))
     end
 
     return path
 end
 
--- Get target skill (max or current cap)
-function Pathfinder:GetTargetSkill(currentSkill, milestones)
-    -- Find the max skill cap based on current skill
-    -- (player needs to train at milestones to increase cap)
-    local maxPossible = milestones[#milestones]
+-- Calculate the path for the open profession, from the character's real skill.
+-- reason: optional string describing what triggered this calculation
+function Pathfinder:Calculate(reason)
+    -- Get active profession
+    local profData = LazyProf.Professions:GetActive()
+    if not profData then
+        LazyProf:Debug("pathfinder", "No active profession detected")
+        return nil
+    end
 
-    -- For simplicity, target the final milestone
-    -- Future: could detect actual skill cap from UI
-    return maxPossible
+    -- Get current skill level
+    local _, currentSkill = LazyProf.Client:GetLine()
+    if not currentSkill then
+        LazyProf:Debug("pathfinder", "Could not get current skill")
+        return nil
+    end
+
+    local profKey = LazyProf.Professions.active
+    self.currentPath = self:BuildPath({
+        profKey = profKey,
+        profData = profData,
+        -- Recipes with learned status from the open window
+        recipes = LazyProf.Professions:GetRecipesWithLearnedStatus(profKey),
+        startSkill = currentSkill,
+        actualSkill = currentSkill,
+        hasProfession = true,
+        reason = reason,
+    })
+    return self.currentPath
+end
+
+-- Calculate the path for any profession, without its window (planning).
+-- A profession the character has is planned from the real skill; one not
+-- learned yet from 1. opts.planFromOne plans a learned profession from 1 as a
+-- what-if (the path bar then shows what is already done).
+-- opts: { planFromOne = bool, reason = string }
+function Pathfinder:CalculateForProfession(profKey, opts)
+    opts = opts or {}
+    local profData = LazyProf.Professions:Get(profKey)
+    if not profData then
+        LazyProf:Debug("pathfinder", "Profession not found: " .. tostring(profKey))
+        return nil
+    end
+
+    -- A learned profession starts at 1, not 0
+    local realSkill = LazyProf.Client:PlayerSkill(profKey) or 0
+    local hasProfession = realSkill > 0
+    local actualSkill = math.max(1, realSkill)
+    local planFromOne = hasProfession and opts.planFromOne and true or false
+    local startSkill = (hasProfession and not planFromOne) and actualSkill or 1
+
+    -- Learned status from the cache the profession window fills
+    local recipes = LazyProf.Utils.DeepCopy(profData.recipes)
+    local cachedLearned = LazyProf.db.char.learnedRecipes and LazyProf.db.char.learnedRecipes[profKey] or {}
+    for _, recipe in ipairs(recipes) do
+        recipe.learned = cachedLearned[recipe.id] or false
+    end
+
+    return self:BuildPath({
+        profKey = profKey,
+        profData = profData,
+        recipes = recipes,
+        startSkill = startSkill,
+        actualSkill = actualSkill,
+        hasProfession = hasProfession,
+        planFromOne = planFromOne,
+        planning = true,
+        reason = opts.reason,
+    })
+end
+
+-- The skill a profession's path runs to: the target the player set for it,
+-- never above the last cap; the last cap when none is set.
+function Pathfinder:GetTargetSkill(profKey, milestones)
+    local cap = milestones[#milestones]
+    local stored = profKey and LazyProf.CharStore:Profession(profKey).target
+    if stored and stored < cap then
+        return stored
+    end
+    return cap
+end
+
+-- Set a profession's target from what the player typed. The value is clamped
+-- to [real skill + 1, last cap]; returns the value in force so the input box
+-- can show the correction. A target equal to the cap is stored as "none", so
+-- it follows the cap.
+function Pathfinder:SetTargetSkill(profKey, value, actualSkill, milestones)
+    local cap = milestones[#milestones]
+    value = math.floor(tonumber(value) or cap)
+    local low = math.min((actualSkill or 0) + 1, cap)
+    value = math.max(low, math.min(cap, value))
+    LazyProf.CharStore:Profession(profKey).target = (value < cap) and value or nil
+    return value
 end
 
 -- Calculate total missing materials for entire path

@@ -409,12 +409,10 @@ function MilestonePanelClass:CreateModeToggle()
                 LazyProf:UpdateDisplay()
             end
             local currentPath = panel.currentPath
-            if currentPath and currentPath.professionKey then
+            if currentPath and currentPath.planning then
                 local path = LazyProf.Pathfinder:CalculateForProfession(
                     currentPath.professionKey,
-                    currentPath.currentSkill,
-                    "strategy change",
-                    currentPath.actualSkill
+                    { reason = "strategy change", planFromOne = currentPath.planFromOne }
                 )
                 if path then
                     panel:Update(path)
@@ -540,11 +538,7 @@ function MilestonePanelClass:Update(path)
 
     -- Update title with mode indicator (standalone only)
     if not self.config.embedded and self.frame.title then
-        if LazyProf.db.profile.calculateFromCurrentSkill then
-            self.frame.title:SetText(string.format("Milestone Breakdown |cFF66FF66(from %d)|r", path.currentSkill))
-        else
-            self.frame.title:SetText("Milestone Breakdown |cFF888888(full path)|r")
-        end
+        self.frame.title:SetText(string.format("Milestone Breakdown |cFF66FF66(from %d)|r", path.currentSkill))
     end
 
     local contentWidth = self.frame:GetWidth() - 40
@@ -1570,13 +1564,11 @@ function MilestonePanelClass:CreateRecalculateButton(dirtyCount)
             if currentPath then
                 local pinCount = LazyProf.Pathfinder:GetDirtyPinCount(currentPath)
                 local reason = string.format("recalculate button (%d dirty pin%s)", pinCount, pinCount ~= 1 and "s" or "")
-                if currentPath.professionKey then
+                if currentPath.planning then
                     -- Planning mode - recalculate and update this panel
                     local path = LazyProf.Pathfinder:CalculateForProfession(
                         currentPath.professionKey,
-                        currentPath.currentSkill,
-                        reason,
-                        currentPath.actualSkill
+                        { reason = reason, planFromOne = currentPath.planFromOne }
                     )
                     if path then
                         self:Update(path)

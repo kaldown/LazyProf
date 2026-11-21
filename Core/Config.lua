@@ -11,12 +11,14 @@ LazyProf.defaults = {
         suggestUnlearnedRecipes = true,
         includeGreenRecipes = false,
         includeCurrencyRecipes = false,
+        -- "With margin": extra crafts for bad luck, as a percentage of each step
+        useMargin = false,
+        marginPercent = 15,
 
         -- Display
         displayMode = Constants.DISPLAY_MODE.ARROW_TOOLTIP,
         showMilestonePanel = true,
         showMissingMaterials = true,
-        calculateFromCurrentSkill = false,
         includeBankItems = false,
         includeAltCharacters = false,
         includeGuildBank = false,
@@ -170,6 +172,24 @@ LazyProf.options = {
                         LazyProf:Recalculate("setting changed")
                     end,
                 },
+                marginPercent = {
+                    name = "Margin (percent)",
+                    desc = "Skill-ups are a matter of chance, so the planned number of crafts " ..
+                           "is an average. With the \"With margin\" box of the LazyProf window " ..
+                           "ticked, every step plans this many percent more crafts and " ..
+                           "reagents, rounded up once per step.\n\n" ..
+                           "The margin never changes which recipes are chosen.",
+                    type = "range",
+                    order = 5,
+                    min = 5,
+                    max = 30,
+                    step = 5,
+                    get = function() return LazyProf.db.profile.marginPercent end,
+                    set = function(_, v)
+                        LazyProf.db.profile.marginPercent = v
+                        LazyProf:UpdateDisplay()
+                    end,
+                },
                 selfFoundMode = {
                     name = "Self-Found mode",
                     desc = "When enabled, the path only suggests recipes you can complete " ..
@@ -250,23 +270,6 @@ LazyProf.options = {
                     set = function(_, v)
                         LazyProf.db.profile.showMissingMaterials = v
                         LazyProf:UpdateDisplay()
-                    end,
-                },
-                calculateFromCurrentSkill = {
-                    name = "Calculate from current skill",
-                    desc = "When enabled, shows the leveling path starting from your " ..
-                           "current skill level.\n\n" ..
-                           "When disabled, shows the FULL leveling path from skill 1 " ..
-                           "to max, useful for planning total materials needed.\n\n" ..
-                           "Example: At Engineering 184, enabled shows 184-300, " ..
-                           "disabled shows 1-300 (full path).",
-                    type = "toggle",
-                    order = 4,
-                    width = "full",
-                    get = function() return LazyProf.db.profile.calculateFromCurrentSkill end,
-                    set = function(_, v)
-                        LazyProf.db.profile.calculateFromCurrentSkill = v
-                        LazyProf:Recalculate("setting changed")
                     end,
                 },
                 resetPanelPositions = {
