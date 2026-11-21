@@ -71,6 +71,7 @@ addon.Utils = {
 assert(loadfile("Core/Init.lua"))("LazyProf", addon)
 assert(loadfile("Modules/Recipes/Availability.lua"))("LazyProf", addon)
 assert(loadfile("Modules/Recipes/SelfFound.lua"))("LazyProf", addon)
+assert(loadfile("Modules/Pathfinder/Pins.lua"))("LazyProf", addon)
 assert(loadfile("Modules/Pathfinder/StrategyCore.lua"))("LazyProf", addon)
 assert(loadfile("Modules/Pathfinder/Strategies/Cheapest.lua"))("LazyProf", addon)
 local LP = _G.LazyProf

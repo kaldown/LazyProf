@@ -105,9 +105,10 @@ local function AddGap(gaps, from, to, reason)
 end
 
 LazyProf.StrategyCore = {
-    Run = function(_core, self, currentSkill, targetSkill, recipes, inventory, prices, racialBonus, pinnedRecipes)
+    -- pins: optional pin list (Modules/Pathfinder/Pins.lua); with none the
+    -- loop's output is what the optimizer picks.
+    Run = function(_core, self, currentSkill, targetSkill, recipes, inventory, prices, racialBonus, pins)
         racialBonus = racialBonus or 0
-        pinnedRecipes = pinnedRecipes or {}
         local path = {}
         local gaps = {}
         local simulatedSkill = currentSkill
@@ -115,7 +116,7 @@ LazyProf.StrategyCore = {
         local purchasedRecipes = {}  -- Track recipes we've "bought" in simulation
 
         while simulatedSkill < targetSkill do
-            local pinnedId = pinnedRecipes[simulatedSkill]
+            local pinnedId = LazyProf.Pins.Find(pins, simulatedSkill)
 
             -- Get craftable recipes that can still give skillups
             -- Use effective skill (base - bonus) for color calculations

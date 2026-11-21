@@ -49,6 +49,7 @@ function harness.stubWow(opts)
     _G.IsSpellKnown = function() return false end
     _G.InCombatLockdown = function() return false end
     _G.UnitFactionGroup = function() return "Alliance", "Alliance" end
+    _G.UnitGUID = function(unit) return unit == "player" and "Player-1-TEST0001" or nil end
 
     if opts.sod then
         _G.Enum = { SeasonID = { SeasonOfDiscovery = 2 } }
@@ -100,7 +101,7 @@ function harness.loadLazyProf(files)
     LazyProf.IsDebugEnabled = function() return false end
     -- Nothing owned: snapshots pin pure market-price scoring.
     LazyProf.Inventory = { ScanAll = function() return {}, {} end }
-    LazyProf.db = { profile = {}, char = { learnedRecipes = {}, priceCache = {} } }
+    LazyProf.db = { profile = {}, char = { learnedRecipes = {}, priceCache = {} }, global = { characters = {} } }
     for _, path in ipairs(files) do
         loadChunk(path, "LazyProf", LazyProf)
         if path == "Core/Config.lua" then

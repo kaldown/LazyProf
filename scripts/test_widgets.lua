@@ -237,7 +237,8 @@ local function load(family, opts)
         UnlearnedHiddenByFilter = function() return env.unlearnedHidden or false end,
     }
     addon.Pathfinder = {
-        pinnedRecipes = {},
+        PinnedAt = function() return nil end,
+        GetDirtyPinCount = function() return 0 end,
         CalculateMissingMaterials = function() return env.missing end,
         GetArrowStep = function() return env.arrowStep end,
     }

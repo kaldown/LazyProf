@@ -9,10 +9,6 @@ local Pathfinder = LazyProf.Pathfinder
 -- Current calculated path
 Pathfinder.currentPath = nil
 
--- Pinned recipes: session-only overrides for pathfinder choices
--- Key: skill level (step's skillStart), Value: recipe ID
-Pathfinder.pinnedRecipes = {}
-
 -- Calculate optimal path for active profession
 -- reason: optional string describing what triggered this calculation
 function Pathfinder:Calculate(reason)
@@ -50,15 +46,17 @@ function Pathfinder:Calculate(reason)
         tostring(LazyProf.db.profile.includeAltCharacters),
         tostring(LazyProf.db.profile.includeGreenRecipes)))
 
-    -- Log active pins if any
-    local pinCount = 0
-    for _ in pairs(self.pinnedRecipes) do pinCount = pinCount + 1 end
-    if pinCount > 0 then
+    -- Pins the real skill has passed are done with; the rest override the
+    -- optimizer over their skill range.
+    local profKey = LazyProf.Professions.active
+    local pins = self:GetPins(profKey)
+    LazyProf.Pins.Prune(pins, currentSkill)
+    if #pins > 0 and LazyProf:IsDebugEnabled("pathfinder") then
         local pinDetails = {}
-        for skill, recipeId in pairs(self.pinnedRecipes) do
-            table.insert(pinDetails, string.format("skill %d -> recipe %s", skill, tostring(recipeId)))
+        for _, pin in ipairs(pins) do
+            table.insert(pinDetails, string.format("%.2f-%.2f -> recipe %s", pin.from, pin.to, tostring(pin.recipeId)))
         end
-        LazyProf:Debug("pathfinder", string.format("Active pins (%d): %s", pinCount, table.concat(pinDetails, ", ")))
+        LazyProf:Debug("pathfinder", string.format("Active pins (%d): %s", #pins, table.concat(pinDetails, ", ")))
     end
 
     -- Get recipes with learned status
@@ -144,13 +142,14 @@ function Pathfinder:Calculate(reason)
     -- pass (IsRecipeAvailable is called per unlearned candidate per step).
     LazyProf.RecipeAvailability:BeginRecalc()
     LazyProf.SelfFound:BeginRecalc(inventory)
-    local steps, meta = strategy:Calculate(startSkill, targetSkill, recipes, {}, prices, racialBonus, self.pinnedRecipes)
+    local steps, meta = strategy:Calculate(startSkill, targetSkill, recipes, {}, prices, racialBonus, pins)
     LazyProf.SelfFound:EndRecalc()
     LazyProf.RecipeAvailability:EndRecalc()
 
     -- Build result (totals cover the steps the path has; gaps add nothing)
     self.currentPath = {
         profession = profData.name,
+        professionKey = profKey,
         currentSkill = startSkill,
         actualSkill = currentSkill,
         targetSkill = targetSkill,
@@ -263,7 +262,8 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel, reason, actualSk
     -- (owned materials are handled separately by the shopping list)
     LazyProf.RecipeAvailability:BeginRecalc()
     LazyProf.SelfFound:BeginRecalc(inventory)
-    local steps, meta = strategy:Calculate(skillLevel, targetSkill, recipes, {}, prices, racialBonus, self.pinnedRecipes)
+    local pins = self:GetPins(profKey)
+    local steps, meta = strategy:Calculate(skillLevel, targetSkill, recipes, {}, prices, racialBonus, pins)
     LazyProf.SelfFound:EndRecalc()
     LazyProf.RecipeAvailability:EndRecalc()
 
@@ -831,42 +831,50 @@ function Pathfinder:GetArrowStep(path)
     return nil  -- past the last step: nothing left to point at
 end
 
--- Pin a recipe at a specific skill level (overrides optimizer's pick on next recalculate)
-function Pathfinder:PinRecipe(skillLevel, recipeId)
-    self.pinnedRecipes[skillLevel] = recipeId
-    LazyProf:Debug("pathfinder", string.format("Pinned recipe %s at skill %d", tostring(recipeId), skillLevel))
+-- Pins (see Modules/Pathfinder/Pins.lua): saved per character and profession.
+
+-- The profession's pin list (the saved table itself).
+function Pathfinder:GetPins(profKey)
+    if not profKey then return {} end
+    return LazyProf.CharStore:Profession(profKey).pins
 end
 
--- Remove a pin at a specific skill level
-function Pathfinder:UnpinRecipe(skillLevel)
-    self.pinnedRecipes[skillLevel] = nil
-    LazyProf:Debug("pathfinder", string.format("Unpinned recipe at skill %d", skillLevel))
+-- Recipe id pinned at a skill, nil when none.
+function Pathfinder:PinnedAt(profKey, skill)
+    return LazyProf.Pins.Find(self:GetPins(profKey), skill)
 end
 
--- Clear all pins
-function Pathfinder:ClearPins()
-    self.pinnedRecipes = {}
-    LazyProf:Debug("pathfinder", "Cleared all pinned recipes")
+-- Pin a recipe over a skill range; it replaces any pin it overlaps. The
+-- caller recalculates.
+function Pathfinder:PinRange(profKey, from, to, recipeId)
+    LazyProf.Pins.Add(self:GetPins(profKey), from, to, recipeId)
+    LazyProf:Debug("pathfinder", string.format("Pinned recipe %s for %s %.2f-%.2f",
+        tostring(recipeId), tostring(profKey), from, to))
 end
 
--- Check if any pins exist that differ from the current path's winners
-function Pathfinder:HasDirtyPins()
-    if not self.currentPath then return false end
-    for _, step in ipairs(self.currentPath.steps) do
-        local pinned = self.pinnedRecipes[step.skillStart]
-        if pinned and pinned ~= step.recipe.id then
-            return true
-        end
+-- Remove the pin covering a skill.
+function Pathfinder:UnpinAt(profKey, skill)
+    if LazyProf.Pins.RemoveAt(self:GetPins(profKey), skill) then
+        LazyProf:Debug("pathfinder", string.format("Unpinned %s at %.2f", tostring(profKey), skill))
     end
-    return false
 end
 
--- Get count of pins that differ from current path winners
-function Pathfinder:GetDirtyPinCount()
-    if not self.currentPath then return 0 end
+-- Remove every pin of a profession.
+function Pathfinder:ClearPins(profKey)
+    local pins = self:GetPins(profKey)
+    for i = #pins, 1, -1 do
+        pins[i] = nil
+    end
+end
+
+-- How many steps of a path are overridden by a pin the path was not
+-- calculated with yet (the pinned recipe differs from the step's).
+function Pathfinder:GetDirtyPinCount(path)
+    path = path or self.currentPath
+    if not path then return 0 end
     local count = 0
-    for _, step in ipairs(self.currentPath.steps) do
-        local pinned = self.pinnedRecipes[step.skillStart]
+    for _, step in ipairs(path.steps) do
+        local pinned = self:PinnedAt(path.professionKey, step.skillStart)
         if pinned and pinned ~= step.recipe.id then
             count = count + 1
         end
