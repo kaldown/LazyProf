@@ -108,6 +108,7 @@ function RecipeDetails:Initialize()
 
     -- Close button
     self.frame.closeBtn = CreateFrame("Button", nil, self.frame, "UIPanelCloseButton")
+    LazyProf.PanelShell:RaiseControl(self.frame, self.frame.closeBtn)
     self.frame.closeBtn:SetPoint("TOPRIGHT", -2, -2)
     self.frame.closeBtn:SetSize(20, 20)
     -- A plain hide, not "user closed": this panel only opens on a click, so the

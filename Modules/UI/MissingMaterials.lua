@@ -57,6 +57,7 @@ function MissingPanel:Initialize()
 
     -- Close button
     self.frame.closeBtn = CreateFrame("Button", nil, self.frame, "UIPanelCloseButton")
+    LazyProf.PanelShell:RaiseControl(self.frame, self.frame.closeBtn)
     self.frame.closeBtn:SetPoint("TOPRIGHT", -2, -2)
     self.frame.closeBtn:SetSize(20, 20)
     -- Stays closed until the profession window is reopened
@@ -91,6 +92,7 @@ function MissingPanel:Initialize()
 
     -- Resize handle (solid hit area with grabber icon overlay)
     self.frame.resizeBtn = CreateFrame("Button", nil, self.frame)
+    LazyProf.PanelShell:RaiseControl(self.frame, self.frame.resizeBtn)
     self.frame.resizeBtn:SetSize(32, 32)
     self.frame.resizeBtn:SetPoint("BOTTOMRIGHT", 0, 0)
     self.frame.resizeBtn:SetFrameStrata("DIALOG") -- Above all nested content

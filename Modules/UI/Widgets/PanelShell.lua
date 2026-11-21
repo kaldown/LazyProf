@@ -146,11 +146,14 @@ end
 -- hidden; the title font stays GameFontNormal. Call after the title bar
 -- texture exists.
 local FOREVER_LAYOUT = "ButtonFrameTemplateNoPortrait"
+local CHROME_LEVEL = 5   -- NineSlice level above the panel; titles and controls sit above it
 local FOREVER_BG = "Interface\\FrameGeneral\\UI-Background-Rock"
 
 function PanelShell:ApplyChrome(frame, opts)
     opts = opts or {}
     if LazyProf.ClientFamily == "forever" then
+        if frame._chromeApplied == true then return end
+        frame._chromeApplied = true
         if frame.titleBg then frame.titleBg:Hide() end
         if not frame.Bg then
             local bg = frame:CreateTexture(nil, "BACKGROUND")
@@ -162,10 +165,24 @@ function PanelShell:ApplyChrome(frame, opts)
             frame.Bg = bg
         end
         if NineSliceUtil and NineSliceUtil.ApplyLayoutByName then
-            if not frame.NineSlice then
-                frame.NineSlice = CreateFrame("Frame", nil, frame, "NineSlicePanelTemplate")
-            end
+            frame.NineSlice = CreateFrame("Frame", nil, frame, "NineSlicePanelTemplate")
+            -- NineSlicePanelTemplate already sets all points and a fixed level 500
+            -- (Mainline/SharedUIPanelTemplates.xml:381); anchor explicitly and take
+            -- a level relative to the panel so the shell's raise still orders panels.
+            frame.NineSlice:SetAllPoints(frame)
+            frame.NineSlice:SetFrameLevel(frame:GetFrameLevel() + CHROME_LEVEL)
             NineSliceUtil.ApplyLayoutByName(frame.NineSlice, FOREVER_LAYOUT)
+            -- The border is textures on a child frame, and a child frame draws above
+            -- the parent's own regions, so the title moves to a host frame above it
+            -- (Blizzard does the same: TitleContainer at frameLevel 510,
+            -- SharedUIPanelTemplates.xml:486).
+            if frame.title then
+                local host = CreateFrame("Frame", nil, frame)
+                host:SetAllPoints(frame)
+                host:SetFrameLevel(frame:GetFrameLevel() + CHROME_LEVEL + 2)
+                frame.title:SetParent(host)
+                frame.TitleHost = host
+            end
         end
         return
     end
@@ -178,6 +195,13 @@ function PanelShell:ApplyChrome(frame, opts)
     })
     frame:SetBackdropColor(bg[1], bg[2], bg[3], bg[4])
     frame:SetBackdropBorderColor(border[1], border[2], border[3], border[4])
+end
+
+-- Forever: lift a control (close button, resize grip, mode toggle) above the
+-- border frame so the frame art does not cover it. No-op elsewhere.
+function PanelShell:RaiseControl(frame, control)
+    if LazyProf.ClientFamily ~= "forever" or not control or type(frame.NineSlice) ~= "table" then return end
+    control:SetFrameLevel(frame.NineSlice:GetFrameLevel() + 2)
 end
 
 -- Save where the user dropped the panel.

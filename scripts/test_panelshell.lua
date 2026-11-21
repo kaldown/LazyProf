@@ -775,6 +775,9 @@ section("chrome", function()
         f.calls[2] and f.calls[2][2] == 0.1 and f.calls[2][5] == 0.95
         and f.calls[3] and f.calls[3][2] == 0.6 and f.calls[3][5] == 1)
     check(p .. "classic: no nine-slice", f.NineSlice == nil)
+    local cl = newFrame("close"); cl.level = 3
+    env.shell:RaiseControl(f, cl)
+    check(p .. "classic: RaiseControl does nothing", cl.level == 3)
 
     -- Forever: nine-slice child + rock background, no backdrop calls.
     fresh()
@@ -783,6 +786,8 @@ section("chrome", function()
     _G.CreateFrame = function(kind, name, parent, template)
         local c = newFrame("nine")
         c.kind, c.parent, c.template = kind, parent, template
+        c.level = (parent and parent:GetFrameLevel() or 0) + 1
+        function c:SetAllPoints(rel) self.allPoints = rel end
         created[#created + 1] = c
         return c
     end
@@ -791,13 +796,23 @@ section("chrome", function()
     end }
     f = chromeFrame()
     f.titleBg = f:CreateTexture(nil, "ARTWORK")
+    f.title = { SetParent = function(self, p) self.parent = p end }
+    f.level = 10
+    local close = newFrame("close")
     env.shell:ApplyChrome(f, OPTS)
     check(p .. "forever: no backdrop calls", #f.calls == 0, #f.calls)
     check(p .. "forever: NineSlice child from NineSlicePanelTemplate",
-        #created == 1 and f.NineSlice == created[1] and created[1].parent == f
+        f.NineSlice == created[1] and created[1].parent == f
         and created[1].template == "NineSlicePanelTemplate")
     check(p .. "forever: layout applied by name",
         #applied == 1 and applied[1].container == f.NineSlice and applied[1].layout == "ButtonFrameTemplateNoPortrait")
+    check(p .. "forever: NineSlice anchored to the panel", f.NineSlice.allPoints == f)
+    local host = f.TitleHost
+    check(p .. "forever: title re-parented to a host frame above the NineSlice",
+        host and f.title.parent == host and host.parent == f and host.allPoints == f
+        and host:GetFrameLevel() > f.NineSlice:GetFrameLevel() and f.NineSlice:GetFrameLevel() > f:GetFrameLevel())
+    env.shell:RaiseControl(f, close)
+    check(p .. "forever: controls raised above the NineSlice", close:GetFrameLevel() > f.NineSlice:GetFrameLevel())
     check(p .. "forever: rock background tiled",
         f.Bg and f.Bg.path == "Interface\\FrameGeneral\\UI-Background-Rock" and f.Bg.horiz == true
         and f.Bg.vert == true and f.Bg.layer == "BACKGROUND")

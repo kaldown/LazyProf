@@ -166,6 +166,7 @@ function MilestonePanelClass:Initialize()
 
         -- Close button
         self.frame.closeBtn = CreateFrame("Button", nil, self.frame, "UIPanelCloseButton")
+        LazyProf.PanelShell:RaiseControl(self.frame, self.frame.closeBtn)
         self.frame.closeBtn:SetPoint("TOPRIGHT", -2, -2)
         self.frame.closeBtn:SetSize(20, 20)
         -- Stays closed until the profession window is reopened
@@ -179,6 +180,7 @@ function MilestonePanelClass:Initialize()
 
         -- Resize handle
         self.frame.resizeBtn = CreateFrame("Button", nil, self.frame)
+        LazyProf.PanelShell:RaiseControl(self.frame, self.frame.resizeBtn)
         self.frame.resizeBtn:SetSize(32, 32)
         self.frame.resizeBtn:SetPoint("BOTTOMRIGHT", 0, 0)
         self.frame.resizeBtn:SetFrameStrata("DIALOG")
@@ -366,6 +368,7 @@ end
 -- Create the mode toggle button (Cheapest/Fastest)
 function MilestonePanelClass:CreateModeToggle()
     self.frame.modeBtn = CreateFrame("Button", nil, self.frame, "BackdropTemplate")
+    LazyProf.PanelShell:RaiseControl(self.frame, self.frame.modeBtn)
     self.frame.modeBtn:SetSize(80, 20)
     self.frame.modeBtn:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
