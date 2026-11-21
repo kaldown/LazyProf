@@ -76,8 +76,8 @@ local function installAuctionator(withAge)
 end
 
 local itemNames = { [2589] = "Linen Cloth", [2592] = "Wool Cloth", [2320] = "Coarse Thread",
-                    [4306] = "Silk Cloth", [2996] = "Bolt of Linen Cloth" }
-local sellPrices = { [2589] = 13, [2592] = 33, [2320] = 2, [4306] = 150, [2996] = 40 }
+                    [4306] = "Silk Cloth", [2996] = "Bolt of Linen Cloth", [8888] = "Unsellable Thing" }
+local sellPrices = { [2589] = 13, [2592] = 33, [2320] = 2, [4306] = 150, [2996] = 40, [8888] = 0 }
 
 local function loadPricing(opts)
     opts = opts or {}
@@ -157,7 +157,12 @@ section("no price yet", function()
     local info = pm:GetPriceInfo(7777)
     check(p .. "floor price, not cached", info.source == "floor" and info.price == addon.Constants.MIN_REAGENT_PRICE
         and pm.cache[7777] == nil)
+    check(p .. "item data not loaded: still loading", info.detail == "loading", tostring(info.detail))
     check(p .. "remembered for refinement", pm.flooredItems[7777] == true)
+
+    info = pm:GetPriceInfo(8888)
+    check(p .. "loaded item without a sell value: unsellable", info.source == "floor"
+        and info.detail == "unsellable", tostring(info.detail))
 
     addon = loadPricing({ sellFallback = false, uncached = { [7777] = true } })
     info = addon.PriceManager:GetPriceInfo(7777)
@@ -169,6 +174,14 @@ section("auctionator without the age call", function()
     local info = addon.PriceManager:GetPriceInfo(4306)
     check("age: missing age call leaves the age unknown", info.source == "Auctionator"
         and info.price == 300 and info.ageDays == nil)
+    addon = loadPricing({ tsm = false })
+    auctionatorAges[4306] = nil
+    info = addon.PriceManager:GetPriceInfo(4306)
+    resetAuctionator()
+    check("age: age call without data leaves the age unknown", info.source == "Auctionator"
+        and info.price == 300 and info.ageDays == nil)
+    check("age: undated price is not stale", addon.PriceManager:PathSummary(
+        { steps = { { recipe = { reagents = { { itemId = 4306 } } } } } }).stale == 0)
 end)
 
 -- ===========================================================================
@@ -185,19 +198,29 @@ section("describe", function()
     check(p .. "Auctionator 4 days", D({ source = "Auctionator", ageDays = 4 }) == "Auctionator, seen 4 days ago")
     check(p .. "Auctionator undated", D({ source = "Auctionator" }) == "Auctionator")
     check(p .. "estimate", D({ source = "VendorSell" }) == "estimate from the vendor sell value")
-    check(p .. "floor", D({ source = "floor" }) == "no price yet (item data still loading)")
-    check(p .. "none", D({ source = "none" }) == "no price")
+    check(p .. "floor, loading", D({ source = "floor", detail = "loading" }) == "no price yet (item data still loading)")
+    check(p .. "floor, unsellable",
+        D({ source = "floor", detail = "unsellable" }) == "no price (no auction price, no vendor sell value)")
+    check(p .. "none", D({ source = "none" }) == "no price (no auction price, vendor sell estimate off)")
+
+    local L = addon.PriceManager.PriceLine
+    check(p .. "price line", L({ price = 120, source = "TSM", detail = "DBRecent" }) == "Price: 1s 20c each, TSM DBRecent",
+        L({ price = 120, source = "TSM", detail = "DBRecent" }))
+    check(p .. "price line without a real price",
+        L({ price = 1, source = "floor", detail = "loading" }) == "Price: no price yet (item data still loading)")
+    check(p .. "price line, none", L({ source = "none" }) == "Price: no price (no auction price, vendor sell estimate off)")
 end)
 
 -- ===========================================================================
 -- A path's reagents: counts by source, too-old auction prices, missing prices
 -- ===========================================================================
+-- Step 1 uses the first two reagents, step 2 all of them (so ids repeat).
 local function pathWith(...)
     local reagents = {}
     for _, id in ipairs({ ... }) do reagents[#reagents + 1] = { itemId = id, count = 1 } end
     return { steps = {
         { recipe = { id = 1, reagents = { reagents[1], reagents[2] } } },
-        { recipe = { id = 2, reagents = { reagents[2], reagents[3], reagents[4], reagents[5], reagents[6] } } },
+        { recipe = { id = 2, reagents = reagents } },
     } }
 end
 
@@ -205,14 +228,23 @@ section("summary", function()
     local p = "summary: "
     local addon = loadPricing({ uncached = { [7777] = true } })
     local pm = addon.PriceManager
-    local path = pathWith(2589, 2592, 2320, 4306, 2996, 7777)
+    local path = pathWith(2589, 2592, 2320, 4306, 2996, 7777, 8888)
     local ids = pm:PathReagentIds(path)
-    check(p .. "unique reagent ids", #ids == 6, #ids)
+    check(p .. "unique reagent ids", #ids == 7, #ids)
     local s = pm:PathSummary(path)
-    check(p .. "counts", s.total == 6 and s.tsm == 2 and s.vendor == 1 and s.auctionator == 1
-        and s.estimate == 1 and s.missing == 1,
-        string.format("%d %d %d %d %d %d", s.total, s.tsm, s.vendor, s.auctionator, s.estimate, s.missing))
+    check(p .. "counts", s.total == 7 and s.tsm == 2 and s.vendor == 1 and s.auctionator == 1
+        and s.estimate == 1 and s.loading == 1 and s.unpriced == 1,
+        string.format("%d %d %d %d %d %d %d", s.total, s.tsm, s.vendor, s.auctionator, s.estimate, s.loading, s.unpriced))
     check(p .. "5-day-old Auctionator price is stale", s.stale == 1 and s.oldestAuctionatorDays == 5)
+
+    -- Reports read the prices the calculation used, even past the cache TTL.
+    local readAt = pm.cache[2589].timestamp
+    tsmValues.DBRecent["i:2589"] = 999
+    now = now + 10000
+    s = pm:PathSummary(path)
+    check(p .. "past the TTL the cached price is reported, not re-read",
+        pm.cache[2589].timestamp == readAt and pm.cache[2589].price == 120)
+    resetTsm()
 
     auctionatorAges[4306] = addon.Constants.PRICE_STALE_DAYS - 1
     pm.cache = {}
@@ -225,6 +257,10 @@ section("summary", function()
     resetAuctionator()
 
     check(p .. "empty path", pm:PathSummary({ steps = {} }).total == 0 and pm:PathSummary(nil).total == 0)
+
+    addon = loadPricing({ sellFallback = false, uncached = { [7777] = true } })
+    s = addon.PriceManager:PathSummary(pathWith(2589, 7777))
+    check(p .. "sell estimate off: no price counts as unpriced", s.unpriced == 1 and s.loading == 0)
 end)
 
 section("warnings", function()
@@ -236,20 +272,28 @@ section("warnings", function()
         for _, l in ipairs(W(s)) do out[#out + 1] = l.text end
         return table.concat(out, " | ")
     end
-    local clean = { total = 5, tsm = 3, auctionator = 1, vendor = 1, estimate = 0, missing = 0, stale = 0 }
+    local clean = { total = 5, tsm = 3, auctionator = 1, vendor = 1, estimate = 0, loading = 0, unpriced = 0, stale = 0 }
     local t = texts(clean)
     check(p .. "breakdown line", t == "Prices: TSM 3, Auctionator 1, vendor 1", t)
 
-    local bad = { total = 9, tsm = 3, auctionator = 2, vendor = 1, estimate = 2, missing = 1, stale = 2,
+    local estimateOnly = { total = 4, tsm = 0, auctionator = 0, vendor = 0, estimate = 4, loading = 0, unpriced = 0,
+                           stale = 0 }
+    t = texts(estimateOnly)
+    check(p .. "estimates only: noted, no diagnostic hint",
+        t == "Prices: estimate 4 | 4 reagents have no auction price - cost uses the vendor sell value.", t)
+
+    local bad = { total = 11, tsm = 3, auctionator = 2, vendor = 1, estimate = 2, loading = 1, unpriced = 2, stale = 2,
                   oldestAuctionatorDays = 6 }
     t = texts(bad)
-    check(p .. "no price yet", t:find("1 reagent has no price yet", 1, true) ~= nil, t)
+    check(p .. "breakdown counts both kinds of none", t:find("estimate 2, none 3", 1, true) ~= nil, t)
+    check(p .. "no price yet", t:find("1 reagent has no price yet - it updates by itself", 1, true) ~= nil, t)
+    check(p .. "no price at all", t:find("2 reagents have no price at all - scan the auction house", 1, true) ~= nil, t)
     check(p .. "stale auction prices", t:find("Auctionator prices up to 6 days old - rescan the auction house", 1, true) ~= nil, t)
     check(p .. "estimates", t:find("2 reagents have no auction price - cost uses the vendor sell value", 1, true) ~= nil, t)
     check(p .. "points at the diagnostic", t:find("/lp diag prices", 1, true) ~= nil, t)
     check(p .. "plain ASCII", not t:find("[\128-\255]"))
     check(p .. "nothing for no reagents", #W({ total = 0, tsm = 0, auctionator = 0, vendor = 0, estimate = 0,
-        missing = 0, stale = 0 }) == 0)
+        loading = 0, unpriced = 0, stale = 0 }) == 0)
 end)
 
 -- ===========================================================================
@@ -267,7 +311,8 @@ section("diagnostic", function()
     print(text)
     check(p .. "providers line", text:find("tsm=true auctionator=true auctionatorAge=true", 1, true) ~= nil, text)
     check(p .. "TSM sync note", text:find("TSM does not tell other addons when its data was synced", 1, true) ~= nil)
-    check(p .. "summary line", text:find("reagents=6 tsm=2 auctionator=1 vendor=1 estimate=1 noPrice=1 stale=1", 1, true) ~= nil, text)
+    check(p .. "summary line",
+        text:find("reagents=6 tsm=2 auctionator=1 vendor=1 estimate=1 loading=1 noPrice=0 stale=1", 1, true) ~= nil, text)
     check(p .. "item line names item, price and source",
         text:find("2589 Linen Cloth: 1s 20c TSM DBRecent", 1, true) ~= nil, text)
     check(p .. "item line shows every source's value",
@@ -293,6 +338,20 @@ section("diagnostic", function()
     check(p .. "no auction addons: no error", ok, err)
     check(p .. "no auction addons: providers false", text:find("tsm=false auctionator=false", 1, true) ~= nil, text)
     check(p .. "no auction addons: values n/a", text:find("tsm=n/a auctionator=n/a", 1, true) ~= nil, text)
+
+    -- A price source that errors: that item's line fails, the rest still prints.
+    addon = loadPricing()
+    addon.Pathfinder = { currentPath = pathWith(2589, 2592) }
+    _G.TSM_API.GetCustomPriceValue = function(_source, itemString)
+        if itemString == "i:2592" then error("boom") end
+        return 120
+    end
+    lines = {}
+    ok, err = pcall(addon.PriceManager.RunDiagnostic, addon.PriceManager, lines)
+    text = table.concat(lines, "\n")
+    check(p .. "erroring source: no Lua error", ok, err)
+    check(p .. "erroring source: section error and the other item",
+        text:find("SECTION ERROR", 1, true) ~= nil and text:find("2589 Linen Cloth:", 1, true) ~= nil, text)
 end)
 
 print(string.format("\n%d/%d checks passed", total - failures, total))

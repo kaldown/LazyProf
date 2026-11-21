@@ -459,9 +459,8 @@ function MissingPanel:CreateMaterialRow(mat, yOffset, contentWidth, rowType)
                 GameTooltip:AddLine(style.tooltipWarning, 0.6, 0.6, 0.6)
             end
             if style.showCost and LazyProf.PriceManager then
-                local info = LazyProf.PriceManager:GetPriceInfo(mat.itemId)
-                local each = info.price and info.source ~= "floor" and (Utils.FormatMoney(info.price) .. " each, ") or ""
-                GameTooltip:AddLine("Price: " .. each .. LazyProf.PriceManager.DescribeSource(info), 0.7, 0.7, 0.7)
+                local pm = LazyProf.PriceManager
+                GameTooltip:AddLine(pm.PriceLine(pm:PeekPriceInfo(mat.itemId)), 0.7, 0.7, 0.7)
             end
             GameTooltip:AddLine("Shift-click to link", 0.5, 0.5, 0.5)
             GameTooltip:Show()

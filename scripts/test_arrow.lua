@@ -293,6 +293,7 @@ section("tooltip prices", function()
     local p = "tooltip prices: "
     fresh()
     local added, summarized = {}, nil
+    local savedAddLine = rawget(GameTooltip, "AddLine")
     function GameTooltip:AddLine(text) added[#added + 1] = text end
     env.addon.PriceManager = {
         PathSummary = function(_self, path) summarized = path; return { total = 2 } end,
@@ -314,6 +315,7 @@ section("tooltip prices", function()
     env.arrow.frame.scripts.OnEnter(env.arrow.frame)
     text = table.concat(added, "|")
     check(p .. "no reagents: no price lines", text:find("Prices", 1, true) == nil, text)
+    GameTooltip.AddLine = savedAddLine
 end)
 
 print(string.format("\n%d/%d checks passed", total - failures, total))

@@ -40,8 +40,11 @@ end
 -- Price of an item and where it came from:
 --   price     copper, or nil when nothing prices the item
 --   source    "Vendor" | "TSM" | "Auctionator" | "VendorSell" | "floor" | "none"
+--             ("floor": the 1-copper stand-in; "none": no price, sell estimate off)
 --   detail    TSM: the price source key that answered (DBRecent, DBMarket, ...);
---             Vendor: the addon that recorded the merchant price
+--             Vendor: the addon that recorded the merchant price;
+--             floor: "loading" (item data not in the client yet) or
+--             "unsellable" (item data loaded, no vendor sell value)
 --   ageDays   Auctionator: days since it last saw a price for the item
 --   timestamp when LazyProf read it (time())
 function PriceManager:GetPriceInfo(itemId)
@@ -102,10 +105,18 @@ function PriceManager:GetPriceInfo(itemId)
         -- refine the value once GET_ITEM_INFO_RECEIVED delivers the real price.
         self.flooredItems = self.flooredItems or {}
         self.flooredItems[itemId] = true
-        return { price = Constants.MIN_REAGENT_PRICE, source = "floor", timestamp = time() }
+        local loaded = LazyProf.Client:GetItemInfo(itemId) ~= nil
+        return { price = Constants.MIN_REAGENT_PRICE, source = "floor",
+                 detail = loaded and "unsellable" or "loading", timestamp = time() }
     end
 
     return { price = nil, source = "none", timestamp = time() }
+end
+
+-- The price info the last calculation used: the cached entry whatever its
+-- age, so reports match the path's totals; looked up only when not cached.
+function PriceManager:PeekPriceInfo(itemId)
+    return self.cache[itemId] or self:GetPriceInfo(itemId)
 end
 
 -- Get price for an item: price, source (see GetPriceInfo).
@@ -156,9 +167,27 @@ function PriceManager.DescribeSource(info)
     elseif source == "VendorSell" then
         return "estimate from the vendor sell value"
     elseif source == "floor" then
+        if info.detail == "unsellable" then
+            return "no price (no auction price, no vendor sell value)"
+        end
         return "no price yet (item data still loading)"
     end
-    return "no price"
+    return "no price (no auction price, vendor sell estimate off)"
+end
+
+-- Shopping-list tooltip line for one item's price.
+function PriceManager.PriceLine(info)
+    local each = ""
+    if info and info.price and info.source ~= "floor" then
+        each = Utils.FormatMoney(info.price) .. " each, "
+    end
+    return "Price: " .. each .. PriceManager.DescribeSource(info)
+end
+
+-- A reagent that will not get a price by itself (no auction price and no
+-- sell value, or the sell estimate is off), as opposed to one still loading.
+local function IsUnpriced(info)
+    return info.source == "none" or (info.source == "floor" and info.detail == "unsellable")
 end
 
 -- Every distinct reagent item id of the path's steps, in first-seen order.
@@ -176,13 +205,15 @@ function PriceManager:PathReagentIds(path)
 end
 
 -- Counts the path's reagent prices by source: total, tsm, auctionator,
--- vendor, estimate (vendor sell value), missing (no price yet / none),
+-- vendor, estimate (vendor sell value), loading (no price yet, item data
+-- still loading), unpriced (no price and none coming: see IsUnpriced),
 -- stale (Auctionator prices PRICE_STALE_DAYS or more old) and
--- oldestAuctionatorDays.
+-- oldestAuctionatorDays. Reads the prices the calculation used.
 function PriceManager:PathSummary(path)
-    local s = { total = 0, tsm = 0, auctionator = 0, vendor = 0, estimate = 0, missing = 0, stale = 0 }
+    local s = { total = 0, tsm = 0, auctionator = 0, vendor = 0, estimate = 0, loading = 0, unpriced = 0,
+                stale = 0 }
     for _, itemId in ipairs(self:PathReagentIds(path)) do
-        local info = self:GetPriceInfo(itemId)
+        local info = self:PeekPriceInfo(itemId)
         s.total = s.total + 1
         if info.source == "TSM" then
             s.tsm = s.tsm + 1
@@ -196,8 +227,10 @@ function PriceManager:PathSummary(path)
             s.vendor = s.vendor + 1
         elseif info.source == "VendorSell" then
             s.estimate = s.estimate + 1
+        elseif IsUnpriced(info) then
+            s.unpriced = s.unpriced + 1
         else
-            s.missing = s.missing + 1
+            s.loading = s.loading + 1
         end
     end
     return s
@@ -209,7 +242,9 @@ end
 
 -- Tooltip lines for a path summary: { text, r, g, b } each. A breakdown of
 -- where the prices came from, then a line for each problem (prices still
--- missing, Auctionator prices too old, reagents priced by the sell estimate).
+-- loading, reagents with no price at all, Auctionator prices too old,
+-- reagents priced by the sell estimate). The /lp diag prices hint is added
+-- only for problems the player can act on.
 function PriceManager.SummaryLines(s)
     local lines = {}
     if not s or s.total == 0 then return lines end
@@ -219,14 +254,20 @@ function PriceManager.SummaryLines(s)
     if s.auctionator > 0 then parts[#parts + 1] = "Auctionator " .. tostring(s.auctionator) end
     if s.vendor > 0 then parts[#parts + 1] = "vendor " .. tostring(s.vendor) end
     if s.estimate > 0 then parts[#parts + 1] = "estimate " .. tostring(s.estimate) end
-    if s.missing > 0 then parts[#parts + 1] = "none " .. tostring(s.missing) end
+    local none = s.loading + s.unpriced
+    if none > 0 then parts[#parts + 1] = "none " .. tostring(none) end
     lines[#lines + 1] = { text = "Prices: " .. table.concat(parts, ", "), r = 0.6, g = 0.6, b = 0.6 }
 
     local problem = false
-    if s.missing > 0 then
+    if s.loading > 0 then
         problem = true
-        lines[#lines + 1] = { text = Reagents(s.missing, "reagent has", "reagents have")
+        lines[#lines + 1] = { text = Reagents(s.loading, "reagent has", "reagents have")
             .. " no price yet - it updates by itself; /reload if it stays.", r = 1, g = 0.5, b = 0 }
+    end
+    if s.unpriced > 0 then
+        problem = true
+        lines[#lines + 1] = { text = Reagents(s.unpriced, "reagent has", "reagents have")
+            .. " no price at all - scan the auction house.", r = 1, g = 0.5, b = 0 }
     end
     if s.stale > 0 then
         problem = true
@@ -234,7 +275,6 @@ function PriceManager.SummaryLines(s)
             .. " days old - rescan the auction house.", r = 1, g = 0.5, b = 0 }
     end
     if s.estimate > 0 then
-        problem = true
         lines[#lines + 1] = { text = Reagents(s.estimate, "reagent has", "reagents have")
             .. " no auction price - cost uses the vendor sell value.", r = 0.7, g = 0.7, b = 0.7 }
     end
@@ -261,23 +301,31 @@ end
 -- (documented in docs/development/TROUBLESHOOTING.md).
 function PriceManager:RunDiagnostic(lines)
     local function add(text) lines[#lines + 1] = text end
+    -- Each part runs under pcall: a failing price source prints
+    -- "SECTION ERROR" and the rest still prints.
+    local function section(name, fn)
+        local ok, err = pcall(fn)
+        if not ok then add("SECTION ERROR: " .. name .. ": " .. tostring(err)) end
+    end
     local providers = LazyProf.PriceProviders or {}
     local function available(name)
         local p = providers[name]
         return p ~= nil and p:IsAvailable() and true or false
     end
     local profile = LazyProf.db.profile
-    local ageCall = Auctionator and Auctionator.API and Auctionator.API.v1
-        and Auctionator.API.v1.GetAuctionAgeByItemID ~= nil or false
 
-    add("diag prices: tsm=" .. tostring(available("tsm")) .. " auctionator=" .. tostring(available("auctionator"))
-        .. " auctionatorAge=" .. tostring(ageCall) .. " vendor=" .. tostring(available("vendor"))
-        .. " order=" .. table.concat(profile.priceSourcePriority or {}, ",")
-        .. " tsmSource=" .. tostring(profile.tsmPriceSource)
-        .. " sellFallback=" .. tostring(profile.useVendorSellFallback ~= false)
-        .. " staleAfterDays=" .. tostring(Constants.PRICE_STALE_DAYS))
-    add("note: TSM does not tell other addons when its data was synced; the TSM desktop app shows its last sync."
-        .. " Auctionator ages are days since it last saw the item.")
+    section("sources", function()
+        local ageCall = Auctionator and Auctionator.API and Auctionator.API.v1
+            and Auctionator.API.v1.GetAuctionAgeByItemID ~= nil or false
+        add("diag prices: tsm=" .. tostring(available("tsm")) .. " auctionator=" .. tostring(available("auctionator"))
+            .. " auctionatorAge=" .. tostring(ageCall) .. " vendor=" .. tostring(available("vendor"))
+            .. " order=" .. table.concat(profile.priceSourcePriority or {}, ",")
+            .. " tsmSource=" .. tostring(profile.tsmPriceSource)
+            .. " sellFallback=" .. tostring(profile.useVendorSellFallback ~= false)
+            .. " staleAfterDays=" .. tostring(Constants.PRICE_STALE_DAYS))
+        add("note: TSM does not tell other addons when its data was synced; the TSM desktop app shows its last sync."
+            .. " Auctionator ages are days since it last saw the item.")
+    end)
 
     local path = LazyProf.Pathfinder and LazyProf.Pathfinder.currentPath
     if not path or not path.steps or #path.steps == 0 then
@@ -285,30 +333,34 @@ function PriceManager:RunDiagnostic(lines)
         return
     end
 
-    local s = self:PathSummary(path)
-    add("summary: reagents=" .. tostring(s.total) .. " tsm=" .. tostring(s.tsm)
-        .. " auctionator=" .. tostring(s.auctionator) .. " vendor=" .. tostring(s.vendor)
-        .. " estimate=" .. tostring(s.estimate) .. " noPrice=" .. tostring(s.missing)
-        .. " stale=" .. tostring(s.stale)
-        .. " oldestAuctionatorDays=" .. tostring(s.oldestAuctionatorDays))
+    section("summary", function()
+        local s = self:PathSummary(path)
+        add("summary: reagents=" .. tostring(s.total) .. " tsm=" .. tostring(s.tsm)
+            .. " auctionator=" .. tostring(s.auctionator) .. " vendor=" .. tostring(s.vendor)
+            .. " estimate=" .. tostring(s.estimate) .. " loading=" .. tostring(s.loading)
+            .. " noPrice=" .. tostring(s.unpriced) .. " stale=" .. tostring(s.stale)
+            .. " oldestAuctionatorDays=" .. tostring(s.oldestAuctionatorDays))
+    end)
 
     local ids = self:PathReagentIds(path)
     table.sort(ids)
     for _, itemId in ipairs(ids) do
-        local info = self:GetPriceInfo(itemId)
-        local name, _, _, _, _, _, _, _, _, _, sell = LazyProf.Client:GetItemInfo(itemId)
-        local tsmText, tsmPrice = ProviderValue("tsm", itemId)
-        local aucText, aucPrice = ProviderValue("auctionator", itemId)
-        local vendorText = ProviderValue("vendor", itemId)
-        local line = tostring(itemId) .. " " .. (name or ("item:" .. tostring(itemId))) .. ": "
-            .. (info.price and Utils.FormatMoney(info.price) or "-") .. " " .. PriceManager.DescribeSource(info)
-            .. " | tsm=" .. tsmText .. " auctionator=" .. aucText .. " vendor=" .. vendorText
-            .. " sell=" .. ((sell and sell > 0) and Utils.FormatMoney(sell) or "-")
-        if tsmPrice and aucPrice
-                and math.max(tsmPrice, aucPrice) > DISAGREE_RATIO * math.min(tsmPrice, aucPrice) then
-            line = line .. " DISAGREE"
-        end
-        if IsStale(info) then line = line .. " STALE" end
-        add(line)
+        section("item " .. tostring(itemId), function()
+            local info = self:PeekPriceInfo(itemId)
+            local name, _, _, _, _, _, _, _, _, _, sell = LazyProf.Client:GetItemInfo(itemId)
+            local tsmText, tsmPrice = ProviderValue("tsm", itemId)
+            local aucText, aucPrice = ProviderValue("auctionator", itemId)
+            local vendorText = ProviderValue("vendor", itemId)
+            local line = tostring(itemId) .. " " .. (name or ("item:" .. tostring(itemId))) .. ": "
+                .. (info.price and Utils.FormatMoney(info.price) or "-") .. " " .. PriceManager.DescribeSource(info)
+                .. " | tsm=" .. tsmText .. " auctionator=" .. aucText .. " vendor=" .. vendorText
+                .. " sell=" .. ((sell and sell > 0) and Utils.FormatMoney(sell) or "-")
+            if tsmPrice and aucPrice
+                    and math.max(tsmPrice, aucPrice) > DISAGREE_RATIO * math.min(tsmPrice, aucPrice) then
+                line = line .. " DISAGREE"
+            end
+            if IsStale(info) then line = line .. " STALE" end
+            add(line)
+        end)
     end
 end
