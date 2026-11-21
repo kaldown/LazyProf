@@ -4,6 +4,27 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- WoW Forever (1.60) support from the same addon. LazyProf adapts to the Forever profession window, uses native dropdowns and panel frames, and opens from an addon compartment entry instead of a minimap button. The bundled CraftLib ships Forever recipe data for 7 professions: Alchemy (169 recipes), Blacksmithing (387), Enchanting (221), Leatherworking (467), Tailoring (373), Cooking (122) and First Aid (28). Engineering and Mining are not included yet while their data is being confirmed in game.
+- Recipes with an unknown source are only suggested once you have learned them, own them, or can buy them. They are labelled "Unknown source".
+- New option "Include recipes bought with currency" (off by default). Recipes bought with a currency such as Merchant's Favor are otherwise only suggested when already learned.
+- `/lp diag forever` reports the Forever client state (profession window, recipe data, CraftLib version) in a copyable window.
+- `/lp resetpanels` and a "Reset panel positions" option move the panels back to their default places.
+
+### Changed
+
+- Paths no longer stop silently at a skill gap. A gap is bridged with a green recipe while its skill-up chance is at least 10%; otherwise it is shown as a gap in the path.
+- Panel positions are kept, and a panel you closed stays closed until the profession window is reopened. Panels are restored correctly after combat.
+- With "Calculate from current skill" off, the bracket, shopping list and arrow now follow your real skill.
+- Panel rows are reused, so long crafting sessions no longer build up frames.
+
+### Known limits
+
+- Racial profession bonuses on Forever are treated as 0 until confirmed.
+- Required tools (for example enchanting rods) are not taken into account when planning paths yet.
+- The skill cap on Forever is assumed to be 300 until confirmed.
+
 ## [0.9.0] - 2026-06-30
 
 ### Added

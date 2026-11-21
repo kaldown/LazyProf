@@ -28,6 +28,7 @@ See [CraftLib's profession coverage](https://github.com/kaldown/CraftLib#profess
 - **Optimal leveling path** - Calculates which recipes to craft based on current AH prices
 - **Two strategies** - Cheapest (minimize gold) or Fastest (minimize crafts)
 - **Material Resolution** - Automatically suggests crafting intermediates (e.g., smelt ore into bars) when cheaper than buying
+- **Skill gaps** - Paths bridge a gap with a green recipe while its skill-up chance is at least 10%, otherwise the gap is shown
 - **Recipe Availability Filtering** - Only suggests recipes you can actually obtain - checks inventory, trainers, vendors, and Auction House listings
 - **Missing materials list** - Shows what you need from bank, mail, guild bank, alts, what to craft, and total cost
 - **Milestone tracking** - See your progress through each skill bracket with bracket filtering
@@ -36,6 +37,7 @@ See [CraftLib's profession coverage](https://github.com/kaldown/CraftLib#profess
 - **Planning mode** - Plan any profession's leveling path without learning it first
 - **Extended inventory** - Checks bags, bank, mailbox, active AH listings, guild bank, and alt characters (with Syndicator)
 - **Every Classic expansion** - One install plans correctly on Classic Era / Vanilla, Season of Discovery, The Burning Crusade, and Wrath of the Lich King (including Inscription, skill cap 450) - it detects your client and uses the right recipes, caps, racial bonuses, and Wowhead links automatically
+- **WoW Forever** - Runs on WoW Forever 1.60 from the same install, with native dropdowns and panels and an addon compartment entry instead of a minimap button. Forever recipe data covers Alchemy, Blacksmithing, Enchanting, Leatherworking, Tailoring, Cooking and First Aid (Engineering and Mining to follow). Known limits: racial bonuses are not applied, required tools are not used for paths yet, and the skill cap is assumed to be 300 until confirmed
 
 ## Pricing
 
@@ -78,6 +80,8 @@ Access via `/lp` or the Interface Options panel:
 - **Include bank items** - Count bank contents in shopping list (requires Syndicator)
 - **Include alt characters** - Include materials on all your characters (requires Syndicator)
 - **Include guild bank** - Include guild bank materials in shopping list (requires Syndicator)
+- **Include recipes bought with currency** - Suggest recipes sold for a currency (such as Merchant's Favor) even before you learn them (off by default)
+- **Reset panel positions** - Move the panels back to their defaults (also `/lp resetpanels`)
 
 ## Supported Game Versions
 
@@ -88,6 +92,7 @@ One install works on every live Classic-family client - it detects which one you
 - The Burning Crusade Classic - cap 375
 - Wrath of the Lich King Classic - cap 450, includes Inscription (also loads on the Titan 3.80 seasonal client)
 - Hardcore (Classic Era)
+- WoW Forever 1.60 - cap 300 (assumed until confirmed); 7 professions so far, see CraftLib for the list
 
 ## License
 

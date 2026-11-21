@@ -334,6 +334,95 @@ score = (reagent_cost + amortized_cost) / expected_skillup
 
 ---
 
+## ADR-013: Client Adapter Chosen Once at Load
+
+**Date**: 2026-11-21
+
+**Status**: Accepted
+
+### Context
+
+LazyProf must run on the Classic clients (TradeSkill API, `UIDropDownMenu`) and on WoW Forever (`C_TradeSkillUI`, `ProfessionsFrame`, native menus). Calls to the profession window, item info and similar APIs were spread across the code.
+
+### Decision
+
+All client-specific calls live behind one adapter (`LazyProf.Client`) in `Core/Client/`, and widgets that differ per client (dropdowns, panel frames) live in `Modules/UI/Widgets/`. `Core/Client/Family.lua` selects the family once at load: `forever` when `WOW_PROJECT_ID` and `WOW_PROJECT_CAMELOT` are both set and equal, or the interface is 16000-19999; otherwise `classic`. Both adapter files are listed in the TOC and load everywhere; each returns at its top unless its family is active. Code outside those folders never names client APIs, which a test enforces.
+
+### Alternatives Considered
+
+- Per-file TOC conditions to load only the matching adapter: rejected because they cannot be verified on the Classic clients, and a client that does not understand the syntax would skip the Classic adapter.
+- Checking the client at each call site: rejected, it scatters the branching and is easy to miss.
+
+### Trade-offs Accepted
+
+- Both adapters are parsed on every client, and each file needs an early-return guard.
+
+### Consequences
+
+- Adding a client means adding one adapter file and, if needed, widget variants.
+- Pathfinder, pricing and UI logic stay client-independent and testable headless.
+
+---
+
+## ADR-014: Shared Panel Shell
+
+**Date**: 2026-11-21
+
+**Status**: Accepted
+
+### Context
+
+The milestone, shopping list and recipe details panels each handled position, visibility and combat on their own. Positions were lost, a panel closed by the user could reappear, and a panel hidden by combat lockdown could stay hidden or return when the profession window was no longer open.
+
+### Decision
+
+A panel shell owns frame creation (native frame style per client), saved position, drag, the user-closed state and combat handling. A panel restores after combat only if the profession window is still open, a path is valid and the user did not close it; the Planning window counts as an owner as well. A user-closed panel stays closed until the profession window is reopened or the user acts in Planning. Rows are pooled and reused instead of re-created on each update. Panels keep scroll-frame rows; a ScrollBox rewrite is left for later.
+
+### Alternatives Considered
+
+- Leave each panel with its own handling: rejected, the bugs were the same in every panel.
+- Rewrite lists on ScrollBox now: rejected as out of scope for the port.
+
+### Trade-offs Accepted
+
+- Combat auto-hide stays, so panels disappear in combat and return afterwards.
+
+### Consequences
+
+- New panels get position, closed-state and combat behavior by using the shell.
+- `/lp resetpanels` has one place to reset.
+
+---
+
+## ADR-015: One Strategy Loop With Gap Handling
+
+**Date**: 2026-11-21
+
+**Status**: Accepted
+
+### Context
+
+The Cheapest and Fastest strategies each had their own copy of the leveling loop. When no recipe was available at the current skill, the loop ended silently, so paths stopped short with no explanation. Forever data has recipes with unknown sources and currency-only costs, which makes such gaps more likely.
+
+### Decision
+
+Both strategies share one core loop and differ only in how they score candidates. When no candidate fits at a skill level, the loop bridges the gap with a green recipe as long as its skill-up chance is at least 10%; otherwise it records a gap step and the path and UI report it. Availability also handles two new cases: unknown-source recipes (usable only when learned, owned or priced) and currency-only recipes (usable when learned or when "Include recipes bought with currency" is on, costed at 0 copper). Snapshot tests pin the resulting paths.
+
+### Alternatives Considered
+
+- Keep two loops and patch both: rejected, the fixes would drift apart.
+- Bridge with any recipe: rejected, below 10% the cost and time are misleading.
+
+### Trade-offs Accepted
+
+- A gap in the path can make later steps depend on a skill the player may not reach by that route.
+
+### Consequences
+
+- Only the `cheapest` and `fastest` strategies exist; new scoring is a new candidate scorer, not a new loop.
+
+---
+
 ## Template for New ADRs
 
 ```markdown
