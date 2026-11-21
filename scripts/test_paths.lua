@@ -31,6 +31,8 @@ local CASES = {
     { name = "tbc_engineering_1_375", interface = 20505, prof = "engineering", from = 1, to = 375 },
     { name = "wotlk_alchemy_1_450", interface = 30403, prof = "alchemy", from = 1, to = 450 },
     { name = "sod_tailoring_1_300", interface = 11508, sod = true, prof = "tailoring", from = 1, to = 300 },
+    { name = "forever_tailoring_1_300", interface = 16001, camelot = true, forever = true, prof = "tailoring", from = 1, to = 300 },
+    { name = "forever_alchemy_1_300", interface = 16001, camelot = true, forever = true, prof = "alchemy", from = 1, to = 300 },
 }
 local STRATEGIES = { "cheapest", "fastest" }
 
@@ -61,8 +63,11 @@ end
 local summary = {}
 
 for _, case in ipairs(CASES) do
-    local CraftLib = harness.loadCraftLib(case.interface, { sod = case.sod })
+    local CraftLib = harness.loadCraftLib(case.interface, { sod = case.sod, camelot = case.camelot })
     local LazyProf = harness.loadLazyProf(LAZYPROF_FILES)
+    if case.forever then
+        check(case.name .. " active profile is FOREVER", CraftLib:GetActiveProfile() == "FOREVER")
+    end
     local prof = CraftLib:GetProfession(case.prof)
     assert(prof, case.name .. ": CraftLib has no profession " .. case.prof)
 
@@ -81,6 +86,11 @@ for _, case in ipairs(CASES) do
         local steps, meta = strategy:Calculate(case.from, case.to, LazyProf.Utils.DeepCopy(recipes), {}, prices, 0, {})
         LazyProf.SelfFound:EndRecalc()
         LazyProf.RecipeAvailability:EndRecalc()
+
+        if case.forever then
+            check(label .. " path non-empty", #steps > 0)
+            check(label .. " starts at 1", steps[1] ~= nil and steps[1].skillStart == case.from)
+        end
 
         local text = harness.formatSteps(steps, meta)
         local path = "scripts/snapshots/" .. label .. ".txt"
