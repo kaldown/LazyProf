@@ -127,7 +127,8 @@ function MilestonePanelClass:Initialize()
     else
         -- Standalone mode: own size, position, chrome
         self.frame:SetSize(DEFAULT_WIDTH, 200)
-        self.frame:SetPoint("TOPLEFT", LazyProf.Client:AnchorFrame() or UIParent, "TOPRIGHT", 10, 0)
+        self.frame:SetPoint("TOPLEFT", LazyProf.Client:AnchorFrame() or UIParent, "TOPRIGHT",
+            LazyProf.Client:PanelOffsetX(), 0)
         self.frame:SetFrameStrata("MEDIUM")
         self.frame:SetFrameLevel(10)
 
@@ -210,13 +211,14 @@ function MilestonePanelClass:Initialize()
     end
 
     -- Standalone: the panel shell owns position, dragging, closed state and
-    -- combat hide/restore. Default spot: right of the profession window.
+    -- combat hide/restore. Default spot: right of the profession window, at
+    -- the client's panel offset (clear of the Forever side tabs).
     if not config.embedded then
         LazyProf.PanelShell:Attach(self.frame, "milestone", {
             anchor = function()
                 local anchor = LazyProf.Client:AnchorFrame()
                 if anchor then
-                    return anchor, "TOPLEFT", "TOPRIGHT", 10, 0
+                    return anchor, "TOPLEFT", "TOPRIGHT", LazyProf.Client:PanelOffsetX(), 0
                 end
             end,
         })

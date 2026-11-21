@@ -124,7 +124,7 @@ function MissingPanel:Initialize()
 
     -- The panel shell owns position, dragging, closed state and combat
     -- hide/restore. Default spot: below the milestone panel when it is shown,
-    -- else right of the profession window, lower down.
+    -- else right of the profession window (at the client's panel offset), lower down.
     LazyProf.PanelShell:Attach(self.frame, "shoppingList", {
         planning = true,   -- the Planning window shows it too
         anchor = function()
@@ -134,7 +134,7 @@ function MissingPanel:Initialize()
             end
             local anchor = LazyProf.Client:AnchorFrame()
             if anchor then
-                return anchor, "TOPLEFT", "TOPRIGHT", 10, -220
+                return anchor, "TOPLEFT", "TOPRIGHT", LazyProf.Client:PanelOffsetX(), -220
             end
         end,
     })

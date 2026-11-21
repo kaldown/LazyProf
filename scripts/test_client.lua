@@ -190,7 +190,7 @@ section("selection", function()
     local camelot = loadAdapter(11508, 18, 18)
     check(p .. "camelot project: Classic.lua leaves LazyProf.Client unset", camelot.Client == nil)
     for _, m in ipairs({ "IsOpen", "GetLine", "KnownRecipeIds", "PlayerSkill", "GetItemInfo",
-                         "AnchorFrame", "Start", "RunDiagnostic" }) do
+                         "AnchorFrame", "PanelOffsetX", "Start", "RunDiagnostic" }) do
         check(p .. "Client:" .. m .. " exists", type(classic.Client[m]) == "function")
     end
 end)
@@ -221,6 +221,8 @@ section("classic", function()
     _G.TradeSkillFrame = frameStub(true)
     check(p .. "IsOpen visible -> true", Client:IsOpen() == true)
     check(p .. "AnchorFrame -> TradeSkillFrame", Client:AnchorFrame() == _G.TradeSkillFrame)
+    check(p .. "PanelOffsetX -> 10 (panels sit 10 px right of the window)", Client:PanelOffsetX() == 10,
+        Client:PanelOffsetX())
 
     -- Known recipes: the same sets test_learned.lua expects.
     recipeLinkEnabled = true

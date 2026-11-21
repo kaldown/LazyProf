@@ -20,6 +20,11 @@ function Client:AnchorFrame()
     return TradeSkillFrame
 end
 
+-- How far right of the anchor frame's right edge the side panels sit by default.
+function Client:PanelOffsetX()
+    return 10
+end
+
 -- Map the open trade-skill line to its registered profession key.
 local function ProfKeyForName(skillName)
     if not skillName then return nil end

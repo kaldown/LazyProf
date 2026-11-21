@@ -49,6 +49,21 @@ function Client:AnchorFrame()
     return ProfessionsFrame
 end
 
+-- How far right of the anchor frame's right edge the side panels sit by
+-- default: 10 px past the profession side tabs, which hang outside the
+-- window's right edge from 60 px down
+-- (Blizzard_Professions/Camelot/Blizzard_ProfessionsFrame.xml:13-21). A tab is
+-- as wide as the "common-sidetab" atlas (SidePanelTabButtonMixin,
+-- Blizzard_SharedXML/Mainline/SharedUIPanelTemplates.lua:311-330; wider on
+-- this client, SharedUIPanelTemplates.xml:1013), 55 px here (Ketho
+-- BlizzardInterfaceResources, forever branch, Resources/AtlasInfo.lua:3758).
+local SIDE_TAB_WIDTH = 55
+local PANEL_GAP = 10
+
+function Client:PanelOffsetX()
+    return SIDE_TAB_WIDTH + PANEL_GAP
+end
+
 -- The open profession, the way Blizzard reads it (Professions.GetProfessionInfo,
 -- Blizzard_ProfessionsTemplates/Blizzard_Professions.lua:1665-1676): the child
 -- line, or the base line when the child's professionID is 0.

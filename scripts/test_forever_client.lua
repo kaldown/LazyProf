@@ -192,8 +192,19 @@ local function loadAdapter(interface, projectId, camelot)
     return addon
 end
 
-local SURFACE = { "IsOpen", "AnchorFrame", "GetLine", "KnownRecipeIds", "PlayerSkill", "GetItemInfo",
-                  "FindRecipeRow", "InvalidateRowCache", "UnlearnedHiddenByFilter", "Start", "RunDiagnostic" }
+local SURFACE = { "IsOpen", "AnchorFrame", "PanelOffsetX", "GetLine", "KnownRecipeIds", "PlayerSkill",
+                  "GetItemInfo", "FindRecipeRow", "InvalidateRowCache", "UnlearnedHiddenByFilter", "Start",
+                  "RunDiagnostic" }
+
+-- Names of the functions an adapter installs.
+local function methodNames(client)
+    local names = {}
+    for k, v in pairs(client or {}) do
+        if type(v) == "function" then names[#names + 1] = k end
+    end
+    table.sort(names)
+    return table.concat(names, ",")
+end
 
 -- ===========================================================================
 -- 1. Only the Forever adapter installs itself on a Forever client
@@ -211,6 +222,10 @@ section("selection", function()
     local classic = loadAdapter(11508)
     check(p .. "classic client: Forever.lua does not replace the Classic adapter",
         classic.Client and classic.Client:UnlearnedHiddenByFilter() == false)
+    -- Callers never branch on the family: both adapters expose the same methods.
+    check(p .. "Classic and Forever adapters expose the same methods",
+        methodNames(classic.Client) == methodNames(forever.Client),
+        methodNames(classic.Client) .. " vs " .. methodNames(forever.Client))
 end)
 
 -- ===========================================================================
@@ -234,6 +249,9 @@ section("forever", function()
     _G.ProfessionsFrame.CraftingPage.visible = true
     check(p .. "IsOpen with the recipe list -> true", Client:IsOpen() == true)
     check(p .. "AnchorFrame -> ProfessionsFrame", Client:AnchorFrame() == _G.ProfessionsFrame)
+    -- The side tabs hang 55 px outside the window's right edge: panels go 10 px past them.
+    check(p .. "PanelOffsetX -> 65 (10 px right of the 55 px side tabs)", Client:PanelOffsetX() == 65,
+        Client:PanelOffsetX())
 
     -- Profession line: child info, parent skill line.
     local key, rank, maxRank = Client:GetLine()

@@ -232,6 +232,7 @@ local function load(family, opts)
     }
     addon.Client = {
         AnchorFrame = function() return nil end,
+        PanelOffsetX = function() return 10 end,
         IsOpen = function() return true end,
         UnlearnedHiddenByFilter = function() return env.unlearnedHidden or false end,
     }
@@ -686,7 +687,45 @@ section("debug dropdowns classic", function()
 end)
 
 -- ===========================================================================
--- 6. TOC wiring
+-- 6. Default panel spot: the adapter's x offset right of the profession window
+--    (Classic 10; Forever 65, past the side tabs)
+-- ===========================================================================
+for _, family in ipairs({ "classic", "forever" }) do
+    section("panel anchors " .. family, function()
+        local p = "panel anchors " .. family .. ": "
+        local addon = load(family)
+        local window = newFrame("Frame", "ProfessionWindow")
+        local offset = (family == "forever") and 65 or 10
+        addon.Client.AnchorFrame = function() return window end
+        addon.Client.PanelOffsetX = function() return offset end
+        local milestone = addon.MilestonePanel
+        milestone:Initialize()
+        addon.MissingMaterialsPanel:Initialize()
+
+        local first = milestone.frame.points[1]
+        check(p .. "milestone panel starts at the adapter offset",
+            first and first[2] == window and first[3] == "TOPRIGHT" and first[4] == offset and first[5] == 0,
+            first and tostring(first[4]))
+        local a, point, relPoint, x, y = milestone.frame._shell.anchor()
+        check(p .. "milestone default spot: TOPLEFT to the window TOPRIGHT at the adapter offset",
+            a == window and point == "TOPLEFT" and relPoint == "TOPRIGHT" and x == offset and y == 0,
+            tostring(x))
+
+        milestone.frame:Hide()
+        local list = addon.MissingMaterialsPanel.frame
+        a, point, relPoint, x, y = list._shell.anchor()
+        check(p .. "shopping list default spot (milestone hidden): adapter offset, 220 down",
+            a == window and point == "TOPLEFT" and relPoint == "TOPRIGHT" and x == offset and y == -220,
+            tostring(x))
+        milestone.frame:Show()
+        a, point, relPoint, x, y = list._shell.anchor()
+        check(p .. "shopping list below a shown milestone panel is unchanged",
+            a == milestone.frame and relPoint == "BOTTOMLEFT" and x == 0 and y == -10)
+    end)
+end
+
+-- ===========================================================================
+-- 7. TOC wiring
 -- ===========================================================================
 section("toc", function()
     local fh = assert(io.open("LazyProf.toc", "r"))
