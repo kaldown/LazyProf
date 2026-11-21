@@ -635,3 +635,201 @@ function Views.GuideNav(view)
         recipe = stage ~= nil and stage.recipe ~= nil,
     }
 end
+
+-- Shopping tab -------------------------------------------------------------------
+
+-- Owned stock that is not in the bags: where to fetch it first. Same sections
+-- and colours the shopping list has always had.
+local COLLECT = {
+    { list = "fromBank", label = "From bank", color = { 0.4, 1, 0.4 },
+      tip = function(mat) return string.format("In bank: %d | Grab: %d", mat.have, mat.missing) end },
+    { list = "fromMail", label = "Check mail", color = { 0.4, 0.8, 1 },
+      tip = function(mat) return string.format("In mail: %d | Grab: %d", mat.have, mat.missing) end },
+    { list = "fromAuctions", label = "Cancel from AH", color = { 1, 0.6, 0.2 },
+      tip = function(mat) return string.format("Listed on AH: %d | Cancel: %d", mat.have, mat.missing) end,
+      warning = "Requires cancelling your auction" },
+    { list = "fromGuildBank", label = "From guild bank", color = { 0.2, 0.8, 0.8 },
+      tip = function(mat) return string.format("In guild bank: %d | Withdraw: %d", mat.have, mat.missing) end,
+      warning = "Shared resource - others may need these" },
+    { list = "fromAlts", label = "From alts", color = { 0.8, 0.6, 1 } },
+}
+
+local function CollectRow(section, mat)
+    local text = string.format("%dx %s", mat.missing, mat.name or "Unknown")
+    local tooltip = {}
+    if section.list == "fromAlts" then
+        local names = {}
+        tooltip[#tooltip + 1] = { text = "On your alts:", r = 0.8, g = 0.6, b = 1 }
+        for _, char in ipairs(mat.characters or {}) do
+            -- Character name without the realm part
+            names[#names + 1] = (char.name:match("^([^-]+)") or char.name) .. ":" .. tostring(char.count)
+            tooltip[#tooltip + 1] = { text = string.format("  %s: %d", char.name, char.count), r = 1, g = 1, b = 1 }
+        end
+        text = text .. " " .. Grey("(" .. table.concat(names, ", ") .. ")")
+        tooltip[#tooltip + 1] = { text = "Transfer to this character before crafting", r = 0.6, g = 0.6, b = 0.6 }
+    else
+        if mat.purpose then
+            text = text .. " " .. Grey("(" .. mat.purpose .. ")")
+        end
+        local c = section.color
+        tooltip[#tooltip + 1] = { text = section.tip(mat), r = c[1], g = c[2], b = c[3] }
+        if section.warning then
+            tooltip[#tooltip + 1] = { text = section.warning, r = 0.6, g = 0.6, b = 0.6 }
+        end
+    end
+    tooltip[#tooltip + 1] = { text = "Shift-click to link", r = 0.5, g = 0.5, b = 0.5 }
+    return {
+        kind = "line", icon = mat.icon, lead = section.label, leadWidth = 96, leadColor = section.color,
+        text = text, bg = BG_SUB, hoverBg = BG_ROW_HOVER,
+        itemId = mat.itemId, link = mat.link, tooltip = tooltip,
+    }
+end
+
+-- The craft / buy button of a craftable reagent. Its text is the state in
+-- force; a click switches it, a right-click goes back to automatic.
+local function ChoiceButton(row, ctx)
+    local lines = {}
+    if row.choice then
+        lines[#lines + 1] = { text = row.crafted and "You chose to craft this yourself." or "You chose to buy this.", r = 1, g = 1, b = 1 }
+    else
+        lines[#lines + 1] = { text = row.crafted and "Chosen automatically: crafting is cheaper."
+            or "Chosen automatically: buying is cheaper, or automatic crafting is off.", r = 1, g = 1, b = 1 }
+    end
+    if row.craftRecipeName then
+        lines[#lines + 1] = { text = "Recipe: " .. row.craftRecipeName, r = 0.7, g = 0.7, b = 0.7 }
+    end
+    lines[#lines + 1] = { text = "Click to switch. Right-click for automatic.", r = 0.5, g = 0.5, b = 0.5 }
+    lines[#lines + 1] = { text = "This changes the shopping list only, not the path.", r = 0.5, g = 0.5, b = 0.5 }
+    return {
+        text = row.crafted and "I craft it" or "I buy it",
+        tooltip = lines,
+        onClick = function(mouseButton)
+            if mouseButton == "RightButton" then
+                ctx.onCraftChoice(row, nil)
+            else
+                ctx.onCraftChoice(row, row.crafted and "buy" or "craft")
+            end
+        end,
+    }
+end
+
+local function ShoppingTooltip(row)
+    local lines = {}
+    local parts = {}
+    if (row.inBags or 0) > 0 then parts[#parts + 1] = "bags " .. row.inBags end
+    for _, source in ipairs({ { "bank", "bank" }, { "mail", "mail" }, { "auctions", "your auctions" },
+                              { "guildBank", "guild bank" }, { "alts", "alts" } }) do
+        local n = row.sources and row.sources[source[1]] or 0
+        if n > 0 then parts[#parts + 1] = source[2] .. " " .. n end
+    end
+    lines[#lines + 1] = { text = string.format("Need: %d | Have: %d | Buy: %d", row.need or 0, row.have or 0, row.toBuy or 0), r = 1, g = 1, b = 1 }
+    if #parts > 0 then
+        lines[#lines + 1] = { text = "Using: " .. table.concat(parts, ", "), r = 0.7, g = 0.7, b = 0.7 }
+    end
+    if row.crafted then
+        lines[#lines + 1] = { text = string.format("Craft %d with %s", row.craftQuantity or 0, tostring(row.craftRecipeName)), r = 0.4, g = 0.8, b = 1 }
+    else
+        local pm = LazyProf.PriceManager
+        if pm and pm.PeekPriceInfo then
+            lines[#lines + 1] = { text = pm.PriceLine(pm:PeekPriceInfo(row.itemId)), r = 0.7, g = 0.7, b = 0.7 }
+        end
+    end
+    lines[#lines + 1] = { text = "Shift-click to link", r = 0.5, g = 0.5, b = 0.5 }
+    return lines
+end
+
+-- "Collect first", then one row per reagent: need / have / buy / cost, a
+-- "vendor" mark, and a craft / buy button on reagents the character can make.
+-- view.missing is Pathfinder:CalculateMissingMaterials of the chosen range;
+-- view.hideOwned hides rows with nothing left to buy.
+-- ctx: onCraftChoice(row, "craft" | "buy" | nil).
+function Views.Shopping(view, ctx)
+    local path = view.path
+    if path and path.nothingLeft then
+        return Views.Notice(view)
+    end
+    local missing = view.missing or {}
+    local rows = {}
+
+    local collect = {}
+    for _, section in ipairs(COLLECT) do
+        for _, mat in ipairs(missing[section.list] or {}) do
+            collect[#collect + 1] = CollectRow(section, mat)
+        end
+    end
+    if #collect > 0 then
+        rows[#rows + 1] = { kind = "line", font = "GameFontNormalSmall", color = GOLD, text = "Collect first" }
+        for _, row in ipairs(collect) do rows[#rows + 1] = row end
+        rows[#rows + 1] = { kind = "sep" }
+    end
+
+    local items = missing.rows or {}
+    if #items == 0 then
+        rows[#rows + 1] = { kind = "line", height = 26, color = DIM,
+            text = "No reagents needed in " .. (view.bracket and view.bracket.name or "this path") .. "." }
+        return rows
+    end
+
+    local table_ = {}
+    local toBuyRows = 0
+    for _, row in ipairs(items) do
+        if row.toBuy > 0 then toBuyRows = toBuyRows + 1 end
+        if not (view.hideOwned and row.toBuy <= 0 and not row.crafted) then
+            local buy = row.toBuy > 0 and tostring(row.toBuy) or "-"
+            local cost
+            if row.crafted or row.toBuy <= 0 then
+                cost = row.crafted and "" or "-"
+            elseif row.unpriced then
+                cost = "?"
+            else
+                cost = Utils.FormatMoneyShort(row.cost)
+            end
+            local desc = {
+                kind = "cols", item = row, icon = row.icon, text = row.name,
+                cols = { tostring(row.need), tostring(row.have), buy, cost },
+                colColors = {
+                    [2] = row.have >= row.need and GREEN or WHITE,
+                    [3] = row.toBuy > 0 and RED or DIM,
+                    [4] = row.unpriced and ORANGE or WHITE,
+                },
+                mark = row.isVendor and "vendor" or nil,
+                bg = BG_SUB, hoverBg = BG_ROW_HOVER,
+                itemId = row.itemId, link = row.link, tooltip = ShoppingTooltip(row),
+            }
+            if row.craftable then
+                desc.button = ChoiceButton(row, ctx)
+            end
+            table_[#table_ + 1] = desc
+            for _, child in ipairs(row.crafted and row.children or {}) do
+                table_[#table_ + 1] = {
+                    kind = "cols", indent = 14, text = child.name, color = GREY,
+                    cols = { tostring(child.need), "", "", "" }, colColors = { [1] = GREY },
+                    mark = "in list", itemId = child.itemId,
+                    tooltip = { { text = string.format("Needed to craft %s. It is counted in this reagent's own row.", tostring(row.name)),
+                        r = 0.7, g = 0.7, b = 0.7 } },
+                }
+            end
+        end
+    end
+
+    if toBuyRows == 0 then
+        rows[#rows + 1] = { kind = "line", color = GREEN, text = "Nothing left to buy"
+            .. (view.bracket and (" for " .. view.bracket.name) or "") .. "." }
+    end
+    if #table_ > 0 then
+        rows[#rows + 1] = Views.ReagentHeader()
+        for _, desc in ipairs(table_) do rows[#rows + 1] = desc end
+    end
+    return rows
+end
+
+-- "To buy: X + Y recipes" under the shopping table.
+function Views.ShoppingTotal(view)
+    local missing = view.missing
+    if not missing then return "" end
+    local text = "To buy: " .. Money(missing.buyTotal or 0)
+    if (missing.recipeCosts or 0) > 0 then
+        text = text .. "  " .. Grey("+ " .. Money(missing.recipeCosts) .. " recipes")
+    end
+    return text
+end

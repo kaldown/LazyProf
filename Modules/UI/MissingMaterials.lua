@@ -136,16 +136,17 @@ function MissingPanel:Initialize()
     })
 end
 
--- Refresh layout after resize
+-- Refresh layout after resize: redraw what the panel last showed
 function MissingPanel:RefreshLayout()
-    local path = LazyProf.Pathfinder and LazyProf.Pathfinder.currentPath
-    if not path then return end
-    LazyProf:UpdateShoppingPanel()
+    if self.lastMissing then
+        self:Update(self.lastMissing, self.lastLabel)
+    end
 end
 
 -- Update panel with missing materials
 -- bracketLabel: optional string like "225-300 (Artisan)" to show in title
 function MissingPanel:Update(missingMaterials, bracketLabel)
+    self.lastMissing, self.lastLabel = missingMaterials, bracketLabel
     if not LazyProf.db.profile.showMissingMaterials then
         self:Hide()
         return
