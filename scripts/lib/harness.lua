@@ -3,6 +3,10 @@
 -- Headless test harness: stubs the WoW globals the addon modules touch, loads
 -- CraftLib data for a chosen client, and loads LazyProf modules in TOC order.
 -- Run from the addon root (all paths are relative to it).
+--
+-- Fidelity limits: no auction prices exist for recipe items (recipe-item
+-- availability via AH is never satisfied), PriceManager is not loaded (prices
+-- come from harness.priceTable), and the inventory is always empty.
 
 local harness = {}
 
@@ -95,7 +99,9 @@ function harness.loadLazyProf(files)
     LazyProf.db = { profile = {}, char = { learnedRecipes = {}, priceCache = {} } }
     for _, path in ipairs(files) do
         loadChunk(path, "LazyProf", LazyProf)
-        if path == "Core/Config.lua" and LazyProf.defaults then
+        if path == "Core/Config.lua" then
+            assert(LazyProf.defaults and LazyProf.defaults.profile,
+                "Core/Config.lua did not define LazyProf.defaults.profile")
             local profile = {}
             for k, v in pairs(LazyProf.defaults.profile) do
                 profile[k] = type(v) == "table" and shallowCopy(v) or v

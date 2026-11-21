@@ -67,6 +67,7 @@ addon.Utils = {
 assert(loadfile("Core/Init.lua"))("LazyProf", addon)
 assert(loadfile("Modules/Recipes/Availability.lua"))("LazyProf", addon)
 assert(loadfile("Modules/Recipes/SelfFound.lua"))("LazyProf", addon)
+assert(loadfile("Modules/Pathfinder/StrategyCore.lua"))("LazyProf", addon)
 assert(loadfile("Modules/Pathfinder/Strategies/Cheapest.lua"))("LazyProf", addon)
 local LP = _G.LazyProf
 assert(LP == addon, "Init.lua did not expose the shared addon table as _G.LazyProf")
