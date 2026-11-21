@@ -259,14 +259,6 @@ function PlanningWindow:LoadProfession(profKey)
     -- Check if player has this profession
     local actualSkillLevel = self:GetPlayerSkillLevel(profKey)
 
-    -- Determine starting skill based on calculateFromCurrentSkill setting
-    local startSkill
-    if LazyProf.db.profile.calculateFromCurrentSkill then
-        startSkill = actualSkillLevel
-    else
-        startSkill = 0  -- CalculateForProfession will use max(1, skillLevel)
-    end
-
     -- Check for racial bonus
     local racialBonus = Utils.GetRacialProfessionBonus(profKey)
     local racialText = ""
@@ -275,29 +267,21 @@ function PlanningWindow:LoadProfession(profKey)
         racialText = string.format(" |cFFFFD700(+%d %s)|r", racialBonus, race)
     end
 
-    -- Update status bar with mode indicator and racial bonus
+    -- Update status bar with racial bonus
     if actualSkillLevel > 0 then
-        if LazyProf.db.profile.calculateFromCurrentSkill then
-            self.frame.status:SetText(string.format("Path from current skill: %d%s", actualSkillLevel, racialText))
-        else
-            self.frame.status:SetText(string.format("Current skill: %d%s |cFF888888(showing full path)|r", actualSkillLevel, racialText))
-        end
+        self.frame.status:SetText(string.format("Path from current skill: %d%s", actualSkillLevel, racialText))
         self.frame.status:SetTextColor(0.4, 1, 0.4)
     else
-        if racialBonus > 0 then
-            self.frame.status:SetText(string.format("You have not learned this profession%s |cFF888888(showing full path)|r", racialText))
-        else
-            self.frame.status:SetText("You have not learned this profession |cFF888888(showing full path)|r")
-        end
+        self.frame.status:SetText("You have not learned this profession" .. racialText
+            .. " |cFF888888(showing full path)|r")
         self.frame.status:SetTextColor(0.7, 0.7, 0.7)
     end
 
     -- Calculate path
     LazyProf:Debug("ui", "=== PlanningWindow:LoadProfession ===")
     LazyProf:Debug("ui", "  profKey: " .. tostring(profKey))
-    LazyProf:Debug("ui", "  startSkill: " .. tostring(startSkill))
 
-    self.currentPath = LazyProf.Pathfinder:CalculateForProfession(profKey, startSkill, nil, actualSkillLevel)
+    self.currentPath = LazyProf.Pathfinder:CalculateForProfession(profKey)
 
     LazyProf:Debug("ui", "  currentPath: " .. (self.currentPath and "exists" or "NIL"))
     if self.currentPath then

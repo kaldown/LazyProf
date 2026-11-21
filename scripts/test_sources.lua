@@ -14,6 +14,7 @@ local FILES = {
     "Core/Config.lua",
     "Modules/Recipes/Availability.lua",
     "Modules/Recipes/SelfFound.lua",
+    "Modules/Pathfinder/Pins.lua",
     "Modules/Pathfinder/StrategyCore.lua",
     "Modules/Pathfinder/Strategies/Cheapest.lua",
     "Modules/Pathfinder/Strategies/Fastest.lua",

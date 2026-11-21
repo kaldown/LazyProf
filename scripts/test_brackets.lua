@@ -1,6 +1,6 @@
 -- scripts/test_brackets.lua
 --
--- With calculateFromCurrentSkill off the path starts at skill 1, but the
+-- A what-if path may start at skill 1 (planning "from 1"), but the
 -- selected bracket, the shopping-list filter and the arrow follow the
 -- player's real skill (path.actualSkill).
 --
@@ -15,8 +15,10 @@ local FILES = {
     "Core/Client/Family.lua",
     "Core/Client/Classic.lua",
     "Core/Config.lua",
+    "Core/CharStore.lua",
     "Modules/Recipes/Availability.lua",
     "Modules/Recipes/SelfFound.lua",
+    "Modules/Pathfinder/Pins.lua",
     "Modules/Pathfinder/StrategyCore.lua",
     "Modules/Pathfinder/Strategies/Cheapest.lua",
     "Modules/Pathfinder/Strategies/Fastest.lua",
@@ -113,11 +115,14 @@ do
     LazyProf.PriceManager = { GetPrices = function() return { [101] = 100 } end, cache = {} }
     LazyProf.Inventory.ScanBags = function() return {} end
     LazyProf.db.profile.strategy = "cheapest"
-    local pp = LazyProf.Pathfinder:CalculateForProfession("testprof", 0, nil, 250)
+    -- A learned profession is planned from the real skill; "plan from 1"
+    -- keeps the real skill beside a path that starts at 1.
+    LazyProf.Client.PlayerSkill = function() return 250 end
+    local pp = LazyProf.Pathfinder:CalculateForProfession("testprof", { planFromOne = true })
     check("planning: actualSkill is the real skill", pp and pp.actualSkill == 250, pp and pp.actualSkill)
-    check("planning: path still starts at 1", pp and pp.currentSkill == 1, pp and pp.currentSkill)
-    local pp2 = LazyProf.Pathfinder:CalculateForProfession("testprof", 40)
-    check("planning: actualSkill defaults to the start", pp2 and pp2.actualSkill == 40)
+    check("planning from 1: path starts at 1", pp and pp.currentSkill == 1, pp and pp.currentSkill)
+    local pp2 = LazyProf.Pathfinder:CalculateForProfession("testprof")
+    check("planning: a learned profession starts at the real skill", pp2 and pp2.currentSkill == 250 and pp2.actualSkill == 250)
     local pan = setmetatable({ currentPath = pp }, { __index = Panel })
     local eb = pan:GetEffectiveBracket()
     check("planning panel bracket follows the real skill", eb and eb.min == 225, eb and eb.min)

@@ -409,12 +409,10 @@ function MilestonePanelClass:CreateModeToggle()
                 LazyProf:UpdateDisplay()
             end
             local currentPath = panel.currentPath
-            if currentPath and currentPath.professionKey then
+            if currentPath and currentPath.planning then
                 local path = LazyProf.Pathfinder:CalculateForProfession(
                     currentPath.professionKey,
-                    currentPath.currentSkill,
-                    "strategy change",
-                    currentPath.actualSkill
+                    { reason = "strategy change", planFromOne = currentPath.planFromOne }
                 )
                 if path then
                     panel:Update(path)
@@ -540,11 +538,7 @@ function MilestonePanelClass:Update(path)
 
     -- Update title with mode indicator (standalone only)
     if not self.config.embedded and self.frame.title then
-        if LazyProf.db.profile.calculateFromCurrentSkill then
-            self.frame.title:SetText(string.format("Milestone Breakdown |cFF66FF66(from %d)|r", path.currentSkill))
-        else
-            self.frame.title:SetText("Milestone Breakdown |cFF888888(full path)|r")
-        end
+        self.frame.title:SetText(string.format("Milestone Breakdown |cFF66FF66(from %d)|r", path.currentSkill))
     end
 
     local contentWidth = self.frame:GetWidth() - 40
@@ -692,7 +686,7 @@ function MilestonePanelClass:Update(path)
     end
     local dirtyCount = 0
     for _, step in ipairs(fullBreakdown) do
-        local pinned = LazyProf.Pathfinder.pinnedRecipes[step.from]
+        local pinned = LazyProf.Pathfinder:PinnedAt(path.professionKey, step.from)
         if pinned and pinned ~= step.recipe.id then
             dirtyCount = dirtyCount + 1
         end
@@ -870,8 +864,9 @@ function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
     row.expandBtn:SetText(self.expandedRows[index] and "[-]" or "[+]")
     row.expandBtn:SetTextColor(0.6, 0.6, 0.6)
 
-    local hasDirtyPin = LazyProf.Pathfinder.pinnedRecipes[step.from] and
-        LazyProf.Pathfinder.pinnedRecipes[step.from] ~= step.recipe.id
+    local profKey = self.currentPath and self.currentPath.professionKey
+    local pinnedHere = LazyProf.Pathfinder:PinnedAt(profKey, step.from)
+    local hasDirtyPin = pinnedHere and pinnedHere ~= step.recipe.id
     local rangeText = string.format("%d-%d", step.from, step.to)
     if hasDirtyPin then
         rangeText = rangeText .. " [*]"
@@ -1378,7 +1373,8 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
     row:SetPoint("TOPLEFT", 16, -yOffset)
 
     -- Highlight if this recipe is currently pinned at this skill level
-    local pinnedId = LazyProf.Pathfinder.pinnedRecipes[skillLevel]
+    local profKey = self.currentPath and self.currentPath.professionKey
+    local pinnedId = LazyProf.Pathfinder:PinnedAt(profKey, skillLevel)
     local isThisPinned = (pinnedId == alt.recipe.id)
     if isThisPinned then
         row:SetBackdropColor(0.15, 0.2, 0.3, 0.6)
@@ -1397,9 +1393,10 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
     -- Pin button click: toggle pin
     row.pinBtn:SetScript("OnClick", function()
         if isThisPinned then
-            LazyProf.Pathfinder:UnpinRecipe(skillLevel)
+            LazyProf.Pathfinder:UnpinAt(profKey, skillLevel)
         else
-            LazyProf.Pathfinder:PinRecipe(skillLevel, alt.recipe.id)
+            -- The step's own range: from its start to its end
+            LazyProf.Pathfinder:PinRange(profKey, skillLevel, skillLevel + math.max(skillsNeeded, 0.01), alt.recipe.id)
         end
         self:Refresh()
     end)
@@ -1565,15 +1562,13 @@ function MilestonePanelClass:CreateRecalculateButton(dirtyCount)
             -- Use THIS panel's stored path (not the global Pathfinder.currentPath)
             local currentPath = self.currentPath
             if currentPath then
-                local pinCount = LazyProf.Pathfinder:GetDirtyPinCount()
+                local pinCount = LazyProf.Pathfinder:GetDirtyPinCount(currentPath)
                 local reason = string.format("recalculate button (%d dirty pin%s)", pinCount, pinCount ~= 1 and "s" or "")
-                if currentPath.professionKey then
+                if currentPath.planning then
                     -- Planning mode - recalculate and update this panel
                     local path = LazyProf.Pathfinder:CalculateForProfession(
                         currentPath.professionKey,
-                        currentPath.currentSkill,
-                        reason,
-                        currentPath.actualSkill
+                        { reason = reason, planFromOne = currentPath.planFromOne }
                     )
                     if path then
                         self:Update(path)

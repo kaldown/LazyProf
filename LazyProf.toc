@@ -60,6 +60,7 @@ Core\Client\Family.lua
 Core\Client\Classic.lua
 Core\Client\Forever.lua
 Core\Config.lua
+Core\CharStore.lua
 
 # Modules - Data
 Modules\Inventory\Scanner.lua
@@ -74,11 +75,17 @@ Modules\Recipes\Availability.lua
 Modules\Recipes\SelfFound.lua
 
 # Modules - Pathfinding
+Modules\Pathfinder\Pins.lua
 Modules\Pathfinder\StrategyCore.lua
 Modules\Pathfinder\Strategies\Cheapest.lua
 Modules\Pathfinder\Strategies\Fastest.lua
 Modules\Pathfinder\MaterialResolver.lua
 Modules\Pathfinder\Pathfinder.lua
+
+# Modules - Guide
+Modules\Guide\Text.lua
+Modules\Guide\Range.lua
+Modules\Guide\Stages.lua
 
 # Modules - UI
 Modules\UI\Widgets\PanelShell.lua

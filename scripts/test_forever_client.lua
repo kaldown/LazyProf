@@ -488,6 +488,7 @@ section("hint", function()
         "Core/Client/Classic.lua",
         "Core/Client/Forever.lua",
         "Core/Config.lua",
+        "Core/CharStore.lua",
         "Modules/Pathfinder/Pathfinder.lua",
         "Modules/UI/Widgets/RowPool.lua",
         "Modules/UI/MilestoneBreakdown.lua",
