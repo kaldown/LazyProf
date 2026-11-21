@@ -13,7 +13,8 @@ Run these in-game to check addon health:
 /lp browse             -- Open profession browser
 /lp log                -- Open debug log window
 /lp diag               -- List available diagnostics
-/lp diag learned       -- Dump learned-recipe detection state (copyable window)
+/lp diag learned       -- Dump learned-recipe detection state (copyable window; Classic-family clients)
+/lp diag forever       -- Dump WoW Forever client facts and adapter results (copyable window)
 /lp reset              -- Reset database to defaults
 ```
 
@@ -65,6 +66,31 @@ treated as known. Open the profession window first, then run it.
   category headers, then re-run.
 - `scannedIdsWithNoCraftLibMatch` is high -> the scan reads recipes CraftLib doesn't
   know by that id; likely a CraftLib data issue rather than a LazyProf one.
+
+### `/lp diag forever` - WoW Forever client state
+
+**When to use:** on WoW Forever, the arrow or panels are missing, recipes show as
+unlearned/unknown, the wrong profession or skill is detected, or a path stops short.
+Open the profession window (recipe list page) first, then run it. On Forever
+`/lp diag` lists this command instead of `/lp diag learned`. If a section fails it
+prints `SECTION ERROR: <section>: <message>` and the other sections still print.
+
+| Line | Meaning |
+|------|---------|
+| `diag forever: build=.. interface=.. WOW_PROJECT_ID=.. WOW_PROJECT_CAMELOT=.. family=..` | Client build, interface number and project ids. `family` must be `forever`. |
+| `craftlib: version=.. profile=.. ready=..` | Bundled CraftLib version, active profile (expect `FOREVER`) and whether it is ready. |
+| `craftlib: professions=N recipes=T [key=n ...]` | Professions CraftLib provides and their recipe counts. |
+| `window: IsOpen=.. ProfessionsFrame=.. CraftingPageShown=..` | What the adapter treats as "profession window open". `CraftingPageShown=false` is the profession-book page: guidance is hidden there. |
+| `local crafting: linked=.. guild=.. guildMember=.. npc=.. showsOwnList=..` | The checks for whose list the window shows. Anything but `showsOwnList=true` means no path is built. |
+| `child: ...` / `base: ...` | `professionID`, `parentProfessionID`, `skillLevel`, `maxSkillLevel`, `skillModifier` of the child and base profession lines. The adapter uses the child line unless its `professionID` is 0. |
+| `adapter GetLine: key=.. skill=cur/max` | What LazyProf derived. `key=nil` means no registered profession matched. |
+| `craftlib milestones: ...` | The profession's CraftLib milestones; the last one is the skill cap the path aims for. |
+| `recipes=N learned=L craftlibMatched=M craftlibRecipes=C` | Recipe ids the client lists, how many are learned, how many of them CraftLib has, and CraftLib's total. `GetAllRecipeIDs returned nil` is reported instead when the API gives nothing. |
+| `notInCraftLib=N sample=[...]` | Client recipe ids CraftLib lacks (first 10): a data gap. |
+| `notInClient=N sample=[...]` | CraftLib recipe ids the client does not list (first 10): removed or other-profession recipes. |
+| `filters: GetShowLearned=.. GetShowUnlearned=.. UnlearnedHiddenByFilter=..` | The list filters. With unlearned hidden the arrow cannot point at an unlearned next recipe. |
+| `scrollbox: present visibleFrames=N firstFrameDataKeys=..` | Whether the recipe list ScrollBox was found, how many row frames are live, and the data keys of the first one (`recipeInfo` for a recipe, `categoryInfo` for a header). |
+| `path: steps=N complete=.. gaps=G` | The current calculated path: step count, whether it reaches the cap, and the number of gaps (levels no available recipe covers). `path: none` means no path exists. |
 
 ### Adding a new diagnostic
 

@@ -303,8 +303,151 @@ function Client:Start(callbacks)
     end)
 end
 
--- /lp diag learned on Forever. The Forever dump comes with the diagnostic
--- command for this client; until then one line says so.
+-- /lp diag forever: a read-only dump of the client facts and of what this
+-- adapter makes of them (documented in docs/development/TROUBLESHOOTING.md).
+-- Each section runs under pcall so one failure prints "SECTION ERROR" and the
+-- rest still prints. Numbers go through tostring (Forever's %d is 32-bit).
+local function SortedSample(set, limit)
+    local ids = {}
+    for id in pairs(set) do ids[#ids + 1] = id end
+    table.sort(ids, function(a, b) return tostring(a) < tostring(b) end)
+    local out = {}
+    for i = 1, math.min(limit, #ids) do out[i] = tostring(ids[i]) end
+    return #ids, table.concat(out, ",")
+end
+
+local function SortedKeys(t)
+    local keys = {}
+    for k in pairs(t) do keys[#keys + 1] = tostring(k) end
+    table.sort(keys)
+    return table.concat(keys, ",")
+end
+
 function Client:RunDiagnostic(lines)
-    lines[#lines + 1] = "diag learned: WoW Forever client - this diagnostic is not available here yet."
+    local function add(text) lines[#lines + 1] = text end
+    local function section(name, fn)
+        local ok, err = pcall(fn)
+        if not ok then add("SECTION ERROR: " .. name .. ": " .. tostring(err)) end
+    end
+
+    section("build", function()
+        local version, build, _, interface = GetBuildInfo()
+        add("diag forever: build=" .. tostring(version) .. " (" .. tostring(build) .. ") interface="
+            .. tostring(interface) .. " WOW_PROJECT_ID=" .. tostring(WOW_PROJECT_ID)
+            .. " WOW_PROJECT_CAMELOT=" .. tostring(WOW_PROJECT_CAMELOT)
+            .. " family=" .. tostring(LazyProf.ClientFamily))
+    end)
+
+    section("craftlib", function()
+        local cl = _G.CraftLib
+        if not cl then add("craftlib: absent"); return end
+        add("craftlib: version=" .. tostring(cl.version or cl.VERSION) .. " profile="
+            .. tostring(cl.GetActiveProfile and cl:GetActiveProfile())
+            .. " ready=" .. tostring(cl.IsReady and cl:IsReady()))
+        local count, recipeTotal, parts = 0, 0, {}
+        for key, data in pairs(cl:GetProfessions() or {}) do
+            count = count + 1
+            local n = data.recipes and #data.recipes or 0
+            recipeTotal = recipeTotal + n
+            parts[#parts + 1] = tostring(key) .. "=" .. tostring(n)
+        end
+        table.sort(parts)
+        add("craftlib: professions=" .. tostring(count) .. " recipes=" .. tostring(recipeTotal)
+            .. " [" .. table.concat(parts, " ") .. "]")
+    end)
+
+    section("window", function()
+        add("window: IsOpen=" .. tostring(self:IsOpen())
+            .. " ProfessionsFrame=" .. tostring(ProfessionsFrame ~= nil)
+            .. " CraftingPageShown=" .. tostring(ProfessionsFrame ~= nil
+                and ProfessionsFrame.CraftingPage ~= nil and ProfessionsFrame.CraftingPage:IsShown()))
+        add("local crafting: linked=" .. tostring((C_TradeSkillUI.IsTradeSkillLinked()))
+            .. " guild=" .. tostring(C_TradeSkillUI.IsTradeSkillGuild())
+            .. " guildMember=" .. tostring(C_TradeSkillUI.IsTradeSkillGuildMember())
+            .. " npc=" .. tostring(C_TradeSkillUI.IsNPCCrafting())
+            .. " showsOwnList=" .. tostring(ShowsOwnList()))
+    end)
+
+    local profKey
+    section("profession", function()
+        local child = C_TradeSkillUI.GetChildProfessionInfo() or {}
+        local base = C_TradeSkillUI.GetBaseProfessionInfo() or {}
+        add("child: professionID=" .. tostring(child.professionID) .. " parentProfessionID="
+            .. tostring(child.parentProfessionID) .. " skillLevel=" .. tostring(child.skillLevel)
+            .. " maxSkillLevel=" .. tostring(child.maxSkillLevel)
+            .. " skillModifier=" .. tostring(child.skillModifier))
+        add("base: professionID=" .. tostring(base.professionID) .. " parentProfessionID="
+            .. tostring(base.parentProfessionID) .. " skillLevel=" .. tostring(base.skillLevel)
+            .. " maxSkillLevel=" .. tostring(base.maxSkillLevel)
+            .. " skillModifier=" .. tostring(base.skillModifier))
+        local key, skill, max = self:GetLine()
+        profKey = key
+        add("adapter GetLine: key=" .. tostring(key) .. " skill=" .. tostring(skill) .. "/" .. tostring(max))
+        local registry = LazyProf.Professions and LazyProf.Professions.registry
+        local prof = key and registry and registry[key]
+        if prof then
+            local ms = {}
+            for i, m in ipairs(prof.milestones or {}) do ms[i] = tostring(m) end
+            add("craftlib milestones: " .. table.concat(ms, ",") .. " (last = cap "
+                .. tostring((prof.milestones or {})[#(prof.milestones or {})]) .. ")")
+        else
+            add("craftlib milestones: no registered profession for this line")
+        end
+    end)
+
+    section("recipes", function()
+        local ids = C_TradeSkillUI.GetAllRecipeIDs()
+        if not ids then add("recipes: GetAllRecipeIDs returned nil"); return end
+        local inClient, learned, matched = {}, 0, 0
+        local registry = LazyProf.Professions and LazyProf.Professions.registry
+        local prof = profKey and registry and registry[profKey]
+        local inLib = {}
+        if prof then
+            for _, r in ipairs(prof.recipes) do inLib[r.id] = true end
+        end
+        for _, id in ipairs(ids) do
+            inClient[id] = true
+            local info = C_TradeSkillUI.GetRecipeInfo(id)
+            if info and info.learned then learned = learned + 1 end
+            if inLib[id] then matched = matched + 1 end
+        end
+        local missingLib, missingClient = {}, {}
+        for id in pairs(inClient) do if not inLib[id] then missingLib[id] = true end end
+        for id in pairs(inLib) do if not inClient[id] then missingClient[id] = true end end
+        add("recipes=" .. tostring(#ids) .. " learned=" .. tostring(learned)
+            .. " craftlibMatched=" .. tostring(matched) .. " craftlibRecipes=" .. tostring(prof and #prof.recipes or "n/a"))
+        local n, sample = SortedSample(missingLib, 10)
+        add("notInCraftLib=" .. tostring(n) .. " sample=[" .. sample .. "]")
+        n, sample = SortedSample(missingClient, 10)
+        add("notInClient=" .. tostring(n) .. " sample=[" .. sample .. "]")
+    end)
+
+    section("filters", function()
+        add("filters: GetShowLearned=" .. tostring(C_TradeSkillUI.GetShowLearned())
+            .. " GetShowUnlearned=" .. tostring(C_TradeSkillUI.GetShowUnlearned())
+            .. " UnlearnedHiddenByFilter=" .. tostring(self:UnlearnedHiddenByFilter()))
+    end)
+
+    section("scrollbox", function()
+        local box = ProfessionsFrame and ProfessionsFrame.CraftingPage
+            and ProfessionsFrame.CraftingPage.RecipeList and ProfessionsFrame.CraftingPage.RecipeList.ScrollBox
+        if not box then add("scrollbox: absent"); return end
+        local count, firstKeys = 0, nil
+        for _, frame in box:EnumerateFrames() do
+            count = count + 1
+            if not firstKeys then
+                local node = frame:GetElementData()
+                firstKeys = node and node.data and SortedKeys(node.data) or "no data"
+            end
+        end
+        add("scrollbox: present visibleFrames=" .. tostring(count)
+            .. " firstFrameDataKeys=" .. tostring(firstKeys))
+    end)
+
+    section("path", function()
+        local path = LazyProf.Pathfinder and LazyProf.Pathfinder.currentPath
+        if not path then add("path: none"); return end
+        add("path: steps=" .. tostring(#(path.steps or {})) .. " complete=" .. tostring(path.complete)
+            .. " gaps=" .. tostring(#(path.gaps or {})))
+    end)
 end

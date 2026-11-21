@@ -115,9 +115,15 @@ function LazyProf:SlashCommand(input)
     elseif cmd == "log" then
         self:ShowDebugLog()
     elseif cmd == "diag" then
-        self:Print("Diagnostics: /lp diag learned - dumps learned-recipe detection state to a copyable window.")
-    elseif cmd == "diag learned" then
+        if self.ClientFamily == "forever" then
+            self:Print("Diagnostics: /lp diag forever - dumps client facts and adapter results to a copyable window.")
+        else
+            self:Print("Diagnostics: /lp diag learned - dumps learned-recipe detection state to a copyable window.")
+        end
+    elseif cmd == "diag learned" and self.ClientFamily ~= "forever" then
         self:RunLearnedDiagnostic()
+    elseif cmd == "diag forever" and self.ClientFamily == "forever" then
+        self:RunLearnedDiagnostic("forever")
     elseif self.configRegistered then
         LibStub("AceConfigDialog-3.0"):Open("LazyProf")
     else
@@ -453,8 +459,9 @@ end
 -- id-resolution path sees. Read-only: no frame Show/Hide; the only state touched
 -- is the same learnedRecipes cache the normal scan already writes. Output lines
 -- are documented in docs/development/TROUBLESHOOTING.md (Diagnostic Commands).
-function LazyProf:RunLearnedDiagnostic()
-    if not self.Client:IsOpen() then
+function LazyProf:RunLearnedDiagnostic(topic)
+    topic = topic or "learned"
+    if topic == "learned" and not self.Client:IsOpen() then
         self:Print("diag learned: open a profession window first.")
         return
     end
@@ -464,7 +471,7 @@ function LazyProf:RunLearnedDiagnostic()
     local out = {}
     self.Client:RunDiagnostic(out)
 
-    self:Print("diag learned: output ready - copy it from the window that opened.")
+    self:Print("diag " .. topic .. ": output ready - copy it from the window that opened.")
     self:ShowDiagnosticOutput(table.concat(out, "\n"))
 end
 

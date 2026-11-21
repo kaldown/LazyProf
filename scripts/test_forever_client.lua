@@ -86,6 +86,7 @@ _G.C_TradeSkillUI = {
     GetBaseProfessionInfo = function() return baseInfo end,
     GetAllRecipeIDs = function() return { 2329, 2330, 3170 } end,
     GetRecipeInfo = function(id) return recipeInfos[id] end,
+    GetShowLearned = function() return true end,
     GetShowUnlearned = function() return showUnlearned end,
     IsDataSourceChanging = function() return dataSourceChanging end,
 }
@@ -315,7 +316,7 @@ section("forever", function()
 
     local lines = { "existing" }
     Client:RunDiagnostic(lines)
-    check(p .. "RunDiagnostic appends a line", lines[1] == "existing" and type(lines[2]) == "string", #lines)
+    check(p .. "RunDiagnostic appends lines", lines[1] == "existing" and type(lines[2]) == "string", #lines)
 end)
 
 -- ===========================================================================
@@ -528,6 +529,47 @@ section("compartment", function()
     local classic = loadButton("classic")
     classic.MinimapButton:Initialize()
     check(p .. "Classic: LibDBIcon button registered", registered == 1, registered)
+end)
+
+-- ===========================================================================
+-- Diagnostic: /lp diag forever
+-- ===========================================================================
+section("diagnostic", function()
+    local p = "diag: "
+    resetProfessionInfo()
+    externalView = nil
+    _G.ProfessionsFrame = makeProfessionsFrame()
+    local addon = loadAdapter(16001, 18, 18)
+    _G.CraftLib = {
+        version = "0.11.0",
+        IsReady = function() return true end,
+        GetActiveProfile = function() return "FOREVER" end,
+        GetProfessions = function() return { alchemy = {} } end,
+    }
+    addon.Pathfinder = { currentPath = { steps = { 1, 2 }, complete = false, gaps = { { skillStart = 100 } } } }
+    local lines = {}
+    local ok, err = pcall(addon.Client.RunDiagnostic, addon.Client, lines)
+    check(p .. "no Lua error", ok, err)
+    local text = table.concat(lines, "\n")
+    print(text)
+    check(p .. "no SECTION ERROR", not text:find("SECTION ERROR", 1, true), text)
+    check(p .. "profile=FOREVER", text:find("profile=FOREVER", 1, true) ~= nil, text)
+    check(p .. "recipes=3 learned=2", text:find("recipes=3 learned=2", 1, true) ~= nil, text)
+    check(p .. "notInCraftLib=", text:find("notInCraftLib=", 1, true) ~= nil)
+    check(p .. "path line", text:find("steps=2", 1, true) ~= nil and text:find("complete=false", 1, true) ~= nil)
+    check(p .. "plain ASCII", not text:find("[\128-\255]"))
+
+    -- One failing section does not stop the rest.
+    local saved = C_TradeSkillUI.GetAllRecipeIDs
+    C_TradeSkillUI.GetAllRecipeIDs = function() return nil end
+    lines = {}
+    ok, err = pcall(addon.Client.RunDiagnostic, addon.Client, lines)
+    C_TradeSkillUI.GetAllRecipeIDs = saved
+    text = table.concat(lines, "\n")
+    check(p .. "nil GetAllRecipeIDs does not error", ok, err)
+    check(p .. "nil ids reported, later sections still print",
+        text:find("nil", 1, true) ~= nil and text:find("steps=2", 1, true) ~= nil, text)
+    _G.CraftLib = nil
 end)
 
 print(string.format("\n%d/%d checks passed", total - failures, total))
