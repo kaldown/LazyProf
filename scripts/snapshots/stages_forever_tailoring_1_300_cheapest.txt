@@ -1,0 +1,41 @@
+1 learn 2393 trainer 0
+1.00-10.00 craft 2393 x9 26820 orange
+10 learn 2385 trainer 0
+10.00-15.00 craft 2385 x5 9460 orange
+15 learn 8776 trainer 0
+15.00-55.59 craft 8776 x41 77572 orange
+55 learn 2402 trainer 0
+55.59-70.59 craft 2402 x15 29490 orange
+75 rank
+70.59-97.33 craft 2402 x33 64878 orange
+97 learn 3848 trainer 0
+97.33-119.80 craft 3848 x24 118104 orange
+119 learn 3869 vendor 800
+119.80-125.11 craft 3869 x7 42553 orange
+125 learn 3852 trainer 0
+125.11-140.33 craft 3852 x21 150318 yellow
+140 learn 3865 trainer 0
+140.33-147.01 craft 3865 x7 21210 orange
+150 rank
+147 learn 12089 vendor 4500
+147.01-165.01 craft 12089 x18 251010 orange
+165 learn 3862 vendor 1500
+165.01-175.01 craft 3862 x10 125740 orange
+175 learn 12050 trainer 0
+175.01-195.53 craft 12050 x21 120120 orange
+195 learn 12080 vendor 4000
+195.53-204.97 craft 12080 x11 72050 orange
+204 learn 12074 trainer 0
+204.97-205.97 craft 12074 x1 9511 orange
+205 learn 12072 trainer 0
+205.97-210.50 craft 12072 x5 47555 yellow
+210.50-215.01 craft 12074 x6 57066 yellow
+215.01-219.75 craft 12072 x8 76088 yellow
+219 learn 18402 trainer 0
+219.75-220.75 craft 18402 x1 15345 orange
+225 rank
+220.75-230.31 craft 18402 x10 153450 orange
+230 learn 18560 vendor 20000
+230.31-285.43 craft 18560 x61 313784 orange
+285 learn 22902 vendor 40000
+285.43-300.00 craft 22902 x17 585310 orange

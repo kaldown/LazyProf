@@ -82,6 +82,11 @@ Modules\Pathfinder\Strategies\Fastest.lua
 Modules\Pathfinder\MaterialResolver.lua
 Modules\Pathfinder\Pathfinder.lua
 
+# Modules - Guide
+Modules\Guide\Text.lua
+Modules\Guide\Range.lua
+Modules\Guide\Stages.lua
+
 # Modules - UI
 Modules\UI\Widgets\PanelShell.lua
 Modules\UI\Widgets\RowPool.lua
