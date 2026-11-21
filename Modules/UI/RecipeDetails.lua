@@ -607,7 +607,11 @@ function RecipeDetails:UpdateSourceSection(recipe)
         local vendors = Utils.GetVendorsForFaction(source, Utils.GetPlayerFaction(), self.showAllFactions)
 
         if #vendors == 0 then
-            content.sourceRows[1].text:SetText("|cFFFF6666No vendors for your faction|r")
+            local noVendor = "|cFFFF6666No vendors for your faction|r"
+            if Utils.FormatCurrency(source.currency) then
+                noVendor = noVendor .. "\n" .. Utils.FormatCurrency(source.currency)
+            end
+            content.sourceRows[1].text:SetText(noVendor)
             content.sourceRows[1]:Show()
         else
             for _, vendor in ipairs(vendors) do

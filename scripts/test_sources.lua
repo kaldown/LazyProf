@@ -101,6 +101,19 @@ section("self-found does not free currency recipes", function()
     LazyProf.db.profile.includeCurrencyRecipes = false
 end)
 
+section("self-found unknown source", function()
+    local r = recipe(6, { type = "unknown", itemId = 902 })
+    LazyProf.Inventory = { ScanAll = function() return {}, {} end }
+    local ok = LazyProf.SelfFound:IsRecipeObtainableUncached(r)
+    check("self-found unknown not in bags: not obtainable", ok == false)
+    LazyProf.Inventory = { ScanAll = function() return { [902] = 1 }, { [902] = { bags = 1 } } end }
+    local ok2 = LazyProf.SelfFound:IsRecipeObtainableUncached(r)
+    check("self-found unknown in bags: obtainable", ok2 == true)
+    LazyProf.Inventory = { ScanAll = function() return {}, {} end }
+    local ok3 = LazyProf.SelfFound:IsRecipeObtainableUncached(recipe(6, { type = "unknown", itemId = 902 }, true))
+    check("self-found unknown learned: obtainable", ok3 == true)
+end)
+
 section("strategy run", function()
     local PRICES = { [101] = 100, [105] = 100 }
     local learned = recipe(5, { type = "trainer" }, true)

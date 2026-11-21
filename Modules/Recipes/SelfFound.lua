@@ -157,8 +157,16 @@ function SelfFound:IsRecipeObtainableUncached(recipe)
                 and not LazyProf.RecipeAvailability:MeetsTrainerRequirements(source) then
             return false, "Recipe not self-obtainable", nil
         end
+        -- Unknown sources are never free: learned (above) or the item in inventory.
+        if source.type == "unknown" then
+            local A = LazyProf.RecipeAvailability
+            local itemId = source.itemId
+            if not (A and itemId and A:FindRecipeInInventory(itemId)) then
+                return false, "Recipe not self-obtainable", nil
+            end
+            sourceInfo = { type = "inventory", itemId = itemId }
         -- Currency-only recipes are never free: opt-in only.
-        if (source.type == "vendor" or source.type == "reputation")
+        elseif (source.type == "vendor" or source.type == "reputation")
                 and source.cost == nil and source.currency ~= nil then
             local profile = LazyProf.db and LazyProf.db.profile
             if not (profile and profile.includeCurrencyRecipes) then

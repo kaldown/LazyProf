@@ -44,6 +44,9 @@ local function AddSourceTooltipLines(tooltip, recipe)
         if sourceInfo.cost and sourceInfo.cost > 0 then
             tooltip:AddLine("Cost: " .. Utils.FormatMoney(sourceInfo.cost), 1, 0.82, 0)
         end
+        if Utils.FormatCurrency(sourceInfo.currency) then
+            tooltip:AddLine("Recipe: " .. Utils.FormatCurrency(sourceInfo.currency), 1, 0.82, 0)
+        end
     elseif sourceInfo.type == "ah" then
         tooltip:AddLine("Available on Auction House", 0.5, 1, 0.5)
         tooltip:AddLine("Price: " .. Utils.FormatMoney(sourceInfo.price) .. " (" .. sourceInfo.source .. ")", 1, 0.82, 0)
