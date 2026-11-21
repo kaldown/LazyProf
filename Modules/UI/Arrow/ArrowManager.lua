@@ -8,8 +8,7 @@ local ArrowManager = LazyProf.ArrowManager
 ArrowManager.strategies = {}
 ArrowManager.activeStrategy = nil
 ArrowManager.frame = nil
-ArrowManager.cachedRecipeIndex = nil  -- Cached index for scroll performance
-ArrowManager.cachedRecipeName = nil   -- Recipe name that was looked up
+ArrowManager.cachedRecipe = nil  -- Recipe the arrow last pointed at (scroll refresh)
 
 -- Initialize arrow manager
 function ArrowManager:Initialize()
@@ -85,19 +84,18 @@ function ArrowManager:Update(path)
     self.activeStrategy:Update(self, path)
 end
 
--- Lightweight refresh for scroll events - uses cached recipe index
+-- Lightweight refresh for scroll events - uses the cached recipe
 function ArrowManager:RefreshPosition()
-    if not self.cachedRecipeIndex then
+    if not self.cachedRecipe then
         self:Hide()
         return
     end
-    self:PositionAtRecipe(self.cachedRecipeIndex)
+    self:PositionAtRecipe(self.cachedRecipe)
 end
 
 -- Invalidate cache when path changes (called when a new path is calculated)
 function ArrowManager:InvalidateCache()
-    self.cachedRecipeIndex = nil
-    self.cachedRecipeName = nil
+    self.cachedRecipe = nil
 end
 
 -- Show arrow and highlight
@@ -118,21 +116,6 @@ function ArrowManager:Hide()
     end
 end
 
--- Get number of visible skill buttons (varies by game version/UI addons)
-local function GetTradeSkillsDisplayed()
-    -- Try to count actual visible buttons
-    local count = 0
-    for i = 1, 30 do  -- Check up to 30 buttons
-        local button = _G["TradeSkillSkill" .. i]
-        if button and button:IsShown() then
-            count = i
-        else
-            break
-        end
-    end
-    return count > 0 and count or 8  -- Fallback to 8 if detection fails
-end
-
 -- Skill difficulty colors (matching WoW's TradeSkill colors)
 local SKILL_COLORS = {
     optimal = { r = 1.0, g = 0.5, b = 0.25 },  -- Orange
@@ -142,39 +125,19 @@ local SKILL_COLORS = {
     header  = { r = 1.0, g = 0.82, b = 0.0 },  -- Gold (headers)
 }
 
--- Position arrow next to a recipe row
-function ArrowManager:PositionAtRecipe(recipeIndex)
-    if not TradeSkillFrame or not TradeSkillFrame:IsVisible() then
-        return false
-    end
-
-    -- Get scroll offset to determine which button displays this recipe
-    local scrollOffset = 0
-    if TradeSkillListScrollFrame and FauxScrollFrame_GetOffset then
-        scrollOffset = FauxScrollFrame_GetOffset(TradeSkillListScrollFrame)
-    end
-
-    -- Calculate visible button index (1-8 for Classic UI)
-    local buttonIndex = recipeIndex - scrollOffset
-
-    -- Check if recipe is currently visible in the scroll frame
-    local maxVisible = GetTradeSkillsDisplayed()
-    if buttonIndex < 1 or buttonIndex > maxVisible then
+-- Position arrow next to a recipe row (the recipe, not an index)
+function ArrowManager:PositionAtRecipe(recipe)
+    self.cachedRecipe = recipe
+    local button, skillType = LazyProf.Client:FindRecipeRow(recipe)
+    if not button then
         self:Hide()
         return false
     end
 
-    -- Find the skill button for this visible position
-    local buttonName = "TradeSkillSkill" .. buttonIndex
-    local button = _G[buttonName]
-
-    if not button or not button:IsVisible() then
-        self:Hide()
-        return false
-    end
+    local anchor = LazyProf.Client:AnchorFrame()
 
     -- Get skill difficulty color from the recipe
-    local skillName, skillType = GetTradeSkillInfo(recipeIndex)
+    local skillName = recipe.name
     local color = SKILL_COLORS[skillType] or SKILL_COLORS.medium  -- Default to yellow
 
     -- Log when arrow becomes visible
@@ -193,7 +156,7 @@ function ArrowManager:PositionAtRecipe(recipeIndex)
     -- Position arrow at the left side of the button (before recipe name)
     self.frame:ClearAllPoints()
     self.frame:SetPoint("LEFT", button, "LEFT", 2, 0)
-    self.frame:SetParent(TradeSkillFrame)
+    self.frame:SetParent(anchor)
     self.frame:SetFrameStrata("HIGH")
     self.frame:SetFrameLevel(button:GetFrameLevel() + 10)
 
@@ -203,45 +166,13 @@ function ArrowManager:PositionAtRecipe(recipeIndex)
         self.highlight:ClearAllPoints()
         self.highlight:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
         self.highlight:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 0, 0)
-        self.highlight:SetParent(TradeSkillFrame)
+        self.highlight:SetParent(anchor)
         self.highlight:SetFrameStrata("MEDIUM")
         self.highlight:SetFrameLevel(button:GetFrameLevel() + 1)
     end
 
     self:Show()
     return true
-end
-
--- Find recipe index in TradeSkill frame (with caching for scroll performance)
-function ArrowManager:FindRecipeIndex(recipe)
-    if not recipe then
-        self.cachedRecipeIndex = nil
-        self.cachedRecipeName = nil
-        return nil
-    end
-
-    local targetName = recipe.name
-
-    -- Use cache if same recipe
-    if self.cachedRecipeName == targetName and self.cachedRecipeIndex then
-        return self.cachedRecipeIndex
-    end
-
-    local numSkills = GetNumTradeSkills()
-
-    for i = 1, numSkills do
-        local skillName, skillType = GetTradeSkillInfo(i)
-        if skillType ~= "header" and skillName == targetName then
-            -- Cache the result
-            self.cachedRecipeIndex = i
-            self.cachedRecipeName = targetName
-            return i
-        end
-    end
-
-    self.cachedRecipeIndex = nil
-    self.cachedRecipeName = targetName  -- Still cache the name to avoid repeated searches
-    return nil
 end
 
 -- Tooltip handlers

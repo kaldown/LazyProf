@@ -275,9 +275,9 @@ function MissingPanel:Update(missingMaterials, bracketLabel)
     if LazyProfMilestonePanel and LazyProfMilestonePanel:IsVisible() then
         self.frame:ClearAllPoints()
         self.frame:SetPoint("TOPLEFT", LazyProfMilestonePanel, "BOTTOMLEFT", 0, -10)
-    elseif TradeSkillFrame and TradeSkillFrame:IsVisible() then
+    elseif LazyProf.Client:IsOpen() then
         self.frame:ClearAllPoints()
-        self.frame:SetPoint("TOPLEFT", TradeSkillFrame, "TOPRIGHT", 10, -220)
+        self.frame:SetPoint("TOPLEFT", LazyProf.Client:AnchorFrame(), "TOPRIGHT", 10, -220)
     end
 
     self:Show()

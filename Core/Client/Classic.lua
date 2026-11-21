@@ -118,37 +118,103 @@ function Client:GetItemInfo(itemId)
     return GetItemInfo(itemId)
 end
 
+-- Recipe-name -> trade-skill index cache (scrolling asks for the same recipe
+-- many times); dropped whenever the window's list changes.
+local rowIndexCache = {}
+
+function Client:InvalidateRowCache()
+    rowIndexCache = {}
+end
+
+-- Trade-skill list index of a recipe (name match, headers skipped), cached.
+local function FindRecipeIndex(recipe)
+    local targetName = recipe and recipe.name
+    if not targetName then return nil end
+    local cached = rowIndexCache[targetName]
+    if cached ~= nil then return cached or nil end
+
+    for i = 1, GetNumTradeSkills() do
+        local skillName, skillType = GetTradeSkillInfo(i)
+        if skillType ~= "header" and skillName == targetName then
+            rowIndexCache[targetName] = i
+            return i
+        end
+    end
+    rowIndexCache[targetName] = false   -- remember the miss
+    return nil
+end
+
+-- Number of visible skill buttons (varies by game version/UI addons).
+local function VisibleRowCount()
+    local count = 0
+    for i = 1, 30 do
+        local button = _G["TradeSkillSkill" .. i]
+        if button and button:IsShown() then
+            count = i
+        else
+            break
+        end
+    end
+    return count > 0 and count or 8
+end
+
+-- Row frame showing `recipe` right now, plus its difficulty ("optimal",
+-- "medium", "easy", "trivial"). nil when the window is closed, the recipe is
+-- not in the list, or it is scrolled out of view.
+function Client:FindRecipeRow(recipe)
+    if not self:IsOpen() then return nil end
+    local recipeIndex = FindRecipeIndex(recipe)
+    if not recipeIndex then return nil end
+
+    local scrollOffset = 0
+    if TradeSkillListScrollFrame and FauxScrollFrame_GetOffset then
+        scrollOffset = FauxScrollFrame_GetOffset(TradeSkillListScrollFrame)
+    end
+
+    local buttonIndex = recipeIndex - scrollOffset
+    if buttonIndex < 1 or buttonIndex > VisibleRowCount() then return nil end
+
+    local button = _G["TradeSkillSkill" .. buttonIndex]
+    if not button or not button:IsVisible() then return nil end
+
+    local _, skillType = GetTradeSkillInfo(recipeIndex)
+    return button, skillType
+end
+
 -- Hook the trade-skill list scroll frame so the arrow follows scrolling. The
 -- frame belongs to the load-on-demand trade-skill UI, so this runs on open.
-function Client:HookScroll(callbacks)
-    if self.scrollHooked then return end
+local scrollHooked = false
+local scrollToken = 0
+local function HookScroll(callbacks)
+    if scrollHooked or not TradeSkillListScrollFrame then return end
 
-    -- Hook the scroll frame's OnVerticalScroll to reposition arrow (debounced)
-    if TradeSkillListScrollFrame then
-        local origScript = TradeSkillListScrollFrame:GetScript("OnVerticalScroll")
-        local scrollTimer = nil
-        TradeSkillListScrollFrame:SetScript("OnVerticalScroll", function(self, offset, ...)
-            if origScript then
-                origScript(self, offset, ...)
-            end
-            -- Debounce: only refresh after scrolling stops
-            if scrollTimer then scrollTimer:Cancel() end
-            scrollTimer = C_Timer.After(0.05, function()
+    local origScript = TradeSkillListScrollFrame:GetScript("OnVerticalScroll")
+    TradeSkillListScrollFrame:SetScript("OnVerticalScroll", function(frame, offset, ...)
+        if origScript then
+            origScript(frame, offset, ...)
+        end
+        -- Debounce: only the latest scroll's callback refreshes.
+        scrollToken = scrollToken + 1
+        local token = scrollToken
+        C_Timer.After(0.05, function()
+            if token == scrollToken then
                 callbacks.onScroll()
-            end)
+            end
         end)
-        self.scrollHooked = true
-    end
+    end)
+    scrollHooked = true
 end
 
 -- Register the profession-window events and hooks.
 -- callbacks: onOpen(), onClose(), onUpdate(), onScroll().
 function Client:Start(callbacks)
     LazyProf:RegisterEvent("TRADE_SKILL_SHOW", function()
+        Client:InvalidateRowCache()
         callbacks.onOpen()
-        Client:HookScroll(callbacks)
+        HookScroll(callbacks)
     end)
     LazyProf:RegisterEvent("TRADE_SKILL_UPDATE", function()
+        Client:InvalidateRowCache()
         callbacks.onUpdate()
     end)
     LazyProf:RegisterEvent("TRADE_SKILL_CLOSE", function()

@@ -73,14 +73,9 @@ LazyProf.ArrowStrategies.arrowWithTooltip = {
             return
         end
 
-        -- Find recipe in TradeSkill frame
-        local recipeIndex = manager:FindRecipeIndex(recommendation.recipe)
-        if recipeIndex then
-            manager:PositionAtRecipe(recipeIndex)
-        else
-            -- Recipe not in TradeSkill list (not learned)
-            manager:Hide()
-        end
+        -- Hides itself when the recipe has no visible row (not learned or
+        -- scrolled out of view).
+        manager:PositionAtRecipe(recommendation.recipe)
     end,
 
     OnEnter = function(self, manager)

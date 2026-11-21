@@ -115,7 +115,7 @@ function MilestonePanelClass:Initialize()
     else
         -- Standalone mode: own size, position, chrome
         self.frame:SetSize(DEFAULT_WIDTH, 200)
-        self.frame:SetPoint("TOPLEFT", TradeSkillFrame or UIParent, "TOPRIGHT", 10, 0)
+        self.frame:SetPoint("TOPLEFT", LazyProf.Client:AnchorFrame() or UIParent, "TOPRIGHT", 10, 0)
         self.frame:SetFrameStrata("MEDIUM")
         self.frame:SetFrameLevel(10)
 
@@ -568,9 +568,9 @@ function MilestonePanelClass:Update(path)
         self.frame.content:SetHeight(math.max(yOffset + 10, self.frame:GetHeight() - 70))
 
         if not self.config.embedded then
-            if TradeSkillFrame and TradeSkillFrame:IsVisible() and not self.manuallyMoved then
+            if LazyProf.Client:IsOpen() and not self.manuallyMoved then
                 self.frame:ClearAllPoints()
-                self.frame:SetPoint("TOPLEFT", TradeSkillFrame, "TOPRIGHT", 10, 0)
+                self.frame:SetPoint("TOPLEFT", LazyProf.Client:AnchorFrame(), "TOPRIGHT", 10, 0)
             end
         end
 
@@ -733,11 +733,11 @@ function MilestonePanelClass:Update(path)
     -- Update content height for scrolling
     self.frame.content:SetHeight(math.max(yOffset + 10, self.frame:GetHeight() - 70))
 
-    -- Position standalone panel next to TradeSkillFrame
+    -- Position standalone panel next to the profession window
     if not self.config.embedded then
-        if TradeSkillFrame and TradeSkillFrame:IsVisible() and not self.manuallyMoved then
+        if LazyProf.Client:IsOpen() and not self.manuallyMoved then
             self.frame:ClearAllPoints()
-            self.frame:SetPoint("TOPLEFT", TradeSkillFrame, "TOPRIGHT", 10, 0)
+            self.frame:SetPoint("TOPLEFT", LazyProf.Client:AnchorFrame(), "TOPRIGHT", 10, 0)
         end
     end
 
