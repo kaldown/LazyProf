@@ -242,6 +242,20 @@ section("fresh scan", function()
         tostring(price) .. " " .. tostring(source))
 end)
 
+section("clear cache", function()
+    local addon = loadPricing({ uncached = { [7777] = true } })
+    local printed = 0
+    function addon:Print() printed = printed + 1 end
+    local pm = addon.PriceManager
+    pm:GetPriceInfo(2589)
+    pm:GetPriceInfo(7777)
+    pm:ClearCache(true)
+    check("clear: silent clear empties the cache", next(pm.cache) == nil and next(pm.flooredItems) == nil)
+    check("clear: silent clear prints nothing", printed == 0, printed)
+    pm:ClearCache()
+    check("clear: a plain clear still says so", printed == 1, printed)
+end)
+
 -- ===========================================================================
 -- Text for one price
 -- ===========================================================================

@@ -143,11 +143,13 @@ function PriceManager:GetPrices(itemIds)
     return prices
 end
 
--- Clear price cache
-function PriceManager:ClearCache()
+-- Clear price cache; silent skips the chat line (automatic clears).
+function PriceManager:ClearCache(silent)
     self.cache = {}
     self.flooredItems = {}
-    LazyProf:Print("Price cache cleared.")
+    if not silent then
+        LazyProf:Print("Price cache cleared.")
+    end
 end
 
 local function IsStale(info)

@@ -110,6 +110,11 @@ are what the data needs fixing for.
 or you are not sure whether your auction data is current. Run it with a path calculated
 (open a profession window first). Works on every client.
 
+**Which price wins:** a vendor price first; then an Auctionator price from a scan made today
+(`seen today`); then the market sources in `order` (TSM first by default, with its own
+fallback values); then the vendor sell estimate. Closing the auction house drops the
+5-minute price cache, so the next path reads a scan you just made.
+
 | Line | Meaning |
 |------|---------|
 | `diag prices: tsm=.. auctionator=.. auctionatorAge=.. vendor=.. order=.. tsmSource=.. sellFallback=.. staleAfterDays=N` | Which price sources are installed, the market source order, the TSM value LazyProf asks for, whether the vendor sell estimate is used, and after how many days an Auctionator price counts as stale. `auctionatorAge=false` means Auctionator cannot tell the age of its prices. |

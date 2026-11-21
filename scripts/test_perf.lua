@@ -290,5 +290,32 @@ section("H", function()
     LP.debugFrame = nil
 end)
 
+-- ===========================================================================
+-- I: closing the auction house drops the price cache (a scan just happened)
+-- ===========================================================================
+section("I", function()
+    check("I handler exists", type(LP.OnAuctionHouseClosed) == "function")
+    local clears, recalcs, open = {}, {}, true
+    local savedPM, savedClient = LP.PriceManager, LP.Client
+    LP.PriceManager = { ClearCache = function(_self, silent) clears[#clears + 1] = silent end }
+    LP.Client = { IsOpen = function() return open end }
+    LP.Recalculate = function(_self, reason) recalcs[#recalcs + 1] = reason end
+
+    flush(); recalcs = {}
+    -- The close event may fire twice per close.
+    LP:OnAuctionHouseClosed()
+    LP:OnAuctionHouseClosed()
+    advance(0.6)
+    check("I cache dropped silently", #clears == 2 and clears[1] == true, #clears)
+    check("I profession window open: one recalc", #recalcs == 1 and recalcs[1] == "auction house closed",
+        #recalcs .. " " .. tostring(recalcs[1]))
+
+    flush(); clears, recalcs, open = {}, {}, false
+    LP:OnAuctionHouseClosed()
+    advance(0.6)
+    check("I window closed: cache dropped, no recalc", #clears == 1 and #recalcs == 0, #recalcs)
+    LP.PriceManager, LP.Client = savedPM, savedClient
+end)
+
 print(string.format("\n%d/%d checks passed", total - failures, total))
 os.exit(failures == 0 and 0 or 1)

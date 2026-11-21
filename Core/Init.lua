@@ -80,6 +80,20 @@ function LazyProf:OnEnable()
     -- Register events
     self:RegisterEvent("BAG_UPDATE", "OnBagUpdate")
     self:RegisterEvent("GET_ITEM_INFO_RECEIVED", "OnItemInfoReceived")
+    self:RegisterEvent("AUCTION_HOUSE_CLOSED", "OnAuctionHouseClosed")
+end
+
+-- Leaving the auction house: a scan may just have run there, so drop the
+-- cached prices (5-minute cache) and let the next calculation read the new
+-- ones. The event can fire twice per close; the recalculation debounce
+-- coalesces that.
+function LazyProf:OnAuctionHouseClosed()
+    if self.PriceManager then
+        self.PriceManager:ClearCache(true)
+    end
+    if self.Client and self.Client:IsOpen() then
+        self:ScheduleRecalculation("auction house closed")
+    end
 end
 
 -- When a reagent we could only price with the absolute floor (because its

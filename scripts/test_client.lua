@@ -373,8 +373,10 @@ section("init", function()
         IsOpen = function() return open end,
     }
     addon:OnEnable()
-    check(p .. "Init registers only BAG_UPDATE and GET_ITEM_INFO_RECEIVED",
-        sortedKeys(events) == "BAG_UPDATE,GET_ITEM_INFO_RECEIVED", sortedKeys(events))
+    -- No profession-window event here (those go through Client:Start);
+    -- AUCTION_HOUSE_CLOSED has the same name on every client family.
+    check(p .. "Init registers only AUCTION_HOUSE_CLOSED, BAG_UPDATE and GET_ITEM_INFO_RECEIVED",
+        sortedKeys(events) == "AUCTION_HOUSE_CLOSED,BAG_UPDATE,GET_ITEM_INFO_RECEIVED", sortedKeys(events))
     check(p .. "OnEnable calls Client:Start", type(startCallbacks) == "table")
     for _, cb in ipairs({ "onOpen", "onClose", "onUpdate", "onScroll" }) do
         check(p .. "callback " .. cb, startCallbacks and type(startCallbacks[cb]) == "function")
