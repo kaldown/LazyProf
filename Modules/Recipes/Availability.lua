@@ -192,7 +192,20 @@ function Availability:GetAHPrice(itemId)
         return nil, nil
     end
 
-    -- Try TSM first (uses DBMinBuyout - nil means no listings)
+    -- An Auctionator price from a scan made today is newer than TSM's snapshot
+    -- (same rule as PriceManager:GetPriceInfo).
+    local auctionator = Auctionator and Auctionator.API and Auctionator.API.v1
+    if auctionator and auctionator.GetAuctionAgeByItemID then
+        local age = auctionator.GetAuctionAgeByItemID("LazyProf", itemId)
+        if age and age <= LazyProf.Constants.AUCTION_FRESH_DAYS then
+            local price = auctionator.GetAuctionPriceByItemID("LazyProf", itemId)
+            if price and price > 0 then
+                return price, "Auctionator"
+            end
+        end
+    end
+
+    -- Then TSM (uses DBMinBuyout - nil means no listings)
     if TSM_API then
         local itemString = "i:" .. itemId
         local price = TSM_API.GetCustomPriceValue("DBMinBuyout", itemString)

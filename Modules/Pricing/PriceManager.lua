@@ -76,12 +76,21 @@ function PriceManager:GetPriceInfo(itemId)
         end
     end
 
-    -- Query market providers in priority order
+    -- Market providers: a price from a scan made today (a provider that
+    -- reports its age, AUCTION_FRESH_DAYS or less) wins at once; otherwise the
+    -- first price in the configured order.
+    local first
     for _, provider in ipairs(self.providers) do
         local price, detail, ageDays = provider:GetPrice(itemId)
         if price and price > 0 then
-            return record(provider, price, detail, ageDays)
+            if ageDays and ageDays <= Constants.AUCTION_FRESH_DAYS then
+                return record(provider, price, detail, ageDays)
+            end
+            first = first or { provider = provider, price = price, detail = detail, ageDays = ageDays }
         end
+    end
+    if first then
+        return record(first.provider, first.price, first.detail, first.ageDays)
     end
 
     -- Last-resort floor: vendor SELL value (always available offline, no AH).

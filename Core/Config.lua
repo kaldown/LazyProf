@@ -350,7 +350,7 @@ LazyProf.options = {
             order = 3,
             args = {
                 desc = {
-                    name = "Vendor prices (from TSM/Auctionator merchant data) are always used first when available. Market sources below are checked in order for non-vendor items.",
+                    name = "Vendor prices (from TSM/Auctionator merchant data) are always used first when available. An Auctionator price from a scan you made today comes next. Otherwise market sources are checked in order (TSM, then Auctionator).",
                     type = "description",
                     order = 1,
                 },

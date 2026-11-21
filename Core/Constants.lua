@@ -63,6 +63,10 @@ LazyProf.Constants = {
     -- An Auctionator price last seen this many days ago or more counts as stale
     -- (Auctionator reports whole days). TSM does not report the age of its data.
     PRICE_STALE_DAYS = 3,
+    -- An auction price seen this many days ago or less (0 = a scan made today)
+    -- is used before the configured price-source order: it is newer than the
+    -- TSM snapshot, which only reaches the game at login or /reload.
+    AUCTION_FRESH_DAYS = 0,
 
     -- Profession IDs (spell IDs for TBC)
     PROFESSION_IDS = {

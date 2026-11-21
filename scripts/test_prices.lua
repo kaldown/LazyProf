@@ -38,8 +38,9 @@ _G.time = function() return now end
 local tsmValues
 local function resetTsm()
     tsmValues = {
-        DBRecent = { ["i:2589"] = 120 },
+        DBRecent = { ["i:2589"] = 120, ["i:2770"] = 50 },
         DBMarket = { ["i:2589"] = 130, ["i:2592"] = 400 },
+        DBMinBuyout = { ["i:5000"] = 1000 },
         vendorbuy = { ["i:2320"] = 10 },
     }
 end
@@ -54,8 +55,8 @@ end
 
 local auctionatorPrices, auctionatorAges
 local function resetAuctionator()
-    auctionatorPrices = { [2589] = 125, [2592] = 900, [4306] = 300 }
-    auctionatorAges = { [2589] = 0, [2592] = 1, [4306] = 5 }
+    auctionatorPrices = { [2589] = 125, [2592] = 900, [4306] = 300, [2770] = 45, [2320] = 15, [5000] = 800 }
+    auctionatorAges = { [2589] = 1, [2592] = 1, [4306] = 5, [2770] = 0, [2320] = 0, [5000] = 0 }
 end
 resetAuctionator()
 local function installAuctionator(withAge)
@@ -76,8 +77,10 @@ local function installAuctionator(withAge)
 end
 
 local itemNames = { [2589] = "Linen Cloth", [2592] = "Wool Cloth", [2320] = "Coarse Thread",
-                    [4306] = "Silk Cloth", [2996] = "Bolt of Linen Cloth", [8888] = "Unsellable Thing" }
-local sellPrices = { [2589] = 13, [2592] = 33, [2320] = 2, [4306] = 150, [2996] = 40, [8888] = 0 }
+                    [4306] = "Silk Cloth", [2996] = "Bolt of Linen Cloth", [8888] = "Unsellable Thing",
+                    [2770] = "Copper Ore", [5000] = "Pattern: Test" }
+local sellPrices = { [2589] = 13, [2592] = 33, [2320] = 2, [4306] = 150, [2996] = 40, [8888] = 0, [2770] = 5,
+                     [5000] = 100 }
 
 local function loadPricing(opts)
     opts = opts or {}
@@ -110,6 +113,7 @@ local function loadPricing(opts)
         assert(loadfile("Modules/Pricing/Providers/" .. f .. ".lua"))("LazyProf", addon)
     end
     assert(loadfile("Modules/Pricing/PriceManager.lua"))("LazyProf", addon)
+    assert(loadfile("Modules/Recipes/Availability.lua"))("LazyProf", addon)
     addon.PriceManager:Initialize()
     return addon
 end
@@ -182,6 +186,60 @@ section("auctionator without the age call", function()
         and info.price == 300 and info.ageDays == nil)
     check("age: undated price is not stale", addon.PriceManager:PathSummary(
         { steps = { { recipe = { reagents = { { itemId = 4306 } } } } } }).stale == 0)
+end)
+
+-- ===========================================================================
+-- A price from an auction scan made today beats the configured order
+-- ===========================================================================
+section("fresh scan", function()
+    local p = "fresh: "
+    local addon = loadPricing()
+    local pm = addon.PriceManager
+    check(p .. "fresh age is 0 days", addon.Constants.AUCTION_FRESH_DAYS == 0,
+        tostring(addon.Constants.AUCTION_FRESH_DAYS))
+
+    local info = pm:GetPriceInfo(2770)
+    check(p .. "Auctionator seen today beats TSM", info.source == "Auctionator" and info.price == 45
+        and info.ageDays == 0, info.source .. " " .. tostring(info.price))
+    info = pm:GetPriceInfo(2589)
+    check(p .. "Auctionator seen yesterday does not", info.source == "TSM" and info.price == 120,
+        info.source .. " " .. tostring(info.price))
+    info = pm:GetPriceInfo(2320)
+    check(p .. "vendor price still comes first", info.source == "Vendor" and info.price == 10,
+        info.source .. " " .. tostring(info.price))
+
+    addon = loadPricing({ age = false })
+    info = addon.PriceManager:GetPriceInfo(2770)
+    check(p .. "without the age call the order holds", info.source == "TSM" and info.price == 50,
+        info.source .. " " .. tostring(info.price))
+
+    addon = loadPricing()
+    auctionatorPrices[2770] = nil
+    info = addon.PriceManager:GetPriceInfo(2770)
+    resetAuctionator()
+    check(p .. "an age without a price falls through to TSM", info.source == "TSM" and info.price == 50,
+        info.source .. " " .. tostring(info.price))
+
+    addon = loadPricing({ priority = { "auctionator", "tsm" } })
+    info = addon.PriceManager:GetPriceInfo(2589)
+    check(p .. "Auctionator first in the order: any age", info.source == "Auctionator" and info.price == 125,
+        info.source .. " " .. tostring(info.price))
+
+    -- Recipe items bought from the auction house follow the same rule.
+    addon = loadPricing()
+    local Av = addon.RecipeAvailability
+    local price, source = Av:GetAHPrice(5000)
+    check(p .. "recipe item: Auctionator today beats TSM min buyout", price == 800 and source == "Auctionator",
+        tostring(price) .. " " .. tostring(source))
+    auctionatorAges[5000] = 2
+    price, source = Av:GetAHPrice(5000)
+    check(p .. "recipe item: older Auctionator price does not", price == 1000 and source == "TSM",
+        tostring(price) .. " " .. tostring(source))
+    resetAuctionator()
+    addon = loadPricing({ age = false })
+    price, source = addon.RecipeAvailability:GetAHPrice(5000)
+    check(p .. "recipe item: without the age call TSM first", price == 1000 and source == "TSM",
+        tostring(price) .. " " .. tostring(source))
 end)
 
 -- ===========================================================================
@@ -316,7 +374,7 @@ section("diagnostic", function()
     check(p .. "item line names item, price and source",
         text:find("2589 Linen Cloth: 1s 20c TSM DBRecent", 1, true) ~= nil, text)
     check(p .. "item line shows every source's value",
-        text:find("tsm=1s 20c (DBRecent) auctionator=1s 25c (0d) vendor=- sell=13c", 1, true) ~= nil, text)
+        text:find("tsm=1s 20c (DBRecent) auctionator=1s 25c (1d) vendor=- sell=13c", 1, true) ~= nil, text)
     check(p .. "sources that disagree are flagged",
         text:find("2592 Wool Cloth:[^\n]*DISAGREE") ~= nil, text)
     check(p .. "agreeing sources are not flagged", text:find("2589 Linen Cloth:[^\n]*DISAGREE") == nil, text)
