@@ -11,6 +11,9 @@ LazyProf.PriceProviders.tsm = {
         return TSM_API ~= nil
     end,
 
+    -- Returns the price and the TSM price source key that gave it (the
+    -- selected one or the fallback that answered). TSM does not tell other
+    -- addons when its data was synced, so there is no age.
     GetPrice = function(self, itemId)
         if not self:IsAvailable() then return nil end
 
@@ -21,6 +24,7 @@ LazyProf.PriceProviders.tsm = {
             or Constants.TSM_PRICE_SOURCE.MIN_BUYOUT
 
         local price = TSM_API.GetCustomPriceValue(selectedSource, itemString)
+        local usedSource = selectedSource
 
         -- Fallback chain if primary source returns nothing
         -- Note: TSM returns 0 when there's no data (can't list items for 0 copper)
@@ -36,6 +40,7 @@ LazyProf.PriceProviders.tsm = {
                 if source ~= selectedSource then
                     price = TSM_API.GetCustomPriceValue(source, itemString)
                     if price and price > 0 then
+                        usedSource = source
                         break
                     end
                 end
@@ -47,6 +52,6 @@ LazyProf.PriceProviders.tsm = {
             return nil
         end
 
-        return price
+        return price, usedSource
     end,
 }

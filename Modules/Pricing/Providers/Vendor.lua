@@ -14,12 +14,13 @@ LazyProf.PriceProviders.vendor = {
                 and Auctionator.API.v1.GetVendorPriceByItemID)
     end,
 
+    -- Returns the price and which addon recorded it ("TSM" or "Auctionator").
     GetPrice = function(self, itemId)
         -- TSM tracks vendor buy prices when players visit merchants
         if TSM_API then
             local price = TSM_API.GetCustomPriceValue("vendorbuy", "i:" .. itemId)
             if price and price > 0 then
-                return price
+                return price, "TSM"
             end
         end
 
@@ -28,7 +29,7 @@ LazyProf.PriceProviders.vendor = {
                 and Auctionator.API.v1.GetVendorPriceByItemID then
             local price = Auctionator.API.v1.GetVendorPriceByItemID("LazyProf", itemId)
             if price and price > 0 then
-                return price
+                return price, "Auctionator"
             end
         end
 

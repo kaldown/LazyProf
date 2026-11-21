@@ -112,7 +112,10 @@ local function fresh()
         currentPath = env.path,
         GetArrowStep = function(_self, path) return path and path.steps and path.steps[1] end,
     }
-    addon.PriceManager = { ArePricesStale = function() return false end }
+    addon.PriceManager = {
+        PathSummary = function() return { total = 0 } end,
+        SummaryLines = function() return {} end,
+    }
     assert(loadfile("Core/Utils.lua"))("LazyProf", addon)
     assert(loadfile("Modules/UI/Arrow/Strategies/ArrowTooltip.lua"))("LazyProf", addon)
     assert(loadfile("Modules/UI/Arrow/ArrowManager.lua"))("LazyProf", addon)
@@ -281,6 +284,36 @@ section("tooltip", function()
     path.complete = nil
     labels = tooltipLabels(path)
     check(p .. "path without a complete flag: plain labels", labels == "You Pay: |Market Price: ", labels)
+end)
+
+-- ===========================================================================
+-- 3. Tooltip price lines: the path's price summary goes under the totals
+-- ===========================================================================
+section("tooltip prices", function()
+    local p = "tooltip prices: "
+    fresh()
+    local added, summarized = {}, nil
+    function GameTooltip:AddLine(text) added[#added + 1] = text end
+    env.addon.PriceManager = {
+        PathSummary = function(_self, path) summarized = path; return { total = 2 } end,
+        SummaryLines = function(s)
+            if s.total == 0 then return {} end
+            return { { text = "Prices: TSM 2", r = 0.6, g = 0.6, b = 0.6 },
+                     { text = "Auctionator prices up to 4 days old - rescan the auction house.", r = 1, g = 0.5, b = 0 } }
+        end,
+    }
+    env.arrow:Update(env.path)
+    env.arrow.frame.scripts.OnEnter(env.arrow.frame)
+    local text = table.concat(added, "|")
+    check(p .. "summary of the shown path", summarized == env.path)
+    check(p .. "lines shown", text:find("Prices: TSM 2|Auctionator prices up to 4 days old", 1, true) ~= nil, text)
+    check(p .. "no fixed stale warning", text:find("Prices may be stale", 1, true) == nil, text)
+
+    added = {}
+    env.addon.PriceManager.PathSummary = function() return { total = 0 } end
+    env.arrow.frame.scripts.OnEnter(env.arrow.frame)
+    text = table.concat(added, "|")
+    check(p .. "no reagents: no price lines", text:find("Prices", 1, true) == nil, text)
 end)
 
 print(string.format("\n%d/%d checks passed", total - failures, total))

@@ -51,7 +51,6 @@ LazyProf.defaults = {
     char = {
         -- Per-character price cache
         priceCache = {},
-        lastAHScan = 0,
         -- Cached learned recipes per profession (for planning mode)
         learnedRecipes = {},
         -- Self-found mode: only suggest recipes obtainable without AH/trade (per character)

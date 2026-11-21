@@ -141,9 +141,14 @@ LazyProf.ArrowStrategies.arrowWithTooltip = {
             )
         end
 
-        if LazyProf.PriceManager:ArePricesStale() then
+        -- Where the reagent prices came from, and what to do when some are
+        -- missing, too old or only an estimate.
+        local priceLines = LazyProf.PriceManager.SummaryLines(LazyProf.PriceManager:PathSummary(path))
+        if #priceLines > 0 then
             GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("Prices may be stale. Open AH to scan.", 1, 0.5, 0)
+            for _, l in ipairs(priceLines) do
+                GameTooltip:AddLine(l.text, l.r, l.g, l.b, true)
+            end
         end
 
         GameTooltip:Show()

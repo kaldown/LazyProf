@@ -120,6 +120,9 @@ function LazyProf:SlashCommand(input)
         else
             self:Print("Diagnostics: /lp diag learned - dumps learned-recipe detection state to a copyable window.")
         end
+        self:Print("Diagnostics: /lp diag prices - lists every reagent price of the path and where it came from.")
+    elseif cmd == "diag prices" then
+        self:RunPriceDiagnostic()
     elseif cmd == "diag learned" and self.ClientFamily ~= "forever" then
         self:RunLearnedDiagnostic()
     elseif cmd == "diag forever" and self.ClientFamily == "forever" then
@@ -501,6 +504,16 @@ function LazyProf:RunLearnedDiagnostic(topic)
     self:ShowDiagnosticOutput(table.concat(out, "\n"))
 end
 
+-- /lp diag prices: every reagent price of the current path, where it came from
+-- (vendor, TSM and which TSM value, Auctionator and its age in days, vendor
+-- sell estimate, none yet) and what each source says. Read-only.
+function LazyProf:RunPriceDiagnostic()
+    local out = {}
+    self.PriceManager:RunDiagnostic(out)
+    self:Print("diag prices: output ready - copy it from the window that opened.")
+    self:ShowDiagnosticOutput(table.concat(out, "\n"))
+end
+
 -- Debug pipeline primitive (used by /lp diag commands). A copyable popup modeled
 -- on the debug-log window: lazily-built, reused, ESC-closable, combat-safe. Holds
 -- any text in a selectable multi-line EditBox so a player or dev can Ctrl+C
@@ -508,7 +521,7 @@ end
 -- future /lp diag <topic> command - build a lines table and hand it the joined text.
 function LazyProf:ShowDiagnosticOutput(text)
     if InCombatLockdown() then
-        self:Print("diag learned: cannot open the output window in combat.")
+        self:Print("diag: cannot open the output window in combat.")
         return
     end
 

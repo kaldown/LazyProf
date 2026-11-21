@@ -60,7 +60,9 @@ LazyProf.Constants = {
 
     -- Cache TTL in seconds
     PRICE_CACHE_TTL = 300,        -- 5 minutes
-    PRICE_STALE_THRESHOLD = 86400, -- 24 hours
+    -- An Auctionator price last seen this many days ago or more counts as stale
+    -- (Auctionator reports whole days). TSM does not report the age of its data.
+    PRICE_STALE_DAYS = 3,
 
     -- Profession IDs (spell IDs for TBC)
     PROFESSION_IDS = {
