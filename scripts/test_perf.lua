@@ -5,6 +5,9 @@
 --   2. LazyProf:ScheduleItemInfoRecalc()          (Core/Init.lua) - trailing debounce
 --   3. LazyProf:OnItemInfoReceived wiring          (Core/Init.lua)
 --   4. RecipeAvailability per-recalc memo          (Modules/Recipes/Availability.lua)
+--   5. LazyProf:ScheduleRecalculation() / ScheduleShoppingListRefresh() /
+--      ScheduleDebugWindowUpdate() (Core/Init.lua) - first-wins debounces;
+--      C_Timer.After returns nothing
 --
 -- Run from the addon root:  lua5.1 scripts/test_perf.lua
 -- Not shipped: scripts/ is excluded from the package via .pkgmeta.
@@ -15,6 +18,7 @@
 local fakeNow = 0
 local pending = {}   -- { {due=, fn=}, ... }
 _G.GetTime = function() return fakeNow end
+-- Like the client's C_Timer.After, returns nothing (no handle to keep).
 _G.C_Timer = { After = function(delay, fn)
     if delay < 0 then delay = 0 end
     table.insert(pending, { due = fakeNow + delay, fn = fn })
@@ -227,6 +231,63 @@ section("E", function()
     fmCalls = 0
     cheapest:Calculate(1, 5, recipes, {}, prices, 0, {})
     check("E debug ON: top-10 logging builds FormatMoney strings", fmCalls > 0, fmCalls)
+end)
+
+-- ===========================================================================
+-- F: ScheduleRecalculation coalesces a burst into one recalc
+-- ===========================================================================
+section("F", function()
+    local recalcs = {}
+    LP.Recalculate = function(_self, reason) recalcs[#recalcs + 1] = reason end
+
+    flush(); recalcs = {}
+    -- A Forever first open: show + data-source change + list updates.
+    LP:ScheduleRecalculation("trade skill opened")
+    LP:ScheduleRecalculation("skill changed")
+    LP:ScheduleRecalculation("skill changed")
+    advance(0.6)
+    check("F1 three schedules within the delay -> 1 recalc", #recalcs == 1, #recalcs)
+    check("F1 the first reason is kept", recalcs[1] == "trade skill opened", recalcs[1])
+
+    LP:ScheduleRecalculation("later")
+    advance(0.6)
+    check("F2 a schedule after the recalc ran -> one more", #recalcs == 2 and recalcs[2] == "later", #recalcs)
+end)
+
+-- ===========================================================================
+-- G: ScheduleShoppingListRefresh coalesces a burst into one refresh
+-- ===========================================================================
+section("G", function()
+    local refreshes = 0
+    LP.RefreshShoppingList = function(_self) refreshes = refreshes + 1 end
+
+    flush(); refreshes = 0
+    for _ = 1, 5 do LP:ScheduleShoppingListRefresh() end   -- BAG_UPDATE burst while crafting
+    advance(0.4)
+    check("G1 five schedules within the delay -> 1 refresh", refreshes == 1, refreshes)
+
+    LP:ScheduleShoppingListRefresh()
+    advance(0.4)
+    check("G2 a schedule after the refresh ran -> one more", refreshes == 2, refreshes)
+end)
+
+-- ===========================================================================
+-- H: ScheduleDebugWindowUpdate coalesces a burst of log lines into one redraw
+-- ===========================================================================
+section("H", function()
+    local redraws = 0
+    LP.debugFrame = { IsShown = function() return true end }
+    LP.UpdateDebugWindowContent = function(_self) redraws = redraws + 1 end
+
+    flush(); redraws = 0
+    for _ = 1, 50 do LP:ScheduleDebugWindowUpdate() end   -- one recalculation's debug lines
+    advance(0.3)
+    check("H1 fifty schedules within the delay -> 1 redraw", redraws == 1, redraws)
+
+    LP:ScheduleDebugWindowUpdate()
+    advance(0.3)
+    check("H2 a schedule after the redraw ran -> one more", redraws == 2, redraws)
+    LP.debugFrame = nil
 end)
 
 print(string.format("\n%d/%d checks passed", total - failures, total))

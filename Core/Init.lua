@@ -180,12 +180,15 @@ function LazyProf:OnBagUpdate()
     end
 end
 
--- Debounced recalculation
-local recalcTimer = nil
+-- Debounced recalculation: the first request in a 0.5s window schedules one
+-- recalculation, later ones in that window are dropped. C_Timer.After returns
+-- nothing, so a pending flag (not a timer handle) marks the scheduled one.
+local recalcPending = false
 function LazyProf:ScheduleRecalculation(reason)
-    if recalcTimer then return end
-    recalcTimer = C_Timer.After(0.5, function()
-        recalcTimer = nil
+    if recalcPending then return end
+    recalcPending = true
+    C_Timer.After(0.5, function()
+        recalcPending = false
         LazyProf:Recalculate(reason)
     end)
 end
@@ -225,11 +228,13 @@ end
 
 -- PERFORMANCE FIX (GitHub Issue #3): Debounced lightweight shopping list refresh.
 -- This is separate from full recalculation and only updates material quantities.
-local shoppingListTimer = nil
+-- Same pending flag as ScheduleRecalculation (C_Timer.After returns nothing).
+local shoppingListPending = false
 function LazyProf:ScheduleShoppingListRefresh()
-    if shoppingListTimer then return end
-    shoppingListTimer = C_Timer.After(0.3, function()
-        shoppingListTimer = nil
+    if shoppingListPending then return end
+    shoppingListPending = true
+    C_Timer.After(0.3, function()
+        shoppingListPending = false
         LazyProf:RefreshShoppingList()
     end)
 end
@@ -559,12 +564,14 @@ function LazyProf:ShowDiagnosticOutput(text)
     self.diagFrame.editBox:HighlightText()
 end
 
--- Debounced debug-window refresh (see Debug()).
-local debugWindowTimer = nil
+-- Debounced debug-window refresh (see Debug()); a pending flag, as in
+-- ScheduleRecalculation (C_Timer.After returns nothing).
+local debugWindowPending = false
 function LazyProf:ScheduleDebugWindowUpdate()
-    if debugWindowTimer then return end
-    debugWindowTimer = C_Timer.After(0.2, function()
-        debugWindowTimer = nil
+    if debugWindowPending then return end
+    debugWindowPending = true
+    C_Timer.After(0.2, function()
+        debugWindowPending = false
         if LazyProf.debugFrame and LazyProf.debugFrame:IsShown() then
             LazyProf:UpdateDebugWindowContent()
         end
