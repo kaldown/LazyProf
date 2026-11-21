@@ -479,16 +479,13 @@ section("combat", function()
 end)
 
 -- ===========================================================================
--- 4b. The Planning window as a second owner of the shopping list and details
+-- 4b. Planning (the LazyProf window undocked) as a second owner of recipe details
 -- ===========================================================================
 section("planning", function()
     local p = "planning: "
+    -- What the window reports: planning is on screen, or was when combat began.
     local function withPlanning(shown, wasShown)
-        local pf = newFrame("Planning", "HIGH", 100)
-        pf.shown = shown
-        pf._wasShownBeforeCombat = wasShown
-        env.addon.PlanningWindow = { frame = pf }
-        return pf
+        env.addon.GuideWindow = { IsPlanningShown = function() return shown or wasShown == true end }
     end
 
     -- Closed state: Planning reopens only the shared panels.
@@ -503,38 +500,6 @@ section("planning", function()
     check(p .. "ResetClosedForPlanning clears the shared panels",
         not list.userClosed and not details.userClosed)
     check(p .. "ResetClosedForPlanning leaves the milestone panel closed", milestone.userClosed == true)
-
-    -- Only user actions in Planning reopen them: opening the window or picking
-    -- a profession (both PlanningWindow:Open). Programmatic reloads
-    -- (LoadProfession after a live skill-up, the strategy toggle) do not.
-    local addon = env.addon
-    addon.Constants = { PROFESSIONS = {
-        tailoring = { name = "Tailoring" }, blacksmithing = { name = "Blacksmithing" },
-    } }
-    addon.Utils.GetRacialProfessionBonus = function() return 0 end
-    addon.Client.PlayerSkill = function() return 0 end
-    addon.Pathfinder.CalculateForProfession = function() return nil end
-    assert(loadfile("Modules/UI/PlanningWindow.lua"))("LazyProf", addon)
-    local stubText = { SetText = function() end, SetTextColor = function() end, ClearFocus = function() end }
-    local planningShown = false
-    addon.PlanningWindow.frame = {
-        title = stubText, status = stubText, searchBox = stubText,
-        Show = function() planningShown = true end,
-    }
-    addon.PlanningWindow:Open("tailoring")
-    check(p .. "opening Planning shows its window", planningShown)
-    env.shell:Show(list)
-    check(p .. "Planning open: the shopping list shows", list.shown)
-    env.shell:Close(list)
-    -- A live recalculation reloads Planning the way Core/Init.lua does.
-    addon.PlanningWindow:LoadProfession(addon.PlanningWindow.currentProfession)
-    env.shell:Show(list)
-    check(p .. "live recalculation reloading Planning keeps the list closed",
-        list.userClosed == true and not list.shown)
-    addon.PlanningWindow:Open("blacksmithing")
-    check(p .. "picking another profession in Planning reopens the list", not list.userClosed)
-    env.shell:Show(list)
-    check(p .. "the shopping list then shows again", list.shown)
 
     -- After combat: Planning shown, profession window closed, no live path.
     fresh()
@@ -643,31 +608,49 @@ section("init", function()
     local updates = 0
     addon.Pathfinder = { currentPath = { steps = { {} } } }
     addon.ArrowManager = { Update = function() updates = updates + 1 end }
-    addon.GuideWindow = { Update = function() updates = updates + 1 end }
+    local planningPath = nil
+    addon.GuideWindow = {
+        Update = function() updates = updates + 1 end,
+        PlanningPath = function() return planningPath end,
+        Refresh = function() updates = updates + 10 end,
+    }
     open = false
     addon:UpdateDisplay()
     check(p .. "UpdateDisplay with the window closed does nothing", updates == 0, updates)
     open = true
     addon:UpdateDisplay()
     check(p .. "UpdateDisplay with the window open updates", updates == 2, updates)
+    -- A planning view is only redrawn (a display setting changed), window open or not.
+    planningPath = { steps = {} }
+    open = false
+    updates = 0
+    addon:UpdateDisplay()
+    check(p .. "UpdateDisplay with planning shown redraws it", updates == 10, updates)
+    planningPath = nil
+    open = true
 
     -- No path for the open profession: the stale path is dropped.
     local hidden = 0
     addon.ArrowManager = { Hide = function() hidden = hidden + 1 end, InvalidateCache = function() end }
-    addon.GuideWindow = { Hide = function() hidden = hidden + 1 end }
-    addon.MissingMaterialsPanel = { Hide = function() hidden = hidden + 1 end }
+    local replanned = {}
+    addon.GuideWindow = {
+        HideLive = function() hidden = hidden + 1 end,
+        RefreshPlanning = function(_self, reason) replanned[#replanned + 1] = reason end,
+    }
     addon.Pathfinder.Calculate = function() return nil end
     addon:Recalculate("test")
     check(p .. "Recalculate records the skill and profession it used",
         addon.lastCalculatedSkill == 100 and addon.lastCalculatedProfKey == "tailoring")
     check(p .. "no path: stale current path cleared", addon.Pathfinder.currentPath == nil)
-    check(p .. "no path: panels hidden", hidden == 3, hidden)
+    check(p .. "no path: the arrow and the live view go", hidden == 2, hidden)
+    check(p .. "a recalculation plans a planning view again too", replanned[1] == "test", replanned[1])
 
     -- No path because the open profession has no recipe data: one notice row.
     local notices = {}
     local order = {}
     addon.GuideWindow = {
-        Hide = function() order[#order + 1] = "hide" end,
+        RefreshPlanning = function() end,
+        HideLive = function() order[#order + 1] = "hide" end,
         ShowNotice = function(_self, text) notices[#notices + 1] = text; order[#order + 1] = "notice" end,
     }
     local noData = "Engineering"
@@ -691,7 +674,11 @@ section("init", function()
     -- window open it rescans the bags and redraws the LazyProf window.
     addon.Pathfinder.currentPath = { steps = { {} }, milestoneBreakdown = {} }
     local windowRefreshes = 0
-    addon.GuideWindow = { Refresh = function() windowRefreshes = windowRefreshes + 1 end }
+    local planning = nil
+    addon.GuideWindow = {
+        Refresh = function() windowRefreshes = windowRefreshes + 1 end,
+        PlanningPath = function() return planning end,
+    }
     addon.Inventory = { ScanAll = function() return { [1] = 2 }, { [1] = { bags = 2 } } end }
     open = false
     addon:RefreshShoppingList()
@@ -701,6 +688,18 @@ section("init", function()
     check(p .. "stock refresh with the window open redraws the window", windowRefreshes == 1, windowRefreshes)
     check(p .. "from the rescanned stock", addon.Pathfinder.currentPath.inventory[1] == 2
         and addon.Pathfinder.currentPath.sourceBreakdown[1].bags == 2)
+    -- A planning view gets the stock too, with the profession window closed.
+    planning = { steps = {} }
+    open = false
+    addon:RefreshShoppingList()
+    check(p .. "stock refresh with only planning shown redraws it", windowRefreshes == 2 and planning.inventory[1] == 2,
+        windowRefreshes)
+
+    -- The profession window opening tells the window to dock.
+    local docked = 0
+    addon.GuideWindow = { OnProfessionOpened = function() docked = docked + 1 end }
+    addon:OnTradeSkillShow()
+    check(p .. "profession open docks the window", docked == 1, docked)
 end)
 
 -- ===========================================================================
@@ -745,28 +744,23 @@ section("wiring", function()
     local p = "wiring: "
     local toc = read("LazyProf.toc")
     local shellAt = toc:find("Modules\\UI\\Widgets\\PanelShell.lua", 1, true)
-    local firstPanel = toc:find("Modules\\UI\\MilestoneBreakdown.lua", 1, true)
-    check(p .. "TOC loads the shell before the panels", shellAt and firstPanel and shellAt < firstPanel)
+    local firstPanel = toc:find("Modules\\UI\\GuideWindow.lua", 1, true)
+    check(p .. "TOC loads the shell before the window", shellAt and firstPanel and shellAt < firstPanel)
+    for _, gone in ipairs({ "MilestoneBreakdown", "MissingMaterials", "PlanningWindow" }) do
+        check(p .. gone .. " is no longer in the TOC", not toc:find(gone, 1, true))
+    end
 
-    local mb = read("Modules/UI/MilestoneBreakdown.lua")
-    local mm = read("Modules/UI/MissingMaterials.lua")
+    local gw = read("Modules/UI/GuideWindow.lua")
     local rd = read("Modules/UI/RecipeDetails.lua")
-    check(p .. "milestone panel attaches as 'milestone'", mb:find('PanelShell:Attach(self.frame, "milestone"', 1, true))
-    check(p .. "shopping list attaches as 'shoppingList'", mm:find('PanelShell:Attach(self.frame, "shoppingList"', 1, true))
+    check(p .. "the window attaches to the shell with its own owner rule",
+        gw:find("PanelShell:Attach(frame, function()", 1, true) and gw:find("owner = function() return self:WantsShown() end", 1, true))
     check(p .. "recipe details attaches as 'recipeDetails'", rd:find('PanelShell:Attach(self.frame, "recipeDetails"', 1, true))
-    check(p .. "no manuallyMoved left", not mb:find("manuallyMoved", 1, true))
-    check(p .. "shopping list is shared with Planning", mm:find("planning = true", 1, true))
-    check(p .. "recipe details is shared with Planning", rd:find("planning = true", 1, true))
-    check(p .. "milestone panel is not shared with Planning", not mb:find("planning = true", 1, true))
-    -- The programmatic Planning reloads stay plain LoadProfession calls (no reopen).
+    check(p .. "recipe details is shared with planning", rd:find("planning = true", 1, true))
     local init = read("Core/Init.lua")
-    check(p .. "live recalculation reloads Planning with LoadProfession",
-        init:find("self.PlanningWindow:LoadProfession(self.PlanningWindow.currentProfession)", 1, true))
-    check(p .. "strategy toggle reloads Planning with LoadProfession",
-        mb:find("pw:LoadProfession(pw.currentProfession)", 1, true))
-    check(p .. "milestone close button closes through the shell", mb:find("PanelShell:Close(self.frame)", 1, true))
-    check(p .. "shopping list close button closes through the shell", mm:find("PanelShell:Close(self.frame)", 1, true))
-    for name, src in pairs({ milestone = mb, shopping = mm, details = rd }) do
+    check(p .. "a recalculation refreshes planning through the window",
+        init:find("self.GuideWindow:RefreshPlanning(reason)", 1, true))
+    check(p .. "the window's close button closes through the shell", gw:find("PanelShell:Close(frame)", 1, true))
+    for name, src in pairs({ window = gw, details = rd }) do
         check(p .. name .. ": no own drag scripts (the shell owns dragging)",
             not src:find('SetScript("OnDragStart"', 1, true))
         check(p .. name .. ": no direct AddCombatLockdown (through the shell)",
@@ -871,14 +865,80 @@ section("chrome", function()
 
     -- Wiring: each panel routes its chrome through the shell.
     local function read(path) local h = assert(io.open(path, "rb")); local x = h:read("*a"); h:close(); return x end
-    local mb, mm, rd = read("Modules/UI/MilestoneBreakdown.lua"), read("Modules/UI/MissingMaterials.lua"),
-        read("Modules/UI/RecipeDetails.lua")
-    check(p .. "milestone panel uses ApplyChrome", mb:find("PanelShell:ApplyChrome(self.frame", 1, true))
-    check(p .. "shopping list uses ApplyChrome", mm:find("PanelShell:ApplyChrome(self.frame", 1, true))
+    local gw, rd = read("Modules/UI/GuideWindow.lua"), read("Modules/UI/RecipeDetails.lua")
+    check(p .. "the window uses ApplyChrome", gw:find("PanelShell:ApplyChrome(frame", 1, true))
     check(p .. "recipe details uses ApplyChrome", rd:find("PanelShell:ApplyChrome(self.frame", 1, true))
-    check(p .. "panels no longer set their own frame backdrop",
-        not mm:find("self.frame:SetBackdrop(", 1, true) and not rd:find("self.frame:SetBackdrop(", 1, true)
-        and not mb:find("self.frame:SetBackdrop(", 1, true))
+    check(p .. "panels do not set their own frame backdrop",
+        not gw:find("frame:SetBackdrop(", 1, true) and not rd:find("self.frame:SetBackdrop(", 1, true))
+end)
+
+-- ===========================================================================
+-- 8. A frame with its own owner rule, a switchable key and a saved size
+-- ===========================================================================
+section("owner", function()
+    local p = "owner: "
+    fresh()
+    local wanted, key = true, "guide"
+    local f = newFrame("window")
+    f.width, f.height = 420, 500
+    function f:GetWidth() return self.width end
+    function f:GetHeight() return self.height end
+    function f:SetSize(w, h) self.width, self.height = w, h end
+    local resets = 0
+    env.shell:Attach(f, function() return key end, {
+        owner = function() return wanted end,
+        onReset = function() resets = resets + 1 end,
+    })
+    env.frames[#env.frames + 1] = f   -- combat events reach it
+
+    -- The frame's own rule decides the restore, not the profession window.
+    env.shell:Show(f)
+    enterCombat()
+    env.open = false
+    env.addon.Pathfinder.currentPath = nil
+    leaveCombat()
+    check(p .. "restored when the frame says so, without window or path", f.shown)
+    env.shell:Hide(f)
+    enterCombat()
+    leaveCombat()
+    check(p .. "not shown before combat: not shown after", not f.shown)
+    env.shell:Show(f)
+    enterCombat()
+    wanted = false
+    env.open = true
+    leaveCombat()
+    check(p .. "not restored when the frame says no, even with the window open", not f.shown)
+    wanted = true
+    env.shell:Show(f)
+    env.shell:Close(f)
+    enterCombat()
+    leaveCombat()
+    check(p .. "closed by the player: not restored", not f.shown)
+    f.userClosed = nil
+
+    -- Position and size are saved under the key in force.
+    f.left, f.top = 100, 900
+    f:GetScript("OnDragStop")(f)
+    check(p .. "position saved under the current key", env.addon.db.profile.panelPositions.guide ~= nil)
+    key = "guidePlanning"
+    f.left, f.top = 400, 700
+    f:GetScript("OnDragStop")(f)
+    check(p .. "another key keeps another spot",
+        env.addon.db.profile.panelPositions.guidePlanning.x == 400 and env.addon.db.profile.panelPositions.guide.x == 100)
+    f.width, f.height = 480, 620
+    env.shell:SaveSize(f)
+    check(p .. "size saved under the current key", env.addon.db.profile.panelSizes.guidePlanning.width == 480)
+    key = "guide"
+    env.shell:ApplySize(f, 420, 500)
+    check(p .. "no saved size for a key: the default", f.width == 420 and f.height == 500)
+    key = "guidePlanning"
+    env.shell:ApplySize(f, 420, 500)
+    check(p .. "the saved size for its key", f.width == 480 and f.height == 620)
+
+    env.shell:ResetPositions()
+    check(p .. "reset forgets spots and sizes", next(env.addon.db.profile.panelPositions) == nil
+        and next(env.addon.db.profile.panelSizes) == nil)
+    check(p .. "reset tells the frame", resets == 1, resets)
 end)
 
 print(string.format("\n%d/%d checks passed", total - failures, total))

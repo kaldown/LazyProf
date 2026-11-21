@@ -144,4 +144,40 @@ T.section("settings", function()
     T.check("the old option is gone", LazyProf.options.args.display.args.calculateFromCurrentSkill == nil)
 end)
 
+T.section("settings migration", function()
+    local migrate = LazyProf.MigrateSettings
+    -- The raw saved table holds only what differed from the old defaults (both toggles on).
+    local sv = { profiles = {
+        Default = { showMilestonePanel = false, showMissingMaterials = false, calculateFromCurrentSkill = true,
+                    panelPositions = { milestone = { x = 1, y = 2 }, shoppingList = { x = 3, y = 4 }, recipeDetails = { x = 5, y = 6 } } },
+        OnlyMilestoneOff = { showMilestonePanel = false },
+        OnlyShoppingOff = { showMissingMaterials = false },
+        Untouched = { strategy = "fastest" },
+        AlreadyNew = { showMilestonePanel = false, showMissingMaterials = false, openWithProfession = true },
+    } }
+    migrate(sv)
+    local d = sv.profiles.Default
+    T.check("both panels were off: the window does not open with the profession window", d.openWithProfession == false)
+    T.check("old toggles removed", d.showMilestonePanel == nil and d.showMissingMaterials == nil)
+    T.check("retired setting removed", d.calculateFromCurrentSkill == nil)
+    T.check("the two old panel spots removed", d.panelPositions.milestone == nil and d.panelPositions.shoppingList == nil)
+    T.check("other saved spots kept", d.panelPositions.recipeDetails ~= nil)
+    T.check("one panel was on: the default (open) stays", sv.profiles.OnlyMilestoneOff.openWithProfession == nil
+        and sv.profiles.OnlyShoppingOff.openWithProfession == nil)
+    T.check("and its old toggle is removed", sv.profiles.OnlyMilestoneOff.showMilestonePanel == nil)
+    T.check("an untouched profile is left alone", sv.profiles.Untouched.openWithProfession == nil
+        and sv.profiles.Untouched.strategy == "fastest")
+    T.check("a value already set is not overwritten", sv.profiles.AlreadyNew.openWithProfession == true)
+    migrate(sv)
+    T.check("running it again changes nothing", d.openWithProfession == false)
+    T.check("no saved data: no error", pcall(migrate, nil) and pcall(migrate, {}))
+
+    T.eq("default: the window opens with the profession window", LazyProf.defaults.profile.openWithProfession, true)
+    T.check("old toggle defaults are gone", LazyProf.defaults.profile.showMilestonePanel == nil
+        and LazyProf.defaults.profile.showMissingMaterials == nil)
+    local display = LazyProf.options.args.display.args
+    T.check("option: open with the profession window", display.openWithProfession ~= nil)
+    T.check("old options are gone", display.showMilestonePanel == nil and display.showMissingMaterials == nil)
+end)
+
 T.finish()

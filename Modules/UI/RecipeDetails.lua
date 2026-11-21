@@ -127,18 +127,13 @@ function RecipeDetails:Initialize()
     self:CreateWowheadSection()
 
     -- The panel shell owns position, dragging and combat hide/restore.
-    -- Default spot: right of the LazyProf window when it is shown (below the
-    -- shopping list when that is there too); otherwise the panel stays where
-    -- it was (e.g. opened from the Planning window).
+    -- Default spot: right of the LazyProf window when it is shown; otherwise
+    -- the panel stays where it was.
     LazyProf.PanelShell:Attach(self.frame, "recipeDetails", {
-        planning = true,   -- the Planning window shows it too
+        planning = true,   -- planning (the window undocked) shows it too
         anchor = function()
             local window = LazyProf.GuideWindow and LazyProf.GuideWindow.frame
             if window and window:IsShown() then
-                local shopping = LazyProf.MissingMaterialsPanel and LazyProf.MissingMaterialsPanel.frame
-                if shopping and shopping:IsShown() then
-                    return shopping, "TOPLEFT", "BOTTOMLEFT", 0, -10
-                end
                 return window, "TOPLEFT", "TOPRIGHT", 10, 0
             end
         end,
@@ -427,7 +422,7 @@ function RecipeDetails:Show(recipe, atSkillLevel)
         content.urlBox:SetText("")
     end
 
-    -- Placed by the shell (saved spot, else next to the milestone panel);
+    -- Placed by the shell (saved spot, else next to the LazyProf window);
     -- during combat the shell shows it once combat ends
     LazyProf.PanelShell:Show(self.frame)
     self:LayoutContent()

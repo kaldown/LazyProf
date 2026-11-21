@@ -82,7 +82,7 @@ function M.load(family, extraFiles)
         function string.trim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
     end
     local ui = fakeui.install({ family = family })
-    local env = { ui = ui, calls = {}, open = true, cap = 300, hidden = false, recalcs = {} }
+    local env = { ui = ui, calls = {}, open = true, cap = 300, hidden = false, recalcs = {}, planCalls = {} }
     local function called(name) env.calls[#env.calls + 1] = name end
 
     _G.UnitGUID = function() return "Player-1-WINDOW01" end
@@ -128,6 +128,19 @@ function M.load(family, extraFiles)
         end,
         GetArrowStep = function(_, path) return path.steps[1] end,
         CalculateMissingMaterials = function() return {} end,
+        -- Planning: env.planPath(profKey, opts) may supply the path; nil data for "mining".
+        CalculateForProfession = function(_, key, opts)
+            called("plan")
+            env.planCalls[#env.planCalls + 1] = { key = key, opts = opts }
+            if env.planPath then return env.planPath(key, opts) end
+            if key == "mining" then return nil end
+            local has = (env.playerSkill or 0) > 0
+            return M.path({
+                planning = true, professionKey = key, profession = addon.Constants.PROFESSIONS[key].name,
+                hasProfession = has, planFromOne = (has and opts and opts.planFromOne) or nil,
+                actualSkill = has and env.playerSkill or 1,
+            })
+        end,
     }
     addon.PriceManager = {
         cache = {},

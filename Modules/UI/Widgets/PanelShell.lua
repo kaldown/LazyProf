@@ -1,18 +1,19 @@
 -- Modules/UI/Widgets/PanelShell.lua
--- One shell for the side panels next to the profession window (milestone
--- breakdown, shopping list, recipe details): where they sit, whether the user
--- closed them, how they stack above their anchor, and what combat does.
+-- One shell for LazyProf's panels (the LazyProf window, recipe details, the
+-- merchant panel): where they sit, whether the user closed them, how they
+-- stack above their anchor, and what combat does.
 --
 -- Position: the default spot comes from the panel's anchor function. Once the
 --   user drags a panel, its top-left corner is saved in
 --   db.profile.panelPositions[key] (relative to UIParent's BOTTOMLEFT) and
 --   wins from then on, until "/lp resetpanels" or the options button.
--- Owners: the profession window owns every panel; the Planning window also
---   owns the panels attached with opts.planning (shopping list, recipe details).
+-- Owners: the profession window owns every panel; planning (the LazyProf
+--   window undocked) also owns the panels attached with opts.planning (recipe
+--   details).
 -- Closed: the close button sets frame.userClosed. Show does nothing while it
 --   is set. ResetClosed (the profession window opened again) clears it on
---   every panel, ResetClosedForPlanning (the user opens Planning or picks a
---   profession in it) on the Planning panels.
+--   every panel, ResetClosedForPlanning (the user opens planning or picks a
+--   profession in it) on the planning panels.
 -- Raise: on Place the panel sits RAISE_LEVELS above the frame it anchors to,
 --   taking that frame's strata when it is higher than the panel's own. It is
 --   never put below its own strata or level. Without an anchor frame it goes
@@ -29,8 +30,8 @@
 --   shows again only if it was shown or asked for, the user did not close it,
 --   and an owner is there: the profession window is still open and a current
 --   path exists (or the panel shows a notice instead of one, frame.showsNotice),
---   or (Planning panels) the Planning window is shown or was shown before
---   combat. A Hide during combat cancels any restore.
+--   or (planning panels) planning is shown or was shown before combat. A Hide
+--   during combat cancels any restore.
 local ADDON_NAME, LazyProf = ...
 local Utils = LazyProf.Utils
 
@@ -74,7 +75,7 @@ local function Key(shell)
     return shell.key
 end
 
--- A current path: the live path has steps, or gap rows the milestone panel shows.
+-- A current path: the live path has steps, or gaps the window shows.
 local function HasCurrentPath()
     local path = LazyProf.Pathfinder and LazyProf.Pathfinder.currentPath
     if not path then return false end
@@ -85,12 +86,12 @@ local function WindowOpen()
     return LazyProf.Client and LazyProf.Client:IsOpen() or false
 end
 
--- The Planning window is shown, or will be once combat ends: regen handlers
--- run in no fixed order, so its own restore may not have happened yet.
+-- Planning (the LazyProf window undocked) is shown, or will be once combat
+-- ends: regen handlers run in no fixed order, so its own restore may not have
+-- happened yet.
 local function PlanningShown()
-    local frame = LazyProf.PlanningWindow and LazyProf.PlanningWindow.frame
-    if not frame then return false end
-    return frame:IsShown() or frame._wasShownBeforeCombat == true
+    local window = LazyProf.GuideWindow
+    return (window and window.IsPlanningShown and window:IsPlanningShown()) or false
 end
 
 -- Strata and level for a panel anchored to anchorFrame (nil: its own).
@@ -112,7 +113,7 @@ end
 -- Attach a panel frame. key names its saved position (a string, or a function
 -- returning one); opts.anchor is a function returning (anchorFrame, point,
 -- relPoint, x, y) for the default spot, or nil when there is nothing to
--- anchor to; opts.planning marks a panel the Planning window also shows;
+-- anchor to; opts.planning marks a panel planning also shows;
 -- opts.owner is a function(frame) saying whether the frame should be showing
 -- (asked when combat ends); opts.onReset(frame) runs after "/lp resetpanels".
 -- Call after the frame's own strata and level are set (the floor for the
