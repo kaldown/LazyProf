@@ -396,8 +396,9 @@ end
 
 -- /lp diag forever "check" lines: CraftLib's data for the open profession
 -- against what the client itself says about each recipe both know:
---   difficulty  the client's difficulty at the current skill (learned recipes
---               at or above their orange level) vs CraftLib's thresholds
+--   difficulty  the client's difficulty at the current skill (learned recipes)
+--               vs CraftLib's thresholds; a learned recipe below CraftLib's
+--               orange level means that orange level is too high
 --   gray        the client's maxTrivialLevel (TradeSkillRecipeInfo) vs gray
 --   reagents    the schematic's basic reagents vs CraftLib's reagents
 --   product     the schematic's output item vs CraftLib's itemId
@@ -405,9 +406,9 @@ end
 local function CheckAgainstCraftLib(profKey, prof, add)
     local byId = {}
     for _, r in ipairs(prof.recipes or {}) do byId[r.id] = r end
-    local child = C_TradeSkillUI.GetChildProfessionInfo() or {}
-    local modifier = child.skillModifier or 0
-    local skill = (child.skillLevel or 0) + modifier
+    local line = ProfessionInfo() or {}
+    local modifier = line.skillModifier or 0
+    local skill = (line.skillLevel or 0) + modifier
 
     local function tally() return { agree = 0, differ = {}, nDiffer = 0 } end
     local difficulty, gray, reagents, product = tally(), tally(), tally(), tally()
@@ -423,8 +424,8 @@ local function CheckAgainstCraftLib(profKey, prof, add)
             compared = compared + 1
             local range = recipe.skillRange
             local clientDifficulty = DIFFICULTY[info.relativeDifficulty]
-            if range and info.learned and clientDifficulty and skill >= range.orange then
-                local mine = ExpectedDifficulty(skill, range)
+            if range and info.learned and clientDifficulty then
+                local mine = skill < range.orange and "belowOrange" or ExpectedDifficulty(skill, range)
                 count(difficulty, mine == clientDifficulty, tostring(id) .. ":" .. clientDifficulty .. "/" .. mine)
             end
             if range then
@@ -574,7 +575,11 @@ function Client:RunDiagnostic(lines)
     section("check", function()
         local registry = LazyProf.Professions and LazyProf.Professions.registry
         local prof = profKey and registry and registry[profKey]
-        if not prof or not self:IsOpen() then return end
+        if not self:IsOpen() then return end   -- the NOTE line above says why
+        if not prof then
+            add("check: skipped - no profession of yours with recipe data is shown (another player's, guild or NPC list, or no data)")
+            return
+        end
         CheckAgainstCraftLib(profKey, prof, add)
     end)
 

@@ -708,6 +708,25 @@ section("diagnostic check", function()
     C_TradeSkillUI.GetRecipeSchematic = nil
     text = table.concat(lines, "\n")
     check(p .. "skill includes the modifier", text:find("check difficulty at skill 30 (+15)", 1, true) ~= nil, text)
+
+    -- A learned recipe below CraftLib's orange level: that orange is too high.
+    addon.Professions.registry.alchemy.recipes[3].skillRange = { orange = 50, yellow = 60, green = 70, gray = 80 }
+    C_TradeSkillUI.GetRecipeSchematic = function() return { reagentSlotSchematics = {} } end
+    lines = {}
+    addon.Client:RunDiagnostic(lines)
+    text = table.concat(lines, "\n")
+    check(p .. "learned below orange counts as a difference",
+        text:find("[3170:optimal/belowOrange]", 1, true) ~= nil, text)
+
+    -- Someone else's list: the check says why it did not run.
+    externalView = "linked"
+    lines = {}
+    addon.Client:RunDiagnostic(lines)
+    C_TradeSkillUI.GetRecipeSchematic = nil
+    externalView = nil
+    text = table.concat(lines, "\n")
+    check(p .. "not your own list: check skipped with a reason",
+        text:find("check: skipped", 1, true) ~= nil and text:find("check difficulty", 1, true) == nil, text)
     _G.CraftLib = nil
     resetProfessionInfo()
 end)

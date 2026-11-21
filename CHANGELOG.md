@@ -12,7 +12,7 @@ All notable changes to LazyProf will be documented in this file.
 - `/lp diag forever` reports the Forever client state (profession window, recipe data, CraftLib version) in a copyable window.
 - `/lp resetpanels` and a "Reset panel positions" option move the panels back to their default places.
 - When the open profession has no recipe data yet, the milestone panel says so ("No recipe data for Engineering yet.") instead of showing nothing.
-- Where each price comes from: the arrow tooltip lists how the path's reagents were priced (TSM, Auctionator, vendor, sell-value estimate) and warns when some have no price yet, when Auctionator prices are 3 or more days old, or when only the sell-value estimate was available. The shopping list tooltip shows each item's price and source.
+- Where each price comes from: the arrow tooltip lists how the path's reagents were priced (TSM, Auctionator, vendor, sell-value estimate) and warns when some have no price yet or none at all, when Auctionator prices are 3 or more days old, or when only the sell-value estimate was available. The shopping list tooltip shows each item's price and source.
 - `/lp diag prices` lists every reagent price of the path with what TSM, Auctionator, vendor and sell value each say, the age of Auctionator prices, and flags prices that are stale or where the sources disagree.
 - On WoW Forever, `/lp diag forever` checks the recipe data for the open profession against the game: difficulty at your skill, gray level, reagents and crafted item.
 

@@ -95,7 +95,8 @@ prints `SECTION ERROR: <section>: <message>` and the other sections still print.
 | `NOTE: the profession window is closed ...` | Printed first when no profession window is open: the profession, recipe and check lines then describe nothing useful. Open a profession and run it again. |
 | `recipes=N learned=L (no open profession to compare with CraftLib)` | Shown instead of the CraftLib counts when no profession is detected. |
 | `check: <profession>, N recipes in both the client and CraftLib` | The data check below ran over these recipes (window open only). |
-| `check difficulty at skill S (+M): agree=A differ=D sample(id:client/craftlib)=[...]` | For learned recipes at or above their orange level: the difficulty the client shows at your skill (`S` includes the profession's skill modifier `M`) against the one CraftLib's thresholds give. `optimal` = orange, `medium` = yellow, `easy` = green, `trivial` = gray. Differences mean a wrong threshold in the data. |
+| `check: skipped - ...` | The window shows another player's, a guild or an NPC list, or a profession without recipe data: nothing to check. |
+| `check difficulty at skill S (+M): agree=A differ=D sample(id:client/craftlib)=[...]` | For learned recipes: the difficulty the client shows at your skill (`S` includes the profession's skill modifier `M`) against the one CraftLib's thresholds give. `optimal` = orange, `medium` = yellow, `easy` = green, `trivial` = gray; `belowOrange` = you know the recipe but your skill is below CraftLib's orange level, so that level is too high. Differences mean a wrong threshold in the data. |
 | `check gray (client maxTrivialLevel): agree=A differ=D noClientValue=N sample(...)` | The skill at which the client says the recipe turns gray against CraftLib's gray level. `noClientValue` counts recipes for which the client gives none. |
 | `check reagents: agree=A differ=D errors=E sample(id)=[...]` | The client's reagent list (basic reagents and counts) against CraftLib's. `errors` counts recipes whose reagent list the client could not give. |
 | `check product: agree=A differ=D sample(id:client/craftlib)=[...]` | The item the recipe crafts according to the client against CraftLib's item id (recipes without an item, like enchants, are left out). |
@@ -113,14 +114,14 @@ or you are not sure whether your auction data is current. Run it with a path cal
 |------|---------|
 | `diag prices: tsm=.. auctionator=.. auctionatorAge=.. vendor=.. order=.. tsmSource=.. sellFallback=.. staleAfterDays=N` | Which price sources are installed, the market source order, the TSM value LazyProf asks for, whether the vendor sell estimate is used, and after how many days an Auctionator price counts as stale. `auctionatorAge=false` means Auctionator cannot tell the age of its prices. |
 | `note: ...` | TSM does not tell other addons when its data was synced: check the TSM desktop app for its last sync. |
-| `summary: reagents=N tsm=.. auctionator=.. vendor=.. estimate=.. noPrice=.. stale=.. oldestAuctionatorDays=..` | How the path's reagents were priced. `estimate` = only the vendor sell value was available; `noPrice` = no price at all yet (item data still loading); `stale` = Auctionator prices `staleAfterDays` or more days old. |
+| `summary: reagents=N tsm=.. auctionator=.. vendor=.. estimate=.. loading=.. noPrice=.. stale=.. oldestAuctionatorDays=..` | How the path's reagents were priced, as the last calculation used them. `estimate` = only the vendor sell value was available; `loading` = no price yet because the item data is still loading; `noPrice` = no auction price and no sell value (or the sell estimate is off), so a scan is needed; `stale` = Auctionator prices `staleAfterDays` or more days old. |
 | `<itemId> <name>: <price> <source> \| tsm=.. auctionator=.. vendor=.. sell=..` | One reagent: the price LazyProf uses and where it came from, then what each source says (`n/a` = source not installed, `-` = no value; `(DBMarket)` is the TSM value that answered, `(2d)` the Auctionator age in days). |
 | `... DISAGREE` | TSM and Auctionator differ by more than half for this item: one of them is likely out of date. |
 | `... STALE` | The price used is an Auctionator price at least `staleAfterDays` old: rescan the auction house. |
 
-What to do: `noPrice` items fill in by themselves as the client loads item data (`/reload`
-if they stay); `stale` or `DISAGREE` items need a fresh auction scan (Auctionator) or a
-desktop-app sync (TSM). The arrow tooltip shows the same summary and warnings, and the
+What to do: `loading` items fill in by themselves as the client loads item data (`/reload`
+if they stay); `noPrice`, `stale` or `DISAGREE` items need a fresh auction scan (Auctionator)
+or a desktop-app sync (TSM). The arrow tooltip shows the same summary and warnings, and the
 shopping list tooltip shows each item's price and source.
 
 ### Adding a new diagnostic
