@@ -267,7 +267,7 @@ function PriceManager.SummaryLines(s)
     if s.unpriced > 0 then
         problem = true
         lines[#lines + 1] = { text = Reagents(s.unpriced, "reagent has", "reagents have")
-            .. " no price at all - scan the auction house.", r = 1, g = 0.5, b = 0 }
+            .. " no price at all - scan the auction house (needs TSM or Auctionator).", r = 1, g = 0.5, b = 0 }
     end
     if s.stale > 0 then
         problem = true
