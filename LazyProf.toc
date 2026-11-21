@@ -97,6 +97,7 @@ Modules\UI\Widgets\Tabs.lua
 Modules\UI\Widgets\RowList.lua
 Modules\UI\Arrow\Strategies\ArrowTooltip.lua
 Modules\UI\Arrow\ArrowManager.lua
+Modules\UI\PathBar.lua
 Modules\UI\GuideWindow.lua
 Modules\UI\MilestoneBreakdown.lua
 Modules\UI\MissingMaterials.lua

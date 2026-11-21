@@ -51,8 +51,14 @@ for _, family in ipairs({ "forever", "classic" }) do
             "This range: 19s   |cFF888888||r   Whole path (excluding gaps): 99s (you pay 99s)")
         T.eq(p .. "no margin line", window.footer2.text, "")
 
-        -- Steps tab
-        T.eq(p .. "one tab for now", #window.tabs.buttons, #window.TABS)
+        -- Tabs: opens on Guide; Steps is the second tab
+        T.eq(p .. "a tab button per tab", #window.tabs.buttons, #window.TABS)
+        T.eq(p .. "opens on the Guide tab", window.tab, "guide")
+        T.eq(p .. "the card of the current step", W.rowTexts(window)[1], "Step 1 of 3 - craft (current step)")
+        T.check(p .. "step navigation shown on the Guide tab", window.nav.shown and not window.searchBox.frame.shown)
+        ui.fire(window.tabs.buttons[2], "OnClick")
+        T.eq(p .. "a tab click switches", window.tab, "steps")
+        T.check(p .. "navigation hidden on the Steps tab", not window.nav.shown)
         local rows = W.rowTexts(window)
         T.eq(p .. "the current range's stage", rows[1], "> 143-160 | |cFF888888craft|r  19x Gloves | 19s")
         T.eq(p .. "only that stage", #rows, 1)
@@ -69,6 +75,7 @@ T.section("controls", function()
     local env = W.load("forever")
     local window, ui, addon = env.window, env.ui, env.addon
     window:Update(W.path())
+    window:SelectTab("steps")
 
     -- Range
     local root = fakeui.openMenu(window.rangeDropdown.button)
@@ -176,13 +183,15 @@ T.section("states", function()
     addon.db.profile.showMilestonePanel = true
 
     window:Update(W.path())
+    window:SelectTab("steps")
     local frame = window.frame
 
     -- Notice
     window:ShowNotice("No recipe data for Engineering yet.")
     T.check("notice: shown", frame.shown and frame.showsNotice == true)
     T.eq("notice: one row with the text", W.rowTexts(window)[1], "No recipe data for Engineering yet.")
-    T.check("notice: controls hidden", window.controls.shown == false and window.searchBox.frame.shown == false)
+    T.check("notice: controls hidden", window.controls.shown == false and window.searchBox.frame.shown == false
+        and window.nav.shown == false)
     T.eq("notice: plain title", frame.title.text, "LazyProf")
     T.eq("notice: no totals", window.footer1.text, "")
     window:Update(W.path())
@@ -271,6 +280,124 @@ T.section("states", function()
     -- Nothing left
     window:Update(W.path({ steps = {}, gaps = {}, totalCost = 0, nothingLeft = true, actualSkill = 300, currentSkill = 300 }))
     T.eq("nothing left: message instead of rows", W.rowTexts(window)[1], "Nothing left: Tailoring is at its cap of 300.")
+end)
+
+T.section("guide tab", function()
+    local env = W.load("forever")
+    local window, ui, addon = env.window, env.ui, env.addon
+    local alts = {
+        { recipe = W.GLOVES, score = 1, color = "orange", expectedSkillups = 1, craftCost = 100 },
+        { recipe = W.CAPE, score = 2, color = "orange", expectedSkillups = 1, craftCost = 300 },
+    }
+    local function path(extra)
+        local p = W.path(extra)
+        if p.steps[1] then p.steps[1].alternatives = alts end
+        return p
+    end
+    window:Update(path())
+
+    -- Path bar
+    local bar = window.bar
+    T.eq("bar: the done block and one segment per stage", #bar.shown, 4)
+    T.eq("bar: end labels", bar.startLabel.text .. "-" .. bar.endLabel.text, "1-300")
+    T.eq("bar: marker label", bar.markerLabel.text, "143")
+    local barWidth = 420 - 28
+    T.eq("bar: a segment's width follows its share of the path", bar.shown[2].width, (160 - 143) / 299 * barWidth)
+    T.check("bar: the shown stage is marked", bar.shown[2].mark.shown == true and bar.shown[3].mark.shown == false)
+    ui.fire(bar.shown[3], "OnEnter")
+    T.check("bar: hover shows the stage", ui.tooltip:Text():find("40x Shirt", 1, true) ~= nil, ui.tooltip:Text())
+    ui.fire(bar.shown[3], "OnClick")
+    T.eq("bar: a click opens that stage on the Guide tab", W.rowTexts(window)[1], "Step 2 of 3 - craft")
+    T.check("bar: the mark moves", bar.shown[3].mark.shown == true and bar.shown[2].mark.shown == false)
+    ui.fire(bar.shown[1], "OnClick")
+    T.eq("bar: the done block opens nothing", W.rowTexts(window)[1], "Step 2 of 3 - craft")
+
+    -- Navigation
+    T.check("nav: away from the current step, all three work",
+        window.prevBtn.enabled and window.nextBtn.enabled and window.currentBtn.enabled)
+    ui.fire(window.nextBtn, "OnClick")
+    T.eq("nav: Next", W.rowTexts(window)[1], "Step 3 of 3 - gap")
+    T.check("nav: no Next on the last step, no recipe on a gap", not window.nextBtn.enabled and not window.recipeBtn.enabled)
+    ui.fire(window.prevBtn, "OnClick")
+    T.eq("nav: Prev", W.rowTexts(window)[1], "Step 2 of 3 - craft")
+    ui.fire(window.recipeBtn, "OnClick")
+    T.eq("nav: Recipe details opens the shown step's recipe", env.details.recipe.name, "Shirt")
+    ui.fire(window.currentBtn, "OnClick")
+    T.eq("nav: Current step", W.rowTexts(window)[1], "Step 1 of 3 - craft (current step)")
+    T.check("nav: on the current step, Current step and Prev are off", not window.currentBtn.enabled and not window.prevBtn.enabled)
+
+    -- A browsed stage stays shown when a new path arrives.
+    ui.fire(window.nextBtn, "OnClick")
+    window:Update(path())
+    T.eq("selection kept across a new path", W.rowTexts(window)[1], "Step 2 of 3 - craft")
+    -- ...and follows the current step again once that stage is gone.
+    window:Update(path({ currentSkill = 200, actualSkill = 200, steps = {}, totalCost = 0 }))
+    T.eq("selection falls back to the current step", W.rowTexts(window)[1], "Step 1 of 1 - gap (current step)")
+    window:Update(path())
+    ui.fire(window.currentBtn, "OnClick")
+
+    -- Use this: pin over the stage's range and plan again at once.
+    local useRow = W.findRow(window, "Cape")
+    T.check("an alternative row with a Use this button", useRow ~= nil and useRow.button.text == "Use this")
+    local before = #env.recalcs
+    ui.fire(useRow.button, "OnClick", "LeftButton")
+    local pins = addon.CharStore:Profession("tailoring").pins
+    T.check("use: a pin over the stage's exact range", #pins == 1 and pins[1].from == 143 and pins[1].to == 160 and pins[1].recipeId == 3)
+    T.eq("use: planned again at once", env.recalcs[#env.recalcs], "recipe pinned")
+    T.eq("use: once", #env.recalcs, before + 1)
+
+    -- The planner answers with the pinned recipe in that range.
+    local pinned = path()
+    pinned.steps[1] = W.step(W.CAPE, 143, 150, 7, 2100, { alternatives = alts })
+    pinned.steps[2] = W.step(W.CAPE, 150, 160, 12, 3600)
+    pinned.totalCost = 13700
+    window:Update(pinned)
+    local rows = W.rowTexts(window)
+    T.eq("use: the stage is shown under its new recipe", rows[2], "19x Cape | 143 to 160")
+    local resetRow = W.findRow(window, "Pinned:")
+    T.check("use: the pinned stage offers Reset", resetRow ~= nil and resetRow.button.text == "Reset")
+    T.check("use: the planner's own choice is now an alternative", W.findRow(window, "Gloves") ~= nil)
+
+    before = #env.recalcs
+    ui.fire(resetRow.button, "OnClick", "LeftButton")
+    T.eq("reset: the pin is gone", #addon.CharStore:Profession("tailoring").pins, 0)
+    T.eq("reset: planned again at once", env.recalcs[#env.recalcs], "pin removed")
+    T.eq("reset: once", #env.recalcs, before + 1)
+    window:Update(path())
+    T.eq("reset: the planner's recipe is back", W.rowTexts(window)[2], "19x Gloves | 143 to 160")
+    T.check("reset: no pinned line", W.findRow(window, "Pinned:") == nil)
+
+    -- Steps tab: the Guide button of a row opens that stage.
+    window:SelectTab("steps")
+    window.rangeSel = "all"
+    window:Render()
+    local shirt = W.findRow(window, "40x Shirt")
+    ui.fire(shirt.button, "OnClick", "LeftButton")
+    T.eq("steps: a row's Guide button switches to the Guide tab", window.tab, "guide")
+    T.eq("steps: on that stage", W.rowTexts(window)[2], "40x Shirt | 160 to 200")
+
+    -- The range does not cut the Guide tab: the next rows cross into the next range.
+    window.rangeSel = nil
+    ui.fire(window.currentBtn, "OnClick")
+    rows = W.rowTexts(window)
+    T.eq("guide: next rows reach past the current range", rows[#rows - 1], "160-200 | |cFF888888craft|r  40x Shirt | 80s")
+
+    -- Show all
+    local many = path()
+    local list = {}
+    for i = 1, 6 do
+        list[i] = { recipe = W.recipe(20 + i, "Alt" .. i, 100, 150, 160, 170), score = i, color = "orange", expectedSkillups = 1, craftCost = 100 }
+    end
+    many.steps[1].alternatives = list
+    many.prices = setmetatable({}, { __index = function() return 100 end })
+    window:Update(many)
+    local showAll = W.findRow(window, "Show all 6")
+    T.check("alternatives: three shown, the rest behind Show all", showAll ~= nil and W.findRow(window, "Alt4") == nil)
+    ui.fire(showAll, "OnClick", "LeftButton")
+    T.check("alternatives: Show all expands in place", W.findRow(window, "Alt6") ~= nil and W.findRow(window, "Show fewer") ~= nil)
+    ui.fire(window.nextBtn, "OnClick")
+    ui.fire(window.prevBtn, "OnClick")
+    T.check("alternatives: collapsed again after moving to another step", W.findRow(window, "Alt6") == nil)
 end)
 
 T.finish()

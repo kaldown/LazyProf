@@ -17,12 +17,16 @@ local DEFAULT_WIDTH = 420
 local MIN_WIDTH, MAX_WIDTH = 380, 640
 local MIN_HEIGHT, MAX_HEIGHT = 360, 900
 local FALLBACK_HEIGHT = 480
-local HEADER_HEIGHT = 104     -- title, status line, controls row, range row
+local CONTROLS_TOP = 48       -- below the title and the status line
+local CONTROLS_HEIGHT = 92    -- target row, range row, path bar
+local HEADER_HEIGHT = CONTROLS_TOP + CONTROLS_HEIGHT
 local FOOTER_HEIGHT = 40      -- two lines of totals
 local SEARCH_HEIGHT = 26
+local NAV_HEIGHT = 28
 
 -- Tabs in display order. key names the tab in saved data.
 GuideWindow.TABS = {
+    { key = "guide", label = "Guide" },
     { key = "steps", label = "Steps" },
 }
 
@@ -34,7 +38,9 @@ GuideWindow.rangeSel = nil    -- nil: current range; a bracket index; "all"
 GuideWindow.expanded = {}     -- [stage.key] = true, rows opened on the Steps tab
 GuideWindow.search = ""
 GuideWindow.notice = nil      -- text shown instead of a path (no recipe data)
-GuideWindow.tab = "steps"
+GuideWindow.tab = "guide"
+GuideWindow.selection = nil   -- the stage opened on the Guide tab: { key, from }; nil follows the current one
+GuideWindow.showAllAlts = false
 
 function GuideWindow:Initialize()
     -- Frames are built the first time the window is shown.
@@ -51,6 +57,8 @@ function GuideWindow:SetPath(path)
         self.rangeSel = nil
         self.expanded = {}
         self.search = ""
+        self.selection = nil
+        self.showAllAlts = false
         if self.frame then
             self.searchBox:SetText("")
         end
@@ -89,6 +97,8 @@ function GuideWindow:ComputeView()
     view.rangeLabel = Range.Label(self.rangeSel, brackets, path.actualSkill)
     view.rangeStages = Range.FilterStages(stages, view.bracket)
     view.rangeTotals = LazyProf.Stages.Totals(view.rangeStages)
+    view.selectedStage = LazyProf.GuideViews.SelectedStage(stages, summary, self.selection)
+    view.showAllAlts = self.showAllAlts
 
     -- The open profession's cap, as its window reports it
     if self.mode == "live" then
@@ -214,9 +224,9 @@ function GuideWindow:Build()
     -- Controls (hidden while there is no path)
     local controls = CreateFrame("Frame", nil, body)
     self.controls = controls
-    controls:SetPoint("TOPLEFT", 0, -48)
-    controls:SetPoint("TOPRIGHT", 0, -48)
-    controls:SetHeight(HEADER_HEIGHT - 48)
+    controls:SetPoint("TOPLEFT", 0, -CONTROLS_TOP)
+    controls:SetPoint("TOPRIGHT", 0, -CONTROLS_TOP)
+    controls:SetHeight(CONTROLS_HEIGHT)
 
     self.targetLabel = controls:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     self.targetLabel:SetPoint("TOPLEFT", 12, -8)
@@ -251,6 +261,38 @@ function GuideWindow:Build()
     end, function(value)
         self:OnRange(value)
     end)
+
+    -- The path bar: the whole journey, one segment per stage
+    self.bar = LazyProf.PathBar.Create(controls)
+    self.bar.frame:SetPoint("TOPLEFT", 14, -62)
+    self.bar.frame:SetPoint("TOPRIGHT", -14, -62)
+
+    -- Guide tab: step navigation under the card
+    local nav = CreateFrame("Frame", nil, body)
+    self.nav = nav
+    nav:SetPoint("BOTTOMLEFT", 10, FOOTER_HEIGHT + 2)
+    nav:SetPoint("BOTTOMRIGHT", -10, FOOTER_HEIGHT + 2)
+    nav:SetHeight(NAV_HEIGHT - 4)
+    local function navButton(text, width, onClick)
+        local button = CreateFrame("Button", nil, nav, "UIPanelButtonTemplate")
+        button:SetSize(width, 22)
+        button:SetText(text)
+        button:SetScript("OnClick", onClick)
+        return button
+    end
+    self.prevBtn = navButton("< Prev", 62, function() self:Step(-1) end)
+    self.prevBtn:SetPoint("LEFT", 0, 0)
+    self.currentBtn = navButton("Current step", 92, function() self:Step(0) end)
+    self.currentBtn:SetPoint("LEFT", self.prevBtn, "RIGHT", 4, 0)
+    self.nextBtn = navButton("Next >", 62, function() self:Step(1) end)
+    self.nextBtn:SetPoint("LEFT", self.currentBtn, "RIGHT", 4, 0)
+    self.recipeBtn = navButton("Recipe details", 104, function()
+        local stage = self.view and self.view.selectedStage
+        if stage and stage.recipe and LazyProf.RecipeDetails then
+            LazyProf.RecipeDetails:Toggle(stage.recipe, stage.fromDisplay)
+        end
+    end)
+    self.recipeBtn:SetPoint("RIGHT", 0, 0)
 
     -- Steps tab: recipe search above the list
     self.searchBox = Widgets.CreateSearchBox(body, "LazyProfGuideSearch", "Search recipes...", function(text)
@@ -325,14 +367,17 @@ end
 -- Place the list for the selected tab and tell it how wide its rows are.
 function GuideWindow:Layout()
     local frame = self.frame
-    local top = HEADER_HEIGHT + 4
+    local top, bottom = HEADER_HEIGHT + 4, FOOTER_HEIGHT + 2
     if self.tab == "steps" then
         top = top + SEARCH_HEIGHT
+    elseif self.tab == "guide" then
+        bottom = bottom + NAV_HEIGHT
     end
     self.searchBox.frame:SetShown(self.tab == "steps" and self.path ~= nil)
+    self.nav:SetShown(self.tab == "guide" and self.path ~= nil)
     self.list.frame:ClearAllPoints()
     self.list.frame:SetPoint("TOPLEFT", self.body, "TOPLEFT", 10, -top)
-    self.list.frame:SetPoint("BOTTOMRIGHT", self.body, "BOTTOMRIGHT", -30, FOOTER_HEIGHT + 2)
+    self.list.frame:SetPoint("BOTTOMRIGHT", self.body, "BOTTOMRIGHT", -30, bottom)
     self.list:SetWidth(math.max(100, frame:GetWidth() - 44))
 end
 
@@ -418,6 +463,14 @@ function GuideWindow:Render()
         self.strategyGroup:SetSelected(LazyProf.db.profile.strategy)
         self.marginBox:SetChecked(LazyProf.db.profile.useMargin)
         self.rangeDropdown:SetText(view.rangeLabel)
+        self.bar:Render(Views.PathBar(view), math.max(50, self.frame:GetWidth() - 28), function(stage)
+            self:OpenStage(stage)
+        end)
+        local nav = Views.GuideNav(view)
+        self.prevBtn:SetEnabled(nav.prev)
+        self.nextBtn:SetEnabled(nav.next)
+        self.currentBtn:SetEnabled(nav.current)
+        self.recipeBtn:SetEnabled(nav.recipe)
     end
 
     local line1, line2 = Views.Footer(view)
@@ -441,6 +494,25 @@ function GuideWindow:Context()
                 LazyProf.RecipeDetails:Show(recipe, skill)
             end
         end,
+        onOpenStage = function(stage) self:OpenStage(stage) end,
+        onShowAllAlts = function(on)
+            self.showAllAlts = on and true or false
+            self:Render()
+        end,
+        -- "Use this": pin the recipe over the stage's range and plan again at
+        -- once. The stage stays selected under its new recipe.
+        onUseAlternative = function(stage, alt)
+            local key = self.path.professionKey
+            LazyProf.Pathfinder:PinRange(key, stage.from, stage.to, alt.recipe.id)
+            self.selection = { key = "craft:" .. tostring(alt.recipe.id) .. ":" .. tostring(stage.fromDisplay), from = stage.from }
+            self.showAllAlts = false
+            self:Recalculate("recipe pinned")
+        end,
+        onResetPin = function(stage)
+            LazyProf.Pathfinder:UnpinAt(self.path.professionKey, stage.from)
+            self.selection = { key = stage.key, from = stage.from }
+            self:Recalculate("pin removed")
+        end,
     }
     return self.ctx
 end
@@ -453,11 +525,15 @@ function GuideWindow:TabRows()
         return { { kind = "line", height = 26, text = self.notice or "", color = { 0.8, 0.8, 0.8 }, wrap = true } }
     end
     local ctx = self:Context()
-    if self.search ~= "" then
+    local rows
+    if self.tab == "guide" then
+        rows = Views.GuideCard(view, ctx)
+    elseif self.search ~= "" then
         local prof = LazyProf.Professions:Get(view.path.professionKey)
         return Views.SearchResults(Views.SearchRecipes(prof and prof.recipes or {}, self.search), ctx)
+    else
+        rows = Views.Steps(view, ctx)
     end
-    local rows = Views.Steps(view, ctx)
     if view.hint then
         local step = view.hintStep
         table.insert(rows, 1, {
@@ -493,6 +569,35 @@ function GuideWindow:SelectTab(key, fromClick)
     self.tabs:Select(TabIndex(self.tab))
     self:Layout()
     self:RenderTab(true)
+end
+
+-- Open a stage on the Guide tab.
+function GuideWindow:OpenStage(stage)
+    self.selection = { key = stage.key, from = stage.from }
+    self.showAllAlts = false
+    if self.tab ~= "guide" then
+        self.tab = "guide"
+        self.tabs:Select(TabIndex("guide"))
+    end
+    self:Render()
+    self.list.frame:SetVerticalScroll(0)
+end
+
+-- Prev / Next (-1 / 1) from the shown stage; 0 goes back to following the
+-- current step.
+function GuideWindow:Step(direction)
+    local view = self.view
+    local stage = view and view.selectedStage
+    if direction == 0 or not stage then
+        self.selection = nil
+    else
+        local target = view.stages[stage.index + direction]
+        if not target then return end
+        self.selection = { key = target.key, from = target.from }
+    end
+    self.showAllAlts = false
+    self:Render()
+    self.list.frame:SetVerticalScroll(0)
 end
 
 -- Header controls -----------------------------------------------------------------
