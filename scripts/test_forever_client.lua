@@ -195,7 +195,9 @@ end
 
 local SURFACE = { "IsOpen", "AnchorFrame", "PanelOffsetX", "GetLine", "NoDataProfessionName",
                   "KnownRecipeIds", "PlayerSkill", "ProfessionRank", "GetItemInfo", "FindRecipeRow", "InvalidateRowCache",
-                  "UnlearnedHiddenByFilter", "Start", "RunDiagnostic" }
+                  "UnlearnedHiddenByFilter", "Start", "RunDiagnostic",
+                  "StartMerchant", "IsMerchantOpen", "MerchantAnchorFrame", "MerchantItems", "BuyFromMerchant",
+                  "FreeBagSlots", "Money", "RunMerchantDiagnostic" }
 
 -- Names of the functions an adapter installs.
 local function methodNames(client)
@@ -478,6 +480,98 @@ section("start", function()
     closes = counts.close
     addon.events.TRADE_SKILL_CLOSE("TRADE_SKILL_CLOSE")
     check(p .. "TRADE_SKILL_CLOSE -> onClose", counts.close == closes + 1, counts.close - closes)
+end)
+
+-- ===========================================================================
+-- 4. Merchant: items, buying, bag slots, money, open / update / close
+-- ===========================================================================
+section("merchant", function()
+    local p = "merchant: "
+    local addon = loadAdapter(16001)
+    local Client = addon.Client
+
+    -- The merchant as the client reports it.
+    local list = {
+        { id = 2320, info = { name = "Coarse Thread", price = 10, stackCount = 1, numAvailable = -1, isPurchasable = true,
+                              hasExtendedCost = false }, maxStack = 20 },
+        { id = 3371, info = { name = "Empty Vial", price = 100, stackCount = 5, numAvailable = -1, isPurchasable = true,
+                              hasExtendedCost = false }, maxStack = 20 },
+        { id = 4340, info = { name = "Gray Dye", price = 350, stackCount = 1, numAvailable = 3, isPurchasable = true,
+                              hasExtendedCost = false }, maxStack = 10 },
+        { id = 9999, info = { name = "Token Thing", price = 0, stackCount = 1, numAvailable = -1, isPurchasable = false,
+                              hasExtendedCost = true, currencyID = 77 }, maxStack = 1 },
+        { id = 5555, info = nil, maxStack = 1 },   -- the client had nothing for this index
+    }
+    _G.GetMerchantNumItems = function() return #list end
+    _G.C_MerchantFrame = { GetItemInfo = function(index)
+        local entry = list[index]
+        if entry and entry.info then return entry.info end
+    end }
+    _G.GetMerchantItemID = function(index) return list[index] and list[index].id end
+    _G.GetMerchantItemMaxStack = function(index) return list[index] and list[index].maxStack end
+    -- The Classic positional call does not exist on this client.
+    _G.GetMerchantItemInfo = function() error("GetMerchantItemInfo called on Forever") end
+    local bought = {}
+    _G.BuyMerchantItem = function(index, quantity) bought[#bought + 1] = index .. "x" .. tostring(quantity) end
+    _G.GetMoney = function() return 123456 end
+    _G.C_Container = { GetContainerNumFreeSlots = function(bag)
+        if bag == 0 then return 4, 0 end
+        if bag == 1 then return 6, 0 end
+        if bag == 2 then return 10, 8 end     -- a bag for certain items only
+        if bag == 3 then return 2 end         -- no family reported
+        return 0, 0
+    end }
+    _G.MerchantFrame = { IsShown = function() return true end }
+
+    local items = Client:MerchantItems()
+    check(p .. "one entry per index the client has data for", #items == 4, #items)
+    local thread, vial, dye, token = items[1], items[2], items[3], items[4]
+    check(p .. "index, item id and name", thread.index == 1 and thread.itemId == 2320 and thread.name == "Coarse Thread")
+    check(p .. "price, bundle and max stack", vial.price == 100 and vial.bundle == 5 and vial.maxStack == 20)
+    check(p .. "unlimited stock is passed as reported", thread.stock == -1 and dye.stock == 3)
+    check(p .. "a gold-priced item has no extended cost", thread.extendedCost == false and thread.purchasable == true)
+    check(p .. "a currency-priced item is flagged", token.extendedCost == true and token.purchasable == false)
+
+    Client:BuyFromMerchant(2, 10)
+    check(p .. "buy passes index and item count", bought[1] == "2x10", bought[1])
+    check(p .. "money", Client:Money() == 123456)
+    check(p .. "free slots count general-purpose bags only", Client:FreeBagSlots() == 12, Client:FreeBagSlots())
+    check(p .. "anchor frame is the merchant window", Client:MerchantAnchorFrame() == _G.MerchantFrame)
+
+    -- Events
+    local seen = {}
+    Client:StartMerchant({
+        onShow = function() seen[#seen + 1] = "show" end,
+        onUpdate = function() seen[#seen + 1] = "update" end,
+        onClose = function() seen[#seen + 1] = "close" end,
+    })
+    check(p .. "not open before the event", Client:IsMerchantOpen() == false)
+    addon.events.MERCHANT_UPDATE()
+    check(p .. "an update with no merchant open is ignored", #seen == 0)
+    addon.events.MERCHANT_SHOW()
+    check(p .. "open after MERCHANT_SHOW", Client:IsMerchantOpen() == true and seen[1] == "show")
+    addon.events.MERCHANT_UPDATE()
+    addon.events.MERCHANT_FILTER_ITEM_UPDATE()
+    check(p .. "list and filter updates are passed on", seen[2] == "update" and seen[3] == "update")
+    addon.events.MERCHANT_CLOSED()
+    addon.events.MERCHANT_CLOSED()
+    check(p .. "a close is reported once", #seen == 4 and seen[4] == "close" and Client:IsMerchantOpen() == false)
+
+    -- Diagnostic
+    local lines = {}
+    local ok, err = pcall(Client.RunMerchantDiagnostic, Client, lines)
+    check(p .. "diag: no Lua error", ok, err)
+    local text = table.concat(lines, "\n")
+    check(p .. "diag: state line", text:find("numItems=5", 1, true) and text:find("money=123456", 1, true)
+        and text:find("freeSlots=12", 1, true), text)
+    check(p .. "diag: raw stock value shown", text:find("numAvailable=-1", 1, true) ~= nil, text)
+    check(p .. "diag: an index without data is reported", text:find("raw[5] no info", 1, true) ~= nil, text)
+    check(p .. "diag: adapter view", text:find("adapter items=4", 1, true) ~= nil, text)
+    _G.C_MerchantFrame.GetItemInfo = function() error("boom") end
+    lines = {}
+    ok = pcall(Client.RunMerchantDiagnostic, Client, lines)
+    check(p .. "diag: a failing section is reported, the rest still prints",
+        ok and table.concat(lines, "\n"):find("SECTION ERROR", 1, true) ~= nil)
 end)
 
 -- ===========================================================================

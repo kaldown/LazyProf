@@ -49,6 +49,7 @@ GuideWindow.path = nil        -- the path shown (the live one, or planning's)
 GuideWindow.livePath = nil    -- the open profession's path, also while planning is shown
 GuideWindow.liveNotice = nil  -- its "no recipe data" text
 GuideWindow.planning = nil    -- { profKey, path, notice } while a planning view exists
+GuideWindow.shoppingPath = nil   -- the last path shown, kept after the window closes (merchant panel)
 GuideWindow.returnToPlanning = false   -- planning was set aside for a profession window
 GuideWindow.profKey = nil
 GuideWindow.rangeSel = nil    -- nil: current range; a bracket index; "all"
@@ -81,6 +82,9 @@ function GuideWindow:SetPath(path)
         end
     end
     self.path = path
+    if path then
+        self.shoppingPath = path
+    end
 end
 
 -- Margin in force (nil when off).
@@ -189,6 +193,20 @@ function GuideWindow:ShoppingSteps()
     if not self.path then return nil end
     local view = self:ComputeView()
     return LazyProf.Stages.ShoppingSteps(view.rangeStages or {}), view.bracket and view.bracket.name or nil
+end
+
+-- For the merchant panel: the shopping rows of the path the window showed
+-- last (its chosen range while the window still shows that path, else the
+-- current range), worked out from the stock as it is now. Returns the rows
+-- and a name for the list ("Tailoring 75-150"); nil when no path was shown
+-- this session.
+function GuideWindow:MerchantRows()
+    local path = self.shoppingPath
+    if not path then return nil end
+    path.inventory, path.sourceBreakdown = LazyProf.Inventory:ScanAll()
+    local view = self:BuildView(path, path.planning and "planning" or "closed", path ~= self.path)
+    local name = tostring(path.profession) .. (view.bracket and (" " .. view.bracket.name) or "")
+    return self:Missing(view).rows, name
 end
 
 -- Should the window be showing right now? (Asked by the panel shell when

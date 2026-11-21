@@ -64,6 +64,7 @@ Core\CharStore.lua
 
 # Modules - Data
 Modules\Inventory\Scanner.lua
+Modules\Shopping\VendorMemory.lua
 Modules\Pricing\Providers\TSM.lua
 Modules\Pricing\Providers\Auctionator.lua
 Modules\Pricing\Providers\Vendor.lua
@@ -87,6 +88,7 @@ Modules\Guide\Text.lua
 Modules\Guide\Range.lua
 Modules\Guide\Stages.lua
 Modules\Guide\Views.lua
+Modules\Shopping\PurchaseQueue.lua
 
 # Modules - UI
 Modules\UI\Widgets\PanelShell.lua
@@ -100,6 +102,7 @@ Modules\UI\Arrow\ArrowManager.lua
 Modules\UI\PathBar.lua
 Modules\UI\GuideWindow.lua
 Modules\UI\RecipeDetails.lua
+Modules\UI\MerchantPanel.lua
 Modules\UI\ProfessionBrowser.lua
 Modules\UI\MinimapButton.lua
 

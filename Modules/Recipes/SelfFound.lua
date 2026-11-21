@@ -89,8 +89,12 @@ function SelfFound:IsReagentObtainableUncached(itemId)
 
     local CraftLib = _G.CraftLib
 
-    -- 2. Vendor-stocked reagent (authoritative curated allowlist; no AH needed).
+    -- 2. Vendor-stocked reagent (authoritative curated allowlist; no AH needed),
+    -- or one seen for sale without limit at a merchant.
     if CraftLib and CraftLib.GetVendorBuyPrice and CraftLib:GetVendorBuyPrice(itemId) ~= nil then
+        return true
+    end
+    if LazyProf.VendorMemory and LazyProf.VendorMemory:Get(itemId) then
         return true
     end
 
