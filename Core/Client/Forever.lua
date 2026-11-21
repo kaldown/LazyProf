@@ -347,6 +347,152 @@ function Client:Start(callbacks)
     end)
 end
 
+-- Merchant ------------------------------------------------------------------
+-- Events: MERCHANT_SHOW / MERCHANT_CLOSED / MERCHANT_UPDATE and, when the
+-- merchant's filter changes its list, MERCHANT_FILTER_ITEM_UPDATE
+-- (Events.lua:1331-1334; Blizzard's frame handles the same ones,
+-- Blizzard_UIPanels_Game/Mainline/MerchantFrame.lua:8, 97).
+
+local merchantOpen = false
+
+-- callbacks: onShow(), onUpdate(), onClose().
+function Client:StartMerchant(callbacks)
+    LazyProf:RegisterEvent("MERCHANT_SHOW", function()
+        merchantOpen = true
+        callbacks.onShow()
+    end)
+    LazyProf:RegisterEvent("MERCHANT_UPDATE", function()
+        if merchantOpen then callbacks.onUpdate() end
+    end)
+    LazyProf:RegisterEvent("MERCHANT_FILTER_ITEM_UPDATE", function()
+        if merchantOpen then callbacks.onUpdate() end
+    end)
+    LazyProf:RegisterEvent("MERCHANT_CLOSED", function()
+        if not merchantOpen then return end   -- the event can fire twice per close
+        merchantOpen = false
+        callbacks.onClose()
+    end)
+end
+
+function Client:IsMerchantOpen()
+    return merchantOpen
+end
+
+-- The merchant window, for a panel to sit beside (a global frame that always
+-- exists: Blizzard_UIPanels_Game/Mainline/MerchantFrame.xml:94).
+function Client:MerchantAnchorFrame()
+    return MerchantFrame
+end
+
+-- What the open merchant sells, one entry per list index:
+--   index, itemId, name
+--   price        copper for one purchase unit (a bundle of `bundle` items)
+--   bundle       items per purchase unit
+--   stock        the merchant's numAvailable as reported: above zero a limited
+--                supply and zero sold out (the merchant UI shows both:
+--                Blizzard_ItemButton/Mainline/ItemButtonTemplate.lua:40-55,
+--                MerchantFrame.lua:373); below zero is taken as unlimited
+--   maxStack     most items one purchase call may ask for
+--   extendedCost priced in something other than gold alone
+--   purchasable
+-- The item table is C_MerchantFrame.GetItemInfo's (fields:
+-- Blizzard_APIDocumentationGenerated/MerchantFrameDocumentation.lua:126-141);
+-- it may return nothing. Blizzard reads the same calls at MerchantFrame.lua:
+-- 253-300 (list), :359 (item id), :714 (max stack).
+-- Verify in game: numAvailable of an unlimited item (/lp diag merchant).
+function Client:MerchantItems()
+    local items = {}
+    for index = 1, GetMerchantNumItems() do
+        local info = C_MerchantFrame.GetItemInfo(index)
+        local itemId = GetMerchantItemID(index)
+        if info and itemId then
+            local bundle = (info.stackCount and info.stackCount > 0) and info.stackCount or 1
+            items[#items + 1] = {
+                index = index,
+                itemId = itemId,
+                name = info.name,
+                price = info.price or 0,
+                bundle = bundle,
+                stock = info.numAvailable,
+                maxStack = GetMerchantItemMaxStack(index) or bundle,
+                extendedCost = (info.hasExtendedCost or info.currencyID ~= nil) and true or false,
+                purchasable = info.isPurchasable and true or false,
+            }
+        end
+    end
+    return items
+end
+
+-- Buy `quantity` items of a list index: the count is in items, a multiple of
+-- the bundle, at most the item's max stack - as Blizzard's own split-stack
+-- purchase calls it (MerchantFrame.lua:656-666, 713-737).
+-- Verify in game: whether purchases made outside a click are accepted
+-- (/lp diag merchant; the purchase queue copes either way).
+function Client:BuyFromMerchant(index, quantity)
+    BuyMerchantItem(index, quantity)
+end
+
+-- Free general-purpose bag slots (backpack and the four bags; a bag that
+-- only takes certain items reports a non-zero family and is left out).
+-- C_Container.GetContainerNumFreeSlots returns numFreeSlots, bagFamily
+-- (Blizzard_APIDocumentationGenerated/ContainerDocumentation.lua:297-309).
+function Client:FreeBagSlots()
+    local free = 0
+    for bag = 0, 4 do
+        local slots, family = C_Container.GetContainerNumFreeSlots(bag)
+        if slots and (family == nil or family == 0) then
+            free = free + slots
+        end
+    end
+    return free
+end
+
+-- The character's money in copper.
+function Client:Money()
+    return GetMoney()
+end
+
+-- /lp diag merchant: the raw merchant values and what MerchantItems makes of
+-- them. Read-only.
+function Client:RunMerchantDiagnostic(lines)
+    local function add(text) lines[#lines + 1] = text end
+    local function section(name, fn)
+        local ok, err = pcall(fn)
+        if not ok then add("SECTION ERROR: " .. name .. ": " .. tostring(err)) end
+    end
+    section("state", function()
+        add("merchant: open=" .. tostring(merchantOpen) .. " frameShown="
+            .. tostring(MerchantFrame ~= nil and MerchantFrame:IsShown())
+            .. " numItems=" .. tostring(GetMerchantNumItems())
+            .. " money=" .. tostring(GetMoney()) .. " freeSlots=" .. tostring(self:FreeBagSlots()))
+    end)
+    section("raw", function()
+        for index = 1, math.min(GetMerchantNumItems() or 0, 12) do
+            local info = C_MerchantFrame.GetItemInfo(index)
+            if info then
+                add("raw[" .. tostring(index) .. "] id=" .. tostring(GetMerchantItemID(index))
+                    .. " name=" .. tostring(info.name) .. " price=" .. tostring(info.price)
+                    .. " stackCount=" .. tostring(info.stackCount) .. " numAvailable=" .. tostring(info.numAvailable)
+                    .. " isPurchasable=" .. tostring(info.isPurchasable) .. " hasExtendedCost=" .. tostring(info.hasExtendedCost)
+                    .. " currencyID=" .. tostring(info.currencyID) .. " maxStack=" .. tostring(GetMerchantItemMaxStack(index)))
+            else
+                add("raw[" .. tostring(index) .. "] no info")
+            end
+        end
+    end)
+    section("items", function()
+        local items = self:MerchantItems()
+        add("adapter items=" .. tostring(#items))
+        for i = 1, math.min(#items, 12) do
+            local item = items[i]
+            add("item[" .. tostring(item.index) .. "] id=" .. tostring(item.itemId) .. " price=" .. tostring(item.price)
+                .. " bundle=" .. tostring(item.bundle) .. " stock=" .. tostring(item.stock)
+                .. " maxStack=" .. tostring(item.maxStack) .. " extendedCost=" .. tostring(item.extendedCost)
+                .. " purchasable=" .. tostring(item.purchasable))
+        end
+    end)
+end
+
 -- /lp diag forever: a read-only dump of the client facts and of what this
 -- adapter makes of them (documented in docs/development/TROUBLESHOOTING.md).
 -- Each section runs under pcall so one failure prints "SECTION ERROR" and the

@@ -55,6 +55,9 @@ function LazyProf:OnEnable()
     if self.RecipeDetails then
         self.RecipeDetails:Initialize()
     end
+    if self.MerchantPanel then
+        self.MerchantPanel:Initialize()
+    end
     if self.ProfessionBrowser then
         self.ProfessionBrowser:Initialize()
     end
@@ -135,8 +138,11 @@ function LazyProf:SlashCommand(input)
             self:Print("Diagnostics: /lp diag learned - dumps learned-recipe detection state to a copyable window.")
         end
         self:Print("Diagnostics: /lp diag prices - lists every reagent price of the path and where it came from.")
+        self:Print("Diagnostics: /lp diag merchant - at a merchant: what it sells as LazyProf reads it, and what would be bought.")
     elseif cmd == "diag prices" then
         self:RunPriceDiagnostic()
+    elseif cmd == "diag merchant" then
+        self:RunMerchantDiagnostic()
     elseif cmd == "diag learned" and self.ClientFamily ~= "forever" then
         self:RunLearnedDiagnostic()
     elseif cmd == "diag forever" and self.ClientFamily == "forever" then
@@ -203,6 +209,10 @@ function LazyProf:OnBagUpdate()
     -- during batch crafting as reported by users with both old and high-end hardware.
     if self.Client:IsOpen() or (self.GuideWindow and self.GuideWindow:PlanningPath()) then
         self:ScheduleShoppingListRefresh()
+    end
+    -- At a merchant: a purchase may have arrived
+    if self.MerchantPanel then
+        self.MerchantPanel:OnInventoryChanged()
     end
 end
 
@@ -520,6 +530,50 @@ function LazyProf:RunPriceDiagnostic()
     self:ShowDiagnosticOutput(table.concat(out, "\n"))
 end
 
+-- /lp diag merchant: the open merchant's raw values, what the adapter makes
+-- of them, the vendor prices remembered so far and what the merchant panel
+-- would buy. Read-only; run it with a merchant window open.
+function LazyProf:RunMerchantDiagnostic()
+    local out = {}
+    local function add(text) out[#out + 1] = text end
+    local version, build, _, interface = GetBuildInfo()
+    add("diag merchant: build=" .. tostring(version) .. " (" .. tostring(build) .. ") interface=" .. tostring(interface)
+        .. " family=" .. tostring(self.ClientFamily))
+    if not self.Client:IsMerchantOpen() then
+        add("NOTE: no merchant window is open - open one for the item lines.")
+    end
+    local ok, err = pcall(self.Client.RunMerchantDiagnostic, self.Client, out)
+    if not ok then add("SECTION ERROR: adapter: " .. tostring(err)) end
+
+    ok, err = pcall(function()
+        add("remembered vendor prices: " .. tostring(self.VendorMemory:Count()))
+        local panel = self.MerchantPanel
+        local runner = panel and panel.runner
+        add("purchases: onePerClick=" .. tostring(runner and runner:ClickOnly() or false)
+            .. " running=" .. tostring(runner and runner:IsRunning() or false))
+        local rows, listName = nil, nil
+        if self.GuideWindow then rows, listName = self.GuideWindow:MerchantRows() end
+        if not rows then
+            add("shopping list: none yet this session (open a profession or the LazyProf window first)")
+            return
+        end
+        local plan = self.PurchaseQueue.Plan(rows, self.Client:MerchantItems())
+        add("shopping list: " .. tostring(listName) .. ", rows=" .. tostring(#rows) .. " toBuyHere=" .. tostring(#plan.entries)
+            .. " skipped=" .. tostring(#plan.skipped) .. " total=" .. self.Utils.FormatMoney(plan.total))
+        for _, entry in ipairs(plan.entries) do
+            add("buy: " .. tostring(entry.quantity) .. "x " .. tostring(entry.name) .. " (id " .. tostring(entry.itemId)
+                .. ") for " .. self.Utils.FormatMoney(entry.cost))
+        end
+        for _, skipped in ipairs(plan.skipped) do
+            add("skip: " .. tostring(skipped.name) .. " (id " .. tostring(skipped.itemId) .. "): " .. tostring(skipped.reason))
+        end
+    end)
+    if not ok then add("SECTION ERROR: plan: " .. tostring(err)) end
+
+    self:Print("diag merchant: output ready - copy it from the window that opened.")
+    self:ShowDiagnosticOutput(table.concat(out, "\n"))
+end
+
 -- Debug pipeline primitive (used by /lp diag commands). A copyable popup modeled
 -- on the debug-log window: lazily-built, reused, ESC-closable, combat-safe. Holds
 -- any text in a selectable multi-line EditBox so a player or dev can Ctrl+C
@@ -554,7 +608,7 @@ function LazyProf:ShowDiagnosticOutput(text)
 
         frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         frame.title:SetPoint("TOPLEFT", 10, -10)
-        frame.title:SetText("LazyProf Learned Diagnostic")
+        frame.title:SetText("LazyProf Diagnostic")
         frame.title:SetTextColor(1, 0.82, 0)
 
         frame.closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")

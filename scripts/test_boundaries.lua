@@ -9,6 +9,8 @@ local FORBIDDEN = {
     "TradeSkillListScrollFrame", "FauxScrollFrame", "UIDropDownMenu",
     "GetNumSkillLines", "GetSkillLineInfo", "C_TradeSkillUI", "ProfessionsFrame",
     "C_Item.GetItemInfo",
+    -- Merchant window and calls (the adapter's MerchantItems / BuyFromMerchant / Money)
+    "MerchantFrame", "GetMerchant", "BuyMerchantItem",
 }
 
 local EXEMPT_DIRS = { "Core/Client/", "Modules/UI/Widgets/" }
@@ -56,8 +58,8 @@ local function hasBareGetItemInfo(line)
 end
 
 -- Client globals that may only be called inside the adapter: the character's
--- professions (spell-book list on WoW Forever).
-local BARE_FORBIDDEN = { "GetProfessions", "GetProfessionInfo" }
+-- professions (spell-book list on WoW Forever) and money.
+local BARE_FORBIDDEN = { "GetProfessions", "GetProfessionInfo", "GetMoney" }
 
 local function exempt(path)
     for _, d in ipairs(EXEMPT_DIRS) do

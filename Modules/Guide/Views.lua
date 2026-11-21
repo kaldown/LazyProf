@@ -993,3 +993,41 @@ function Views.ArrowTooltip(view)
     end
     return lines
 end
+
+-- Merchant panel -----------------------------------------------------------------
+
+-- Rows of the panel beside the merchant window: what this merchant sells of
+-- the shopping list, with a Buy button each; what it sells but is not bought
+-- automatically, with the reason; and the last purchase's report.
+-- plan: PurchaseQueue.Plan; state: { busy = bool, report = text or nil };
+-- ctx: onBuy(entry).
+function Views.Merchant(plan, state, ctx)
+    local rows = {}
+    state = state or {}
+    for _, entry in ipairs(plan and plan.entries or {}) do
+        rows[#rows + 1] = {
+            kind = "line", entry = entry, text = entry.name, itemId = entry.itemId,
+            right = string.format("%d   %s", entry.quantity, Utils.FormatMoneyShort(entry.cost)),
+            bg = BG_SUB, hoverBg = BG_ROW_HOVER,
+            tooltip = { { text = string.format("%d to buy at %s each", entry.quantity, Money(entry.unitPrice)), r = 0.7, g = 0.7, b = 0.7 } },
+            button = { text = "Buy", width = 44, enabled = not state.busy, onClick = function() ctx.onBuy(entry) end },
+        }
+    end
+    for _, skipped in ipairs(plan and plan.skipped or {}) do
+        rows[#rows + 1] = {
+            kind = "line", text = skipped.name, right = skipped.reason, color = DIM, rightColor = DIM,
+            itemId = skipped.itemId,
+            tooltip = { { text = "Not bought automatically: " .. skipped.reason .. ".", r = 0.7, g = 0.7, b = 0.7 } },
+        }
+    end
+    if state.report then
+        rows[#rows + 1] = { kind = "line", wrap = true, color = GREY, text = state.report }
+    end
+    return rows
+end
+
+-- Text of the "Buy all" button.
+function Views.MerchantBuyAll(plan, state)
+    if state and state.busy then return "Buying..." end
+    return "Buy all - " .. Money(plan and plan.total or 0)
+end

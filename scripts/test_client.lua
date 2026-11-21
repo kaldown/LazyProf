@@ -190,7 +190,9 @@ section("selection", function()
     local camelot = loadAdapter(11508, 18, 18)
     check(p .. "camelot project: Classic.lua leaves LazyProf.Client unset", camelot.Client == nil)
     for _, m in ipairs({ "IsOpen", "GetLine", "KnownRecipeIds", "PlayerSkill", "ProfessionRank", "GetItemInfo",
-                         "AnchorFrame", "PanelOffsetX", "NoDataProfessionName", "Start", "RunDiagnostic" }) do
+                         "AnchorFrame", "PanelOffsetX", "NoDataProfessionName", "Start", "RunDiagnostic",
+                         "StartMerchant", "IsMerchantOpen", "MerchantAnchorFrame", "MerchantItems", "BuyFromMerchant",
+                         "FreeBagSlots", "Money", "RunMerchantDiagnostic" }) do
         check(p .. "Client:" .. m .. " exists", type(classic.Client[m]) == "function")
     end
 end)
@@ -337,6 +339,73 @@ section("start", function()
     addon.events.TRADE_SKILL_CLOSE("TRADE_SKILL_CLOSE")
     check(p .. "TRADE_SKILL_CLOSE -> onClose", counts.close == 1)
     _G.TradeSkillListScrollFrame = nil
+end)
+
+-- ===========================================================================
+-- 4b. Merchant: the positional item call, and staying inert without it
+-- ===========================================================================
+section("merchant", function()
+    local p = "merchant: "
+    local addon = loadAdapter(11508)
+    local Client = addon.Client
+    local list = {
+        { "Coarse Thread", "tex", 10, 1, -1, true, true, nil, id = 2320, maxStack = 20 },
+        { "Empty Vial", "tex", 100, 5, -1, true, true, nil, id = 3371, maxStack = 20 },
+        { "Gray Dye", "tex", 350, 1, 3, true, true, nil, id = 4340, maxStack = 10 },
+        { "Token Thing", "tex", 0, 1, -1, true, true, true, id = 9999, maxStack = 1 },
+        { "Odd", "tex", nil, 1, -1, true, true, nil, id = 1234, maxStack = 1 },   -- no price reported
+    }
+    _G.GetMerchantNumItems = function() return #list end
+    _G.GetMerchantItemInfo = function(index) return unpack(list[index], 1, 8) end
+    _G.GetMerchantItemID = nil   -- not on every Classic client: the link is parsed instead
+    _G.GetMerchantItemLink = function(index) return "|cffffffff|Hitem:" .. list[index].id .. "::::|h[x]|h|r" end
+    _G.GetMerchantItemMaxStack = function(index) return list[index].maxStack end
+    local bought = {}
+    _G.BuyMerchantItem = function(index, quantity) bought[#bought + 1] = index .. "x" .. tostring(quantity) end
+    _G.GetMoney = function() return 5000 end
+    _G.C_Container = nil
+    _G.GetContainerNumFreeSlots = function(bag) return bag == 0 and 3 or (bag == 1 and 5 or 0), bag == 1 and 32 or 0 end
+
+    local items = Client:MerchantItems()
+    check(p .. "items with a sane price and stock", #items == 4, #items)
+    check(p .. "item id from the link when the id call is missing", items[1].itemId == 2320, items[1].itemId)
+    check(p .. "bundle from the quantity return", items[2].bundle == 5 and items[2].price == 100)
+    check(p .. "stock passed as reported", items[1].stock == -1 and items[3].stock == 3)
+    check(p .. "extended cost flagged", items[4].extendedCost == true and items[1].extendedCost == false)
+    _G.GetMerchantItemID = function(index) return list[index].id + 1 end
+    check(p .. "the id call is used when the client has it", Client:MerchantItems()[1].itemId == 2321)
+
+    Client:BuyFromMerchant(1, 20)
+    check(p .. "buy passes index and item count", bought[1] == "1x20", bought[1])
+    check(p .. "money", Client:Money() == 5000)
+    check(p .. "free slots: general-purpose bags only, older bag call", Client:FreeBagSlots() == 3, Client:FreeBagSlots())
+
+    local seen = {}
+    Client:StartMerchant({
+        onShow = function() seen[#seen + 1] = "show" end,
+        onUpdate = function() seen[#seen + 1] = "update" end,
+        onClose = function() seen[#seen + 1] = "close" end,
+    })
+    addon.events.MERCHANT_SHOW()
+    addon.events.MERCHANT_UPDATE()
+    addon.events.MERCHANT_CLOSED()
+    addon.events.MERCHANT_CLOSED()
+    check(p .. "show, update, one close", table.concat(seen, ",") == "show,update,close", table.concat(seen, ","))
+
+    local lines = {}
+    local ok, err = pcall(Client.RunMerchantDiagnostic, Client, lines)
+    check(p .. "diag: no Lua error", ok, err)
+    check(p .. "diag: raw and adapter lines", table.concat(lines, "\n"):find("numAvailable=-1", 1, true) ~= nil
+        and table.concat(lines, "\n"):find("adapter items=4", 1, true) ~= nil)
+
+    -- A client without the calls: nothing listed, nothing bought, no error.
+    _G.GetMerchantItemInfo, _G.BuyMerchantItem, _G.GetMoney, _G.GetContainerNumFreeSlots = nil, nil, nil, nil
+    check(p .. "no item call: no items", #Client:MerchantItems() == 0)
+    check(p .. "no buy call: no error", pcall(Client.BuyFromMerchant, Client, 1, 1))
+    check(p .. "no money call: zero", Client:Money() == 0)
+    check(p .. "no bag call: zero free slots", Client:FreeBagSlots() == 0)
+    lines = {}
+    check(p .. "diag without the calls: no Lua error", pcall(Client.RunMerchantDiagnostic, Client, lines))
 end)
 
 -- ===========================================================================

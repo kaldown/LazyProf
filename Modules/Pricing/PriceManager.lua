@@ -42,7 +42,9 @@ end
 --   source    "Vendor" | "TSM" | "Auctionator" | "VendorSell" | "floor" | "none"
 --             ("floor": the 1-copper stand-in; "none": no price, sell estimate off)
 --   detail    TSM: the price source key that answered (DBRecent, DBMarket, ...);
---             Vendor: the addon that recorded the merchant price;
+--             Vendor: who knows the merchant price - the addon that recorded
+--             it, "seen" (LazyProf saw it at a merchant) or "list" (the
+--             shipped vendor-reagent list);
 --             floor: "loading" (item data not in the client yet) or
 --             "unsellable" (item data loaded, no vendor sell value)
 --   ageDays   Auctionator: days since it last saw a price for the item
@@ -195,6 +197,8 @@ function PriceManager.DescribeSource(info)
         if info.ageDays then return "Auctionator, " .. DaysText(info.ageDays) end
         return "Auctionator"
     elseif source == "Vendor" then
+        if info.detail == "seen" then return "vendor price (seen at a vendor)" end
+        if info.detail == "list" then return "vendor price (known vendor item)" end
         if info.detail then return "vendor price (recorded by " .. info.detail .. ")" end
         return "vendor price"
     elseif source == "VendorSell" then

@@ -56,6 +56,9 @@ LazyProf.defaults = {
     -- (targets, pins, craft choices, last tab): see Core/CharStore.lua.
     global = {
         characters = {},
+        -- Vendor prices seen at merchants: [itemId] = copper per item
+        -- (Modules/Shopping/VendorMemory.lua)
+        vendorPrices = {},
     },
     char = {
         -- Per-character price cache
@@ -351,7 +354,7 @@ LazyProf.options = {
             order = 3,
             args = {
                 desc = {
-                    name = "Vendor prices (from TSM/Auctionator merchant data) are always used first when available. An Auctionator price from a scan you made this session (since login or /reload) comes next. Otherwise market sources are checked in order (TSM, then Auctionator).",
+                    name = "Vendor prices are always used first when known: from TSM/Auctionator merchant data, from merchants you have visited with LazyProf, or from the built-in vendor list. An Auctionator price from a scan you made this session (since login or /reload) comes next. Otherwise market sources are checked in order (TSM, then Auctionator).",
                     type = "description",
                     order = 1,
                 },

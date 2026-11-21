@@ -256,6 +256,127 @@ function Client:Start(callbacks)
     end)
 end
 
+-- Merchant ------------------------------------------------------------------
+-- The Classic merchant calls are used the way these clients have long had
+-- them, but none of it could be checked against client source here, so every
+-- call is looked up first and a value that does not have the expected type
+-- drops the item: without them the merchant panel simply stays away.
+
+local merchantOpen = false
+
+-- callbacks: onShow(), onUpdate(), onClose().
+function Client:StartMerchant(callbacks)
+    LazyProf:RegisterEvent("MERCHANT_SHOW", function()
+        merchantOpen = true
+        callbacks.onShow()
+    end)
+    LazyProf:RegisterEvent("MERCHANT_UPDATE", function()
+        if merchantOpen then callbacks.onUpdate() end
+    end)
+    LazyProf:RegisterEvent("MERCHANT_CLOSED", function()
+        if not merchantOpen then return end
+        merchantOpen = false
+        callbacks.onClose()
+    end)
+end
+
+function Client:IsMerchantOpen()
+    return merchantOpen
+end
+
+-- The merchant window, for a panel to sit beside (nil when it is not there).
+function Client:MerchantAnchorFrame()
+    return MerchantFrame
+end
+
+-- What the open merchant sells (see the Forever adapter for the fields).
+-- Positional item info: name, texture, price, quantity, numAvailable,
+-- isPurchasable, isUsable, extendedCost.
+function Client:MerchantItems()
+    local items = {}
+    if not (GetMerchantNumItems and GetMerchantItemInfo and GetMerchantItemMaxStack) then
+        return items
+    end
+    for index = 1, GetMerchantNumItems() or 0 do
+        local name, _, price, quantity, numAvailable, isPurchasable, _, extendedCost = GetMerchantItemInfo(index)
+        local itemId = GetMerchantItemID and GetMerchantItemID(index)
+        if not itemId and GetMerchantItemLink then
+            local link = GetMerchantItemLink(index)
+            itemId = link and tonumber(link:match("item:(%d+)"))
+        end
+        if itemId and type(price) == "number" and type(numAvailable) == "number" then
+            local bundle = (type(quantity) == "number" and quantity > 0) and quantity or 1
+            local maxStack = GetMerchantItemMaxStack(index)
+            items[#items + 1] = {
+                index = index,
+                itemId = itemId,
+                name = name,
+                price = price,
+                bundle = bundle,
+                stock = numAvailable,
+                maxStack = (type(maxStack) == "number" and maxStack > 0) and maxStack or bundle,
+                extendedCost = extendedCost and true or false,
+                purchasable = isPurchasable ~= false,
+            }
+        end
+    end
+    return items
+end
+
+-- Buy `quantity` items of a list index.
+function Client:BuyFromMerchant(index, quantity)
+    if BuyMerchantItem then
+        BuyMerchantItem(index, quantity)
+    end
+end
+
+-- Free general-purpose bag slots (backpack and the four bags).
+function Client:FreeBagSlots()
+    local getFree = (C_Container and C_Container.GetContainerNumFreeSlots) or GetContainerNumFreeSlots
+    if not getFree then return 0 end
+    local free = 0
+    for bag = 0, 4 do
+        local slots, family = getFree(bag)
+        if slots and (family == nil or family == 0) then
+            free = free + slots
+        end
+    end
+    return free
+end
+
+-- The character's money in copper.
+function Client:Money()
+    return GetMoney and GetMoney() or 0
+end
+
+-- /lp diag merchant: the raw merchant values and what MerchantItems makes of
+-- them. Read-only.
+function Client:RunMerchantDiagnostic(lines)
+    local function add(text) lines[#lines + 1] = text end
+    add("merchant: open=" .. tostring(merchantOpen)
+        .. " numItems=" .. tostring(GetMerchantNumItems and GetMerchantNumItems())
+        .. " money=" .. tostring(self:Money()) .. " freeSlots=" .. tostring(self:FreeBagSlots()))
+    add("api: GetMerchantItemInfo=" .. tostring(GetMerchantItemInfo ~= nil) .. " GetMerchantItemID="
+        .. tostring(GetMerchantItemID ~= nil) .. " GetMerchantItemMaxStack=" .. tostring(GetMerchantItemMaxStack ~= nil)
+        .. " BuyMerchantItem=" .. tostring(BuyMerchantItem ~= nil))
+    if GetMerchantItemInfo and GetMerchantNumItems then
+        for index = 1, math.min(GetMerchantNumItems() or 0, 12) do
+            local name, _, price, quantity, numAvailable, isPurchasable, _, extendedCost = GetMerchantItemInfo(index)
+            add("raw[" .. tostring(index) .. "] name=" .. tostring(name) .. " price=" .. tostring(price)
+                .. " quantity=" .. tostring(quantity) .. " numAvailable=" .. tostring(numAvailable)
+                .. " isPurchasable=" .. tostring(isPurchasable) .. " extendedCost=" .. tostring(extendedCost))
+        end
+    end
+    local items = self:MerchantItems()
+    add("adapter items=" .. tostring(#items))
+    for i = 1, math.min(#items, 12) do
+        local item = items[i]
+        add("item[" .. tostring(item.index) .. "] id=" .. tostring(item.itemId) .. " price=" .. tostring(item.price)
+            .. " bundle=" .. tostring(item.bundle) .. " stock=" .. tostring(item.stock)
+            .. " maxStack=" .. tostring(item.maxStack) .. " extendedCost=" .. tostring(item.extendedCost))
+    end
+end
+
 -- /lp diag learned: append learned-recipe detection lines to `lines`. It
 -- contrasts what each id-resolution path sees: the legacy recipe-link scan
 -- (parsedIds), the active filter/header state, CraftLib match counts, the real

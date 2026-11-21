@@ -1,6 +1,14 @@
 -- Modules/Pricing/Providers/Vendor.lua
--- Queries vendor buy prices from TSM and Auctionator, which record
--- prices automatically when the player visits a merchant.
+-- Vendor BUY prices: what a reagent costs at a merchant. Looked up before any
+-- market price (a vendor is a guaranteed supply at a fixed price). Sources,
+-- in order:
+--   1. TSM / Auctionator, which record merchant prices as the player visits
+--      merchants;
+--   2. prices LazyProf saw at merchants itself (Modules/Shopping/VendorMemory.lua);
+--   3. the vendor-reagent list shipped with the recipe data, where the client
+--      has one.
+-- GetPrice returns the price and where it came from ("TSM", "Auctionator",
+-- "seen", "list"); every one of them is reported as a vendor price.
 local ADDON_NAME, LazyProf = ...
 
 LazyProf.PriceProviders = LazyProf.PriceProviders or {}
@@ -9,12 +17,9 @@ LazyProf.PriceProviders.vendor = {
     name = "Vendor",
 
     IsAvailable = function(self)
-        return TSM_API ~= nil
-            or (Auctionator and Auctionator.API and Auctionator.API.v1
-                and Auctionator.API.v1.GetVendorPriceByItemID)
+        return true
     end,
 
-    -- Returns the price and which addon recorded it ("TSM" or "Auctionator").
     GetPrice = function(self, itemId)
         -- TSM tracks vendor buy prices when players visit merchants
         if TSM_API then
@@ -31,6 +36,20 @@ LazyProf.PriceProviders.vendor = {
             if price and price > 0 then
                 return price, "Auctionator"
             end
+        end
+
+        -- Seen at a merchant by LazyProf
+        local memory = LazyProf.VendorMemory
+        local seen = memory and memory:Get(itemId)
+        if seen and seen > 0 then
+            return seen, "seen"
+        end
+
+        -- The shipped list of vendor-stocked reagents
+        local CraftLib = _G.CraftLib
+        local listed = CraftLib and CraftLib.GetVendorBuyPrice and CraftLib:GetVendorBuyPrice(itemId)
+        if listed and listed > 0 then
+            return listed, "list"
         end
 
         return nil
