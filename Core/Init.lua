@@ -768,9 +768,10 @@ function LazyProf:CreateDebugFrame()
                 local autoIndex = nil
                 local brackets = LazyProf:GetSkillBrackets()
                 local path = LazyProf.Pathfinder and LazyProf.Pathfinder.currentPath
-                if path and path.currentSkill then
+                local pathSkill = path and (path.actualSkill or path.currentSkill)
+                if pathSkill then
                     for i, bracket in ipairs(brackets) do
-                        if path.currentSkill >= bracket.min and path.currentSkill < bracket.max then
+                        if pathSkill >= bracket.min and pathSkill < bracket.max then
                             autoIndex = i
                             break
                         end

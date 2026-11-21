@@ -152,6 +152,7 @@ function Pathfinder:Calculate(reason)
     self.currentPath = {
         profession = profData.name,
         currentSkill = startSkill,
+        actualSkill = currentSkill,
         targetSkill = targetSkill,
         racialBonus = racialBonus,
         steps = steps,
@@ -270,6 +271,7 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel, reason)
         profession = profData.name,
         professionKey = profKey,
         currentSkill = skillLevel,
+        actualSkill = skillLevel,
         targetSkill = targetSkill,
         racialBonus = racialBonus,
         steps = steps,
@@ -800,6 +802,30 @@ function Pathfinder:GetCurrentRecommendation()
         return nil
     end
     return self.currentPath.steps[1]
+end
+
+-- The step the arrow points at: the first step the player's real skill has not
+-- finished. Inside a gap there is no step to point at (returns nil); past the
+-- last step it falls back to the first step.
+function Pathfinder:GetArrowStep(path)
+    if not path or not path.steps or #path.steps == 0 then
+        return nil
+    end
+    local actual = path.actualSkill
+    if not actual then
+        return path.steps[1]
+    end
+    for _, gap in ipairs(path.gaps or {}) do
+        if actual >= gap.from and actual < gap.to then
+            return nil
+        end
+    end
+    for _, step in ipairs(path.steps) do
+        if step.skillEnd and step.skillEnd > actual then
+            return step
+        end
+    end
+    return path.steps[1]
 end
 
 -- Pin a recipe at a specific skill level (overrides optimizer's pick on next recalculate)

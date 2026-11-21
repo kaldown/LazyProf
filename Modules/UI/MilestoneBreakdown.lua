@@ -271,9 +271,10 @@ function MilestonePanelClass:GetEffectiveBracket()
     end
 
     -- nil = auto-detect from current path skill
-    if self.currentPath and self.currentPath.currentSkill then
+    local skill = self.currentPath and (self.currentPath.actualSkill or self.currentPath.currentSkill)
+    if skill then
         for _, bracket in ipairs(brackets) do
-            if self.currentPath.currentSkill >= bracket.min and self.currentPath.currentSkill < bracket.max then
+            if skill >= bracket.min and skill < bracket.max then
                 return bracket
             end
         end

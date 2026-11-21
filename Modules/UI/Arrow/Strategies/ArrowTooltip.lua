@@ -70,7 +70,7 @@ LazyProf.ArrowStrategies.arrowWithTooltip = {
             return
         end
 
-        local recommendation = path.steps[1]
+        local recommendation = LazyProf.Pathfinder:GetArrowStep(path)
         if not recommendation or not recommendation.recipe then
             manager:Hide()
             return
