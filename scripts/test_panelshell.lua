@@ -687,25 +687,20 @@ section("init", function()
     open = true
     addon.Client.NoDataProfessionName = function() return nil end
 
-    -- Shopping-list refresh queued before the window closed does not show the list.
-    local refreshed = 0
+    -- A stock refresh queued before the window closed does nothing; with the
+    -- window open it rescans the bags and redraws the LazyProf window.
     addon.Pathfinder.currentPath = { steps = { {} }, milestoneBreakdown = {} }
     local windowRefreshes = 0
-    addon.GuideWindow = {
-        Refresh = function() windowRefreshes = windowRefreshes + 1 end,
-        ShoppingSteps = function() return {}, "75-150" end,
-    }
-    addon.MissingMaterialsPanel = { frame = {}, Update = function() refreshed = refreshed + 1 end }
-    addon.Inventory = { ScanAll = function() return {}, {} end }
-    addon.PriceManager = { cache = {} }
-    addon.Pathfinder.CalculateMissingMaterials = function() return {} end
+    addon.GuideWindow = { Refresh = function() windowRefreshes = windowRefreshes + 1 end }
+    addon.Inventory = { ScanAll = function() return { [1] = 2 }, { [1] = { bags = 2 } } end }
     open = false
     addon:RefreshShoppingList()
-    check(p .. "shopping-list refresh with the window closed does nothing", refreshed == 0, refreshed)
+    check(p .. "stock refresh with the window closed does nothing", windowRefreshes == 0, windowRefreshes)
     open = true
     addon:RefreshShoppingList()
-    check(p .. "shopping-list refresh with the window open updates", refreshed == 1, refreshed)
-    check(p .. "and redraws the window from the new stock", windowRefreshes == 1, windowRefreshes)
+    check(p .. "stock refresh with the window open redraws the window", windowRefreshes == 1, windowRefreshes)
+    check(p .. "from the rescanned stock", addon.Pathfinder.currentPath.inventory[1] == 2
+        and addon.Pathfinder.currentPath.sourceBreakdown[1].bags == 2)
 end)
 
 -- ===========================================================================

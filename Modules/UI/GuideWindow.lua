@@ -28,6 +28,7 @@ local NAV_HEIGHT = 28
 GuideWindow.TABS = {
     { key = "guide", label = "Guide" },
     { key = "steps", label = "Steps" },
+    { key = "shopping", label = "Shopping" },
 }
 
 GuideWindow.frame = nil
@@ -99,6 +100,12 @@ function GuideWindow:ComputeView()
     view.rangeTotals = LazyProf.Stages.Totals(view.rangeStages)
     view.selectedStage = LazyProf.GuideViews.SelectedStage(stages, summary, self.selection)
     view.showAllAlts = self.showAllAlts
+    view.hideOwned = LazyProf.CharStore:Get().hideOwned and true or false
+    -- The shopping list of the chosen range, from the stages' quantities (so
+    -- the margin is in it). Only worked out for the tab that shows it.
+    if self.tab == "shopping" then
+        view.missing = self:Missing(view)
+    end
 
     -- The open profession's cap, as its window reports it
     if self.mode == "live" then
@@ -123,6 +130,14 @@ function GuideWindow:ComputeView()
         end
     end
     return view
+end
+
+-- The shopping list of a view's range (Pathfinder:CalculateMissingMaterials).
+function GuideWindow:Missing(view)
+    local path = view.path
+    return LazyProf.Pathfinder:CalculateMissingMaterials(
+        LazyProf.Stages.ShoppingSteps(view.rangeStages or {}),
+        path.inventory or {}, path.sourceBreakdown or {}, path.prices or {})
 end
 
 -- What the shopping list of the chosen range is computed from, and the
@@ -294,6 +309,21 @@ function GuideWindow:Build()
     end)
     self.recipeBtn:SetPoint("RIGHT", 0, 0)
 
+    -- Shopping tab: the total and "Hide what I have" under the table
+    local shop = CreateFrame("Frame", nil, body)
+    self.shopStrip = shop
+    shop:SetPoint("BOTTOMLEFT", 10, FOOTER_HEIGHT + 2)
+    shop:SetPoint("BOTTOMRIGHT", -10, FOOTER_HEIGHT + 2)
+    shop:SetHeight(NAV_HEIGHT - 4)
+    self.shopTotal = shop:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    self.shopTotal:SetPoint("LEFT", 4, 0)
+    self.shopTotal:SetTextColor(1, 1, 1)
+    self.hideOwnedBox = Widgets.CreateCheckbox(shop, "LazyProfGuideHideOwned", "Hide what I have", function(checked)
+        LazyProf.CharStore:Get().hideOwned = checked or nil
+        self:Render()
+    end, "Show only the reagents you still have to buy or craft.")
+    self.hideOwnedBox:SetPoint("RIGHT", shop, "RIGHT", -110, 0)
+
     -- Steps tab: recipe search above the list
     self.searchBox = Widgets.CreateSearchBox(body, "LazyProfGuideSearch", "Search recipes...", function(text)
         self:OnSearch(text)
@@ -370,11 +400,12 @@ function GuideWindow:Layout()
     local top, bottom = HEADER_HEIGHT + 4, FOOTER_HEIGHT + 2
     if self.tab == "steps" then
         top = top + SEARCH_HEIGHT
-    elseif self.tab == "guide" then
+    elseif self.tab == "guide" or self.tab == "shopping" then
         bottom = bottom + NAV_HEIGHT
     end
     self.searchBox.frame:SetShown(self.tab == "steps" and self.path ~= nil)
     self.nav:SetShown(self.tab == "guide" and self.path ~= nil)
+    self.shopStrip:SetShown(self.tab == "shopping" and self.path ~= nil)
     self.list.frame:ClearAllPoints()
     self.list.frame:SetPoint("TOPLEFT", self.body, "TOPLEFT", 10, -top)
     self.list.frame:SetPoint("BOTTOMRIGHT", self.body, "BOTTOMRIGHT", -30, bottom)
@@ -471,6 +502,8 @@ function GuideWindow:Render()
         self.nextBtn:SetEnabled(nav.next)
         self.currentBtn:SetEnabled(nav.current)
         self.recipeBtn:SetEnabled(nav.recipe)
+        self.shopTotal:SetText(Views.ShoppingTotal(view))
+        self.hideOwnedBox:SetChecked(view.hideOwned)
     end
 
     local line1, line2 = Views.Footer(view)
@@ -508,6 +541,12 @@ function GuideWindow:Context()
             self.showAllAlts = false
             self:Recalculate("recipe pinned")
         end,
+        -- "I craft it" / "I buy it": a choice per character and item. It
+        -- changes the shopping list only, never the path.
+        onCraftChoice = function(row, choice)
+            LazyProf.CharStore:Get().craftChoices[row.itemId] = choice
+            self:Render()
+        end,
         onResetPin = function(stage)
             LazyProf.Pathfinder:UnpinAt(self.path.professionKey, stage.from)
             self.selection = { key = stage.key, from = stage.from }
@@ -528,6 +567,8 @@ function GuideWindow:TabRows()
     local rows
     if self.tab == "guide" then
         rows = Views.GuideCard(view, ctx)
+    elseif self.tab == "shopping" then
+        rows = Views.Shopping(view, ctx)
     elseif self.search ~= "" then
         local prof = LazyProf.Professions:Get(view.path.professionKey)
         return Views.SearchResults(Views.SearchRecipes(prof and prof.recipes or {}, self.search), ctx)
@@ -567,8 +608,8 @@ function GuideWindow:SelectTab(key, fromClick)
     end
     if not self.frame then return end
     self.tabs:Select(TabIndex(self.tab))
-    self:Layout()
-    self:RenderTab(true)
+    self:Render()
+    self.list.frame:SetVerticalScroll(0)
 end
 
 -- Open a stage on the Guide tab.
@@ -630,14 +671,12 @@ end
 function GuideWindow:OnMargin(checked)
     LazyProf.db.profile.useMargin = checked and true or false
     self:Render()
-    LazyProf:UpdateShoppingPanel()
 end
 
 function GuideWindow:OnRange(value)
     self.rangeSel = LazyProf.GuideRange.FromValue(value)
     self:Render()
     self.list.frame:SetVerticalScroll(0)
-    LazyProf:UpdateShoppingPanel()
 end
 
 function GuideWindow:OnSearch(text)

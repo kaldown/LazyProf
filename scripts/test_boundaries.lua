@@ -38,16 +38,26 @@ local function strip_comment(line)
     return table.concat(out)
 end
 
-local function hasBareGetItemInfo(line)
+-- A call of a global function by its bare name (not a method or a field of
+-- some table, which may share the name: CraftLib:GetProfessions()).
+local function hasBareCall(line, name)
     local init = 1
     while true do
-        local s, e = line:find("GetItemInfo%(", init)
+        local s, e = line:find(name .. "%(", init)
         if not s then return false end
         local prev = s > 1 and line:sub(s - 1, s - 1) or ""
         if not prev:match("[%.:%w_]") then return true end
         init = e + 1
     end
 end
+
+local function hasBareGetItemInfo(line)
+    return hasBareCall(line, "GetItemInfo")
+end
+
+-- Client globals that may only be called inside the adapter: the character's
+-- professions (spell-book list on WoW Forever).
+local BARE_FORBIDDEN = { "GetProfessions", "GetProfessionInfo" }
 
 local function exempt(path)
     for _, d in ipairs(EXEMPT_DIRS) do
@@ -76,6 +86,11 @@ for _, path in ipairs(files) do
             end
             if hasBareGetItemInfo(line) then
                 offenders[#offenders + 1] = string.format("%s:%d: GetItemInfo(", path, n)
+            end
+            for _, name in ipairs(BARE_FORBIDDEN) do
+                if hasBareCall(line, name) then
+                    offenders[#offenders + 1] = string.format("%s:%d: %s(", path, n, name)
+                end
             end
         end
     end

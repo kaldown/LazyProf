@@ -84,7 +84,6 @@ T.section("controls", function()
     T.eq("range: full path chosen", window.rangeDropdown.button.overrideText, "Full path")
     T.eq("range: all stages listed", #W.rowTexts(window), 3)
     T.eq("range: footer drops the range part", window.footer1.text, "Whole path (excluding gaps): 99s (you pay 99s)")
-    T.eq("range: the shopping list is told", env.calls[#env.calls], "shopping")
     T.eq("range: no recalculation", #env.recalcs, 0)
 
     -- Expand
@@ -133,7 +132,6 @@ T.section("controls", function()
     T.eq("margin: no recalculation (recipes do not change)", #env.recalcs, before)
     T.eq("margin: rows show the larger count", W.rowTexts(window)[1], "> 143-160 | |cFF888888craft|r  22x Gloves | 22s")
     T.check("margin: footer gets its second line", window.footer2.text:find("With 15% margin", 1, true) ~= nil, window.footer2.text)
-    T.eq("margin: the shopping list is told", env.calls[#env.calls], "shopping")
 
     -- Search
     window.searchBox.frame.text = "CA"
@@ -398,6 +396,119 @@ T.section("guide tab", function()
     ui.fire(window.nextBtn, "OnClick")
     ui.fire(window.prevBtn, "OnClick")
     T.check("alternatives: collapsed again after moving to another step", W.findRow(window, "Alt6") == nil)
+end)
+
+T.section("shopping tab", function()
+    local env = W.load("forever")
+    local window, ui, addon = env.window, env.ui, env.addon
+    -- The planner's shopping list, as the window asks for it.
+    local asked = {}
+    local function row(itemId, name, need, have, toBuy, extra)
+        local r = { itemId = itemId, name = name, icon = "icon", need = need, have = have, inBags = have, sources = {},
+            toBuy = toBuy, unitPrice = 100, cost = toBuy * 100, craftable = false, crafted = false, firstUsedAtSkill = 1 }
+        for k, v in pairs(extra or {}) do r[k] = v end
+        return r
+    end
+    local missing
+    addon.Pathfinder.CalculateMissingMaterials = function(_, steps, inventory, breakdown, prices)
+        asked[#asked + 1] = { steps = steps, inventory = inventory, prices = prices }
+        return missing
+    end
+    local function fresh()
+        missing = {
+            fromBank = { { itemId = 101, name = "Wool", icon = "icon", have = 40, missing = 40, purpose = "for bolts" } },
+            fromMail = {}, fromAuctions = {}, fromGuildBank = {},
+            fromAlts = { { itemId = 101, name = "Wool", icon = "icon", have = 20, missing = 20,
+                characters = { { name = "Bankalt-Realm", count = 20 } } } },
+            toCraft = {}, fromAH = {}, recipeCosts = 350,
+            rows = {
+                row(101, "Wool", 260, 100, 160),
+                row(102, "Bolt", 55, 0, 0, { craftable = true, crafted = true, craftRecipeName = "Bolt of Wool", craftQuantity = 55,
+                    children = { { itemId = 101, name = "Wool", need = 165 } } }),
+                row(103, "Thread", 96, 12, 84, { isVendor = true, priceSource = "Vendor", craftable = false }),
+                row(104, "Dye", 12, 12, 0),
+                row(105, "Bar", 5, 0, 5, { craftable = true, choice = "buy" }),
+                row(106, "Dust", 4, 0, 4, { unpriced = true, unitPrice = nil, cost = 0 }),
+            },
+            buyTotal = 16000 + 8400 + 500,
+        }
+    end
+    fresh()
+    window:Update(W.path())
+    T.eq("the shopping list is not worked out for other tabs", #asked, 0)
+    ui.fire(window.tabs.buttons[3], "OnClick")
+    T.eq("shopping tab selected", window.tab, "shopping")
+    T.eq("worked out for the shopping tab", #asked, 1)
+    T.eq("from the stage quantities of the chosen range", asked[1].steps[1].quantity, 19)
+    T.check("with the path's stock and prices", asked[1].inventory == window.path.inventory and asked[1].prices == window.path.prices)
+    T.check("navigation and search hidden, the total strip shown",
+        not window.nav.shown and not window.searchBox.frame.shown and window.shopStrip.shown)
+
+    local rows = W.rowTexts(window)
+    T.eq("collect first block", rows[1], "Collect first")
+    T.eq("from bank, with its purpose", rows[2], "From bank | 40x Wool |cFF888888(for bolts)|r")
+    T.eq("from alts, with the character", rows[3], "From alts | 20x Wool |cFF888888(Bankalt:20)|r")
+    T.eq("table header", rows[5], "Reagent | Need,Have,Buy,Cost")
+    T.eq("a reagent to buy", rows[6], "Wool | 260,100,160,1g 60s")
+    T.eq("a crafted reagent: nothing to buy", rows[7], "Bolt | 55,0,-,")
+    T.eq("its sub-reagent indented beneath", rows[8], "Wool | 165,,,")
+    T.eq("a vendor reagent", rows[9], "Thread | 96,12,84,84s")
+    T.eq("an owned reagent", rows[10], "Dye | 12,12,-,-")
+    T.eq("a reagent with no price", rows[12], "Dust | 4,0,4,?")
+    T.eq("vendor mark", W.findRow(window, "Thread").mark.text, "vendor")
+    T.eq("crafted: the button says so", W.findRow(window, "Bolt").button.text, "I craft it")
+    T.eq("bought by choice: the button says so", W.findRow(window, "Bar").button.text, "I buy it")
+    T.check("no button on a reagent the character cannot make", not W.findRow(window, "Thread").button
+        or W.findRow(window, "Thread").button.shown == false)
+    T.eq("total under the table", window.shopTotal.text, "To buy: 2g 49s  |cFF888888+ 3s 50c recipes|r")
+
+    -- Craft / buy choice: stored per character, redrawn at once, no new path.
+    local recalcs = #env.recalcs
+    ui.fire(W.findRow(window, "Bolt").button, "OnClick", "LeftButton")
+    T.eq("click on a crafted reagent chooses buy", addon.CharStore:Get().craftChoices[102], "buy")
+    ui.fire(W.findRow(window, "Bar").button, "OnClick", "LeftButton")
+    T.eq("click on a bought reagent chooses craft", addon.CharStore:Get().craftChoices[105], "craft")
+    ui.fire(W.findRow(window, "Bar").button, "OnClick", "RightButton")
+    T.check("right-click goes back to automatic", addon.CharStore:Get().craftChoices[105] == nil)
+    T.eq("the path is not planned again", #env.recalcs, recalcs)
+    T.check("the list is worked out again", #asked > 1)
+
+    -- Hide what I have
+    ui.fire(W.findRow(window, "Thread"), "OnEnter")
+    T.check("row tooltip: need, have and buy", ui.tooltip:Text():find("Need: 96 | Have: 12 | Buy: 84", 1, true) ~= nil, ui.tooltip:Text())
+    window.hideOwnedBox.frame.checked = true
+    ui.fire(window.hideOwnedBox.frame, "OnClick")
+    T.check("hide what I have: owned rows go", W.findRow(window, "Dye") == nil)
+    T.check("hide what I have: crafted rows stay", W.findRow(window, "Bolt") ~= nil)
+    T.check("hide what I have: remembered for the character", addon.CharStore:Get().hideOwned == true)
+    window.hideOwnedBox.frame.checked = false
+    ui.fire(window.hideOwnedBox.frame, "OnClick")
+    T.check("hide what I have: off again", W.findRow(window, "Dye") ~= nil)
+
+    -- Range and margin reach the shopping list.
+    local root = fakeui.openMenu(window.rangeDropdown.button)
+    root.radios[6].setSelected()
+    T.eq("full path: every craft stage's quantity", #asked[#asked].steps, 2)
+    window.marginBox.frame.checked = true
+    ui.fire(window.marginBox.frame, "OnClick")
+    T.eq("margin: the larger counts go to the shopping list", asked[#asked].steps[1].quantity, 22)
+
+    -- Nothing to buy
+    missing = { fromBank = {}, fromMail = {}, fromAuctions = {}, fromGuildBank = {}, fromAlts = {}, toCraft = {}, fromAH = {},
+        recipeCosts = 0, rows = { row(104, "Dye", 12, 12, 0) }, buyTotal = 0 }
+    window:Render()
+    T.eq("nothing to buy says so", W.rowTexts(window)[1], "Nothing left to buy.")
+    T.eq("zero total", window.shopTotal.text, "To buy: 0c")
+    missing.rows = {}
+    window:Render()
+    T.eq("no reagents at all", W.rowTexts(window)[1], "No reagents needed in this path.")
+
+    -- A stock change redraws the list.
+    fresh()
+    local before = #asked
+    window.path.inventory = { [101] = 1 }
+    window:Refresh()
+    T.eq("stock refresh works the list out again", #asked, before + 1)
 end)
 
 T.finish()

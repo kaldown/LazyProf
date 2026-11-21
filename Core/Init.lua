@@ -263,10 +263,10 @@ function LazyProf:ScheduleShoppingListRefresh()
     end)
 end
 
--- PERFORMANCE FIX (GitHub Issue #3): Lightweight refresh that only updates shopping list.
--- This reuses the cached path and only recalculates missing materials based on
--- current inventory. Much cheaper than full Recalculate() which re-runs the
--- entire pathfinding algorithm with recipe scoring.
+-- PERFORMANCE FIX (GitHub Issue #3): Lightweight refresh for stock changes.
+-- This reuses the cached path: the bags are rescanned and the window redraws
+-- its counts and shopping list from it. Much cheaper than full Recalculate()
+-- which re-runs the entire pathfinding algorithm with recipe scoring.
 -- Called on BAG_UPDATE instead of full recalculation.
 function LazyProf:RefreshShoppingList()
     -- A refresh queued just before the window closed must not show the list.
@@ -284,21 +284,6 @@ function LazyProf:RefreshShoppingList()
     if self.GuideWindow then
         self.GuideWindow:Refresh()
     end
-    self:UpdateShoppingPanel()
-end
-
--- The shopping list of the range chosen in the LazyProf window, from the
--- stages' quantities (so the margin is in it).
-function LazyProf:UpdateShoppingPanel()
-    local panel = self.MissingMaterialsPanel
-    local path = self.Pathfinder.currentPath
-    if not (panel and panel.frame and path and self.GuideWindow) then return end
-    if not self.Client:IsOpen() then return end
-    local steps, rangeName = self.GuideWindow:ShoppingSteps()
-    if not steps then return end
-    path.missingMaterials = self.Pathfinder:CalculateMissingMaterials(
-        steps, path.inventory or {}, path.sourceBreakdown or {}, path.prices or {})
-    panel:Update(path.missingMaterials, rangeName)
 end
 
 function LazyProf:Recalculate(reason)
@@ -366,7 +351,6 @@ function LazyProf:UpdateDisplay()
         if self.GuideWindow then
             self.GuideWindow:Update(path)
         end
-        self:UpdateShoppingPanel()
     end
 end
 
