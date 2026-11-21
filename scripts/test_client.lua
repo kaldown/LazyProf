@@ -190,7 +190,7 @@ section("selection", function()
     local camelot = loadAdapter(11508, 18, 18)
     check(p .. "camelot project: Classic.lua leaves LazyProf.Client unset", camelot.Client == nil)
     for _, m in ipairs({ "IsOpen", "GetLine", "KnownRecipeIds", "PlayerSkill", "GetItemInfo",
-                         "AnchorFrame", "PanelOffsetX", "Start", "RunDiagnostic" }) do
+                         "AnchorFrame", "PanelOffsetX", "NoDataProfessionName", "Start", "RunDiagnostic" }) do
         check(p .. "Client:" .. m .. " exists", type(classic.Client[m]) == "function")
     end
 end)
@@ -208,9 +208,15 @@ section("classic", function()
     check(p .. "GetLine -> tailoring, 152, 225", key == "tailoring" and rank == 152 and maxRank == 225,
         tostring(key) .. "," .. tostring(rank) .. "," .. tostring(maxRank))
 
+    check(p .. "NoDataProfessionName for a profession with data -> nil", Client:NoDataProfessionName() == nil)
+
     _G.GetTradeSkillLine = function() return "Cooking", 40, 75 end
     key, rank, maxRank = Client:GetLine()
     check(p .. "GetLine unknown line -> nil key, rank kept", key == nil and rank == 40 and maxRank == 75)
+    check(p .. "NoDataProfessionName for a line without data -> its name",
+        Client:NoDataProfessionName() == "Cooking", Client:NoDataProfessionName())
+    _G.GetTradeSkillLine = function() return nil, 0, 0 end
+    check(p .. "NoDataProfessionName without a line name -> nil", Client:NoDataProfessionName() == nil)
     _G.GetTradeSkillLine = function() return "Tailoring", 152, 225 end
 
     _G.TradeSkillFrame = nil

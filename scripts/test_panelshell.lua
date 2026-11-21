@@ -362,6 +362,21 @@ section("combat", function()
     leaveCombat()
     check(p .. "empty path does not count", not f.shown)
 
+    -- A notice (no recipe data for the open profession) has no path but is
+    -- restored like one while the window is open.
+    fresh()
+    f = attach("milestone")
+    env.addon.Pathfinder.currentPath = nil
+    f.showsNotice = true
+    env.shell:Show(f)
+    enterCombat()
+    leaveCombat()
+    check(p .. "notice shown before combat, window open -> restored", f.shown)
+    enterCombat()
+    env.open = false
+    leaveCombat()
+    check(p .. "notice shown before combat, window closed -> not restored", not f.shown)
+
     -- Shown before combat: hidden at combat start, restored after.
     fresh()
     f = attach("milestone")
@@ -601,6 +616,7 @@ section("init", function()
     addon.Client = {
         IsOpen = function() return open end,
         GetLine = function() return "tailoring", 100, 150 end,
+        NoDataProfessionName = function() return nil end,
     }
     local calls = {}
     addon.PanelShell = {
@@ -647,6 +663,30 @@ section("init", function()
         addon.lastCalculatedSkill == 100 and addon.lastCalculatedProfKey == "tailoring")
     check(p .. "no path: stale current path cleared", addon.Pathfinder.currentPath == nil)
     check(p .. "no path: panels hidden", hidden == 3, hidden)
+
+    -- No path because the open profession has no recipe data: one notice row.
+    local notices = {}
+    local order = {}
+    addon.MilestonePanel = {
+        Hide = function() order[#order + 1] = "hide" end,
+        ShowNotice = function(_self, text) notices[#notices + 1] = text; order[#order + 1] = "notice" end,
+    }
+    local noData = "Engineering"
+    addon.Client.NoDataProfessionName = function() return noData end
+    addon:Recalculate("test")
+    check(p .. "no data: the milestone panel shows the notice",
+        notices[1] == "No recipe data for Engineering yet.", notices[1])
+    check(p .. "no data: notice after the panels were hidden", table.concat(order, ",") == "hide,notice",
+        table.concat(order, ","))
+    noData = nil
+    addon:Recalculate("test")
+    check(p .. "no path for another reason (e.g. someone else's list): no notice", #notices == 1, #notices)
+    noData = "Engineering"
+    open = false
+    addon:Recalculate("test")
+    check(p .. "window closed: no notice", #notices == 1, #notices)
+    open = true
+    addon.Client.NoDataProfessionName = function() return nil end
 
     -- Shopping-list refresh queued before the window closed does not show the list.
     local refreshed = 0

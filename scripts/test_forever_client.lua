@@ -192,9 +192,9 @@ local function loadAdapter(interface, projectId, camelot)
     return addon
 end
 
-local SURFACE = { "IsOpen", "AnchorFrame", "PanelOffsetX", "GetLine", "KnownRecipeIds", "PlayerSkill",
-                  "GetItemInfo", "FindRecipeRow", "InvalidateRowCache", "UnlearnedHiddenByFilter", "Start",
-                  "RunDiagnostic" }
+local SURFACE = { "IsOpen", "AnchorFrame", "PanelOffsetX", "GetLine", "NoDataProfessionName",
+                  "KnownRecipeIds", "PlayerSkill", "GetItemInfo", "FindRecipeRow", "InvalidateRowCache",
+                  "UnlearnedHiddenByFilter", "Start", "RunDiagnostic" }
 
 -- Names of the functions an adapter installs.
 local function methodNames(client)
@@ -268,6 +268,25 @@ section("forever", function()
     check(p .. "GetLine unmapped skill line -> nil key, rank kept", key == nil and rank == 12 and maxRank == 75)
     childInfo = { professionID = 2950, parentProfessionID = 197, skillLevel = 5, maxSkillLevel = 75 }
     check(p .. "GetLine mapped line without registered profession -> nil key", Client:GetLine() == nil)
+
+    -- A profession without data: the name the window shows (parent line's name
+    -- first, as Blizzard's displayName); nil for one with data or someone else's list.
+    childInfo = { professionID = 2950, professionName = "Classic Tailoring", parentProfessionID = 197,
+                  parentProfessionName = "Tailoring", skillLevel = 5, maxSkillLevel = 75 }
+    check(p .. "NoDataProfessionName without data -> the parent line's name",
+        Client:NoDataProfessionName() == "Tailoring", Client:NoDataProfessionName())
+    childInfo = { professionID = 9999, professionName = "Runecrafting", skillLevel = 1, maxSkillLevel = 75 }
+    check(p .. "NoDataProfessionName unmapped line, no parent -> its own name",
+        Client:NoDataProfessionName() == "Runecrafting", Client:NoDataProfessionName())
+    externalView = "linked"
+    check(p .. "NoDataProfessionName on someone else's list -> nil", Client:NoDataProfessionName() == nil)
+    externalView = nil
+    childInfo = { professionID = 0, skillLevel = 0, maxSkillLevel = 0 }
+    baseInfo = { professionID = 0, professionName = "", skillLevel = 0, maxSkillLevel = 0 }
+    check(p .. "NoDataProfessionName without a profession -> nil", Client:NoDataProfessionName() == nil)
+    resetProfessionInfo()
+    childInfo.professionName, childInfo.parentProfessionName = "Classic Alchemy", "Alchemy"
+    check(p .. "NoDataProfessionName for a profession with data -> nil", Client:NoDataProfessionName() == nil)
     resetProfessionInfo()
 
     -- Someone else's list (linked, guild member, guild, NPC crafting): no

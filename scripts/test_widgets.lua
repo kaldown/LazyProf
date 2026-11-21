@@ -725,7 +725,55 @@ for _, family in ipairs({ "classic", "forever" }) do
 end
 
 -- ===========================================================================
--- 7. TOC wiring
+-- 7. Milestone panel notice: a profession without recipe data
+-- ===========================================================================
+section("milestone notice", function()
+    local p = "milestone notice: "
+    local addon = load("forever")
+    local shopping = addon.MissingMaterialsPanel
+    shopping:Initialize()
+    local listUpdates = 0
+    local realUpdate = shopping.Update
+    shopping.Update = function(...) listUpdates = listUpdates + 1; return realUpdate(...) end
+    local panel = addon.MilestonePanel
+    panel:Initialize()
+    local content = panel.frame.content
+
+    panel:Update(makePath(3, "A"))
+    listUpdates = 0
+    panel:ShowNotice("No recipe data for Engineering yet.")
+    local list = shownChildList(content)
+    check(p .. "one row", #list == 1, #list)
+    check(p .. "row text", list[1] and list[1].text and list[1].text:GetText() == "No recipe data for Engineering yet.",
+        list[1] and list[1].text and list[1].text:GetText())
+    check(p .. "panel shown", panel.frame.shown)
+    check(p .. "no total", panel.frame.total:GetText() == "", panel.frame.total:GetText())
+    check(p .. "no path kept", panel.currentPath == nil)
+    check(p .. "bracket dropdown and mode toggle hidden",
+        not panel.frame.bracketDropdown:IsShown() and not panel.frame.modeBtn:IsShown())
+    check(p .. "plain title", panel.frame.title:GetText() == "Milestone Breakdown", panel.frame.title:GetText())
+    check(p .. "no shopping list update", listUpdates == 0, listUpdates)
+    check(p .. "the shell knows a notice is shown", panel.frame.showsNotice == true)
+
+    panel:Update(makePath(2, "B"))
+    list = shownChildList(content)
+    check(p .. "a path replaces the notice", #list == 2 and list[1].recipe and list[1].recipe:GetText() == "1x B1",
+        #list)
+    check(p .. "controls shown again", panel.frame.bracketDropdown:IsShown() and panel.frame.modeBtn:IsShown())
+    check(p .. "notice flag cleared by a path", panel.frame.showsNotice == nil)
+
+    panel:ShowNotice("No recipe data for Mining yet.")
+    panel:Hide()
+    check(p .. "Hide clears the notice flag", panel.frame.showsNotice == nil and not panel.frame.shown)
+
+    addon.db.profile.showMilestonePanel = false
+    panel:ShowNotice("No recipe data for Mining yet.")
+    check(p .. "milestone panel turned off -> no notice", not panel.frame.shown)
+    addon.db.profile.showMilestonePanel = true
+end)
+
+-- ===========================================================================
+-- 8. TOC wiring
 -- ===========================================================================
 section("toc", function()
     local fh = assert(io.open("LazyProf.toc", "r"))

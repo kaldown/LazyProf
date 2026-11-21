@@ -21,8 +21,9 @@
 --   during combat is remembered instead of shown. When combat ends a panel
 --   shows again only if it was shown or asked for, the user did not close it,
 --   and an owner is there: the profession window is still open and a current
---   path exists, or (Planning panels) the Planning window is shown or was shown
---   before combat. A Hide during combat cancels any restore.
+--   path exists (or the panel shows a notice instead of one, frame.showsNotice),
+--   or (Planning panels) the Planning window is shown or was shown before
+--   combat. A Hide during combat cancels any restore.
 local ADDON_NAME, LazyProf = ...
 local Utils = LazyProf.Utils
 
@@ -323,7 +324,7 @@ function PanelShell:RestoreAfterCombat(frame)
     frame._wasShownBeforeCombat = nil
     if not wanted then return end
 
-    local live = WindowOpen() and HasCurrentPath()
+    local live = WindowOpen() and (HasCurrentPath() or frame.showsNotice == true)
     local planning = frame._shell and frame._shell.planning and PlanningShown() or false
     local restore = not frame.userClosed and (live or planning)
     if LazyProf:IsDebugEnabled("ui") then

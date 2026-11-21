@@ -303,11 +303,23 @@ function LazyProf:Recalculate(reason)
         -- (so nothing redraws it later) and hide panels
         self.Pathfinder.currentPath = nil
         self:HideDisplay()
+        self:ShowNoDataNotice()
     end
 
     -- Also refresh PlanningWindow if visible (it calculates independently)
     if self.PlanningWindow and self.PlanningWindow:IsVisible() then
         self.PlanningWindow:LoadProfession(self.PlanningWindow.currentProfession)
+    end
+end
+
+-- The open profession has no recipe data yet (e.g. professions CraftLib holds
+-- back on a client): the milestone panel says so in one row instead of
+-- showing nothing. No path, arrow or shopping list.
+function LazyProf:ShowNoDataNotice()
+    if not (self.MilestonePanel and self.Client:IsOpen()) then return end
+    local name = self.Client:NoDataProfessionName()
+    if name then
+        self.MilestonePanel:ShowNotice("No recipe data for " .. name .. " yet.")
     end
 end
 

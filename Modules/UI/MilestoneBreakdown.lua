@@ -504,6 +504,7 @@ function MilestonePanelClass:Update(path)
 
     -- Take back every row frame; this update reuses them
     self:ReleaseRows()
+    self:SetNotice(false)
 
     local fullBreakdown = path and path.milestoneBreakdown or {}
     local fullGaps = path and path.gaps or {}
@@ -1605,6 +1606,52 @@ function MilestonePanelClass:CreateRecalculateButton(dirtyCount)
     self.frame.recalcBtn:Show()
 end
 
+-- Notice state: the panel shows one plain message row instead of a path (the
+-- open profession has no recipe data). The bracket filter and mode toggle
+-- hide meanwhile; frame.showsNotice lets the panel shell restore it after
+-- combat although there is no path.
+function MilestonePanelClass:SetNotice(on)
+    if not self.frame then return end
+    self.frame.showsNotice = on or nil
+    if self.frame.bracketDropdown then
+        if on then self.frame.bracketDropdown:Hide() else self.frame.bracketDropdown:Show() end
+    end
+    if self.frame.modeBtn then
+        if on then self.frame.modeBtn:Hide() else self.frame.modeBtn:Show() end
+    end
+end
+
+-- Live panel: show `text` as the only row - no path, total or shopping list.
+function MilestonePanelClass:ShowNotice(text)
+    if not self.frame then return end
+    self.currentPath = nil
+    if not self.config.embedded and not LazyProf.db.profile.showMilestonePanel then
+        self:Hide()
+        return
+    end
+
+    self:ReleaseRows()
+    self:SetNotice(true)
+    if self.frame.recalcBtn then
+        self.frame.recalcBtn:Hide()
+    end
+    if self.frame.title then
+        self.frame.title:SetText("Milestone Breakdown")
+    end
+
+    local row = self:AcquireRow("empty")
+    row:SetSize(self.frame:GetWidth() - 40, STEP_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, 0)
+    row.text:SetText(text)
+    row.text:SetTextColor(0.8, 0.8, 0.8)
+    row:Show()
+    table.insert(self.rows, row)
+
+    self.frame.total:SetText("")
+    self.frame.content:SetHeight(math.max(STEP_ROW_HEIGHT + 10, self.frame:GetHeight() - 70))
+    self:Show()
+end
+
 -- Show the panel (standalone: placed by the shell, unless the user closed it)
 function MilestonePanelClass:Show()
     if not self.config.embedded then
@@ -1618,6 +1665,7 @@ end
 -- Hide the panel
 function MilestonePanelClass:Hide()
     if not self.frame then return end
+    self.frame.showsNotice = nil
     if not self.config.embedded then
         LazyProf.PanelShell:Hide(self.frame)
         return

@@ -46,6 +46,16 @@ function Client:GetLine()
     return ProfKeyForName(skillName), currentSkill, maxSkill
 end
 
+-- Name of the open trade-skill line when no registered profession (no recipe
+-- data) matches it, for the "no recipe data" notice; nil otherwise.
+function Client:NoDataProfessionName()
+    local skillName = GetTradeSkillLine()
+    if not skillName or skillName == "" or ProfKeyForName(skillName) then
+        return nil
+    end
+    return skillName
+end
+
 -- Known recipe spell ids for the open profession: { [spellId] = true }.
 function Client:KnownRecipeIds(profKey)
     local profData = LazyProf.Professions and LazyProf.Professions:Get(profKey)

@@ -111,6 +111,21 @@ function Client:GetLine()
     return key, info.skillLevel, info.maxSkillLevel
 end
 
+-- Name of the open profession when the window shows the player's own list
+-- and no registered profession (no recipe data) matches its line, for the
+-- "no recipe data" notice; nil otherwise. The name is the one Blizzard shows:
+-- the parent line's name when there is one (displayName in
+-- Professions.GetProfessionInfo, Blizzard_ProfessionsTemplates/Blizzard_Professions.lua:1673;
+-- fields in Blizzard_APIDocumentationGenerated/TradeSkillUITypesDocumentation.lua:361-376).
+function Client:NoDataProfessionName()
+    if not ShowsOwnList() then return nil end
+    local info = ProfessionInfo()
+    if ProfKeyForSkillLine(info.parentProfessionID or info.professionID) then return nil end
+    local name = info.parentProfessionName or info.professionName
+    if not name or name == "" then return nil end
+    return name
+end
+
 -- Known recipe spell ids of the open profession: { [spellId] = true }. Every
 -- learned id, whatever the list's filters show: Blizzard builds the visible
 -- list from GetFilteredRecipeIDs
