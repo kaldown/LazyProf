@@ -25,6 +25,11 @@ local function section(name, fn)
     if not ok then check(name .. " executed without error", false, err) end
 end
 
+-- WoW adds string:trim() (Utils.FormatMoney uses it); stock Lua 5.1 does not.
+if not string.trim then
+    function string.trim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
+end
+
 -- ===========================================================================
 -- Fake frames: unknown CamelCase methods are no-ops.
 -- ===========================================================================
@@ -111,6 +116,7 @@ local function fresh()
     assert(loadfile("Core/Utils.lua"))("LazyProf", addon)
     assert(loadfile("Modules/UI/Arrow/Strategies/ArrowTooltip.lua"))("LazyProf", addon)
     assert(loadfile("Modules/UI/Arrow/ArrowManager.lua"))("LazyProf", addon)
+    assert(loadfile("Modules/UI/MilestoneBreakdown.lua"))("LazyProf", addon)
     addon.ArrowManager:Initialize()
     env.addon = addon
     env.arrow = addon.ArrowManager
@@ -241,6 +247,40 @@ section("hide", function()
     leaveCombat()
     a, h = shownState()
     check(p .. "hidden before combat -> not shown after", not a and not h)
+end)
+
+-- ===========================================================================
+-- 2. Tooltip totals: "excluding gaps" when the path has gaps (as the panel says)
+-- ===========================================================================
+local function tooltipLabels(path)
+    env.tooltip = { left = {}, right = {} }
+    env.arrow:Update(path)
+    env.arrow.frame.scripts.OnEnter(env.arrow.frame)
+    -- Skip the per-step lines; the totals are the last double lines.
+    local labels = {}
+    for i = #path.steps + 1, #env.tooltip.left do labels[#labels + 1] = env.tooltip.left[i] end
+    return table.concat(labels, "|")
+end
+
+section("tooltip", function()
+    local p = "tooltip: "
+    fresh()
+    local path = env.path
+    path.complete = true
+    local labels = tooltipLabels(path)
+    check(p .. "complete path: Total Cost", labels == "Total Cost: ", labels)
+
+    path.complete = false
+    labels = tooltipLabels(path)
+    check(p .. "path with gaps: Total Cost (excluding gaps)", labels == "Total Cost (excluding gaps): ", labels)
+
+    path.outOfPocketTotal = 200   -- inventory covers part of it
+    labels = tooltipLabels(path)
+    check(p .. "path with gaps, inventory saves: both totals say excluding gaps",
+        labels == "You Pay (excluding gaps): |Market Price (excluding gaps): ", labels)
+    path.complete = nil
+    labels = tooltipLabels(path)
+    check(p .. "path without a complete flag: plain labels", labels == "You Pay: |Market Price: ", labels)
 end)
 
 print(string.format("\n%d/%d checks passed", total - failures, total))

@@ -115,23 +115,26 @@ LazyProf.ArrowStrategies.arrowWithTooltip = {
         end
 
         GameTooltip:AddLine(" ")
+        -- With gaps the totals cover only the path's steps: the same
+        -- "(excluding gaps)" labels as the milestone panel.
+        local TotalLabel = LazyProf.MilestonePanelClass.TotalLabel
         local oopTotal = path.outOfPocketTotal or path.totalCost
         if oopTotal < path.totalCost then
             GameTooltip:AddDoubleLine(
-                "You Pay:",
+                TotalLabel(path, "You Pay"),
                 Utils.FormatMoney(oopTotal),
                 1, 1, 1,
                 0.4, 1, 0.4
             )
             GameTooltip:AddDoubleLine(
-                "Market Price:",
+                TotalLabel(path, "Market Price"),
                 Utils.FormatMoney(path.totalCost),
                 0.5, 0.5, 0.5,
                 0.5, 0.5, 0.5
             )
         else
             GameTooltip:AddDoubleLine(
-                "Total Cost:",
+                TotalLabel(path, "Total Cost"),
                 Utils.FormatMoney(path.totalCost),
                 1, 1, 1,
                 1, 0.82, 0
