@@ -341,7 +341,7 @@ function Client:RunDiagnostic(lines)
     section("craftlib", function()
         local cl = _G.CraftLib
         if not cl then add("craftlib: absent"); return end
-        add("craftlib: version=" .. tostring(cl.version or cl.VERSION) .. " profile="
+        add("craftlib: version=" .. tostring(C_AddOns.GetAddOnMetadata("CraftLib", "Version")) .. " profile="
             .. tostring(cl.GetActiveProfile and cl:GetActiveProfile())
             .. " ready=" .. tostring(cl.IsReady and cl:IsReady()))
         local count, recipeTotal, parts = 0, 0, {}

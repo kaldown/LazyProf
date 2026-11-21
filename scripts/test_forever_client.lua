@@ -540,8 +540,8 @@ section("diagnostic", function()
     externalView = nil
     _G.ProfessionsFrame = makeProfessionsFrame()
     local addon = loadAdapter(16001, 18, 18)
+    _G.C_AddOns = { GetAddOnMetadata = function(name, field) return (name == "CraftLib" and field == "Version") and "0.11.0" or nil end }
     _G.CraftLib = {
-        version = "0.11.0",
         IsReady = function() return true end,
         GetActiveProfile = function() return "FOREVER" end,
         GetProfessions = function() return { alchemy = {} } end,
@@ -553,6 +553,7 @@ section("diagnostic", function()
     local text = table.concat(lines, "\n")
     print(text)
     check(p .. "no SECTION ERROR", not text:find("SECTION ERROR", 1, true), text)
+    check(p .. "craftlib version from metadata", text:find("version=0.11.0", 1, true) ~= nil, text)
     check(p .. "profile=FOREVER", text:find("profile=FOREVER", 1, true) ~= nil, text)
     check(p .. "recipes=3 learned=2", text:find("recipes=3 learned=2", 1, true) ~= nil, text)
     check(p .. "notInCraftLib=", text:find("notInCraftLib=", 1, true) ~= nil)

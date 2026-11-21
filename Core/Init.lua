@@ -124,6 +124,8 @@ function LazyProf:SlashCommand(input)
         self:RunLearnedDiagnostic()
     elseif cmd == "diag forever" and self.ClientFamily == "forever" then
         self:RunLearnedDiagnostic("forever")
+    elseif cmd == "diag learned" or cmd == "diag forever" then
+        self:Print(cmd .. " is not available on this client")
     elseif self.configRegistered then
         LibStub("AceConfigDialog-3.0"):Open("LazyProf")
     else
@@ -456,8 +458,9 @@ end
 -- copyable popup so a "known recipe shows [!] Unlearned" report can be diagnosed
 -- without game access (chat cannot be copied out of the client). The lines come
 -- from the client adapter (Client:RunDiagnostic), which contrasts what each
--- id-resolution path sees. Read-only: no frame Show/Hide; the only state touched
--- is the same learnedRecipes cache the normal scan already writes. Output lines
+-- id-resolution path sees. Read-only: no frame Show/Hide. On Classic the only state
+-- touched is the same learnedRecipes cache the normal scan already writes; the
+-- Forever diagnostic touches no state. Output lines
 -- are documented in docs/development/TROUBLESHOOTING.md (Diagnostic Commands).
 function LazyProf:RunLearnedDiagnostic(topic)
     topic = topic or "learned"
