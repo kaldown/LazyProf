@@ -55,6 +55,8 @@ Libs\Ace3\AceConfig-3.0\AceConfigCmd-3.0\AceConfigCmd-3.0.lua
 Core\DependencyCheck.lua
 Core\Constants.lua
 Core\Utils.lua
+Core\Client\Family.lua
+Core\Client\Classic.lua
 Core\Config.lua
 
 # Modules - Data

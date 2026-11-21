@@ -23,7 +23,7 @@ function LazyProf:OnInitialize()
     if self.SetupConfig then
         self:SetupConfig()
     end
-    local version = C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version") or "?"
+    local version = (C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata)(ADDON_NAME, "Version") or "?"
     self:Print("v" .. version .. " loaded. Type /lp for options.")
 end
 
@@ -64,10 +64,20 @@ function LazyProf:OnEnable()
         self.MinimapButton:Initialize()
     end
 
+    -- Profession-window events and hooks belong to the client adapter (the
+    -- event names differ between client families).
+    self.Client:Start({
+        onOpen = function() LazyProf:OnTradeSkillShow() end,
+        onClose = function() LazyProf:OnTradeSkillClose() end,
+        onUpdate = function() LazyProf:OnTradeSkillUpdate() end,
+        onScroll = function()
+            if LazyProf.ArrowManager then
+                LazyProf.ArrowManager:RefreshPosition()
+            end
+        end,
+    })
+
     -- Register events
-    self:RegisterEvent("TRADE_SKILL_SHOW", "OnTradeSkillShow")
-    self:RegisterEvent("TRADE_SKILL_UPDATE", "OnTradeSkillUpdate")
-    self:RegisterEvent("TRADE_SKILL_CLOSE", "OnTradeSkillClose")
     self:RegisterEvent("BAG_UPDATE", "OnBagUpdate")
     self:RegisterEvent("GET_ITEM_INFO_RECEIVED", "OnItemInfoReceived")
 end
@@ -110,41 +120,18 @@ function LazyProf:SlashCommand(input)
     end
 end
 
+-- Profession window opened (the client adapter also hooks list scrolling).
 function LazyProf:OnTradeSkillShow()
     self:ScheduleRecalculation("trade skill opened")
-    self:HookTradeSkillScroll()
-end
-
--- Hook scroll frame to update arrow position when scrolling
-function LazyProf:HookTradeSkillScroll()
-    if self.scrollHooked then return end
-
-    -- Hook the scroll frame's OnVerticalScroll to reposition arrow (debounced)
-    if TradeSkillListScrollFrame then
-        local origScript = TradeSkillListScrollFrame:GetScript("OnVerticalScroll")
-        local scrollTimer = nil
-        TradeSkillListScrollFrame:SetScript("OnVerticalScroll", function(self, offset, ...)
-            if origScript then
-                origScript(self, offset, ...)
-            end
-            -- Debounce: only refresh after scrolling stops
-            if scrollTimer then scrollTimer:Cancel() end
-            scrollTimer = C_Timer.After(0.05, function()
-                if LazyProf.ArrowManager then
-                    LazyProf.ArrowManager:RefreshPosition()
-                end
-            end)
-        end)
-        self.scrollHooked = true
-    end
 end
 
 function LazyProf:OnTradeSkillUpdate()
     -- PERFORMANCE FIX (GitHub Issue #3): Only recalculate when skill actually changes.
-    -- TRADE_SKILL_UPDATE fires for many reasons (scrolling, UI refresh, etc).
-    -- Full path recalculation is expensive - only do it when the path might change.
+    -- The profession-window update event fires for many reasons (scrolling, UI
+    -- refresh, etc). Full path recalculation is expensive - only do it when the
+    -- path might change.
     -- DO NOT REVERT THIS to unconditional ScheduleRecalculation() - it causes FPS hitches.
-    local _, currentSkill = GetTradeSkillLine()
+    local currentSkill = select(2, self.Client:GetLine())
     if currentSkill and currentSkill ~= self.lastCalculatedSkill then
         self:ScheduleRecalculation("skill changed")
     end
@@ -171,7 +158,7 @@ function LazyProf:OnBagUpdate()
     -- quantities change. Use lightweight RefreshShoppingList() instead of full recalc.
     -- DO NOT REVERT THIS to ScheduleRecalculation() - it causes severe FPS hitches
     -- during batch crafting as reported by users with both old and high-end hardware.
-    if TradeSkillFrame and TradeSkillFrame:IsVisible() then
+    if self.Client:IsOpen() then
         self:ScheduleShoppingListRefresh()
     end
 end
@@ -268,7 +255,7 @@ end
 
 function LazyProf:Recalculate(reason)
     -- Track skill level for OnTradeSkillUpdate optimization (Issue #3)
-    local _, currentSkill = GetTradeSkillLine()
+    local currentSkill = select(2, self.Client:GetLine())
     self.lastCalculatedSkill = currentSkill
 
     -- Invalidate arrow cache before recalculating (recipe may change)
@@ -437,158 +424,21 @@ end
 
 -- Debug pipeline: /lp diag learned. Dumps learned-recipe detection state to a
 -- copyable popup so a "known recipe shows [!] Unlearned" report can be diagnosed
--- without game access (chat cannot be copied out of the client). It contrasts
--- what each id-resolution path sees: the legacy recipe-link scan (parsedIds),
--- the active filter/header state, CraftLib match counts, the real resolver's
--- learned/total result, and the C_TradeSkillUI capability probe. Read-only: no
--- frame Show/Hide; the only state touched is the same learnedRecipes cache the
--- normal scan already writes. Output lines are documented in
--- docs/development/TROUBLESHOOTING.md (Diagnostic Commands).
+-- without game access (chat cannot be copied out of the client). The lines come
+-- from the client adapter (Client:RunDiagnostic), which contrasts what each
+-- id-resolution path sees. Read-only: no frame Show/Hide; the only state touched
+-- is the same learnedRecipes cache the normal scan already writes. Output lines
+-- are documented in docs/development/TROUBLESHOOTING.md (Diagnostic Commands).
 function LazyProf:RunLearnedDiagnostic()
-    -- Accumulate lines, then show them in a copyable popup (chat cannot be
-    -- copied out of the client). p() appends one line.
-    local out = {}
-    local p = function(s) out[#out + 1] = s end
-
-    if not (TradeSkillFrame and TradeSkillFrame:IsVisible()) then
+    if not self.Client:IsOpen() then
         self:Print("diag learned: open a profession window first.")
         return
     end
 
-    local profKey = self.Professions:DetectActive()
-    local profData = profKey and self.Professions:Get(profKey)
-    local lineName, curSkill, maxSkill = GetTradeSkillLine()
-    p(string.format("diag learned: %s (key=%s) skill=%s/%s",
-        tostring(lineName), tostring(profKey), tostring(curSkill), tostring(maxSkill)))
-
-    -- 1. Replicate the production scan and gather counts.
-    local knownSpellIds = {}
-    local numSkills = GetNumTradeSkills() or 0
-    local headers, rows, parsed, unparsed = 0, 0, 0, 0
-    for i = 1, numSkills do
-        local _, skillType = GetTradeSkillInfo(i)
-        if skillType == "header" then
-            headers = headers + 1
-        else
-            rows = rows + 1
-            local link = GetTradeSkillRecipeLink(i)
-            local spellId = link and tonumber(link:match("enchant:(%d+)") or link:match("spell:(%d+)"))
-            if spellId then
-                knownSpellIds[spellId] = true
-                parsed = parsed + 1
-            else
-                unparsed = unparsed + 1
-            end
-        end
-    end
-    p(string.format("scan: GetNumTradeSkills=%d  headers=%d  recipeRows=%d  parsedIds=%d  unparsed=%d",
-        numSkills, headers, rows, parsed, unparsed))
-
-    -- 1b. Raw row detail: WHY the per-row parse yields no spell id (link nil vs
-    -- unexpected format). Pipes are doubled so the link shows literally instead
-    -- of rendering as a clickable hyperlink in the EditBox.
-    p(string.format("api: GetTradeSkillRecipeLink=%s GetTradeSkillItemLink=%s",
-        tostring(GetTradeSkillRecipeLink ~= nil), tostring(GetTradeSkillItemLink ~= nil)))
-    local function esc(s) return s and (tostring(s):gsub("|", "||")) or "nil" end
-    local shown = 0
-    for i = 1, numSkills do
-        local sName, sType, numAvail = GetTradeSkillInfo(i)
-        if sType ~= "header" and shown < 8 then
-            shown = shown + 1
-            local rLink = GetTradeSkillRecipeLink and GetTradeSkillRecipeLink(i)
-            local iLink = GetTradeSkillItemLink and GetTradeSkillItemLink(i)
-            p(string.format("row[%d] %s type=%s avail=%s", i, tostring(sName), tostring(sType), tostring(numAvail)))
-            p("  recipeLink=" .. esc(rLink))
-            p("  itemLink=" .. esc(iLink))
-        end
-    end
-
-    -- 2. Active filter signals (whichever are queryable on this client; all guarded).
-    local nameFilter = GetTradeSkillItemNameFilter and GetTradeSkillItemNameFilter()
-    p(string.format("filter: nameFilter=%q", tostring(nameFilter or "")))
-    local haveMatsBtn = _G["TradeSkillFrameAvailableFilterCheckButton"]
-    if haveMatsBtn and haveMatsBtn.GetChecked then
-        p(string.format("filter: haveMaterialsChecked=%s", tostring(haveMatsBtn:GetChecked() and true or false)))
-    else
-        p("filter: haveMaterials checkbox not found by name (version-specific)")
-    end
-    p(string.format("filter: hasSubClassFilter=%s hasInvSlotFilter=%s",
-        tostring(GetTradeSkillSubClassFilter ~= nil), tostring(GetTradeSkillInvSlotFilter ~= nil)))
-
-    -- 3. CraftLib match stats for the active profession.
-    if profData and profData.recipes then
-        local total, learnedCount = 0, 0
-        local craftlibIds = {}
-        local sampleUnlearned = {}
-        for _, recipe in ipairs(profData.recipes) do
-            total = total + 1
-            craftlibIds[recipe.id] = true
-            if knownSpellIds[recipe.id] then
-                learnedCount = learnedCount + 1
-            elseif #sampleUnlearned < 8 then
-                sampleUnlearned[#sampleUnlearned + 1] =
-                    string.format("%s(id=%s)", tostring(recipe.name), tostring(recipe.id))
-            end
-        end
-        p(string.format("craftlib: recipes=%d  matchedLearned=%d  flaggedUnlearned=%d",
-            total, learnedCount, total - learnedCount))
-        if #sampleUnlearned > 0 then
-            p("craftlib: sample flagged-unlearned: " .. table.concat(sampleUnlearned, ", "))
-        end
-        -- Scanned ids that match NO CraftLib recipe id (the H2 direction).
-        local unmatched, sampleUnmatched = 0, {}
-        for spellId in pairs(knownSpellIds) do
-            if not craftlibIds[spellId] then
-                unmatched = unmatched + 1
-                if #sampleUnmatched < 8 then sampleUnmatched[#sampleUnmatched + 1] = tostring(spellId) end
-            end
-        end
-        p(string.format("craftlib: scannedIdsWithNoCraftLibMatch=%d", unmatched))
-        if #sampleUnmatched > 0 then
-            p("craftlib: sample unmatched scanned ids: " .. table.concat(sampleUnmatched, ", "))
-        end
-    else
-        p("craftlib: no active profession data (DetectActive returned nil)")
-    end
-
-    -- 3b. Production result. Sections 1/3 above replicate the LEGACY recipe-link
-    -- scan (so parsedIds documents WHY the old path failed). This line calls the
-    -- real resolver, which now also maps via crafted-item id and name - post-fix
-    -- it should report a healthy learned count, not 0.
-    if profKey then
-        local resolved = self.Professions:GetRecipesWithLearnedStatus(profKey)
-        local rTotal, rLearned = 0, 0
-        for _, recipe in ipairs(resolved) do
-            rTotal = rTotal + 1
-            if recipe.learned then rLearned = rLearned + 1 end
-        end
-        p(string.format("result: GetRecipesWithLearnedStatus -> %d/%d learned", rLearned, rTotal))
-    end
-
-    -- 4. Capability probe: filter-immune C_TradeSkillUI path.
-    local hasCTSU = C_TradeSkillUI ~= nil
-    local hasGetAll = hasCTSU and C_TradeSkillUI.GetAllRecipeIDs ~= nil
-    local hasGetInfo = hasCTSU and C_TradeSkillUI.GetRecipeInfo ~= nil
-    p(string.format("probe: C_TradeSkillUI=%s GetAllRecipeIDs=%s GetRecipeInfo=%s",
-        tostring(hasCTSU), tostring(hasGetAll), tostring(hasGetInfo)))
-    if hasGetAll then
-        local ok, ids = pcall(C_TradeSkillUI.GetAllRecipeIDs)
-        if ok and type(ids) == "table" then
-            local ctsuKnown = 0
-            if hasGetInfo then
-                for _, rid in ipairs(ids) do
-                    local okI, info = pcall(C_TradeSkillUI.GetRecipeInfo, rid)
-                    if okI and type(info) == "table" and info.learned then
-                        ctsuKnown = ctsuKnown + 1
-                    end
-                end
-            end
-            p(string.format("probe: GetAllRecipeIDs=%d learnedPerGetRecipeInfo=%d (vs legacy parsedIds=%d)",
-                #ids, ctsuKnown, parsed))
-        else
-            p("probe: GetAllRecipeIDs call failed or returned non-table")
-        end
-    end
+    -- Accumulate lines, then show them in a copyable popup (chat cannot be
+    -- copied out of the client).
+    local out = {}
+    self.Client:RunDiagnostic(out)
 
     self:Print("diag learned: output ready - copy it from the window that opened.")
     self:ShowDiagnosticOutput(table.concat(out, "\n"))

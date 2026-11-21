@@ -33,7 +33,7 @@ local function SetupItemTooltip(frame)
     end)
     frame:SetScript("OnMouseUp", function(self, button)
         if button == "LeftButton" and IsShiftKeyDown() and self.itemId then
-            local itemLink = select(2, GetItemInfo(self.itemId))
+            local itemLink = select(2, LazyProf.Client:GetItemInfo(self.itemId))
             if itemLink then
                 HandleModifiedItemClick(itemLink)
             end
@@ -53,7 +53,7 @@ function RecipeDetails:Initialize()
     self.frame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
     self.frame:SetScript("OnEvent", function(_, event, receivedItemId)
         if event ~= "GET_ITEM_INFO_RECEIVED" or not self.currentRecipe then return end
-        local _, _, _, _, _, _, _, _, _, itemIcon = GetItemInfo(receivedItemId)
+        local _, _, _, _, _, _, _, _, _, itemIcon = LazyProf.Client:GetItemInfo(receivedItemId)
         if not itemIcon then return end
 
         -- Update crafted item icon
@@ -74,7 +74,7 @@ function RecipeDetails:Initialize()
         local source = self.currentRecipe.source
         if source and source.itemId == receivedItemId then
             self.frame.content.recipeItemRow.icon:SetTexture(itemIcon)
-            local itemName = GetItemInfo(receivedItemId)
+            local itemName = LazyProf.Client:GetItemInfo(receivedItemId)
             if itemName then
                 self.frame.content.recipeItemRow.text:SetText(itemName)
             end
@@ -394,7 +394,7 @@ function RecipeDetails:Show(recipe, atSkillLevel)
     -- Update header icon from crafted item
     local icon = nil
     if recipe.itemId then
-        local _, _, _, _, _, _, _, _, _, itemIcon = GetItemInfo(recipe.itemId)
+        local _, _, _, _, _, _, _, _, _, itemIcon = LazyProf.Client:GetItemInfo(recipe.itemId)
         icon = itemIcon
     end
     content.icon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
@@ -466,7 +466,7 @@ function RecipeDetails:UpdateDifficultyBar(recipe, atSkillLevel)
     -- Determine skill to evaluate against
     local currentSkill = atSkillLevel
     if not currentSkill then
-        local _, apiSkill = GetTradeSkillLine()
+        local _, apiSkill = LazyProf.Client:GetLine()
         currentSkill = apiSkill
     end
     if not currentSkill then
@@ -552,7 +552,7 @@ function RecipeDetails:UpdateReagentsSection(recipe)
         -- Set icon from item cache (falls back to question mark if not cached yet)
         local itemIcon
         if reagent.itemId then
-            itemIcon = select(10, GetItemInfo(reagent.itemId))
+            itemIcon = select(10, LazyProf.Client:GetItemInfo(reagent.itemId))
         end
         row.icon:SetTexture(itemIcon or "Interface\\Icons\\INV_Misc_QuestionMark")
 
@@ -577,7 +577,7 @@ function RecipeDetails:UpdateSourceSection(recipe)
         local sourceItemId = recipe.source.itemId
         content.recipeItemRow.itemId = sourceItemId
 
-        local itemName, _, _, _, _, _, _, _, _, itemIcon = GetItemInfo(sourceItemId)
+        local itemName, _, _, _, _, _, _, _, _, itemIcon = LazyProf.Client:GetItemInfo(sourceItemId)
         content.recipeItemRow.icon:SetTexture(itemIcon or "Interface\\Icons\\INV_Misc_QuestionMark")
         content.recipeItemRow.text:SetText(itemName or ("Item #" .. sourceItemId))
         content.recipeItemRow:Show()

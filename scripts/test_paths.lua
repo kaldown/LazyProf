@@ -15,6 +15,8 @@ local UPDATE = os.getenv("UPDATE_SNAPSHOTS") == "1"
 local LAZYPROF_FILES = {
     "Core/Constants.lua",
     "Core/Utils.lua",
+    "Core/Client/Family.lua",
+    "Core/Client/Classic.lua",
     "Core/Config.lua",
     "Modules/Recipes/Availability.lua",
     "Modules/Recipes/SelfFound.lua",

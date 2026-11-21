@@ -24,7 +24,7 @@ function Pathfinder:Calculate(reason)
     end
 
     -- Get current skill level
-    local skillName, currentSkill, maxSkill = GetTradeSkillLine()
+    local _, currentSkill = LazyProf.Client:GetLine()
     if not currentSkill then
         LazyProf:Debug("pathfinder", "Could not get current skill")
         return nil
@@ -41,7 +41,7 @@ function Pathfinder:Calculate(reason)
     local targetSkill = self:GetTargetSkill(startSkill, profData.milestones)
 
     LazyProf:Debug("pathfinder", string.format("Calculating path: %s %d -> %d (actual skill: %d)%s",
-        skillName, startSkill, targetSkill, currentSkill,
+        profData.name, startSkill, targetSkill, currentSkill,
         reason and (" [" .. reason .. "]") or ""))
     LazyProf:Debug("pathfinder", string.format("Settings: strategy=%s, fromCurrentSkill=%s, bank=%s, alts=%s, greenRecipes=%s",
         LazyProf.db.profile.strategy,

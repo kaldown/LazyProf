@@ -69,29 +69,16 @@ function Professions:Get(name)
     return self.registry[name]
 end
 
--- Detect current profession from TradeSkill window
+-- Detect current profession from the open profession window
 function Professions:DetectActive()
-    if not TradeSkillFrame or not TradeSkillFrame:IsVisible() then
+    if not LazyProf.Client:IsOpen() then
         self.active = nil
         return nil
     end
 
-    local skillName = GetTradeSkillLine()
-    if not skillName then
-        self.active = nil
-        return nil
-    end
-
-    -- Find matching registered profession
-    for name, data in pairs(self.registry) do
-        if data.name == skillName then
-            self.active = name
-            return name
-        end
-    end
-
-    self.active = nil
-    return nil
+    -- Registered profession key for the window's line (nil when none matches)
+    self.active = LazyProf.Client:GetLine()
+    return self.active
 end
 
 -- Get active profession data
@@ -125,51 +112,9 @@ function Professions:GetRecipesWithLearnedStatus(profName)
     local profData = self:Get(profName)
     if not profData then return {} end
 
-    -- Reverse indexes from this profession's CraftLib recipes, so a visible
-    -- trade-skill row can be mapped to its spell id (recipe.id) even when the
-    -- client's recipe-link API is unavailable. Scoped to the active profession to
-    -- avoid cross-profession item/name collisions.
-    local idByItemId = {}   -- crafted-item id -> recipe spell id
-    local idByName = {}     -- recipe name      -> recipe spell id
-    for _, recipe in ipairs(profData.recipes) do
-        if recipe.itemId then idByItemId[recipe.itemId] = recipe.id end
-        if recipe.name then idByName[recipe.name] = recipe.id end
-    end
-
-    -- Get list of known recipe spell IDs from TradeSkill window.
-    -- Each visible non-header row is resolved to a spell id by a layered fallback:
-    --   (a) recipe link (enchant:/spell:) - works where the API is populated;
-    --   (b) crafted-item id -> recipe.id - REQUIRED on clients (e.g. Season of
-    --       Discovery) where GetTradeSkillRecipeLink returns nil for every row but
-    --       the item link is populated (confirmed via /lp diag learned);
-    --   (c) recipe name - REQUIRED for enchant-on-gear recipes that craft no item
-    --       (recipe.itemId nil, no item link).
-    local knownSpellIds = {}
-    local numSkills = GetNumTradeSkills()
-    for i = 1, numSkills do
-        local skillName, skillType, _, _, _, _ = GetTradeSkillInfo(i)
-        if skillType ~= "header" then
-            local spellId
-            -- (a) recipe link
-            local link = GetTradeSkillRecipeLink and GetTradeSkillRecipeLink(i)
-            if link then
-                spellId = tonumber(link:match("enchant:(%d+)") or link:match("spell:(%d+)"))
-            end
-            -- (b) crafted-item id
-            if not spellId then
-                local itemLink = GetTradeSkillItemLink and GetTradeSkillItemLink(i)
-                local itemId = itemLink and tonumber(itemLink:match("item:(%d+)"))
-                if itemId then spellId = idByItemId[itemId] end
-            end
-            -- (c) recipe name
-            if not spellId and skillName then
-                spellId = idByName[skillName]
-            end
-            if spellId then
-                knownSpellIds[spellId] = true
-            end
-        end
-    end
+    -- Known recipe spell ids from the open profession window (the client
+    -- adapter resolves each visible row to its spell id).
+    local knownSpellIds = LazyProf.Client:KnownRecipeIds(profName)
 
     -- Cache learned recipes for planning mode
     if profName and next(knownSpellIds) then

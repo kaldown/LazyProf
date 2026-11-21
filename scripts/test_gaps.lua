@@ -13,6 +13,8 @@ local harness = require("scripts.lib.harness")
 local FILES = {
     "Core/Constants.lua",
     "Core/Utils.lua",
+    "Core/Client/Family.lua",
+    "Core/Client/Classic.lua",
     "Core/Config.lua",
     "Modules/Recipes/Availability.lua",
     "Modules/Recipes/SelfFound.lua",

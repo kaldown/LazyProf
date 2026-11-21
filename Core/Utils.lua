@@ -351,7 +351,7 @@ function Utils.GetItemInfo(itemId)
     if itemCache[itemId] then
         return unpack(itemCache[itemId])
     end
-    local name, link, _, _, _, _, _, _, _, icon = GetItemInfo(itemId)
+    local name, link, _, _, _, _, _, _, _, icon = LazyProf.Client:GetItemInfo(itemId)
     if name then
         itemCache[itemId] = {name, link, icon}
         return name, link, icon

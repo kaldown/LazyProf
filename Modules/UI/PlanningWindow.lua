@@ -311,20 +311,7 @@ function PlanningWindow:LoadProfession(profKey)
 end
 
 function PlanningWindow:GetPlayerSkillLevel(profKey)
-    local profInfo = Constants.PROFESSIONS[profKey]
-    if not profInfo then return 0 end
-
-    local targetName = profInfo.name:lower()
-
-    -- Classic/TBC uses GetSkillLineInfo instead of GetProfessions
-    for i = 1, GetNumSkillLines() do
-        local skillName, isHeader, _, skillRank = GetSkillLineInfo(i)
-        if not isHeader and skillName and skillName:lower() == targetName then
-            return skillRank or 0
-        end
-    end
-
-    return 0
+    return LazyProf.Client:PlayerSkill(profKey)
 end
 
 function PlanningWindow:Hide()

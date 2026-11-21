@@ -1,9 +1,12 @@
 -- scripts/test_learned.lua
 --
--- Standalone Lua 5.1 regression test for learned-recipe detection in
--- Professions/Registry.lua (the "[!] Unlearned on already-known recipes" bug).
+-- Standalone Lua 5.1 regression test for learned-recipe detection (the
+-- "[!] Unlearned on already-known recipes" bug). The row resolution lives in
+-- the Classic client adapter (Core/Client/Classic.lua, Client:KnownRecipeIds);
+-- Professions/Registry.lua merges its result into the recipe list.
 --
--- Loads the REAL module against a stubbed trade-skill API. The in-game diagnostic
+-- Loads the REAL modules (Family + Classic adapter + Registry, in TOC order)
+-- against a stubbed trade-skill API. The in-game diagnostic
 -- (/lp diag learned) confirmed the live cause on a Season of Discovery client:
 -- GetTradeSkillRecipeLink(i) is present but returns nil for EVERY row, so the
 -- old scan (which only read the recipe link) produced an empty knownSpellIds and
@@ -69,9 +72,17 @@ _G.GetTradeSkillItemLink = function(i)
     return string.format("|cffffffff|Hitem:%d::::::::28:::::1:3524:::::|h[%s]|h|r", row.itemId, row.name)
 end
 
+-- Classic client (interface 11508, no WOW_PROJECT_CAMELOT) -> Classic adapter.
+_G.GetBuildInfo = function() return "1.15.8", "0", "Jan 1 2000", 11508 end
+_G.WOW_PROJECT_ID = nil
+_G.WOW_PROJECT_CAMELOT = nil
+
 -- ---------------------------------------------------------------------------
--- Load the real module
+-- Load the real modules
 -- ---------------------------------------------------------------------------
+assert(loadfile("Core/Client/Family.lua"))("LazyProf", addon)
+assert(loadfile("Core/Client/Classic.lua"))("LazyProf", addon)
+assert(addon.Client and addon.ClientFamily == "classic", "Classic adapter did not install LazyProf.Client")
 assert(loadfile("Professions/Registry.lua"))("LazyProf", addon)
 local Professions = addon.Professions
 assert(Professions, "Registry.lua did not create LazyProf.Professions")

@@ -74,6 +74,10 @@ collects lines into a table, and finish with `self:ShowDiagnosticOutput(table.co
 - `ShowDiagnosticOutput` is the shared copyable-popup primitive. Keep diagnostics
 read-only (no `Show`/`Hide`/`SetAttribute`), so they are safe to run any time, including
 in combat-adjacent situations. Document the new topic's output lines in this section.
+Lines that read the profession window or other client APIs belong in the client
+adapter (`Core/Client/Classic.lua` for Classic clients): `/lp diag learned` gets its
+lines from `LazyProf.Client:RunDiagnostic(lines)`, so each client family reports
+what its own API sees.
 
 ---
 
