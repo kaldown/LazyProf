@@ -134,7 +134,8 @@ local function sourceInfoFor(recipe)
     if t == "trainer" then
         return { type = "trainer", cost = source.trainingCost or source.cost, npcName = source.npcName }
     elseif t == "vendor" then
-        return { type = "vendor", cost = source.cost, vendors = source.vendors, itemId = source.itemId }
+        return { type = "vendor", cost = source.cost, vendors = source.vendors, itemId = source.itemId,
+                 currency = source.currency }
     end
     -- drop/quest/reputation/discovery: self-obtainable scroll, no gold cost to model.
     return { type = t }
@@ -156,7 +157,17 @@ function SelfFound:IsRecipeObtainableUncached(recipe)
                 and not LazyProf.RecipeAvailability:MeetsTrainerRequirements(source) then
             return false, "Recipe not self-obtainable", nil
         end
-        sourceInfo = sourceInfoFor(recipe)
+        -- Currency-only recipes are never free: opt-in only.
+        if (source.type == "vendor" or source.type == "reputation")
+                and source.cost == nil and source.currency ~= nil then
+            local profile = LazyProf.db and LazyProf.db.profile
+            if not (profile and profile.includeCurrencyRecipes) then
+                return false, "Recipe not self-obtainable", nil
+            end
+            sourceInfo = { type = "vendor", cost = 0, currency = source.currency, itemId = source.itemId }
+        else
+            sourceInfo = sourceInfoFor(recipe)
+        end
     end
 
     for _, reagent in ipairs(recipe.reagents) do

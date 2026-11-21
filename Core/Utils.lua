@@ -183,8 +183,23 @@ function Utils.GetWowheadItemUrl(itemId)
     return "https://www.wowhead.com/" .. WowheadBranch() .. "/item=" .. tostring(itemId)
 end
 
+-- "<amount> <name>" for a currency price table, nil when there is none.
+function Utils.FormatCurrency(currency)
+    if type(currency) ~= "table" or not currency.name then return nil end
+    return tostring(currency.amount or 0) .. " " .. currency.name
+end
+
 -- Get human-readable description for recipe source (short version for list display)
 function Utils.GetSourceDescription(source)
+    local base = Utils.GetBaseSourceDescription(source)
+    local currencyText = source and Utils.FormatCurrency(source.currency)
+    if currencyText and (source.type == "vendor" or source.type == "reputation") then
+        return base .. ": " .. currencyText
+    end
+    return base
+end
+
+function Utils.GetBaseSourceDescription(source)
     if not source then return "Unknown" end
 
     local sourceType = source.type
@@ -240,6 +255,9 @@ function Utils.GetSourceDescription(source)
 
     elseif sourceType == "discovery" then
         return "Discovery"
+
+    elseif sourceType == "unknown" then
+        return "Unknown source"
     end
 
     return sourceType or "Unknown"
@@ -261,6 +279,7 @@ function Utils.GetSourceDetails(source, showAllFactions)
         details.vendors = Utils.GetVendorsForFaction(source, playerFaction, showAllFactions)
         details.recipeItemId = source.itemId
         details.cost = source.cost
+        details.currency = source.currency
 
     elseif source.type == "quest" then
         details.quest = {

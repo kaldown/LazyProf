@@ -624,6 +624,9 @@ function RecipeDetails:UpdateSourceSection(recipe)
                 end
 
                 row.text:SetText(string.format("%s%s|r (%s)", factionColor, vendor.npcName, vendor.location or "Unknown"))
+                if rowIndex == 1 and Utils.FormatCurrency(source.currency) then
+                    row.text:SetText(row.text:GetText() .. " - " .. Utils.FormatCurrency(source.currency))
+                end
                 row:Show()
                 rowIndex = rowIndex + 1
             end

@@ -79,17 +79,34 @@ function Availability:IsRecipeAvailableUncached(recipe)
         -- Doesn't meet requirements, fall through to check AH
     end
 
+    -- Currency-only recipes (no gold cost, bought with e.g. Merchant's Favor):
+    -- never free. Available only when learned (handled above) or opted in.
+    if (source.type == "vendor" or source.type == "reputation")
+            and source.cost == nil and source.currency ~= nil then
+        local profile = LazyProf.db and LazyProf.db.profile
+        if profile and profile.includeCurrencyRecipes then
+            return true, {
+                type = "vendor",
+                cost = 0,
+                currency = source.currency,
+                itemId = source.itemId
+            }
+        end
+        return false, nil
+    end
+
     -- Vendor recipes - always available (player can travel)
     if source.type == "vendor" then
         return true, {
             type = "vendor",
             cost = source.cost,
             vendors = source.vendors,
-            itemId = source.itemId
+            itemId = source.itemId,
+            currency = source.currency
         }
     end
 
-    -- 4. Quest/Rep/Drop/World Drop - check AH
+    -- 4. Quest/Rep/Drop/World Drop/Unknown - check AH
     if recipeItemId then
         local ahPrice, ahSource = self:GetAHPrice(recipeItemId)
         if ahPrice then

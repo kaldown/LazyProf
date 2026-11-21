@@ -10,6 +10,7 @@ LazyProf.defaults = {
         materialResolution = Constants.MATERIAL_RESOLUTION.COST_COMPARE,
         suggestUnlearnedRecipes = true,
         includeGreenRecipes = false,
+        includeCurrencyRecipes = false,
 
         -- Display
         displayMode = Constants.DISPLAY_MODE.ARROW_TOOLTIP,
@@ -127,6 +128,20 @@ LazyProf.options = {
                     get = function() return LazyProf.db.profile.suggestUnlearnedRecipes end,
                     set = function(_, v)
                         LazyProf.db.profile.suggestUnlearnedRecipes = v
+                        LazyProf:Recalculate("setting changed")
+                    end,
+                },
+                includeCurrencyRecipes = {
+                    name = "Include recipes bought with currency (e.g. Merchant's Favor)",
+                    desc = "When enabled, recipes sold only for a currency (not gold) are " ..
+                           "included in path calculations. Their currency price is shown " ..
+                           "but not counted in the gold cost.",
+                    type = "toggle",
+                    order = 3.5,
+                    width = "full",
+                    get = function() return LazyProf.db.profile.includeCurrencyRecipes end,
+                    set = function(_, v)
+                        LazyProf.db.profile.includeCurrencyRecipes = v
                         LazyProf:Recalculate("setting changed")
                     end,
                 },
