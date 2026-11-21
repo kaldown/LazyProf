@@ -733,5 +733,97 @@ section("wiring", function()
     end
 end)
 
+-- ===========================================================================
+-- 6. Panel chrome: classic keeps the tooltip-style backdrop, Forever gets the
+--    native nine-slice frame and the rock background.
+-- ===========================================================================
+section("chrome", function()
+    local p = "chrome: "
+    local OPTS = { bg = { 0.1, 0.1, 0.1, 0.95 }, border = { 0.6, 0.6, 0.6, 1 } }
+    local function chromeFrame()
+        local f = newFrame("panel")
+        f.calls = {}
+        function f:SetBackdrop(t) self.calls[#self.calls + 1] = { "SetBackdrop", t } end
+        function f:SetBackdropColor(...) self.calls[#self.calls + 1] = { "SetBackdropColor", ... } end
+        function f:SetBackdropBorderColor(...) self.calls[#self.calls + 1] = { "SetBackdropBorderColor", ... } end
+        function f:CreateTexture(_, layer)
+            local t = { layer = layer, points = {}, hidden = false }
+            function t:SetTexture(path) self.path = path end
+            function t:SetHorizTile(v) self.horiz = v end
+            function t:SetVertTile(v) self.vert = v end
+            function t:SetPoint(...) self.points[#self.points + 1] = { ... } end
+            function t:Hide() self.hidden = true end
+            return t
+        end
+        return f
+    end
+
+    -- Classic: exactly today's three backdrop calls.
+    fresh()
+    env.addon.ClientFamily = "classic"
+    local f = chromeFrame()
+    env.shell:ApplyChrome(f, OPTS)
+    check(p .. "classic: three backdrop calls",
+        #f.calls == 3 and f.calls[1][1] == "SetBackdrop" and f.calls[2][1] == "SetBackdropColor"
+        and f.calls[3][1] == "SetBackdropBorderColor", #f.calls)
+    local t = f.calls[1] and f.calls[1][2] or {}
+    check(p .. "classic: tooltip backdrop table unchanged",
+        t.bgFile == "Interface\\Buttons\\WHITE8x8" and t.edgeFile == "Interface\\Tooltips\\UI-Tooltip-Border"
+        and t.tile == true and t.tileSize == 16 and t.edgeSize == 16 and t.insets and t.insets.left == 4
+        and t.insets.bottom == 4)
+    check(p .. "classic: colours from opts",
+        f.calls[2] and f.calls[2][2] == 0.1 and f.calls[2][5] == 0.95
+        and f.calls[3] and f.calls[3][2] == 0.6 and f.calls[3][5] == 1)
+    check(p .. "classic: no nine-slice", f.NineSlice == nil)
+
+    -- Forever: nine-slice child + rock background, no backdrop calls.
+    fresh()
+    env.addon.ClientFamily = "forever"
+    local created, applied = {}, {}
+    _G.CreateFrame = function(kind, name, parent, template)
+        local c = newFrame("nine")
+        c.kind, c.parent, c.template = kind, parent, template
+        created[#created + 1] = c
+        return c
+    end
+    _G.NineSliceUtil = { ApplyLayoutByName = function(container, layout)
+        applied[#applied + 1] = { container = container, layout = layout }
+    end }
+    f = chromeFrame()
+    f.titleBg = f:CreateTexture(nil, "ARTWORK")
+    env.shell:ApplyChrome(f, OPTS)
+    check(p .. "forever: no backdrop calls", #f.calls == 0, #f.calls)
+    check(p .. "forever: NineSlice child from NineSlicePanelTemplate",
+        #created == 1 and f.NineSlice == created[1] and created[1].parent == f
+        and created[1].template == "NineSlicePanelTemplate")
+    check(p .. "forever: layout applied by name",
+        #applied == 1 and applied[1].container == f.NineSlice and applied[1].layout == "ButtonFrameTemplateNoPortrait")
+    check(p .. "forever: rock background tiled",
+        f.Bg and f.Bg.path == "Interface\\FrameGeneral\\UI-Background-Rock" and f.Bg.horiz == true
+        and f.Bg.vert == true and f.Bg.layer == "BACKGROUND")
+    check(p .. "forever: custom title bar hidden", f.titleBg.hidden == true)
+
+    -- Forever without the nine-slice API: no error, no backdrop either.
+    fresh()
+    env.addon.ClientFamily = "forever"
+    _G.NineSliceUtil = nil
+    f = chromeFrame()
+    local ok = pcall(env.shell.ApplyChrome, env.shell, f, OPTS)
+    check(p .. "forever without NineSliceUtil does not error", ok)
+    check(p .. "forever without NineSliceUtil sets no backdrop", #f.calls == 0)
+    _G.CreateFrame, _G.NineSliceUtil = nil, nil
+
+    -- Wiring: each panel routes its chrome through the shell.
+    local function read(path) local h = assert(io.open(path, "rb")); local x = h:read("*a"); h:close(); return x end
+    local mb, mm, rd = read("Modules/UI/MilestoneBreakdown.lua"), read("Modules/UI/MissingMaterials.lua"),
+        read("Modules/UI/RecipeDetails.lua")
+    check(p .. "milestone panel uses ApplyChrome", mb:find("PanelShell:ApplyChrome(self.frame", 1, true))
+    check(p .. "shopping list uses ApplyChrome", mm:find("PanelShell:ApplyChrome(self.frame", 1, true))
+    check(p .. "recipe details uses ApplyChrome", rd:find("PanelShell:ApplyChrome(self.frame", 1, true))
+    check(p .. "panels no longer set their own frame backdrop",
+        not mm:find("self.frame:SetBackdrop(", 1, true) and not rd:find("self.frame:SetBackdrop(", 1, true)
+        and not mb:find("self.frame:SetBackdrop(", 1, true))
+end)
+
 print(string.format("\n%d/%d checks passed", total - failures, total))
 os.exit(failures == 0 and 0 or 1)

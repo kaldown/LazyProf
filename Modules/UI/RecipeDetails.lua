@@ -81,16 +81,6 @@ function RecipeDetails:Initialize()
         end
     end)
 
-    -- Solid dark background
-    self.frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 }
-    })
-    self.frame:SetBackdropColor(0.08, 0.08, 0.08, 0.98)
-    self.frame:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
-
     self.frame:EnableMouse(true)
     self.frame:SetMovable(true)
     self.frame:SetClampedToScreen(true)
@@ -110,6 +100,11 @@ function RecipeDetails:Initialize()
     self.frame.title:SetPoint("TOP", 0, -10)
     self.frame.title:SetText("Recipe Details")
     self.frame.title:SetTextColor(1, 0.82, 0)
+
+    -- Background and border (native frame on Forever)
+    LazyProf.PanelShell:ApplyChrome(self.frame, {
+        bg = { 0.08, 0.08, 0.08, 0.98 }, border = { 0.5, 0.5, 0.5, 1 },
+    })
 
     -- Close button
     self.frame.closeBtn = CreateFrame("Button", nil, self.frame, "UIPanelCloseButton")

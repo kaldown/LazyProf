@@ -131,6 +131,55 @@ function PanelShell:Attach(frame, key, opts)
     return frame
 end
 
+-- Panel chrome. opts.bg / opts.border are the classic backdrop colours.
+-- Classic: the tooltip-style backdrop. Forever: Blizzard's own panel frame -
+-- a NineSlice child with the "ButtonFrameTemplateNoPortrait" layout, the layout
+-- every plain portrait-less framed panel uses (Blizzard_SharedXML/Mainline/
+-- NineSliceLayouts.lua:43, picked by DefaultPanelBaseTemplate at
+-- Blizzard_SharedXML/Mainline/SharedUIPanelTemplates.xml:480; the Camelot
+-- overrides in Blizzard_SharedXML/Camelot/NineSliceLayoutOverrides.lua adjust
+-- its offsets on this client). NineSlicePanelTemplate:
+-- kbir-forever Resources/Templates.lua:2311, applied with
+-- NineSliceUtil.ApplyLayoutByName (Blizzard_SharedXML/NineSlice.lua:226).
+-- Background: the rock tile at the anchors DefaultPanelTemplate uses
+-- (SharedUIPanelTemplates.xml:531-537). The panel's own title bar strip is
+-- hidden; the title font stays GameFontNormal. Call after the title bar
+-- texture exists.
+local FOREVER_LAYOUT = "ButtonFrameTemplateNoPortrait"
+local FOREVER_BG = "Interface\\FrameGeneral\\UI-Background-Rock"
+
+function PanelShell:ApplyChrome(frame, opts)
+    opts = opts or {}
+    if LazyProf.ClientFamily == "forever" then
+        if frame.titleBg then frame.titleBg:Hide() end
+        if not frame.Bg then
+            local bg = frame:CreateTexture(nil, "BACKGROUND")
+            bg:SetTexture(FOREVER_BG)
+            bg:SetHorizTile(true)
+            bg:SetVertTile(true)
+            bg:SetPoint("TOPLEFT", 6, -21)
+            bg:SetPoint("BOTTOMRIGHT", -2, 2)
+            frame.Bg = bg
+        end
+        if NineSliceUtil and NineSliceUtil.ApplyLayoutByName then
+            if not frame.NineSlice then
+                frame.NineSlice = CreateFrame("Frame", nil, frame, "NineSlicePanelTemplate")
+            end
+            NineSliceUtil.ApplyLayoutByName(frame.NineSlice, FOREVER_LAYOUT)
+        end
+        return
+    end
+    local bg, border = opts.bg or { 0.1, 0.1, 0.1, 0.95 }, opts.border or { 0.6, 0.6, 0.6, 1 }
+    frame:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 }
+    })
+    frame:SetBackdropColor(bg[1], bg[2], bg[3], bg[4])
+    frame:SetBackdropBorderColor(border[1], border[2], border[3], border[4])
+end
+
 -- Save where the user dropped the panel.
 function PanelShell:SavePosition(frame)
     local shell = frame._shell

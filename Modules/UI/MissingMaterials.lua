@@ -21,16 +21,6 @@ function MissingPanel:Initialize()
     self.frame:SetFrameStrata("MEDIUM")
     self.frame:SetFrameLevel(10)
 
-    -- Solid dark background
-    self.frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 }
-    })
-    self.frame:SetBackdropColor(0.1, 0.1, 0.1, 0.95)
-    self.frame:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
-
     self.frame:EnableMouse(true)
     self.frame:SetMovable(true)
     self.frame:SetResizable(true)
@@ -59,6 +49,11 @@ function MissingPanel:Initialize()
     self.frame.title:SetPoint("TOP", 0, -10)
     self.frame.title:SetText("Shopping List")
     self.frame.title:SetTextColor(1, 0.82, 0)
+
+    -- Background and border (native frame on Forever)
+    LazyProf.PanelShell:ApplyChrome(self.frame, {
+        bg = { 0.1, 0.1, 0.1, 0.95 }, border = { 0.6, 0.6, 0.6, 1 },
+    })
 
     -- Close button
     self.frame.closeBtn = CreateFrame("Button", nil, self.frame, "UIPanelCloseButton")
