@@ -15,6 +15,7 @@ Run these in-game to check addon health:
 /lp diag               -- List available diagnostics
 /lp diag learned       -- Dump learned-recipe detection state (copyable window; Classic-family clients)
 /lp diag forever       -- Dump WoW Forever client facts and adapter results (copyable window)
+/lp diag prices        -- List every reagent price of the path and where it came from (copyable window)
 /lp reset              -- Reset database to defaults
 ```
 
@@ -91,6 +92,36 @@ prints `SECTION ERROR: <section>: <message>` and the other sections still print.
 | `filters: GetShowLearned=.. GetShowUnlearned=.. UnlearnedHiddenByFilter=..` | The list filters. With unlearned hidden the arrow cannot point at an unlearned next recipe. |
 | `scrollbox: present visibleFrames=N firstFrameDataKeys=..` | Whether the recipe list ScrollBox was found, how many row frames are live, and the data keys of the first one (`recipeInfo` for a recipe, `categoryInfo` for a header). |
 | `path: steps=N complete=.. gaps=G` | The current calculated path: step count, whether it reaches the cap, and the number of gaps (levels no available recipe covers). `path: none` means no path exists. |
+| `NOTE: the profession window is closed ...` | Printed first when no profession window is open: the profession, recipe and check lines then describe nothing useful. Open a profession and run it again. |
+| `recipes=N learned=L (no open profession to compare with CraftLib)` | Shown instead of the CraftLib counts when no profession is detected. |
+| `check: <profession>, N recipes in both the client and CraftLib` | The data check below ran over these recipes (window open only). |
+| `check difficulty at skill S (+M): agree=A differ=D sample(id:client/craftlib)=[...]` | For learned recipes at or above their orange level: the difficulty the client shows at your skill (`S` includes the profession's skill modifier `M`) against the one CraftLib's thresholds give. `optimal` = orange, `medium` = yellow, `easy` = green, `trivial` = gray. Differences mean a wrong threshold in the data. |
+| `check gray (client maxTrivialLevel): agree=A differ=D noClientValue=N sample(...)` | The skill at which the client says the recipe turns gray against CraftLib's gray level. `noClientValue` counts recipes for which the client gives none. |
+| `check reagents: agree=A differ=D errors=E sample(id)=[...]` | The client's reagent list (basic reagents and counts) against CraftLib's. `errors` counts recipes whose reagent list the client could not give. |
+| `check product: agree=A differ=D sample(id:client/craftlib)=[...]` | The item the recipe crafts according to the client against CraftLib's item id (recipes without an item, like enchants, are left out). |
+
+If the check lines show differences, paste the whole output: the sampled recipe ids
+are what the data needs fixing for.
+
+### `/lp diag prices` - where the prices come from
+
+**When to use:** the path's cost looks wrong, a reagent seems too cheap or too expensive,
+or you are not sure whether your auction data is current. Run it with a path calculated
+(open a profession window first). Works on every client.
+
+| Line | Meaning |
+|------|---------|
+| `diag prices: tsm=.. auctionator=.. auctionatorAge=.. vendor=.. order=.. tsmSource=.. sellFallback=.. staleAfterDays=N` | Which price sources are installed, the market source order, the TSM value LazyProf asks for, whether the vendor sell estimate is used, and after how many days an Auctionator price counts as stale. `auctionatorAge=false` means Auctionator cannot tell the age of its prices. |
+| `note: ...` | TSM does not tell other addons when its data was synced: check the TSM desktop app for its last sync. |
+| `summary: reagents=N tsm=.. auctionator=.. vendor=.. estimate=.. noPrice=.. stale=.. oldestAuctionatorDays=..` | How the path's reagents were priced. `estimate` = only the vendor sell value was available; `noPrice` = no price at all yet (item data still loading); `stale` = Auctionator prices `staleAfterDays` or more days old. |
+| `<itemId> <name>: <price> <source> \| tsm=.. auctionator=.. vendor=.. sell=..` | One reagent: the price LazyProf uses and where it came from, then what each source says (`n/a` = source not installed, `-` = no value; `(DBMarket)` is the TSM value that answered, `(2d)` the Auctionator age in days). |
+| `... DISAGREE` | TSM and Auctionator differ by more than half for this item: one of them is likely out of date. |
+| `... STALE` | The price used is an Auctionator price at least `staleAfterDays` old: rescan the auction house. |
+
+What to do: `noPrice` items fill in by themselves as the client loads item data (`/reload`
+if they stay); `stale` or `DISAGREE` items need a fresh auction scan (Auctionator) or a
+desktop-app sync (TSM). The arrow tooltip shows the same summary and warnings, and the
+shopping list tooltip shows each item's price and source.
 
 ### Adding a new diagnostic
 
@@ -302,6 +333,11 @@ Verify CraftLib is loaded and has profession data:
 ### Minimap Button Missing
 
 **Symptoms:** No LazyProf icon on minimap
+
+On WoW Forever there is no separate minimap button: LazyProf is listed in the addon
+compartment, the small button with a number (the count of addons in it) next to the
+calendar at the top of the minimap. Click it and pick LazyProf (left click: profession
+browser, right click: settings). On the other clients:
 
 **Check:**
 1. Is it hidden in settings?
