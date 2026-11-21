@@ -48,6 +48,11 @@ LazyProf.defaults = {
             arrow = false,        -- Arrow positioning
         },
     },
+    -- Account-wide. characters[guid] holds each character's planner data
+    -- (targets, pins, craft choices, last tab): see Core/CharStore.lua.
+    global = {
+        characters = {},
+    },
     char = {
         -- Per-character price cache
         priceCache = {},

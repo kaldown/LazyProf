@@ -60,6 +60,7 @@ Core\Client\Family.lua
 Core\Client\Classic.lua
 Core\Client\Forever.lua
 Core\Config.lua
+Core\CharStore.lua
 
 # Modules - Data
 Modules\Inventory\Scanner.lua
