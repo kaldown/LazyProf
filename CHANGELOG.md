@@ -11,6 +11,14 @@ All notable changes to LazyProf will be documented in this file.
 - New option "Include recipes bought with currency" (off by default). Recipes bought with a currency such as Merchant's Favor are otherwise only suggested when already learned.
 - `/lp diag forever` reports the Forever client state (profession window, recipe data, CraftLib version) in a copyable window.
 - `/lp resetpanels` and a "Reset panel positions" option move the panels back to their default places.
+- When the open profession has no recipe data yet, the milestone panel says so ("No recipe data for Engineering yet.") instead of showing nothing.
+
+### Fixed
+
+- Opening a profession, crafting or a busy debug log no longer runs several full recalculations or refreshes in a row; bursts are combined into one as intended.
+- Switching to another profession at the same skill with the window open now updates the path.
+- The recipe arrow no longer reappears after combat over a closed profession window, and an arrow due during combat now appears when combat ends.
+- The arrow tooltip says "(excluding gaps)" on its totals when the path has gaps, like the milestone panel.
 
 ### Changed
 
