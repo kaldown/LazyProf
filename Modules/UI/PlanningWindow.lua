@@ -297,7 +297,7 @@ function PlanningWindow:LoadProfession(profKey)
     LazyProf:Debug("ui", "  profKey: " .. tostring(profKey))
     LazyProf:Debug("ui", "  startSkill: " .. tostring(startSkill))
 
-    self.currentPath = LazyProf.Pathfinder:CalculateForProfession(profKey, startSkill)
+    self.currentPath = LazyProf.Pathfinder:CalculateForProfession(profKey, startSkill, nil, actualSkillLevel)
 
     LazyProf:Debug("ui", "  currentPath: " .. (self.currentPath and "exists" or "NIL"))
     if self.currentPath then

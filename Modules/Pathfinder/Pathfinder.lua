@@ -182,7 +182,7 @@ end
 -- profKey: profession key like "alchemy", "engineering"
 -- skillLevel: current skill (0 if not learned)
 -- reason: optional string describing what triggered this calculation
-function Pathfinder:CalculateForProfession(profKey, skillLevel, reason)
+function Pathfinder:CalculateForProfession(profKey, skillLevel, reason, actualSkill)
     local profData = LazyProf.Professions:Get(profKey)
     if not profData then
         LazyProf:Debug("pathfinder", "Profession not found: " .. tostring(profKey))
@@ -192,6 +192,8 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel, reason)
     -- In WoW, you start at skill 1 when learning a profession, not 0
     -- Use minimum of 1 for planning mode calculations
     skillLevel = math.max(1, skillLevel or 0)
+    -- The player's real skill (what the bracket and arrow follow); defaults to the path start
+    actualSkill = math.max(1, actualSkill or skillLevel)
     local targetSkill = self:GetTargetSkill(skillLevel, profData.milestones)
 
     LazyProf:Debug("pathfinder", string.format("Planning path: %s %d -> %d%s",
@@ -271,7 +273,7 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel, reason)
         profession = profData.name,
         professionKey = profKey,
         currentSkill = skillLevel,
-        actualSkill = skillLevel,
+        actualSkill = actualSkill,
         targetSkill = targetSkill,
         racialBonus = racialBonus,
         steps = steps,
@@ -825,7 +827,7 @@ function Pathfinder:GetArrowStep(path)
             return step
         end
     end
-    return path.steps[1]
+    return nil  -- past the last step: nothing left to point at
 end
 
 -- Pin a recipe at a specific skill level (overrides optimizer's pick on next recalculate)

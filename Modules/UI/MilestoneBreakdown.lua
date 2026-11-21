@@ -401,7 +401,8 @@ function MilestonePanelClass:CreateModeToggle()
                 local path = LazyProf.Pathfinder:CalculateForProfession(
                     currentPath.professionKey,
                     currentPath.currentSkill,
-                    "strategy change"
+                    "strategy change",
+                    currentPath.actualSkill
                 )
                 if path then
                     panel:Update(path)
@@ -1500,7 +1501,8 @@ function MilestonePanelClass:CreateRecalculateButton(dirtyCount)
                     local path = LazyProf.Pathfinder:CalculateForProfession(
                         currentPath.professionKey,
                         currentPath.currentSkill,
-                        reason
+                        reason,
+                        currentPath.actualSkill
                     )
                     if path then
                         self:Update(path)

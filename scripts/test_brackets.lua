@@ -78,7 +78,7 @@ check("arrow at a step end moves to the next step", s and s.skillStart == 260, s
 s = P:GetArrowStep(path(1))
 check("arrow at skill 1 is the first step", s and s.skillStart == 1)
 s = P:GetArrowStep(path(400))
-check("past the last step falls back to steps[1]", s and s.skillStart == 1)
+check("past the last step: no arrow step", s == nil)
 s = P:GetArrowStep(path(nil))
 check("no actualSkill gives steps[1]", s and s.skillStart == 1)
 
@@ -97,6 +97,31 @@ LazyProf.ArrowStrategies.arrowWithTooltip.Update({}, manager, gp)
 check("arrow hides inside a gap", hidden == 1 and shown == nil)
 LazyProf.ArrowStrategies.arrowWithTooltip.Update({}, manager, path(250))
 check("arrow points at the step covering 250", shown and shown.id == 225, shown and shown.id)
+
+-- Planning: CalculateForProfession carries the real skill separately from the start
+do
+    local function rec(id, o, y, g, gr)
+        return { id = id, name = "R" .. id, learned = true, skillRequired = o,
+            skillRange = { orange = o, yellow = y, green = g, gray = gr },
+            reagents = { { itemId = 100 + id, count = 1, name = "M" } } }
+    end
+    LazyProf.Professions = { Get = function(_, key)
+        if key ~= "testprof" then return nil end
+        return { name = "Test", milestones = { 75, 150, 225, 300 }, recipes = { rec(1, 1, 100, 200, 300) } }
+    end }
+    LazyProf.db.char.learnedRecipes = { testprof = { [1] = true } }
+    LazyProf.PriceManager = { GetPrices = function() return { [101] = 100 } end, cache = {} }
+    LazyProf.Inventory.ScanBags = function() return {} end
+    LazyProf.db.profile.strategy = "cheapest"
+    local pp = LazyProf.Pathfinder:CalculateForProfession("testprof", 0, nil, 250)
+    check("planning: actualSkill is the real skill", pp and pp.actualSkill == 250, pp and pp.actualSkill)
+    check("planning: path still starts at 1", pp and pp.currentSkill == 1, pp and pp.currentSkill)
+    local pp2 = LazyProf.Pathfinder:CalculateForProfession("testprof", 40)
+    check("planning: actualSkill defaults to the start", pp2 and pp2.actualSkill == 40)
+    local pan = setmetatable({ currentPath = pp }, { __index = Panel })
+    local eb = pan:GetEffectiveBracket()
+    check("planning panel bracket follows the real skill", eb and eb.min == 225, eb and eb.min)
+end
 
 print(string.format("%d/%d passed", total - failures, total))
 os.exit(failures == 0 and 0 or 1)
