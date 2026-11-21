@@ -40,12 +40,7 @@ function PlanningWindow:Initialize()
     self.frame:SetScript("OnDragStart", function(f) f:StartMoving() end)
     self.frame:SetScript("OnDragStop", function(f) f:StopMovingOrSizing() end)
 
-    if self.frame.SetResizeBounds then
-        self.frame:SetResizeBounds(380, 300, 600, 800)
-    else
-        self.frame:SetMinResize(380, 300)
-        self.frame:SetMaxResize(600, 800)
-    end
+    LazyProf.Widgets.SetResizeBounds(self.frame, 380, 300, 600, 800)
 
     self.frame:Hide()
 

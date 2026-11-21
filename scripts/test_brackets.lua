@@ -25,6 +25,7 @@ local FILES = {
     "Modules/Pathfinder/Pathfinder.lua",
     "Modules/UI/Widgets/RowPool.lua",
     "Modules/UI/Widgets/Dropdown.lua",
+    "Modules/UI/Widgets/Controls.lua",
     "Modules/UI/MilestoneBreakdown.lua",
     "Modules/UI/Arrow/Strategies/ArrowTooltip.lua",
 }

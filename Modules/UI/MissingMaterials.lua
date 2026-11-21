@@ -27,12 +27,7 @@ function MissingPanel:Initialize()
     self.frame:SetClampedToScreen(true)
 
     -- Set resize bounds
-    if self.frame.SetResizeBounds then
-        self.frame:SetResizeBounds(MIN_WIDTH, MIN_HEIGHT, 500, 600)
-    else
-        self.frame:SetMinResize(MIN_WIDTH, MIN_HEIGHT)
-        self.frame:SetMaxResize(500, 600)
-    end
+    LazyProf.Widgets.SetResizeBounds(self.frame, MIN_WIDTH, MIN_HEIGHT, 500, 600)
 
     self.frame:Hide()
 

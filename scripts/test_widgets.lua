@@ -251,6 +251,7 @@ local function load(family, opts)
         "Modules/UI/Widgets/PanelShell.lua",
         "Modules/UI/Widgets/RowPool.lua",
         "Modules/UI/Widgets/Dropdown.lua",
+        "Modules/UI/Widgets/Controls.lua",
         "Modules/UI/MilestoneBreakdown.lua",
         "Modules/UI/MissingMaterials.lua",
     }

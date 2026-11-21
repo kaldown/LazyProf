@@ -91,6 +91,9 @@ Modules\Guide\Stages.lua
 Modules\UI\Widgets\PanelShell.lua
 Modules\UI\Widgets\RowPool.lua
 Modules\UI\Widgets\Dropdown.lua
+Modules\UI\Widgets\Controls.lua
+Modules\UI\Widgets\Tabs.lua
+Modules\UI\Widgets\RowList.lua
 Modules\UI\Arrow\Strategies\ArrowTooltip.lua
 Modules\UI\Arrow\ArrowManager.lua
 Modules\UI\MilestoneBreakdown.lua
