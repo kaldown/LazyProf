@@ -144,17 +144,19 @@ function Pathfinder:Calculate(reason)
     -- pass (IsRecipeAvailable is called per unlearned candidate per step).
     LazyProf.RecipeAvailability:BeginRecalc()
     LazyProf.SelfFound:BeginRecalc(inventory)
-    local steps = strategy:Calculate(startSkill, targetSkill, recipes, {}, prices, racialBonus, self.pinnedRecipes)
+    local steps, meta = strategy:Calculate(startSkill, targetSkill, recipes, {}, prices, racialBonus, self.pinnedRecipes)
     LazyProf.SelfFound:EndRecalc()
     LazyProf.RecipeAvailability:EndRecalc()
 
-    -- Build result
+    -- Build result (totals cover the steps the path has; gaps add nothing)
     self.currentPath = {
         profession = profData.name,
         currentSkill = startSkill,
         targetSkill = targetSkill,
         racialBonus = racialBonus,
         steps = steps,
+        complete = meta.complete,
+        gaps = meta.gaps,
         totalCost = Utils.Sum(steps, "totalCost"),
         missingMaterials = self:CalculateMissingMaterials(steps, inventory, sourceBreakdown, prices),
         milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, startSkill, inventory, prices, racialBonus),
@@ -167,8 +169,10 @@ function Pathfinder:Calculate(reason)
     end
     self.currentPath.outOfPocketTotal = outOfPocketTotal
 
-    LazyProf:Debug("pathfinder", string.format("Path calculated: %d steps, %s total",
-        #steps, Utils.FormatMoney(self.currentPath.totalCost)))
+    if LazyProf:IsDebugEnabled("pathfinder") then
+        LazyProf:Debug("pathfinder", string.format("Path calculated: %d steps, %d gaps, %s total",
+            #steps, #meta.gaps, Utils.FormatMoney(self.currentPath.totalCost)))
+    end
 
     return self.currentPath
 end
@@ -256,11 +260,12 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel, reason)
     -- (owned materials are handled separately by the shopping list)
     LazyProf.RecipeAvailability:BeginRecalc()
     LazyProf.SelfFound:BeginRecalc(inventory)
-    local steps = strategy:Calculate(skillLevel, targetSkill, recipes, {}, prices, racialBonus, self.pinnedRecipes)
+    local steps, meta = strategy:Calculate(skillLevel, targetSkill, recipes, {}, prices, racialBonus, self.pinnedRecipes)
     LazyProf.SelfFound:EndRecalc()
     LazyProf.RecipeAvailability:EndRecalc()
 
-    -- Build result (similar to Calculate() but stored separately)
+    -- Build result (similar to Calculate() but stored separately;
+    -- totals cover the steps the path has; gaps add nothing)
     local path = {
         profession = profData.name,
         professionKey = profKey,
@@ -268,6 +273,8 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel, reason)
         targetSkill = targetSkill,
         racialBonus = racialBonus,
         steps = steps,
+        complete = meta.complete,
+        gaps = meta.gaps,
         totalCost = Utils.Sum(steps, "totalCost"),
         missingMaterials = self:CalculateMissingMaterials(steps, inventory, sourceBreakdown, prices),
         milestoneBreakdown = self:CalculateMilestoneBreakdown(steps, profData.milestones, skillLevel, inventory, prices, racialBonus),
@@ -280,8 +287,10 @@ function Pathfinder:CalculateForProfession(profKey, skillLevel, reason)
     end
     path.outOfPocketTotal = outOfPocketTotal
 
-    LazyProf:Debug("pathfinder", string.format("Planning path calculated: %d steps, %s total",
-        #steps, Utils.FormatMoney(path.totalCost)))
+    if LazyProf:IsDebugEnabled("pathfinder") then
+        LazyProf:Debug("pathfinder", string.format("Planning path calculated: %d steps, %d gaps, %s total",
+            #steps, #meta.gaps, Utils.FormatMoney(path.totalCost)))
+    end
 
     return path
 end
@@ -754,6 +763,7 @@ function Pathfinder:CalculateMilestoneBreakdown(steps, milestones, currentSkill,
             materials = materials,
             materialsSummary = table.concat(materialParts, ", "),
             color = color,  -- Pre-calculated color for UI display
+            bridge = step.bridge,  -- green recipe bridging a range with no better recipe
             alternatives = adjustedAlternatives,
             -- Check if this step crosses a trainer milestone
             trainerMilestoneAfter = self:GetMilestoneBetween(step.skillStart, step.skillEnd, milestones),

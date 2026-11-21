@@ -20,6 +20,61 @@ local MIN_WIDTH = 350
 local MIN_HEIGHT = 100
 local DEFAULT_WIDTH = 400
 
+-- Text helpers (pure, no frames) ------------------------------------------
+
+-- Row text for a skill range the path could not cover.
+function MilestonePanelClass.GapText(gap)
+    return string.format("No recipe for %d-%d: train elsewhere or missing data",
+        math.floor(gap.from), math.floor(gap.to))
+end
+
+-- "<qty>x <recipe>", with a suffix when a green recipe bridges a gap.
+function MilestonePanelClass.StepRecipeText(step)
+    local name = step.recipe and step.recipe.name or "Unknown"
+    local text = string.format("%dx %s", step.quantity, name)
+    if step.bridge then
+        text = text .. " (green: no better recipe)"
+    end
+    return text
+end
+
+-- Prefix of a total-cost label ("Total: " / "Total (excluding gaps): ").
+function MilestonePanelClass.TotalLabel(path, word)
+    if path and path.complete == false then
+        return word .. " (excluding gaps): "
+    end
+    return word .. ": "
+end
+
+-- Gaps overlapping the bracket (all gaps when bracket is nil).
+function MilestonePanelClass.FilterGapsForBracket(gaps, bracket)
+    local filtered = {}
+    for _, gap in ipairs(gaps or {}) do
+        if not bracket or (gap.from < bracket.max and gap.to > bracket.min) then
+            table.insert(filtered, gap)
+        end
+    end
+    return filtered
+end
+
+-- Display order: each gap goes before the first step that starts above it.
+-- Returns a list of { step = s } / { gap = g } entries.
+function MilestonePanelClass.MergeStepsAndGaps(steps, gaps)
+    local entries = {}
+    local gi = 1
+    for _, step in ipairs(steps) do
+        while gaps[gi] and gaps[gi].from < step.from do
+            table.insert(entries, { gap = gaps[gi] })
+            gi = gi + 1
+        end
+        table.insert(entries, { step = step })
+    end
+    for i = gi, #gaps do
+        table.insert(entries, { gap = gaps[i] })
+    end
+    return entries
+end
+
 -- Constructor
 -- config.name: unique name for frame (e.g., "Main", "Planning")
 -- config.embedded: if true, no chrome (title bar, close btn, resize handle)
@@ -451,10 +506,12 @@ function MilestonePanelClass:Update(path)
     end
     self.rows = {}
 
-    local fullBreakdown = path and path.milestoneBreakdown
-    LazyProf:Debug("ui", "  breakdown: " .. (fullBreakdown and ("#" .. #fullBreakdown .. " steps") or "NIL"))
+    local fullBreakdown = path and path.milestoneBreakdown or {}
+    local fullGaps = path and path.gaps or {}
+    LazyProf:Debug("ui", "  breakdown: #" .. #fullBreakdown .. " steps, #" .. #fullGaps .. " gaps")
 
-    if not fullBreakdown or #fullBreakdown == 0 then
+    -- A path made only of gaps still shows (the gap rows say why there are no steps)
+    if #fullBreakdown == 0 and #fullGaps == 0 then
         LazyProf:Debug("ui", "  HIDING - no breakdown data")
         self:Hide()
         return
@@ -463,6 +520,7 @@ function MilestonePanelClass:Update(path)
     -- Apply bracket filter
     local bracket = self:GetEffectiveBracket()
     local breakdown = self:FilterBreakdownByBracket(fullBreakdown)
+    local gaps = MilestonePanelClass.FilterGapsForBracket(fullGaps, bracket)
     LazyProf:Debug("ui", "  bracket filter: " .. self:GetBracketLabel() .. " (" .. #breakdown .. " of " .. #fullBreakdown .. " steps)")
 
     -- Update bracket dropdown text
@@ -494,7 +552,7 @@ function MilestonePanelClass:Update(path)
     local lastMilestone = nil
 
     -- Handle empty bracket
-    if #breakdown == 0 then
+    if #breakdown == 0 and #gaps == 0 then
         local emptyRow = CreateFrame("Frame", nil, self.frame.content)
         emptyRow:SetSize(contentWidth, STEP_ROW_HEIGHT)
         emptyRow:SetPoint("TOPLEFT", 0, 0)
@@ -522,104 +580,112 @@ function MilestonePanelClass:Update(path)
         return
     end
 
-    for _, step in ipairs(breakdown) do
-        local stepKey = step.from
-        -- Create step row
-        local row = self:CreateStepRow(step, stepKey, yOffset, contentWidth)
-        table.insert(self.rows, row)
-        yOffset = yOffset + STEP_ROW_HEIGHT
+    for _, entry in ipairs(MilestonePanelClass.MergeStepsAndGaps(breakdown, gaps)) do
+        if entry.gap then
+            -- A skill range no recipe covers: say so instead of skipping it
+            local gapRow = self:CreateGapRow(entry.gap, yOffset, contentWidth)
+            table.insert(self.rows, gapRow)
+            yOffset = yOffset + STEP_ROW_HEIGHT
+        else
+            local step = entry.step
+            local stepKey = step.from
+            -- Create step row
+            local row = self:CreateStepRow(step, stepKey, yOffset, contentWidth)
+            table.insert(self.rows, row)
+            yOffset = yOffset + STEP_ROW_HEIGHT
 
-        -- If expanded, show unlearned indicator, ingredients, then alternatives
-        if self.expandedRows[stepKey] then
-            -- Show unlearned indicator if recipe not learned
-            if step.recipe and not step.recipe.learned then
-                local unlearnedRow = self:CreateUnlearnedIndicator(step, yOffset, contentWidth)
-                table.insert(self.rows, unlearnedRow)
-                yOffset = yOffset + INGREDIENT_ROW_HEIGHT
-            end
-
-            -- Show ingredients first (context for why the winner was chosen)
-            for _, mat in ipairs(step.materials) do
-                local ingredientRow = self:CreateIngredientRow(mat, yOffset, contentWidth)
-                table.insert(self.rows, ingredientRow)
-                yOffset = yOffset + INGREDIENT_ROW_HEIGHT
-            end
-
-            -- Show alternatives section (collapsible spoiler with groups inside)
-            if step.alternatives and #step.alternatives > 1 then
-                -- Build filtered list (exclude current recipe)
-                local filteredAlts = {}
-                for _, alt in ipairs(step.alternatives) do
-                    if alt.recipe.id ~= step.recipe.id then
-                        table.insert(filteredAlts, { alt = alt })
-                    end
-                end
-                -- Sort by out-of-pocket cost (cheapest-for-you first)
-                table.sort(filteredAlts, function(a, b)
-                    return (a.alt.outOfPocketCost or a.alt.craftCost) < (b.alt.outOfPocketCost or b.alt.craftCost)
-                end)
-                -- Assign display rank after sort
-                for i, entry in ipairs(filteredAlts) do
-                    entry.rank = i
+            -- If expanded, show unlearned indicator, ingredients, then alternatives
+            if self.expandedRows[stepKey] then
+                -- Show unlearned indicator if recipe not learned
+                if step.recipe and not step.recipe.learned then
+                    local unlearnedRow = self:CreateUnlearnedIndicator(step, yOffset, contentWidth)
+                    table.insert(self.rows, unlearnedRow)
+                    yOffset = yOffset + INGREDIENT_ROW_HEIGHT
                 end
 
-                local totalAlts = #filteredAlts
-                if totalAlts > 0 then
-                    -- Main "Alternatives" spoiler header with separator lines
-                    local isAltExpanded = self.expandedAlternatives[stepKey]
-                    local altHeader = self:CreateAlternativesSpoiler(totalAlts, isAltExpanded, stepKey, yOffset, contentWidth)
-                    table.insert(self.rows, altHeader)
-                    yOffset = yOffset + MILESTONE_SEPARATOR_HEIGHT
+                -- Show ingredients first (context for why the winner was chosen)
+                for _, mat in ipairs(step.materials) do
+                    local ingredientRow = self:CreateIngredientRow(mat, yOffset, contentWidth)
+                    table.insert(self.rows, ingredientRow)
+                    yOffset = yOffset + INGREDIENT_ROW_HEIGHT
+                end
 
-                    -- Only show groups if the main spoiler is expanded
-                    if isAltExpanded then
-                        local bestScore = step.alternatives[1] and step.alternatives[1].score or 0
-                        local skillsNeeded = step.to - step.from
-
-                        -- Initialize group state for this step
-                        if not self.expandedAltGroups[stepKey] then
-                            self.expandedAltGroups[stepKey] = {}
+                -- Show alternatives section (collapsible spoiler with groups inside)
+                if step.alternatives and #step.alternatives > 1 then
+                    -- Build filtered list (exclude current recipe)
+                    local filteredAlts = {}
+                    for _, alt in ipairs(step.alternatives) do
+                        if alt.recipe.id ~= step.recipe.id then
+                            table.insert(filteredAlts, { alt = alt })
                         end
+                    end
+                    -- Sort by out-of-pocket cost (cheapest-for-you first)
+                    table.sort(filteredAlts, function(a, b)
+                        return (a.alt.outOfPocketCost or a.alt.craftCost) < (b.alt.outOfPocketCost or b.alt.craftCost)
+                    end)
+                    -- Assign display rank after sort
+                    for i, entry in ipairs(filteredAlts) do
+                        entry.rank = i
+                    end
 
-                        -- Split into groups of ALT_GROUP_SIZE
-                        local groupIndex = 0
-                        for startIdx = 1, totalAlts, ALT_GROUP_SIZE do
-                            groupIndex = groupIndex + 1
-                            local endIdx = math.min(startIdx + ALT_GROUP_SIZE - 1, totalAlts)
-                            local firstRank = filteredAlts[startIdx].rank
-                            local lastRank = filteredAlts[endIdx].rank
+                    local totalAlts = #filteredAlts
+                    if totalAlts > 0 then
+                        -- Main "Alternatives" spoiler header with separator lines
+                        local isAltExpanded = self.expandedAlternatives[stepKey]
+                        local altHeader = self:CreateAlternativesSpoiler(totalAlts, isAltExpanded, stepKey, yOffset, contentWidth)
+                        table.insert(self.rows, altHeader)
+                        yOffset = yOffset + MILESTONE_SEPARATOR_HEIGHT
 
-                            -- Group header
-                            local isGroupExpanded = self.expandedAltGroups[stepKey][groupIndex]
-                            local headerRow = self:CreateAltGroupHeader(
-                                firstRank, lastRank, isGroupExpanded, stepKey, groupIndex, yOffset, contentWidth
-                            )
-                            table.insert(self.rows, headerRow)
-                            yOffset = yOffset + ALT_GROUP_HEADER_HEIGHT
+                        -- Only show groups if the main spoiler is expanded
+                        if isAltExpanded then
+                            local bestScore = step.alternatives[1] and step.alternatives[1].score or 0
+                            local skillsNeeded = step.to - step.from
 
-                            -- Show individual rows if group is expanded
-                            if isGroupExpanded then
-                                for idx = startIdx, endIdx do
-                                    local entry = filteredAlts[idx]
-                                    local altRow = self:CreateAlternativeRow(
-                                        entry.alt, entry.rank, bestScore, step.from, skillsNeeded, yOffset, contentWidth
-                                    )
-                                    table.insert(self.rows, altRow)
-                                    yOffset = yOffset + ALTERNATIVE_ROW_HEIGHT
+                            -- Initialize group state for this step
+                            if not self.expandedAltGroups[stepKey] then
+                                self.expandedAltGroups[stepKey] = {}
+                            end
+
+                            -- Split into groups of ALT_GROUP_SIZE
+                            local groupIndex = 0
+                            for startIdx = 1, totalAlts, ALT_GROUP_SIZE do
+                                groupIndex = groupIndex + 1
+                                local endIdx = math.min(startIdx + ALT_GROUP_SIZE - 1, totalAlts)
+                                local firstRank = filteredAlts[startIdx].rank
+                                local lastRank = filteredAlts[endIdx].rank
+
+                                -- Group header
+                                local isGroupExpanded = self.expandedAltGroups[stepKey][groupIndex]
+                                local headerRow = self:CreateAltGroupHeader(
+                                    firstRank, lastRank, isGroupExpanded, stepKey, groupIndex, yOffset, contentWidth
+                                )
+                                table.insert(self.rows, headerRow)
+                                yOffset = yOffset + ALT_GROUP_HEADER_HEIGHT
+
+                                -- Show individual rows if group is expanded
+                                if isGroupExpanded then
+                                    for idx = startIdx, endIdx do
+                                        local entry = filteredAlts[idx]
+                                        local altRow = self:CreateAlternativeRow(
+                                            entry.alt, entry.rank, bestScore, step.from, skillsNeeded, yOffset, contentWidth
+                                        )
+                                        table.insert(self.rows, altRow)
+                                        yOffset = yOffset + ALTERNATIVE_ROW_HEIGHT
+                                    end
                                 end
                             end
                         end
                     end
                 end
             end
-        end
 
-        -- Add milestone separator after this step if it crosses a trainer milestone
-        if step.trainerMilestoneAfter and step.trainerMilestoneAfter ~= lastMilestone then
-            local separator = self:CreateMilestoneSeparator(step.trainerMilestoneAfter, yOffset, contentWidth)
-            table.insert(self.rows, separator)
-            yOffset = yOffset + MILESTONE_SEPARATOR_HEIGHT
-            lastMilestone = step.trainerMilestoneAfter
+            -- Add milestone separator after this step if it crosses a trainer milestone
+            if step.trainerMilestoneAfter and step.trainerMilestoneAfter ~= lastMilestone then
+                local separator = self:CreateMilestoneSeparator(step.trainerMilestoneAfter, yOffset, contentWidth)
+                table.insert(self.rows, separator)
+                yOffset = yOffset + MILESTONE_SEPARATOR_HEIGHT
+                lastMilestone = step.trainerMilestoneAfter
+            end
         end
     end
 
@@ -649,15 +715,18 @@ function MilestonePanelClass:Update(path)
         local fullOopCost = path.outOfPocketTotal or path.totalCost
         local bracketColor = bracketOopCost < bracketMarketCost and "|cFF66FF66" or ""
         local bracketColorEnd = bracketOopCost < bracketMarketCost and "|r" or ""
-        self.frame.total:SetText(string.format("Bracket: %s%s%s  |cFF888888|  Full: %s|r",
-            bracketColor, Utils.FormatMoney(bracketOopCost), bracketColorEnd, Utils.FormatMoney(fullOopCost)))
+        self.frame.total:SetText(string.format("Bracket: %s%s%s  |cFF888888|  %s%s|r",
+            bracketColor, Utils.FormatMoney(bracketOopCost), bracketColorEnd,
+            MilestonePanelClass.TotalLabel(path, "Full"), Utils.FormatMoney(fullOopCost)))
     else
+        -- "Total (excluding gaps)" when the path has gaps: the total covers only its steps
+        local totalLabel = MilestonePanelClass.TotalLabel(path, "Total")
         local oopTotal = path.outOfPocketTotal or path.totalCost
         if oopTotal < path.totalCost then
-            self.frame.total:SetText(string.format("Total: |cFF66FF66%s|r",
-                Utils.FormatMoney(oopTotal)))
+            self.frame.total:SetText(string.format("%s|cFF66FF66%s|r",
+                totalLabel, Utils.FormatMoney(oopTotal)))
         else
-            self.frame.total:SetText("Total: " .. Utils.FormatMoney(path.totalCost))
+            self.frame.total:SetText(totalLabel .. Utils.FormatMoney(path.totalCost))
         end
     end
 
@@ -724,7 +793,6 @@ function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
     row.range:SetText(rangeText)
 
     -- Quantity and recipe name (e.g., "30x Bronze Tube")
-    local recipeName = step.recipe and step.recipe.name or "Unknown"
     local recipeColor = self:ColorToRGB(step.color)
 
     row.recipe = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -732,7 +800,7 @@ function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
     row.recipe:SetPoint("RIGHT", row, "LEFT", 175, 0)
     row.recipe:SetJustifyH("LEFT")
     row.recipe:SetWordWrap(false)
-    row.recipe:SetText(string.format("%dx %s", step.quantity, recipeName))
+    row.recipe:SetText(MilestonePanelClass.StepRecipeText(step))
     row.recipe:SetTextColor(recipeColor.r, recipeColor.g, recipeColor.b)
 
     -- Materials summary (truncated)
@@ -779,8 +847,11 @@ function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
         row.expandBtn:SetTextColor(1, 1, 0)
         -- Tooltip with full materials
         GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(string.format("%dx %s", step.quantity, recipeName), 1, 1, 1)
+        GameTooltip:AddLine(MilestonePanelClass.StepRecipeText(step), 1, 1, 1)
         GameTooltip:AddLine(string.format("Skill: %d -> %d", step.from, step.to), 0.7, 0.7, 0.7)
+        if step.bridge then
+            GameTooltip:AddLine("No orange or yellow recipe is available here, so this green recipe keeps you leveling.", 0.25, 0.75, 0.25, true)
+        end
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("Materials:", 1, 0.82, 0)
         for _, mat in ipairs(step.materials) do
@@ -813,6 +884,43 @@ function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
     row:SetScript("OnLeave", function()
         row:SetBackdropColor(0.15, 0.15, 0.15, 0.3)
         row.expandBtn:SetTextColor(0.6, 0.6, 0.6)
+        GameTooltip:Hide()
+    end)
+
+    row:Show()
+    return row
+end
+
+-- Create a gap row: a skill range the path could not cover with any recipe
+function MilestonePanelClass:CreateGapRow(gap, yOffset, contentWidth)
+    local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
+    row:SetSize(contentWidth, STEP_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -yOffset)
+
+    row:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+    })
+    row:SetBackdropColor(0.35, 0.1, 0.1, 0.35)
+
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.text:SetPoint("LEFT", 18, 0)
+    row.text:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+    row.text:SetJustifyH("LEFT")
+    row.text:SetWordWrap(false)
+    row.text:SetText(MilestonePanelClass.GapText(gap))
+    row.text:SetTextColor(1, 0.5, 0.4)
+
+    row:SetScript("OnEnter", function()
+        row:SetBackdropColor(0.45, 0.15, 0.15, 0.6)
+        GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(MilestonePanelClass.GapText(gap), 1, 0.5, 0.4, true)
+        GameTooltip:AddLine("No available recipe gives skill-ups in this range.", 0.7, 0.7, 0.7, true)
+        GameTooltip:AddLine("Level these points another way, or the recipe data is missing.", 0.7, 0.7, 0.7, true)
+        GameTooltip:AddLine("The path continues after the gap; totals exclude it.", 0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    row:SetScript("OnLeave", function()
+        row:SetBackdropColor(0.35, 0.1, 0.1, 0.35)
         GameTooltip:Hide()
     end)
 

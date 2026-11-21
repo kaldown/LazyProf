@@ -41,6 +41,10 @@ function harness.stubWow(opts)
     _G.C_AddOns = { GetAddOnMetadata = function() return "test" end }
     _G.date = function() return "00:00:00" end
     _G.strlower = string.lower
+    -- WoW adds string:trim(); stock Lua 5.1 does not.
+    if not string.trim then
+        function string.trim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
+    end
     _G.wipe = function(t) for k in pairs(t) do t[k] = nil end return t end
     _G.IsSpellKnown = function() return false end
     _G.InCombatLockdown = function() return false end
@@ -123,13 +127,27 @@ function harness.priceTable(recipes)
     return prices
 end
 
-function harness.formatSteps(steps)
+-- One line per step ("bridge" marks a green recipe bridging a gap); each gap
+-- from meta (optional) is a "gap <from>-<to> <reason>" line in skill order.
+function harness.formatSteps(steps, meta)
     local out = {}
+    local gaps = meta and meta.gaps or {}
+    local gi = 1
+    local function gapLine(g)
+        return string.format("gap %.2f-%.2f %s", g.from, g.to, tostring(g.reason))
+    end
     for _, s in ipairs(steps) do
+        while gaps[gi] and gaps[gi].from < (s.skillStart or 0) do
+            out[#out + 1] = gapLine(gaps[gi])
+            gi = gi + 1
+        end
         local rid = s.recipe and s.recipe.id
         out[#out + 1] = string.format("%.2f-%.2f %s x%s %s",
             s.skillStart or 0, s.skillEnd or 0, tostring(rid),
-            tostring(s.quantity), tostring(s.totalCost))
+            tostring(s.quantity), tostring(s.totalCost)) .. (s.bridge and " bridge" or "")
+    end
+    for i = gi, #gaps do
+        out[#out + 1] = gapLine(gaps[i])
     end
     return table.concat(out, "\n") .. "\n"
 end

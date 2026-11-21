@@ -26,6 +26,11 @@ LazyProf.Constants = {
     -- math.huge (which makes recipe selection arbitrary when no AH data exists).
     MIN_REAGENT_PRICE = 1,
 
+    -- Lowest skill-up chance at which a green recipe may bridge a skill range
+    -- where no orange/yellow recipe can be chosen (green recipes excluded by
+    -- the setting). Below it the remaining range is reported as a gap.
+    BRIDGE_MIN_CHANCE = 0.10,
+
     -- TSM price source options
     TSM_PRICE_SOURCE = {
         MIN_BUYOUT = "DBMinBuyout",       -- Current minimum buyout (what you can buy NOW)

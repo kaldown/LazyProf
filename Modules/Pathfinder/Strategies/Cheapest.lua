@@ -19,8 +19,11 @@ LazyProf.PathfinderStrategies.cheapest = {
 
     -- Get recipes that can be crafted and give skillups at current skill
     -- racialBonus: extends color ranges (e.g., Gnome +15 Engineering)
-    GetCandidates = function(self, recipes, currentSkill, racialBonus)
+    -- includeGreen: optional; true allows green recipes regardless of the setting
+    --               (used to bridge a range with no orange/yellow recipe)
+    GetCandidates = function(self, recipes, currentSkill, racialBonus, includeGreen)
         racialBonus = racialBonus or 0
+        local allowGreen = includeGreen or LazyProf.db.profile.includeGreenRecipes
         local candidates = {}
         -- Effective skill for color calculations (racial bonus extends color ranges)
         local effectiveSkill = currentSkill - racialBonus
@@ -32,7 +35,7 @@ LazyProf.PathfinderStrategies.cheapest = {
                 if effectiveSkill < recipe.skillRange.gray then
                     -- Skip green recipes unless setting enabled
                     local color = Utils.GetSkillColor(effectiveSkill, recipe.skillRange)
-                    if color == "green" and not LazyProf.db.profile.includeGreenRecipes then
+                    if color == "green" and not allowGreen then
                         -- Green recipes excluded by setting
                     elseif recipe.learned then
                         -- Already learned - always available

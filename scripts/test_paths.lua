@@ -76,13 +76,16 @@ for _, case in ipairs(CASES) do
 
         LazyProf.RecipeAvailability:BeginRecalc()
         LazyProf.SelfFound:BeginRecalc({})
-        local steps = strategy:Calculate(case.from, case.to, LazyProf.Utils.DeepCopy(recipes), {}, prices, 0, {})
+        local steps, meta = strategy:Calculate(case.from, case.to, LazyProf.Utils.DeepCopy(recipes), {}, prices, 0, {})
         LazyProf.SelfFound:EndRecalc()
         LazyProf.RecipeAvailability:EndRecalc()
 
-        local text = harness.formatSteps(steps)
+        local text = harness.formatSteps(steps, meta)
         local path = "scripts/snapshots/" .. label .. ".txt"
-        summary[#summary + 1] = string.format("%s: %d steps, final skill %.2f", label, #steps, lastSkill(steps))
+        local bridges = 0
+        for _, s in ipairs(steps) do if s.bridge then bridges = bridges + 1 end end
+        summary[#summary + 1] = string.format("%s: %d steps, final skill %.2f, %d bridge steps, %d gaps",
+            label, #steps, lastSkill(steps), bridges, #meta.gaps)
 
         if UPDATE then
             local f = assert(io.open(path, "w"))
