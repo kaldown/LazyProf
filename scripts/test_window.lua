@@ -40,7 +40,7 @@ for _, family in ipairs({ "forever", "classic" }) do
 
         -- Header
         T.eq(p .. "title", frame.title.text, "LazyProf - Tailoring")
-        T.eq(p .. "status line", window.status.text, "Skill 143 / 150")
+        T.eq(p .. "status line", window.status.text, "Skill 143 / 300")
         T.eq(p .. "price line", window.prices.text, "Prices: TSM 2")
         T.eq(p .. "target box shows the target", window.targetInput.frame.text, "300")
         T.eq(p .. "strategy shown selected", window.strategyGroup:GetSelected(), "cheapest")
@@ -195,15 +195,20 @@ T.section("states", function()
     window:Update(W.path())
     T.check("a path replaces the notice", window.controls.shown == true and frame.showsNotice == nil)
 
-    -- Filter hint
+    -- The next recipe is unlearned and the profession window hides unlearned
+    -- recipes: its learn step says so.
     env.hidden = true
     local unlearned = W.recipe(9, "Boots", 100, 150, 160, 170, { unlearned = true, sourceInfo = { type = "trainer", cost = 100 } })
-    window:Update(W.path({ steps = { W.step(unlearned, 143, 160, 19, 1900) }, gaps = {}, totalCost = 1900 }))
-    T.eq("filter hint row comes first", W.rowTexts(window)[1], "Next recipe is not learned yet - learn it from Any Tailoring Trainer")
-    ui.fire(window.list.rows[1], "OnClick", "LeftButton")
-    T.eq("hint click opens the recipe details", env.details and env.details.recipe.name, "Boots")
+    window:Update(W.path({ steps = { W.step(unlearned, 143, 160, 19, 2000) }, gaps = {}, totalCost = 2000 }))
+    window:SelectTab("guide")
+    local card = W.rowTexts(window)
+    T.eq("the learn step is the current one", card[1], "Step 1 of 2 - learn (current step)")
+    T.check("the filter hint is on its card", W.findRow(window, "hides unlearned recipes") ~= nil)
     env.hidden = false
+    window:Update(W.path({ steps = { W.step(unlearned, 143, 160, 19, 2000) }, gaps = {}, totalCost = 2000 }))
+    T.check("no hint when the filter shows unlearned recipes", W.findRow(window, "hides unlearned recipes") == nil)
     window:Update(W.path())
+    window:SelectTab("steps")
 
     -- Close button: stays closed until the profession window reopens.
     ui.fire(frame.closeBtn, "OnClick")
@@ -509,6 +514,80 @@ T.section("shopping tab", function()
     window.path.inventory = { [101] = 1 }
     window:Refresh()
     T.eq("stock refresh works the list out again", #asked, before + 1)
+end)
+
+T.section("learn and rank steps", function()
+    local env = W.load("forever")
+    local window, ui, addon = env.window, env.ui, env.addon
+    env.cap = 150
+    local boots = W.recipe(9, "Boots", 150, 200, 210, 220, { unlearned = true, sourceInfo = { type = "vendor", cost = 1500 } })
+    local function path()
+        return W.path({
+            steps = { W.step(W.GLOVES, 143, 150, 7, 700), W.step(W.GLOVES, 150, 152, 3, 300),
+                      W.step(boots, 152, 225, 73, 73 * 100 + 1500), W.step(boots, 225, 300, 75, 7500) },
+            gaps = {}, totalCost = 700 + 300 + 8800 + 7500, complete = true,
+            prices = { [101] = 100, [109] = 100 },
+        })
+    end
+    window:Update(path())
+    T.eq("status shows the live cap", window.status.text, "Skill 143 / 150")
+
+    window:SelectTab("steps")
+    window.rangeSel = "all"
+    window:Render()
+    local rows = W.rowTexts(window)
+    T.eq("steps: craft up to the cap", rows[1], "> 143-150 | |cFF888888craft|r  7x Gloves | 7s")
+    T.eq("steps: the rank step at the cap", rows[2], "150 | |cFF888888train|r  Train the next rank before 150")
+    T.eq("steps: the crossing fragment starts the next stage", rows[3], "150-152 | |cFF888888craft|r  3x Gloves | 3s")
+    T.eq("steps: the learn step, with its fee", rows[4], "152 | |cFF888888learn|r  Boots - vendor | 15s")
+    T.eq("steps: the craft stage costs its reagents only", rows[5], "152-225 | |cFF888888craft|r  73x Boots | 73s")
+    T.eq("steps: the next cap", rows[6], "225 | |cFF888888train|r  Train the next rank before 225")
+    T.eq("footer: fees stay in the totals", window.footer1.text, "Whole path: 1g 73s (you pay 1g 73s)")
+
+    -- The bar gets a tick per rank still to train.
+    local ticks = 0
+    for _ in ipairs(window.bar.model.ticks) do ticks = ticks + 1 end
+    T.eq("bar: a tick per rank step", ticks, 2)
+
+    -- Rank card
+    ui.fire(W.findRow(window, "Train the next rank before 150"), "OnClick", "LeftButton")
+    T.eq("a rank row opens its card", window.tab, "guide")
+    rows = W.rowTexts(window)
+    T.eq("rank card header", rows[1], "Step 2 of 7 - train")
+    T.eq("rank card title", rows[2], "Train the next rank | before 150")
+    T.eq("rank card: the cap the client reports is called yours", rows[3],
+        "Your cap is 150. Train the next rank at a Tailoring trainer before you reach 150.")
+    T.check("rank card: no recipe to show", not window.recipeBtn.enabled)
+
+    -- Learn card
+    ui.fire(window.nextBtn, "OnClick")
+    ui.fire(window.nextBtn, "OnClick")
+    rows = W.rowTexts(window)
+    T.eq("learn card header", rows[1], "Step 4 of 7 - learn")
+    T.eq("learn card title", rows[2], "Learn Boots | at 152")
+    T.eq("learn card: source kind", rows[3], "Sold by a vendor.")
+    T.eq("learn card: fee", rows[4], "Cost: 15s")
+    T.eq("learn card: required skill", rows[5], "Requires skill 150")
+    T.check("learn card: recipe details offered", window.recipeBtn.enabled)
+    ui.fire(window.list.rows[2], "OnClick", "LeftButton")
+    T.eq("learn card: the title opens the recipe details", env.details.recipe.name, "Boots")
+
+    -- A later cap is not called "your cap".
+    ui.fire(window.nextBtn, "OnClick")
+    ui.fire(window.nextBtn, "OnClick")
+    rows = W.rowTexts(window)
+    T.eq("later rank card", rows[3], "Skill cap 225: train the next rank at a Tailoring trainer before you reach 225.")
+
+    -- Cap already at the top: no rank steps.
+    env.cap = 300
+    window:Update(path())
+    window:SelectTab("steps")
+    T.check("cap trained: no rank rows", W.findRow(window, "Train the next rank") == nil)
+    -- Cap unknown: no rank steps either, and no cap in the status line.
+    env.cap = nil
+    window:Update(path())
+    T.check("cap unknown: no rank rows", W.findRow(window, "Train the next rank") == nil)
+    T.eq("cap unknown: status without a cap", window.status.text, "Skill 143")
 end)
 
 T.finish()

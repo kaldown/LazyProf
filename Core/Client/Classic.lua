@@ -109,23 +109,35 @@ function Client:KnownRecipeIds(profKey)
     return knownSpellIds
 end
 
--- The player's rank in a profession, read from the skill-line list (works with
--- the profession window closed). 0 when not trained or unknown.
-function Client:PlayerSkill(profKey)
+-- Rank and cap of a profession, read from the skill-line list (works with
+-- the profession window closed). 0 and nil when not trained or unknown. The
+-- cap is the skill line's 7th return (its maximum rank); a value that cannot
+-- be a cap (missing, or below the rank) is reported as unknown rather than
+-- trusted.
+function Client:ProfessionRank(profKey)
     local profInfo = LazyProf.Constants.PROFESSIONS[profKey]
-    if not profInfo then return 0 end
+    if not profInfo then return 0, nil end
 
     local targetName = profInfo.name:lower()
 
     -- Classic/TBC uses GetSkillLineInfo instead of GetProfessions
     for i = 1, GetNumSkillLines() do
-        local skillName, isHeader, _, skillRank = GetSkillLineInfo(i)
+        local skillName, isHeader, _, skillRank, _, _, skillMaxRank = GetSkillLineInfo(i)
         if not isHeader and skillName and skillName:lower() == targetName then
-            return skillRank or 0
+            skillRank = skillRank or 0
+            if type(skillMaxRank) ~= "number" or skillMaxRank < skillRank or skillMaxRank <= 0 then
+                skillMaxRank = nil
+            end
+            return skillRank, skillMaxRank
         end
     end
 
-    return 0
+    return 0, nil
+end
+
+-- The player's rank in a profession (0 when not trained or unknown).
+function Client:PlayerSkill(profKey)
+    return (self:ProfessionRank(profKey))
 end
 
 -- Every return of the client's item-info call (11th = vendor sell price).

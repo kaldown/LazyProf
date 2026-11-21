@@ -432,4 +432,59 @@ T.section("guide card", function()
     T.eq("nothing left on the card too", Views.GuideCard(view, ctx)[1].text, "Nothing left: Tailoring is at its cap of 300.")
 end)
 
+T.section("learn and rank text", function()
+    local Text = LazyProf.GuideText
+    local R = recipe(8, "Boots", 150, 200, 210, 220, { unlearned = true })
+    local function learn(info) return { kind = "learn", recipe = R, sourceInfo = info, fee = 0, at = 150 } end
+    local function texts(lines)
+        local out = {}
+        for _, l in ipairs(lines) do out[#out + 1] = l.text end
+        return table.concat(out, " / ")
+    end
+
+    T.eq("trainer", texts(Text.LearnLines(learn({ type = "trainer", cost = 500, npcName = "Any Tailoring Trainer" }), "FOREVER", "Tailoring")),
+        "Learn from: any Tailoring trainer / Cost: 5s / Requires skill 150")
+    T.eq("trainer without a known fee: no fee line", texts(Text.LearnLines(learn({ type = "trainer" }), "FOREVER", "Tailoring")),
+        "Learn from: any Tailoring trainer / Requires skill 150")
+    T.eq("a named trainer note is kept", texts(Text.LearnLines(learn({ type = "trainer", npcName = "Special trainer" }), "FOREVER", "Alchemy")),
+        "Learn from: Special trainer / Requires skill 150")
+    T.eq("vendor", texts(Text.LearnLines(learn({ type = "vendor", cost = 1500 }), "TBC", "Tailoring")),
+        "Sold by a vendor. / Cost: 15s / Requires skill 150")
+    T.eq("vendor with a currency price", texts(Text.LearnLines(learn({ type = "vendor", cost = 0,
+        currency = { name = "Merchant's Favor", amount = 45 } }), "FOREVER", "Tailoring")),
+        "Sold by a vendor. / Price: 45 Merchant's Favor / Requires skill 150")
+    T.eq("in the bags", texts(Text.LearnLines(learn({ type = "inventory", location = { type = "bags", count = 1 } }), "SOD", "Tailoring")),
+        "The recipe is in your bags. Use it to learn the recipe. / Requires skill 150")
+    T.eq("on an alt", texts(Text.LearnLines(learn({ type = "inventory", location = { type = "alt", character = "Bankalt" } }), "SOD", "Tailoring")),
+        "The recipe is on your alt Bankalt. Use it to learn the recipe. / Requires skill 150")
+    T.eq("auction house, with its price", texts(Text.LearnLines(learn({ type = "ah", price = 7000, source = "TSM" }), "WOTLK", "Tailoring")),
+        "Listed on the auction house. / Price: 70s (TSM) / Requires skill 150")
+    T.eq("no resolved source", texts(Text.LearnLines(learn(nil), "FOREVER", "Tailoring")),
+        "Not currently obtainable from a trainer, a vendor or the auction house. / You chose this recipe yourself; you will need to obtain it. / Requires skill 150")
+    -- The Vanilla data types every recipe as trainer-taught: say nothing about the source.
+    T.eq("VANILLA profile never names a source", texts(Text.LearnLines(learn({ type = "trainer", cost = 500 }), "VANILLA", "Tailoring")),
+        "Learn the recipe. The recipe details show what is known about it. / Requires skill 150")
+    T.check("VANILLA profile: no short source", Text.LearnShort(learn({ type = "trainer" }), "VANILLA") == nil)
+    T.eq("short: trainer", Text.LearnShort(learn({ type = "trainer" }), "FOREVER"), "trainer")
+    T.eq("short: bank", Text.LearnShort(learn({ type = "inventory", location = { type = "bank" } }), "FOREVER"), "in your bank")
+    T.eq("short: auction house", Text.LearnShort(learn({ type = "ah", price = 1 }), "FOREVER"), "auction house")
+    T.eq("short: currency vendor", Text.LearnShort(learn({ type = "vendor", currency = { name = "Favor", amount = 3 } }), "FOREVER"), "vendor, 3 Favor")
+    T.eq("short: none", Text.LearnShort(learn(nil), "FOREVER"), "not currently obtainable")
+
+    local rank = { kind = "rank", cap = 150, at = 150 }
+    T.eq("rank: the character's own cap", Text.RankLine(rank, 150, "Tailoring", true),
+        "Your cap is 150. Train the next rank at a Tailoring trainer before you reach 150.")
+    T.eq("rank: a later cap", Text.RankLine({ kind = "rank", cap = 225 }, 150, "Tailoring", true),
+        "Skill cap 225: train the next rank at a Tailoring trainer before you reach 225.")
+    T.eq("rank: a profession not learned yet", Text.RankLine({ kind = "rank", cap = 75 }, 75, "Tailoring", false),
+        "Skill cap 75: train the next rank at a Tailoring trainer before you reach 75.")
+    T.eq("rank: range text", Text.StageRange(rank), "150")
+
+    -- Rows on the VANILLA profile: the learn row names no source.
+    local row = Views.StepRow(learn({ type = "trainer", cost = 500 }), { profile = "VANILLA", path = { profession = "Tailoring" } }, {})
+    T.eq("VANILLA learn row", row.text, "|cFF888888learn|r  Boots")
+    row = Views.StepRow(learn({ type = "trainer", cost = 500 }), { profile = "FOREVER", path = { profession = "Tailoring" } }, {})
+    T.eq("learn row elsewhere", row.text, "|cFF888888learn|r  Boots - trainer")
+end)
+
 T.finish()

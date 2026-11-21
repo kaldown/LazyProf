@@ -99,13 +99,13 @@ end
 
 local skillLines = {
     { name = "Professions", header = true },
-    { name = "Tailoring", rank = 152 },
-    { name = "Leatherworking", rank = 75 },
+    { name = "Tailoring", rank = 152, max = 225 },
+    { name = "Leatherworking", rank = 75 },                 -- no cap reported
 }
 _G.GetNumSkillLines = function() return #skillLines end
 _G.GetSkillLineInfo = function(i)
     local s = skillLines[i]
-    return s.name, s.header and true or false, nil, s.rank
+    return s.name, s.header and true or false, nil, s.rank, 0, 0, s.max
 end
 
 _G.GetItemInfo = function(itemId)
@@ -189,7 +189,7 @@ section("selection", function()
     check(p .. "forever client: Classic.lua leaves LazyProf.Client unset", forever.Client == nil)
     local camelot = loadAdapter(11508, 18, 18)
     check(p .. "camelot project: Classic.lua leaves LazyProf.Client unset", camelot.Client == nil)
-    for _, m in ipairs({ "IsOpen", "GetLine", "KnownRecipeIds", "PlayerSkill", "GetItemInfo",
+    for _, m in ipairs({ "IsOpen", "GetLine", "KnownRecipeIds", "PlayerSkill", "ProfessionRank", "GetItemInfo",
                          "AnchorFrame", "PanelOffsetX", "NoDataProfessionName", "Start", "RunDiagnostic" }) do
         check(p .. "Client:" .. m .. " exists", type(classic.Client[m]) == "function")
     end
@@ -275,6 +275,18 @@ section("classic", function()
     check(p .. "PlayerSkill leatherworking -> 75", Client:PlayerSkill("leatherworking") == 75)
     check(p .. "PlayerSkill not trained -> 0", Client:PlayerSkill("mining") == 0)
     check(p .. "PlayerSkill unknown key -> 0", Client:PlayerSkill("nope") == 0)
+
+    -- Rank and cap with the profession window closed (7th return of the skill line).
+    local rank, cap = Client:ProfessionRank("tailoring")
+    check(p .. "ProfessionRank tailoring -> 152 of 225", rank == 152 and cap == 225, tostring(rank) .. "/" .. tostring(cap))
+    rank, cap = Client:ProfessionRank("leatherworking")
+    check(p .. "ProfessionRank without a reported cap -> rank, no cap", rank == 75 and cap == nil, tostring(cap))
+    skillLines[2].max = 30   -- a cap below the rank cannot be a cap
+    rank, cap = Client:ProfessionRank("tailoring")
+    check(p .. "ProfessionRank with a cap below the rank -> no cap", rank == 152 and cap == nil, tostring(cap))
+    skillLines[2].max = 225
+    rank, cap = Client:ProfessionRank("mining")
+    check(p .. "ProfessionRank not trained -> 0, no cap", rank == 0 and cap == nil)
 
     check(p .. "GetItemInfo returns every value", select("#", Client:GetItemInfo(2589)) == 11)
     check(p .. "GetItemInfo 11th return is the sell price", select(11, Client:GetItemInfo(2589)) == 13)

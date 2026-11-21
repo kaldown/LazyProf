@@ -83,11 +83,30 @@ function GuideWindow:ComputeView()
     local view = { path = path, expanded = self.expanded, marginPercent = MarginPercent() }
     if not path then return view end
 
+    -- The cap the character works under: the open profession's as its window
+    -- reports it, else the one the client reports for the profession; the
+    -- first cap for a profession not learned yet. Unknown: no rank steps.
+    local liveCap
+    if path.hasProfession == false then
+        liveCap = LazyProf.Stages.LiveCap(nil, path.milestones)
+    elseif self.mode == "live" then
+        local _, _, cap = LazyProf.Client:GetLine()
+        liveCap = cap
+    else
+        local _, cap = LazyProf.Client:ProfessionRank(path.professionKey)
+        liveCap = cap
+    end
+    view.liveCap = liveCap
+    view.cap = (path.hasProfession ~= false) and liveCap or nil
+    view.profile = Utils.GetActiveProfile()
+
     local stages, summary = LazyProf.Stages.Build(path, {
         inventory = path.inventory,
         prices = path.prices,
         marginPercent = view.marginPercent,
         pins = LazyProf.Pathfinder:GetPins(path.professionKey),
+        includeLearn = true,
+        liveCap = liveCap,
     })
     local brackets = Utils.BuildSkillBrackets(path.milestones or {})
     local Range = LazyProf.GuideRange
@@ -107,12 +126,6 @@ function GuideWindow:ComputeView()
         view.missing = self:Missing(view)
     end
 
-    -- The open profession's cap, as its window reports it
-    if self.mode == "live" then
-        local _, _, cap = LazyProf.Client:GetLine()
-        view.cap = cap
-    end
-
     local pm = LazyProf.PriceManager
     if pm and pm.PathSummary then
         view.priceSummary = pm:PathSummary(path)
@@ -120,13 +133,12 @@ function GuideWindow:ComputeView()
     end
 
     -- The next recipe is unlearned and the profession window hides unlearned
-    -- recipes, so the arrow has no row to point at: say where to learn it.
+    -- recipes, so the arrow has no row to point at: its learn step says so.
     if self.mode == "live" then
         local step = LazyProf.Pathfinder:GetArrowStep(path)
         local recipe = step and step.recipe
         if recipe and not recipe.learned and LazyProf.Client:UnlearnedHiddenByFilter() then
-            view.hint = "Next recipe is not learned yet - learn it from " .. Utils.GetSourceDescription(recipe.source)
-            view.hintStep = step
+            view.hiddenRecipeId = recipe.id
         end
     end
     return view
@@ -574,23 +586,6 @@ function GuideWindow:TabRows()
         return Views.SearchResults(Views.SearchRecipes(prof and prof.recipes or {}, self.search), ctx)
     else
         rows = Views.Steps(view, ctx)
-    end
-    if view.hint then
-        local step = view.hintStep
-        table.insert(rows, 1, {
-            kind = "line", text = view.hint, color = { 1, 0.53, 0 },
-            bg = { 0.2, 0.15, 0, 0.3 }, hoverBg = { 0.3, 0.25, 0.1, 0.5 },
-            tooltip = {
-                { text = view.hint, r = 1, g = 0.53, b = 0 },
-                { text = "The profession window hides unlearned recipes, so the arrow cannot point at it.", r = 0.7, g = 0.7, b = 0.7 },
-                { text = "Click for details", r = 1, g = 1, b = 1 },
-            },
-            onClick = function()
-                if LazyProf.RecipeDetails then
-                    LazyProf.RecipeDetails:Toggle(step.recipe, math.floor(step.skillStart or 0))
-                end
-            end,
-        })
     end
     return rows
 end

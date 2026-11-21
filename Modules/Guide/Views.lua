@@ -253,6 +253,33 @@ local function GapTooltip(stage)
     return lines
 end
 
+local LEARN_COLOR = { 1, 0.75, 0.3 }
+
+-- One line for a learn or rank step (lists and "next" rows).
+function Views.StepRow(stage, view, ctx)
+    local row = {
+        kind = "line", stage = stage, lead = Text.StageRange(stage), leadWidth = 74,
+        bg = BG_ROW, hoverBg = BG_ROW_HOVER, alpha = stage.done and 0.5 or 1,
+        onClick = ctx.onOpenStage and function() ctx.onOpenStage(stage) end or nil,
+    }
+    if stage.kind == "learn" then
+        local short = Text.LearnShort(stage, view.profile)
+        row.text = Grey("learn") .. "  " .. (stage.recipe.name or "Unknown") .. (short and (" - " .. short) or "")
+        row.color = LEARN_COLOR
+        row.right = stage.fee > 0 and Money(stage.fee) or ""
+        row.tooltip = { { text = "Learn " .. (stage.recipe.name or "the recipe"), r = 1, g = 1, b = 1 } }
+        for _, line in ipairs(Text.LearnLines(stage, view.profile, view.path and view.path.profession)) do
+            row.tooltip[#row.tooltip + 1] = { text = line.text, r = 0.7, g = 0.7, b = 0.7 }
+        end
+    else
+        row.text = Grey("train") .. "  " .. Text.RankShort(stage)
+        row.color = GOLD
+        row.tooltip = { { text = Text.RankLine(stage, view.liveCap, view.path and view.path.profession,
+            view.path and view.path.hasProfession), r = 1, g = 1, b = 1 } }
+    end
+    return row
+end
+
 -- "> 143-165" for the current stage, "143-165" otherwise.
 local function Lead(stage)
     return (stage.current and "> " or "") .. Text.StageRange(stage)
@@ -298,6 +325,11 @@ function Views.Steps(view, ctx)
                 tooltip = GapTooltip(stage),
                 onClick = ctx.onOpenStage and function() ctx.onOpenStage(stage) end or nil,
             }
+        elseif stage.kind == "learn" or stage.kind == "rank" then
+            local row = Views.StepRow(stage, view, ctx)
+            row.lead = Lead(stage)
+            row.bg, row.hoverBg = bg, hover
+            rows[#rows + 1] = row
         end
     end
     return rows
@@ -506,7 +538,11 @@ local function AlternativeRow(stage, alt, ctx)
 end
 
 -- One-line row for a stage (the "next" rows under the card, and the list).
-local function CompactRow(stage, ctx, lead)
+local function CompactRow(stage, ctx, view)
+    if stage.kind == "learn" or stage.kind == "rank" then
+        return Views.StepRow(stage, view, ctx)
+    end
+    local lead = nil
     local row = {
         kind = "line", stage = stage, lead = lead or Text.StageRange(stage), leadWidth = 74,
         bg = BG_ROW, hoverBg = BG_ROW_HOVER, alpha = stage.done and 0.5 or 1,
@@ -541,7 +577,8 @@ function Views.GuideCard(view, ctx)
     local rows = {}
     local state = stage.done and " (done)" or (stage.current and " (current step)" or "")
     rows[#rows + 1] = { kind = "line", font = "GameFontNormalSmall", color = GOLD,
-        text = string.format("Step %d of %d - %s%s", stage.index, #stages, stage.kind, state) }
+        text = string.format("Step %d of %d - %s%s", stage.index, #stages,
+            stage.kind == "rank" and "train" or stage.kind, state) }
 
     if stage.kind == "craft" then
         local recipe = stage.recipe
@@ -609,12 +646,41 @@ function Views.GuideCard(view, ctx)
         for _, text in ipairs(Views.GAP_TOOLTIP) do
             rows[#rows + 1] = { kind = "line", wrap = true, color = GREY, text = text }
         end
+    elseif stage.kind == "learn" then
+        local recipe = stage.recipe
+        local icon
+        if recipe.itemId then
+            local _, _, itemIcon = Utils.GetItemInfo(recipe.itemId)
+            icon = itemIcon
+        end
+        rows[#rows + 1] = {
+            kind = "line", height = 26, font = "GameFontNormalLarge", icon = icon or QUESTION_MARK,
+            text = "Learn " .. (recipe.name or "the recipe"), color = LEARN_COLOR,
+            right = "at " .. tostring(stage.at), rightColor = GOLD, hoverBg = BG_ROW_HOVER,
+            tooltip = { { text = "Click for recipe details", r = 0.5, g = 0.5, b = 0.5 } },
+            onClick = function() ctx.onShowRecipe(recipe, stage.at) end,
+        }
+        local LINE_COLOR = { plain = WHITE, good = GREEN, warn = { 1, 0.3, 0.3 }, cost = GOLD }
+        for _, line in ipairs(Text.LearnLines(stage, view.profile, path and path.profession)) do
+            rows[#rows + 1] = { kind = "line", wrap = true, text = line.text, color = LINE_COLOR[line.color] or WHITE }
+        end
+        -- The profession window's filter hides unlearned recipes, so the arrow
+        -- has no row to point at for this one.
+        if view.hiddenRecipeId and view.hiddenRecipeId == recipe.id then
+            rows[#rows + 1] = { kind = "line", wrap = true, color = ORANGE,
+                text = "The profession window hides unlearned recipes, so the arrow cannot point at this one until you learn it." }
+        end
+    elseif stage.kind == "rank" then
+        rows[#rows + 1] = { kind = "line", height = 26, font = "GameFontNormalLarge", color = GOLD,
+            text = "Train the next rank", right = "before " .. tostring(stage.cap), rightColor = GOLD }
+        rows[#rows + 1] = { kind = "line", wrap = true, color = WHITE,
+            text = Text.RankLine(stage, view.liveCap, path and path.profession, path and path.hasProfession) }
     end
 
     -- The next two stages
     local nextRows = {}
     for i = stage.index + 1, math.min(stage.index + 2, #stages) do
-        nextRows[#nextRows + 1] = CompactRow(stages[i], ctx)
+        nextRows[#nextRows + 1] = CompactRow(stages[i], ctx, view)
     end
     if #nextRows > 0 then
         rows[#rows + 1] = { kind = "sep" }

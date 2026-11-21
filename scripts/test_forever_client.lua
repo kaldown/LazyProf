@@ -194,7 +194,7 @@ local function loadAdapter(interface, projectId, camelot)
 end
 
 local SURFACE = { "IsOpen", "AnchorFrame", "PanelOffsetX", "GetLine", "NoDataProfessionName",
-                  "KnownRecipeIds", "PlayerSkill", "GetItemInfo", "FindRecipeRow", "InvalidateRowCache",
+                  "KnownRecipeIds", "PlayerSkill", "ProfessionRank", "GetItemInfo", "FindRecipeRow", "InvalidateRowCache",
                   "UnlearnedHiddenByFilter", "Start", "RunDiagnostic" }
 
 -- Names of the functions an adapter installs.
@@ -344,6 +344,14 @@ section("forever", function()
     check(p .. "PlayerSkill cooking -> 40", Client:PlayerSkill("cooking") == 40)
     check(p .. "PlayerSkill not trained -> 0", Client:PlayerSkill("tailoring") == 0)
     check(p .. "PlayerSkill unknown key -> 0", Client:PlayerSkill("nope") == 0)
+
+    -- Rank and cap with the profession window closed (3rd and 4th returns).
+    local rank, cap = Client:ProfessionRank("alchemy")
+    check(p .. "ProfessionRank alchemy -> 152 of 225", rank == 152 and cap == 225, tostring(rank) .. "/" .. tostring(cap))
+    rank, cap = Client:ProfessionRank("cooking")
+    check(p .. "ProfessionRank cooking -> 40 of 75", rank == 40 and cap == 75)
+    rank, cap = Client:ProfessionRank("tailoring")
+    check(p .. "ProfessionRank not trained -> 0, no cap", rank == 0 and cap == nil)
 
     -- Items through C_Item.
     itemCalls = {}
