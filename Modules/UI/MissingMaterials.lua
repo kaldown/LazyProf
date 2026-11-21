@@ -79,6 +79,9 @@ function MissingPanel:Initialize()
     self.frame.content:SetSize(DEFAULT_WIDTH - 40, 300)
     self.frame.scrollFrame:SetScrollChild(self.frame.content)
 
+    -- Row frames, one pool per row kind, reused by every update
+    self:CreateRowPools()
+
     -- Total bar at bottom
     self.frame.totalBg = self.frame:CreateTexture(nil, "ARTWORK")
     self.frame.totalBg:SetTexture("Interface\\Buttons\\WHITE8x8")
@@ -164,11 +167,8 @@ function MissingPanel:Update(missingMaterials, bracketLabel)
         return
     end
 
-    -- Clear existing rows
-    for _, row in ipairs(self.rows) do
-        row:Hide()
-    end
-    self.rows = {}
+    -- Take back every row frame; this update reuses them
+    self:ReleaseRows()
 
     local fromBank = missingMaterials and missingMaterials.fromBank or {}
     local fromMail = missingMaterials and missingMaterials.fromMail or {}
@@ -289,16 +289,64 @@ function MissingPanel:Update(missingMaterials, bracketLabel)
     self:Show()
 end
 
--- Create a section header row
-function MissingPanel:CreateSectionHeader(text, yOffset, contentWidth)
-    local row = CreateFrame("Frame", nil, self.frame.content)
-    row:SetSize(contentWidth, ROW_HEIGHT)
-    row:SetPoint("TOPLEFT", 0, -yOffset)
+-- Row pools -------------------------------------------------------------------
+-- Each row kind has its own pool: Build<Kind> makes a frame's regions and
+-- their fixed layout once; Create<Kind> takes a frame from the pool and sets
+-- every value it shows (size, point, texts, colours, icon, scripts), so a
+-- reused frame never keeps anything from its previous use.
 
+local ROW_BUILDERS = {
+    header = "BuildSectionHeader",
+    material = "BuildMaterialRow",
+    altMaterial = "BuildAltMaterialRow",
+    craft = "BuildCraftRow",
+    craftSub = "BuildCraftSubRow",
+}
+
+local BUTTON_KINDS = { material = true, altMaterial = true, craft = true }
+
+-- Released button rows drop their handlers (the next use sets new ones).
+local function ClearButtonScripts(row)
+    row:SetScript("OnClick", nil)
+    row:SetScript("OnEnter", nil)
+    row:SetScript("OnLeave", nil)
+end
+
+function MissingPanel:CreateRowPools()
+    local RowPool = LazyProf.Widgets.RowPool
+    self.rowPools = {}
+    for kind, builder in pairs(ROW_BUILDERS) do
+        self.rowPools[kind] = RowPool.New(function()
+            return self[builder](self)
+        end, BUTTON_KINDS[kind] and ClearButtonScripts or nil)
+    end
+end
+
+-- Take back every row of the last update.
+function MissingPanel:ReleaseRows()
+    for _, pool in pairs(self.rowPools) do
+        pool:ReleaseAll()
+    end
+    self.rows = {}
+end
+
+function MissingPanel:AcquireRow(kind)
+    return self.rowPools[kind]:Acquire()
+end
+
+-- Section header row
+function MissingPanel:BuildSectionHeader()
+    local row = CreateFrame("Frame", nil, self.frame.content)
     row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     row.text:SetPoint("LEFT", 4, 0)
-    row.text:SetText("|cFFFFD100" .. text .. "|r")
+    return row
+end
 
+function MissingPanel:CreateSectionHeader(text, yOffset, contentWidth)
+    local row = self:AcquireRow("header")
+    row:SetSize(contentWidth, ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -yOffset)
+    row.text:SetText("|cFFFFD100" .. text .. "|r")
     row:Show()
     return row
 end
@@ -339,42 +387,48 @@ local ROW_STYLES = {
     },
 }
 
--- Create a material row
--- rowType: "bank", "mail", "auctions", "guildBank", "ah"
-function MissingPanel:CreateMaterialRow(mat, yOffset, contentWidth, rowType)
+-- Material row
+function MissingPanel:BuildMaterialRow()
     local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
-    row:SetSize(contentWidth, ROW_HEIGHT)
-    row:SetPoint("TOPLEFT", 0, -yOffset)
-
     row:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
     })
-    row:SetBackdropColor(0.15, 0.15, 0.15, 0.5)
-
-    local style = ROW_STYLES[rowType] or ROW_STYLES.ah
 
     -- Icon
     row.icon = row:CreateTexture(nil, "ARTWORK")
     row.icon:SetSize(18, 18)
     row.icon:SetPoint("LEFT", 4, 0)
-    row.icon:SetTexture(mat.icon)
 
     -- Count and name
     row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     row.text:SetPoint("LEFT", 26, 0)
     row.text:SetPoint("RIGHT", row, "RIGHT", -80, 0)
     row.text:SetJustifyH("LEFT")
-    local displayText = string.format("%s%dx|r %s", style.color, mat.missing, mat.name or "Unknown")
 
+    -- Cost (only for AH items)
+    row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.cost:SetPoint("RIGHT", -8, 0)
+    return row
+end
+
+-- rowType: "bank", "mail", "auctions", "guildBank", "ah"
+function MissingPanel:CreateMaterialRow(mat, yOffset, contentWidth, rowType)
+    local row = self:AcquireRow("material")
+    row:SetSize(contentWidth, ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -yOffset)
+    row:SetBackdropColor(0.15, 0.15, 0.15, 0.5)
+
+    local style = ROW_STYLES[rowType] or ROW_STYLES.ah
+
+    row.icon:SetTexture(mat.icon)
+
+    local displayText = string.format("%s%dx|r %s", style.color, mat.missing, mat.name or "Unknown")
     -- Add purpose annotation for bank items (e.g., "for smelting")
     if rowType == "bank" and mat.purpose then
         displayText = displayText .. string.format(" |cFF888888(%s)|r", mat.purpose)
     end
     row.text:SetText(displayText)
 
-    -- Cost (only for AH items)
-    row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    row.cost:SetPoint("RIGHT", -8, 0)
     if style.showCost then
         if mat.estimatedCost and mat.estimatedCost > 0 then
             row.cost:SetText(Utils.FormatMoney(mat.estimatedCost))
@@ -420,21 +474,32 @@ function MissingPanel:CreateMaterialRow(mat, yOffset, contentWidth, rowType)
     return row
 end
 
--- Create a material row for alt items (shows character name)
-function MissingPanel:CreateAltMaterialRow(mat, yOffset, contentWidth)
+-- Material row for alt items (shows character name)
+function MissingPanel:BuildAltMaterialRow()
     local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
-    row:SetSize(contentWidth, ROW_HEIGHT)
-    row:SetPoint("TOPLEFT", 0, -yOffset)
-
     row:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
     })
-    row:SetBackdropColor(0.15, 0.15, 0.15, 0.5)
 
     -- Icon
     row.icon = row:CreateTexture(nil, "ARTWORK")
     row.icon:SetSize(18, 18)
     row.icon:SetPoint("LEFT", 4, 0)
+
+    -- Count and name (purple for alts)
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.text:SetPoint("LEFT", 26, 0)
+    row.text:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+    row.text:SetJustifyH("LEFT")
+    return row
+end
+
+function MissingPanel:CreateAltMaterialRow(mat, yOffset, contentWidth)
+    local row = self:AcquireRow("altMaterial")
+    row:SetSize(contentWidth, ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -yOffset)
+    row:SetBackdropColor(0.15, 0.15, 0.15, 0.5)
+
     row.icon:SetTexture(mat.icon)
 
     -- Build character list string
@@ -446,11 +511,6 @@ function MissingPanel:CreateAltMaterialRow(mat, yOffset, contentWidth)
     end
     local charString = table.concat(charList, ", ")
 
-    -- Count and name (purple for alts)
-    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    row.text:SetPoint("LEFT", 26, 0)
-    row.text:SetPoint("RIGHT", row, "RIGHT", -8, 0)
-    row.text:SetJustifyH("LEFT")
     local displayText = string.format("|cFFCC99FF%dx|r %s |cFF888888(%s)|r",
         mat.missing, mat.name or "Unknown", charString)
     row.text:SetText(displayText)
@@ -488,24 +548,20 @@ function MissingPanel:CreateAltMaterialRow(mat, yOffset, contentWidth)
     return row
 end
 
--- Create a craft row for "To Craft" section
+-- Craft row for "To Craft" section
 -- Format: 46x Fel Iron Bar (Smelt Fel Iron: 92x Fel Iron Ore)
-function MissingPanel:CreateCraftRow(craft, yOffset, contentWidth)
+function MissingPanel:BuildCraftRow()
     local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
-    row:SetSize(contentWidth, ROW_HEIGHT)
-    row:SetPoint("TOPLEFT", 0, -yOffset)
 
     -- Row background for hover
     row:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
     })
-    row:SetBackdropColor(0.15, 0.15, 0.15, 0.5)
 
     -- Icon
     row.icon = row:CreateTexture(nil, "ARTWORK")
     row.icon:SetSize(18, 18)
     row.icon:SetPoint("LEFT", 4, 0)
-    row.icon:SetTexture(craft.icon)
 
     -- Text: "46x Fel Iron Bar (Smelt Fel Iron: 92x Fel Iron Ore)"
     row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -513,15 +569,26 @@ function MissingPanel:CreateCraftRow(craft, yOffset, contentWidth)
     row.text:SetPoint("RIGHT", row, "RIGHT", -80, 0)
     row.text:SetJustifyH("LEFT")
 
+    -- Cost
+    row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.cost:SetPoint("RIGHT", -8, 0)
+    return row
+end
+
+function MissingPanel:CreateCraftRow(craft, yOffset, contentWidth)
+    local row = self:AcquireRow("craft")
+    row:SetSize(contentWidth, ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -yOffset)
+    row:SetBackdropColor(0.15, 0.15, 0.15, 0.5)
+
+    row.icon:SetTexture(craft.icon)
+
     local displayText = string.format("|cFF66CCFF%dx|r %s", craft.quantity, craft.name or "Unknown")
     if craft.recipeName and craft.sourceDesc then
         displayText = displayText .. string.format(" |cFFAAAAAA(%s: %s)|r", craft.recipeName, craft.sourceDesc)
     end
     row.text:SetText(displayText)
 
-    -- Cost
-    row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    row.cost:SetPoint("RIGHT", -8, 0)
     if craft.craftCost and craft.craftCost > 0 then
         row.cost:SetText(Utils.FormatMoney(craft.craftCost))
     else
@@ -562,20 +629,22 @@ function MissingPanel:CreateCraftRow(craft, yOffset, contentWidth)
     return row
 end
 
--- Create a sub-row showing material breakdown: "└─ Using: 50x from bank + 42x from AH"
-function MissingPanel:CreateCraftSubRow(craft, yOffset, contentWidth)
+-- Sub-row showing material breakdown: "- Using: 50x from bank + 42x from AH"
+function MissingPanel:BuildCraftSubRow()
     local row = CreateFrame("Frame", nil, self.frame.content)
-    row:SetSize(contentWidth, ROW_HEIGHT)
-    row:SetPoint("TOPLEFT", 0, -yOffset)
-
     row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     row.text:SetPoint("LEFT", 26, 0)
     row.text:SetJustifyH("LEFT")
     row.text:SetTextColor(0.6, 0.6, 0.6)
+    return row
+end
 
+function MissingPanel:CreateCraftSubRow(craft, yOffset, contentWidth)
+    local row = self:AcquireRow("craftSub")
+    row:SetSize(contentWidth, ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -yOffset)
     local usingText = craft.usingDesc or ""
-    row.text:SetText(string.format("    \226\148\148\226\148\128 Using: %s", usingText))
-
+    row.text:SetText(string.format("    - Using: %s", usingText))
     row:Show()
     return row
 end

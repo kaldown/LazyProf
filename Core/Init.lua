@@ -729,115 +729,92 @@ function LazyProf:CreateDebugFrame()
     frame.closeBtn:SetPoint("TOPRIGHT", -2, -2)
 
     -- Filter dropdown
-    frame.filterDropdown = CreateFrame("Frame", "LazyProfDebugFilterDropdown", frame, "UIDropDownMenuTemplate")
+    local Widgets = self.Widgets
+    frame.filterDropdown = Widgets.CreateDropdown(frame, "LazyProfDebugFilterDropdown", 150)
     frame.filterDropdown:SetPoint("TOPLEFT", 100, -3)
-    UIDropDownMenu_SetWidth(frame.filterDropdown, 150)
 
-    local function FilterDropdown_Initialize(dropdown, level)
-        local info = UIDropDownMenu_CreateInfo()
-
-        -- "All Categories" option
-        info.text = "All Categories"
-        info.value = nil
-        info.checked = (LazyProf.debugFilter == nil)
-        info.func = function()
-            LazyProf.debugFilter = nil
-            UIDropDownMenu_SetText(dropdown, "All Categories")
+    local categories = {"scoring", "pathfinder", "ui", "professions", "pricing", "arrow"}
+    frame.filterDropdown:SetOptions(function()
+        -- "All Categories", a separator, then each category
+        local options = {
+            { text = "All Categories", value = nil, checked = (LazyProf.debugFilter == nil) },
+            { separator = true },
+        }
+        for _, cat in ipairs(categories) do
+            table.insert(options, {
+                text = LazyProf.debugCategoryNames[cat],
+                value = cat,
+                checked = (LazyProf.debugFilter == cat),
+            })
+        end
+        return options
+    end, function(cat)
+        LazyProf.debugFilter = cat
+        if cat == nil then
+            frame.filterDropdown:SetText("All Categories")
             LazyProf.debugScoringBracket = nil
             if frame.bracketDropdown then
                 frame.bracketDropdown:Hide()
-                UIDropDownMenu_SetText(frame.bracketDropdown, "All Skill Levels")
+                frame.bracketDropdown:SetText("All Skill Levels")
             end
             LazyProf:UpdateDebugWindowContent()
+            return
         end
-        UIDropDownMenu_AddButton(info, level)
 
-        -- Separator
-        info = UIDropDownMenu_CreateInfo()
-        info.disabled = true
-        info.notCheckable = true
-        UIDropDownMenu_AddButton(info, level)
-
-        -- Category options
-        local categories = {"scoring", "pathfinder", "ui", "professions", "pricing", "arrow"}
-        for _, cat in ipairs(categories) do
-            info = UIDropDownMenu_CreateInfo()
-            info.text = LazyProf.debugCategoryNames[cat]
-            info.value = cat
-            info.checked = (LazyProf.debugFilter == cat)
-            info.func = function()
-                LazyProf.debugFilter = cat
-                UIDropDownMenu_SetText(dropdown, LazyProf.debugCategoryNames[cat])
-                if frame.bracketDropdown then
-                    if cat == "scoring" then
-                        -- Auto-select bracket matching current skill level
-                        local autoIndex = nil
-                        local brackets = LazyProf:GetSkillBrackets()
-                        local path = LazyProf.Pathfinder and LazyProf.Pathfinder.currentPath
-                        if path and path.currentSkill then
-                            for i, bracket in ipairs(brackets) do
-                                if path.currentSkill >= bracket.min and path.currentSkill < bracket.max then
-                                    autoIndex = i
-                                    break
-                                end
-                            end
+        frame.filterDropdown:SetText(LazyProf.debugCategoryNames[cat])
+        if frame.bracketDropdown then
+            if cat == "scoring" then
+                -- Auto-select bracket matching current skill level
+                local autoIndex = nil
+                local brackets = LazyProf:GetSkillBrackets()
+                local path = LazyProf.Pathfinder and LazyProf.Pathfinder.currentPath
+                if path and path.currentSkill then
+                    for i, bracket in ipairs(brackets) do
+                        if path.currentSkill >= bracket.min and path.currentSkill < bracket.max then
+                            autoIndex = i
+                            break
                         end
-                        LazyProf.debugScoringBracket = autoIndex
-                        if autoIndex then
-                            UIDropDownMenu_SetText(frame.bracketDropdown, brackets[autoIndex].name)
-                        else
-                            UIDropDownMenu_SetText(frame.bracketDropdown, "All Skill Levels")
-                        end
-                        frame.bracketDropdown:Show()
-                    else
-                        frame.bracketDropdown:Hide()
-                        LazyProf.debugScoringBracket = nil
-                        UIDropDownMenu_SetText(frame.bracketDropdown, "All Skill Levels")
                     end
                 end
-                LazyProf:UpdateDebugWindowContent()
+                LazyProf.debugScoringBracket = autoIndex
+                if autoIndex then
+                    frame.bracketDropdown:SetText(brackets[autoIndex].name)
+                else
+                    frame.bracketDropdown:SetText("All Skill Levels")
+                end
+                frame.bracketDropdown:Show()
+            else
+                frame.bracketDropdown:Hide()
+                LazyProf.debugScoringBracket = nil
+                frame.bracketDropdown:SetText("All Skill Levels")
             end
-            UIDropDownMenu_AddButton(info, level)
         end
-    end
-
-    UIDropDownMenu_Initialize(frame.filterDropdown, FilterDropdown_Initialize)
-    UIDropDownMenu_SetText(frame.filterDropdown, "All Categories")
+        LazyProf:UpdateDebugWindowContent()
+    end)
+    frame.filterDropdown:SetText("All Categories")
 
     -- Skill bracket dropdown (visible only when Pathfinder Scoring filter is active)
-    frame.bracketDropdown = CreateFrame("Frame", "LazyProfDebugBracketDropdown", frame, "UIDropDownMenuTemplate")
+    frame.bracketDropdown = Widgets.CreateDropdown(frame, "LazyProfDebugBracketDropdown", 150)
     frame.bracketDropdown:SetPoint("LEFT", frame.filterDropdown, "RIGHT", -15, 0)
-    UIDropDownMenu_SetWidth(frame.bracketDropdown, 150)
 
-    local function BracketDropdown_Initialize(dropdown, level)
-        local info = UIDropDownMenu_CreateInfo()
-
-        info.text = "All Skill Levels"
-        info.value = nil
-        info.checked = (LazyProf.debugScoringBracket == nil)
-        info.func = function()
-            LazyProf.debugScoringBracket = nil
-            UIDropDownMenu_SetText(dropdown, "All Skill Levels")
-            LazyProf:UpdateDebugWindowContent()
-        end
-        UIDropDownMenu_AddButton(info, level)
-
+    frame.bracketDropdown:SetOptions(function()
+        local options = {
+            { text = "All Skill Levels", value = nil, checked = (LazyProf.debugScoringBracket == nil) },
+        }
         for i, bracket in ipairs(LazyProf:GetSkillBrackets()) do
-            info = UIDropDownMenu_CreateInfo()
-            info.text = bracket.name
-            info.value = i
-            info.checked = (LazyProf.debugScoringBracket == i)
-            info.func = function()
-                LazyProf.debugScoringBracket = i
-                UIDropDownMenu_SetText(dropdown, bracket.name)
-                LazyProf:UpdateDebugWindowContent()
-            end
-            UIDropDownMenu_AddButton(info, level)
+            table.insert(options, {
+                text = bracket.name,
+                value = i,
+                checked = (LazyProf.debugScoringBracket == i),
+            })
         end
-    end
-
-    UIDropDownMenu_Initialize(frame.bracketDropdown, BracketDropdown_Initialize)
-    UIDropDownMenu_SetText(frame.bracketDropdown, "All Skill Levels")
+        return options
+    end, function(index, option)
+        LazyProf.debugScoringBracket = index
+        frame.bracketDropdown:SetText(option.text)
+        LazyProf:UpdateDebugWindowContent()
+    end)
+    frame.bracketDropdown:SetText("All Skill Levels")
     frame.bracketDropdown:Hide()
 
     -- Message count display

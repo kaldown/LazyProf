@@ -10,13 +10,6 @@ local FORBIDDEN = {
     "C_Item.GetItemInfo",
 }
 
--- TEMPORARY: files that still build UIDropDownMenu dropdowns. Removed when the
--- dropdown widget lands; only the UIDropDownMenu name is exempt for them.
-local DROPDOWN_ALLOWLIST = {
-    ["Core/Init.lua"] = true,
-    ["Modules/UI/MilestoneBreakdown.lua"] = true,
-}
-
 local EXEMPT_DIRS = { "Core/Client/", "Modules/UI/Widgets/" }
 
 local function strip_comment(line)
@@ -77,9 +70,7 @@ for _, path in ipairs(files) do
             local line = strip_comment(raw)
             for _, name in ipairs(FORBIDDEN) do
                 if line:find(name, 1, true) then
-                    if not (name == "UIDropDownMenu" and DROPDOWN_ALLOWLIST[path]) then
-                        offenders[#offenders + 1] = string.format("%s:%d: %s", path, n, name)
-                    end
+                    offenders[#offenders + 1] = string.format("%s:%d: %s", path, n, name)
                 end
             end
             if hasBareGetItemInfo(line) then

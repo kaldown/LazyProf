@@ -235,6 +235,9 @@ function MilestonePanelClass:Initialize()
     self.frame.content:SetSize(DEFAULT_WIDTH - 40, 400)
     self.frame.scrollFrame:SetScrollChild(self.frame.content)
 
+    -- Row frames, one pool per row kind, reused by every update
+    self:CreateRowPools()
+
     -- Total cost bar at bottom
     self.frame.totalBg = self.frame:CreateTexture(nil, "ARTWORK")
     self.frame.totalBg:SetTexture("Interface\\Buttons\\WHITE8x8")
@@ -311,61 +314,45 @@ function MilestonePanelClass:FilterBreakdownByBracket(breakdown)
     return filtered
 end
 
+-- Bracket filter options: "Current Bracket" (auto-detect), each bracket, "Full Path"
+function MilestonePanelClass:BracketOptions()
+    local options = {
+        { text = "Current Bracket", value = "current", checked = (self.selectedBracketIndex == nil) },
+    }
+    for i, bracket in ipairs(LazyProf:GetSkillBrackets()) do
+        table.insert(options, { text = bracket.name, value = i, checked = (self.selectedBracketIndex == i) })
+    end
+    table.insert(options, { text = "Full Path", value = "all", checked = (self.selectedBracketIndex == "all") })
+    return options
+end
+
+-- A bracket option was picked ("current", a bracket index, or "all")
+function MilestonePanelClass:SelectBracket(value)
+    if value == "current" then
+        self.selectedBracketIndex = nil
+    else
+        self.selectedBracketIndex = value
+    end
+    self.frame.bracketDropdown:SetText(self:GetBracketLabel())
+    self:Refresh()
+end
+
 -- Create the bracket filter dropdown
 function MilestonePanelClass:CreateBracketDropdown(frameName, config)
-    local dropdownName = frameName .. "BracketDropdown"
-    self.frame.bracketDropdown = CreateFrame("Frame", dropdownName, self.frame, "UIDropDownMenuTemplate")
+    local dropdown = LazyProf.Widgets.CreateDropdown(self.frame, frameName .. "BracketDropdown", 160)
+    self.frame.bracketDropdown = dropdown
     if self.config.embedded then
-        self.frame.bracketDropdown:SetPoint("TOPLEFT", -8, 0)
+        dropdown:SetPoint("TOPLEFT", -8, 0)
     else
-        self.frame.bracketDropdown:SetPoint("TOPLEFT", -8, -26)
+        dropdown:SetPoint("TOPLEFT", -8, -26)
     end
-    UIDropDownMenu_SetWidth(self.frame.bracketDropdown, 160)
 
     local panel = self
-    local function BracketDropdown_Initialize(dropdown, level)
-        local info = UIDropDownMenu_CreateInfo()
-
-        -- "Current Bracket" option (auto-detect)
-        info.text = "Current Bracket"
-        info.value = "current"
-        info.checked = (panel.selectedBracketIndex == nil)
-        info.func = function()
-            panel.selectedBracketIndex = nil
-            UIDropDownMenu_SetText(dropdown, panel:GetBracketLabel())
-            panel:Refresh()
-        end
-        UIDropDownMenu_AddButton(info, level)
-
-        -- Individual brackets
-        for i, bracket in ipairs(LazyProf:GetSkillBrackets()) do
-            info = UIDropDownMenu_CreateInfo()
-            info.text = bracket.name
-            info.value = i
-            info.checked = (panel.selectedBracketIndex == i)
-            info.func = function()
-                panel.selectedBracketIndex = i
-                UIDropDownMenu_SetText(dropdown, panel:GetBracketLabel())
-                panel:Refresh()
-            end
-            UIDropDownMenu_AddButton(info, level)
-        end
-
-        -- "Full Path" option
-        info = UIDropDownMenu_CreateInfo()
-        info.text = "Full Path"
-        info.value = "all"
-        info.checked = (panel.selectedBracketIndex == "all")
-        info.func = function()
-            panel.selectedBracketIndex = "all"
-            UIDropDownMenu_SetText(dropdown, "Full Path")
-            panel:Refresh()
-        end
-        UIDropDownMenu_AddButton(info, level)
-    end
-
-    UIDropDownMenu_Initialize(self.frame.bracketDropdown, BracketDropdown_Initialize)
-    UIDropDownMenu_SetText(self.frame.bracketDropdown, self:GetBracketLabel())
+    dropdown:SetOptions(
+        function() return panel:BracketOptions() end,
+        function(value) panel:SelectBracket(value) end
+    )
+    dropdown:SetText(self:GetBracketLabel())
 end
 
 -- Create the mode toggle button (Cheapest/Fastest)
@@ -501,11 +488,8 @@ function MilestonePanelClass:Update(path)
         return
     end
 
-    -- Clear existing rows
-    for _, row in ipairs(self.rows) do
-        row:Hide()
-    end
-    self.rows = {}
+    -- Take back every row frame; this update reuses them
+    self:ReleaseRows()
 
     local fullBreakdown = path and path.milestoneBreakdown or {}
     local fullGaps = path and path.gaps or {}
@@ -526,7 +510,7 @@ function MilestonePanelClass:Update(path)
 
     -- Update bracket dropdown text
     if self.frame.bracketDropdown then
-        UIDropDownMenu_SetText(self.frame.bracketDropdown, self:GetBracketLabel())
+        self.frame.bracketDropdown:SetText(self:GetBracketLabel())
     end
 
     -- Update mode toggle text
@@ -554,14 +538,7 @@ function MilestonePanelClass:Update(path)
 
     -- Handle empty bracket
     if #breakdown == 0 and #gaps == 0 then
-        local emptyRow = CreateFrame("Frame", nil, self.frame.content)
-        emptyRow:SetSize(contentWidth, STEP_ROW_HEIGHT)
-        emptyRow:SetPoint("TOPLEFT", 0, 0)
-        emptyRow.text = emptyRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        emptyRow.text:SetPoint("CENTER", 0, 0)
-        emptyRow.text:SetText("No steps in " .. (bracket and bracket.name or "this bracket"))
-        emptyRow.text:SetTextColor(0.5, 0.5, 0.5)
-        emptyRow:Show()
+        local emptyRow = self:CreateEmptyRow(bracket, contentWidth)
         table.insert(self.rows, emptyRow)
         yOffset = STEP_ROW_HEIGHT
 
@@ -746,29 +723,128 @@ function MilestonePanelClass:Update(path)
     self:UpdateShoppingList(path, breakdown, bracket)
 end
 
--- Create a step row (single recipe step)
-function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
-    local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
+-- Row pools -------------------------------------------------------------------
+-- Each row kind has its own pool: Build<Kind> makes a frame's regions and
+-- their fixed layout once; Create<Kind> takes a frame from the pool and sets
+-- every value it shows (size, point, texts, colours, icon, alpha, scripts),
+-- so a reused frame never keeps anything from its previous use. Hover
+-- colours are reset there too, in case a row was released while hovered.
+
+local ROW_BUILDERS = {
+    empty = "BuildEmptyRow",
+    step = "BuildStepRow",
+    gap = "BuildGapRow",
+    unlearned = "BuildUnlearnedIndicator",
+    separator = "BuildMilestoneSeparator",
+    ingredient = "BuildIngredientRow",
+    altSpoiler = "BuildAlternativesSpoiler",
+    altGroup = "BuildAltGroupHeader",
+    alternative = "BuildAlternativeRow",
+}
+
+-- Released button rows drop their handlers (the next use sets new ones).
+local function ClearButtonScripts(row)
+    row:SetScript("OnClick", nil)
+    row:SetScript("OnEnter", nil)
+    row:SetScript("OnLeave", nil)
+    if row.pinBtn then
+        ClearButtonScripts(row.pinBtn)
+    end
+end
+
+local BUTTON_KINDS = {
+    step = true, gap = true, unlearned = true, ingredient = true,
+    altSpoiler = true, altGroup = true, alternative = true,
+}
+
+function MilestonePanelClass:CreateRowPools()
+    local RowPool = LazyProf.Widgets.RowPool
+    self.rowPools = {}
+    for kind, builder in pairs(ROW_BUILDERS) do
+        self.rowPools[kind] = RowPool.New(function()
+            return self[builder](self)
+        end, BUTTON_KINDS[kind] and ClearButtonScripts or nil)
+    end
+end
+
+-- Take back every row of the last update.
+function MilestonePanelClass:ReleaseRows()
+    for _, pool in pairs(self.rowPools) do
+        pool:ReleaseAll()
+    end
+    self.rows = {}
+end
+
+function MilestonePanelClass:AcquireRow(kind)
+    return self.rowPools[kind]:Acquire()
+end
+
+-- "No steps in <bracket>" row
+function MilestonePanelClass:BuildEmptyRow()
+    local row = CreateFrame("Frame", nil, self.frame.content)
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    row.text:SetPoint("CENTER", 0, 0)
+    return row
+end
+
+function MilestonePanelClass:CreateEmptyRow(bracket, contentWidth)
+    local row = self:AcquireRow("empty")
     row:SetSize(contentWidth, STEP_ROW_HEIGHT)
-    row:SetPoint("TOPLEFT", 0, -yOffset)
+    row:SetPoint("TOPLEFT", 0, 0)
+    row.text:SetText("No steps in " .. (bracket and bracket.name or "this bracket"))
+    row.text:SetTextColor(0.5, 0.5, 0.5)
+    row:Show()
+    return row
+end
+
+-- Step row (single recipe step)
+function MilestonePanelClass:BuildStepRow()
+    local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
 
     -- Row background for hover
     row:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
     })
-    row:SetBackdropColor(0.15, 0.15, 0.15, 0.3)
 
     -- Expand/collapse indicator
     row.expandBtn = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     row.expandBtn:SetPoint("LEFT", 2, 0)
+
+    -- Skill range (e.g., "184-197") with pin indicator
+    row.range = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.range:SetPoint("LEFT", 18, 0)
+
+    -- Quantity and recipe name (e.g., "30x Bronze Tube")
+    row.recipe = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.recipe:SetPoint("LEFT", 65, 0)
+    row.recipe:SetPoint("RIGHT", row, "LEFT", 175, 0)
+    row.recipe:SetJustifyH("LEFT")
+    row.recipe:SetWordWrap(false)
+
+    -- Materials summary (truncated)
+    row.materials = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.materials:SetPoint("LEFT", 180, 0)
+    row.materials:SetPoint("RIGHT", row, "RIGHT", -120, 0)
+    row.materials:SetJustifyH("LEFT")
+    row.materials:SetWordWrap(false)
+
+    -- Cost (per-craft first, total in parens)
+    row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.cost:SetPoint("RIGHT", -4, 0)
+    return row
+end
+
+function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
+    local row = self:AcquireRow("step")
+    row:SetSize(contentWidth, STEP_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -yOffset)
+    row:SetBackdropColor(0.15, 0.15, 0.15, 0.3)
+
     row.expandBtn:SetText(self.expandedRows[index] and "[-]" or "[+]")
     row.expandBtn:SetTextColor(0.6, 0.6, 0.6)
 
-    -- Skill range (e.g., "184-197") with pin indicator
     local hasDirtyPin = LazyProf.Pathfinder.pinnedRecipes[step.from] and
         LazyProf.Pathfinder.pinnedRecipes[step.from] ~= step.recipe.id
-    row.range = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    row.range:SetPoint("LEFT", 18, 0)
     local rangeText = string.format("%d-%d", step.from, step.to)
     if hasDirtyPin then
         rangeText = rangeText .. " [*]"
@@ -778,23 +854,10 @@ function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
     end
     row.range:SetText(rangeText)
 
-    -- Quantity and recipe name (e.g., "30x Bronze Tube")
     local recipeColor = self:ColorToRGB(step.color)
-
-    row.recipe = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.recipe:SetPoint("LEFT", 65, 0)
-    row.recipe:SetPoint("RIGHT", row, "LEFT", 175, 0)
-    row.recipe:SetJustifyH("LEFT")
-    row.recipe:SetWordWrap(false)
     row.recipe:SetText(MilestonePanelClass.StepRecipeText(step))
     row.recipe:SetTextColor(recipeColor.r, recipeColor.g, recipeColor.b)
 
-    -- Materials summary (truncated)
-    row.materials = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    row.materials:SetPoint("LEFT", 180, 0)
-    row.materials:SetPoint("RIGHT", row, "RIGHT", -120, 0)
-    row.materials:SetJustifyH("LEFT")
-    row.materials:SetWordWrap(false)
     local matSummary = step.materialsSummary or ""
     if #matSummary > 25 then
         matSummary = matSummary:sub(1, 22) .. "..."
@@ -803,8 +866,6 @@ function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
     row.materials:SetTextColor(0.7, 0.7, 0.7)
 
     -- Cost (per-craft first, total in parens; green when inventory reduces cost)
-    row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    row.cost:SetPoint("RIGHT", -4, 0)
     local oopCost = step.outOfPocketCost or step.cost
     local marketCost = step.cost or 0
     local perCraft = step.quantity > 0 and math.floor(oopCost / step.quantity + 0.5) or oopCost
@@ -877,22 +938,26 @@ function MilestonePanelClass:CreateStepRow(step, index, yOffset, contentWidth)
     return row
 end
 
--- Create a gap row: a skill range the path could not cover with any recipe
-function MilestonePanelClass:CreateGapRow(gap, yOffset, contentWidth)
+-- Gap row: a skill range the path could not cover with any recipe
+function MilestonePanelClass:BuildGapRow()
     local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
-    row:SetSize(contentWidth, STEP_ROW_HEIGHT)
-    row:SetPoint("TOPLEFT", 0, -yOffset)
-
     row:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
     })
-    row:SetBackdropColor(0.35, 0.1, 0.1, 0.35)
-
     row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     row.text:SetPoint("LEFT", 18, 0)
     row.text:SetPoint("RIGHT", row, "RIGHT", -4, 0)
     row.text:SetJustifyH("LEFT")
     row.text:SetWordWrap(false)
+    return row
+end
+
+function MilestonePanelClass:CreateGapRow(gap, yOffset, contentWidth)
+    local row = self:AcquireRow("gap")
+    row:SetSize(contentWidth, STEP_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -yOffset)
+    row:SetBackdropColor(0.35, 0.1, 0.1, 0.35)
+
     row.text:SetText(MilestonePanelClass.GapText(gap))
     row.text:SetTextColor(1, 0.5, 0.4)
 
@@ -927,23 +992,26 @@ function MilestonePanelClass:ColorToRGB(color)
     end
 end
 
--- Create an unlearned recipe indicator row (for expanded step view)
-function MilestonePanelClass:CreateUnlearnedIndicator(step, yOffset, contentWidth)
+-- Unlearned recipe indicator row (for expanded step view)
+function MilestonePanelClass:BuildUnlearnedIndicator()
     local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
-    row:SetSize(contentWidth - 20, INGREDIENT_ROW_HEIGHT)
-    row:SetPoint("TOPLEFT", 20, -yOffset)
-
     -- Row background for hover
     row:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
     })
-    row:SetBackdropColor(0.2, 0.15, 0, 0.3)
-
     -- Warning indicator
     row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     row.text:SetPoint("LEFT", 4, 0)
     row.text:SetPoint("RIGHT", row, "RIGHT", -8, 0)
     row.text:SetJustifyH("LEFT")
+    return row
+end
+
+function MilestonePanelClass:CreateUnlearnedIndicator(step, yOffset, contentWidth)
+    local row = self:AcquireRow("unlearned")
+    row:SetSize(contentWidth - 20, INGREDIENT_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 20, -yOffset)
+    row:SetBackdropColor(0.2, 0.15, 0, 0.3)
 
     local sourceDesc = Utils.GetSourceDescription(step.recipe.source)
     row.text:SetText(string.format("|cFFFF8800[!] Unlearned:|r %s", sourceDesc))
@@ -976,11 +1044,9 @@ function MilestonePanelClass:CreateUnlearnedIndicator(step, yOffset, contentWidt
     return row
 end
 
--- Create a trainer milestone separator
-function MilestonePanelClass:CreateMilestoneSeparator(milestone, yOffset, contentWidth)
+-- Trainer milestone separator
+function MilestonePanelClass:BuildMilestoneSeparator()
     local row = CreateFrame("Frame", nil, self.frame.content)
-    row:SetSize(contentWidth, MILESTONE_SEPARATOR_HEIGHT)
-    row:SetPoint("TOPLEFT", 0, -yOffset)
 
     -- Separator line left
     row.lineLeft = row:CreateTexture(nil, "ARTWORK")
@@ -993,7 +1059,6 @@ function MilestonePanelClass:CreateMilestoneSeparator(milestone, yOffset, conten
     -- Milestone text
     row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     row.text:SetPoint("CENTER", 0, 0)
-    row.text:SetText(string.format("Train (%d)", milestone))
     row.text:SetTextColor(0.6, 0.6, 0.6)
 
     -- Separator line right
@@ -1003,42 +1068,58 @@ function MilestonePanelClass:CreateMilestoneSeparator(milestone, yOffset, conten
     row.lineRight:SetHeight(1)
     row.lineRight:SetPoint("LEFT", row, "CENTER", 40, 0)
     row.lineRight:SetPoint("RIGHT", -4, 0)
+    return row
+end
 
+function MilestonePanelClass:CreateMilestoneSeparator(milestone, yOffset, contentWidth)
+    local row = self:AcquireRow("separator")
+    row:SetSize(contentWidth, MILESTONE_SEPARATOR_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -yOffset)
+    row.text:SetText(string.format("Train (%d)", milestone))
     row:Show()
     return row
 end
 
--- Create an ingredient row
-function MilestonePanelClass:CreateIngredientRow(mat, yOffset, contentWidth)
+-- Ingredient row
+function MilestonePanelClass:BuildIngredientRow()
     local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
-    row:SetSize(contentWidth - 20, INGREDIENT_ROW_HEIGHT)
-    row:SetPoint("TOPLEFT", 20, -yOffset)
 
     -- Row background for hover
     row:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
     })
-    row:SetBackdropColor(0.15, 0.15, 0.15, 0.5)
 
     -- Icon
     row.icon = row:CreateTexture(nil, "ARTWORK")
     row.icon:SetSize(16, 16)
     row.icon:SetPoint("LEFT", 4, 0)
-    row.icon:SetTexture(mat.icon)
 
-    -- Name and count (show how many still needed)
+    -- Name and count
     row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     row.text:SetPoint("LEFT", 24, 0)
     row.text:SetPoint("RIGHT", row, "RIGHT", -80, 0)
     row.text:SetJustifyH("LEFT")
+
+    -- Cost
+    row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.cost:SetPoint("RIGHT", -8, 0)
+    return row
+end
+
+function MilestonePanelClass:CreateIngredientRow(mat, yOffset, contentWidth)
+    local row = self:AcquireRow("ingredient")
+    row:SetSize(contentWidth - 20, INGREDIENT_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 20, -yOffset)
+    row:SetBackdropColor(0.15, 0.15, 0.15, 0.5)
+
+    row.icon:SetTexture(mat.icon)
+
+    -- Name and count (show how many still needed)
     local countText = mat.missing > 0 and
         string.format("|cFFFF6666%dx|r", mat.missing) or
         "|cFF66FF66Ready|r"
     row.text:SetText(countText .. " " .. (mat.name or "Unknown"))
 
-    -- Cost
-    row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    row.cost:SetPoint("RIGHT", -8, 0)
     if mat.estimatedCost > 0 then
         row.cost:SetText(Utils.FormatMoney(mat.estimatedCost))
     else
@@ -1070,16 +1151,13 @@ function MilestonePanelClass:CreateIngredientRow(mat, yOffset, contentWidth)
     return row
 end
 
--- Create the main "Alternatives" spoiler separator (with lines on both sides)
-function MilestonePanelClass:CreateAlternativesSpoiler(totalAlts, isExpanded, stepIndex, yOffset, contentWidth)
+-- Main "Alternatives" spoiler separator (with lines on both sides)
+function MilestonePanelClass:BuildAlternativesSpoiler()
     local row = CreateFrame("Button", nil, self.frame.content)
-    row:SetSize(contentWidth - 16, MILESTONE_SEPARATOR_HEIGHT)
-    row:SetPoint("TOPLEFT", 16, -yOffset)
 
     -- Separator line left
     row.lineLeft = row:CreateTexture(nil, "ARTWORK")
     row.lineLeft:SetTexture("Interface\\Buttons\\WHITE8x8")
-    row.lineLeft:SetVertexColor(0.3, 0.4, 0.5, 0.8)
     row.lineLeft:SetHeight(1)
     row.lineLeft:SetPoint("LEFT", 0, 0)
     row.lineLeft:SetPoint("RIGHT", row, "CENTER", -60, 0)
@@ -1087,17 +1165,26 @@ function MilestonePanelClass:CreateAlternativesSpoiler(totalAlts, isExpanded, st
     -- Label text
     row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     row.text:SetPoint("CENTER", 0, 0)
-    local indicator = isExpanded and "[-]" or "[+]"
-    row.text:SetText(string.format("%s Alternatives (%d)", indicator, totalAlts))
-    row.text:SetTextColor(0.5, 0.6, 0.8)
 
     -- Separator line right
     row.lineRight = row:CreateTexture(nil, "ARTWORK")
     row.lineRight:SetTexture("Interface\\Buttons\\WHITE8x8")
-    row.lineRight:SetVertexColor(0.3, 0.4, 0.5, 0.8)
     row.lineRight:SetHeight(1)
     row.lineRight:SetPoint("LEFT", row, "CENTER", 60, 0)
     row.lineRight:SetPoint("RIGHT", 0, 0)
+    return row
+end
+
+function MilestonePanelClass:CreateAlternativesSpoiler(totalAlts, isExpanded, stepIndex, yOffset, contentWidth)
+    local row = self:AcquireRow("altSpoiler")
+    row:SetSize(contentWidth - 16, MILESTONE_SEPARATOR_HEIGHT)
+    row:SetPoint("TOPLEFT", 16, -yOffset)
+
+    row.lineLeft:SetVertexColor(0.3, 0.4, 0.5, 0.8)
+    row.lineRight:SetVertexColor(0.3, 0.4, 0.5, 0.8)
+    local indicator = isExpanded and "[-]" or "[+]"
+    row.text:SetText(string.format("%s Alternatives (%d)", indicator, totalAlts))
+    row.text:SetTextColor(0.5, 0.6, 0.8)
 
     -- Click to expand/collapse
     row:SetScript("OnClick", function()
@@ -1121,20 +1208,24 @@ function MilestonePanelClass:CreateAlternativesSpoiler(totalAlts, isExpanded, st
     return row
 end
 
--- Create a collapsible group header for alternatives (e.g., "Alternatives #2-#6")
-function MilestonePanelClass:CreateAltGroupHeader(firstRank, lastRank, isExpanded, stepIndex, groupIndex, yOffset, contentWidth)
+-- Collapsible group header for alternatives (e.g., "Alternatives #2-#6")
+function MilestonePanelClass:BuildAltGroupHeader()
     local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
-    row:SetSize(contentWidth - 12, ALT_GROUP_HEADER_HEIGHT)
-    row:SetPoint("TOPLEFT", 12, -yOffset)
-
     row:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
     })
-    row:SetBackdropColor(0.12, 0.14, 0.2, 0.5)
-
     -- Expand/collapse indicator + label
     row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     row.text:SetPoint("LEFT", 4, 0)
+    return row
+end
+
+function MilestonePanelClass:CreateAltGroupHeader(firstRank, lastRank, isExpanded, stepIndex, groupIndex, yOffset, contentWidth)
+    local row = self:AcquireRow("altGroup")
+    row:SetSize(contentWidth - 12, ALT_GROUP_HEADER_HEIGHT)
+    row:SetPoint("TOPLEFT", 12, -yOffset)
+    row:SetBackdropColor(0.12, 0.14, 0.2, 0.5)
+
     local indicator = isExpanded and "[-]" or "[+]"
     local label
     if firstRank == lastRank then
@@ -1168,21 +1259,50 @@ function MilestonePanelClass:CreateAltGroupHeader(firstRank, lastRank, isExpande
     return row
 end
 
--- Create an alternative recipe row (shown when step is expanded)
+-- Alternative recipe row (shown when step is expanded)
+function MilestonePanelClass:BuildAlternativeRow()
+    local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
+
+    -- Row background - blue tint to distinguish from ingredients
+    row:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+    })
+
+    -- Pin indicator button (clickable separately from row)
+    row.pinBtn = CreateFrame("Button", nil, row)
+    row.pinBtn:SetSize(18, ALTERNATIVE_ROW_HEIGHT)
+    row.pinBtn:SetPoint("LEFT", 0, 0)
+    row.pin = row.pinBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.pin:SetPoint("CENTER", row.pinBtn, "CENTER", 0, 0)
+
+    -- Rank
+    row.rank = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.rank:SetPoint("LEFT", 20, 0)
+
+    -- Recipe name (colored by difficulty), with [!] prefix if unlearned
+    row.recipe = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.recipe:SetPoint("LEFT", 40, 0)
+    row.recipe:SetPoint("RIGHT", row, "RIGHT", -150, 0)
+    row.recipe:SetJustifyH("LEFT")
+    row.recipe:SetWordWrap(false)
+
+    -- Skillup rate (left out: overlaps with cost column at narrow widths)
+
+    -- Cost per craft + projected total
+    row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.cost:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+    return row
+end
+
 -- alt: { recipe, score, color, expectedSkillups, craftCost }
 -- rank: position in sorted alternatives (1 = best)
 -- bestScore: score of the #1 alternative for delta calculation
 -- skillLevel: the step's starting skill level (for pinning)
 -- skillsNeeded: number of skill points this step covers (for projected total)
 function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLevel, skillsNeeded, yOffset, contentWidth)
-    local row = CreateFrame("Button", nil, self.frame.content, "BackdropTemplate")
+    local row = self:AcquireRow("alternative")
     row:SetSize(contentWidth - 16, ALTERNATIVE_ROW_HEIGHT)
     row:SetPoint("TOPLEFT", 16, -yOffset)
-
-    -- Row background - blue tint to distinguish from ingredients
-    row:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-    })
 
     -- Highlight if this recipe is currently pinned at this skill level
     local pinnedId = LazyProf.Pathfinder.pinnedRecipes[skillLevel]
@@ -1193,12 +1313,6 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
         row:SetBackdropColor(0.1, 0.12, 0.18, 0.4)
     end
 
-    -- Pin indicator button (clickable separately from row)
-    row.pinBtn = CreateFrame("Button", nil, row)
-    row.pinBtn:SetSize(18, ALTERNATIVE_ROW_HEIGHT)
-    row.pinBtn:SetPoint("LEFT", 0, 0)
-    row.pin = row.pinBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    row.pin:SetPoint("CENTER", row.pinBtn, "CENTER", 0, 0)
     if isThisPinned then
         row.pin:SetText("[*]")
         row.pin:SetTextColor(0.4, 0.7, 1)
@@ -1226,20 +1340,11 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
         row:GetScript("OnLeave")(row)
     end)
 
-    -- Rank
-    row.rank = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    row.rank:SetPoint("LEFT", 20, 0)
     row.rank:SetText(string.format("#%d", rank))
     row.rank:SetTextColor(0.5, 0.5, 0.5)
 
-    -- Recipe name (colored by difficulty), with [!] prefix if unlearned
     local recipeColor = self:ColorToRGB(alt.color)
     local isUnlearned = not alt.recipe.learned
-    row.recipe = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.recipe:SetPoint("LEFT", 40, 0)
-    row.recipe:SetPoint("RIGHT", row, "RIGHT", -150, 0)
-    row.recipe:SetJustifyH("LEFT")
-    row.recipe:SetWordWrap(false)
     local displayName = alt.recipe.name or "Unknown"
     if isUnlearned then
         displayName = "|cFFFF8800[!]|r " .. displayName
@@ -1247,15 +1352,7 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
     row.recipe:SetText(displayName)
     row.recipe:SetTextColor(recipeColor.r, recipeColor.g, recipeColor.b)
 
-    -- Skillup rate (commented out: overlaps with cost column at narrow widths)
-    -- row.skillup = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    -- row.skillup:SetPoint("RIGHT", row, "RIGHT", -155, 0)
-    -- row.skillup:SetText(string.format("%.0f%%", alt.expectedSkillups * 100))
-    -- row.skillup:SetTextColor(0.7, 0.7, 0.7)
-
     -- Cost per craft + projected total (out-of-pocket; green when inventory reduces cost)
-    row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    row.cost:SetPoint("RIGHT", row, "RIGHT", -4, 0)
     if alt.score < math.huge then
         local altOopCost = alt.outOfPocketCost or alt.craftCost
         local projectedCrafts = (alt.expectedSkillups > 0 and skillsNeeded > 0) and math.ceil(skillsNeeded / alt.expectedSkillups) or 1
@@ -1278,12 +1375,10 @@ function MilestonePanelClass:CreateAlternativeRow(alt, rank, bestScore, skillLev
     end
 
     -- Dim unavailable recipes visually
-    if alt.recipe._isUnavailable then
-        row.rank:SetAlpha(0.5)
-        row.recipe:SetAlpha(0.5)
-        -- row.skillup:SetAlpha(0.5)
-        row.cost:SetAlpha(0.5)
-    end
+    local alpha = alt.recipe._isUnavailable and 0.5 or 1
+    row.rank:SetAlpha(alpha)
+    row.recipe:SetAlpha(alpha)
+    row.cost:SetAlpha(alpha)
 
     -- Click row to show recipe details (pass step skill level for accurate difficulty)
     row:SetScript("OnClick", function()
