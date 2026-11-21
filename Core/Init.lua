@@ -148,9 +148,14 @@ function LazyProf:OnTradeSkillUpdate()
     -- refresh, etc). Full path recalculation is expensive - only do it when the
     -- path might change.
     -- DO NOT REVERT THIS to unconditional ScheduleRecalculation() - it causes FPS hitches.
-    local currentSkill = select(2, self.Client:GetLine())
-    if currentSkill and currentSkill ~= self.lastCalculatedSkill then
+    -- A different profession at the same skill (switched while the window
+    -- stays open) needs a new path too.
+    local profKey, currentSkill = self.Client:GetLine()
+    if not currentSkill then return end
+    if currentSkill ~= self.lastCalculatedSkill then
         self:ScheduleRecalculation("skill changed")
+    elseif profKey ~= self.lastCalculatedProfKey then
+        self:ScheduleRecalculation("profession changed")
     end
 end
 
@@ -280,9 +285,10 @@ function LazyProf:RefreshShoppingList()
 end
 
 function LazyProf:Recalculate(reason)
-    -- Track skill level for OnTradeSkillUpdate optimization (Issue #3)
-    local currentSkill = select(2, self.Client:GetLine())
+    -- Track skill level and profession for OnTradeSkillUpdate optimization (Issue #3)
+    local profKey, currentSkill = self.Client:GetLine()
     self.lastCalculatedSkill = currentSkill
+    self.lastCalculatedProfKey = profKey
 
     -- Invalidate arrow cache before recalculating (recipe may change)
     if self.ArrowManager then

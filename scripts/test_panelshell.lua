@@ -643,6 +643,8 @@ section("init", function()
     addon.MissingMaterialsPanel = { Hide = function() hidden = hidden + 1 end }
     addon.Pathfinder.Calculate = function() return nil end
     addon:Recalculate("test")
+    check(p .. "Recalculate records the skill and profession it used",
+        addon.lastCalculatedSkill == 100 and addon.lastCalculatedProfKey == "tailoring")
     check(p .. "no path: stale current path cleared", addon.Pathfinder.currentPath == nil)
     check(p .. "no path: panels hidden", hidden == 3, hidden)
 

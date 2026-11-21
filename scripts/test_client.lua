@@ -381,11 +381,26 @@ section("init", function()
     check(p .. "onOpen schedules a recalculation", recalcs[1] == "trade skill opened", recalcs[1])
 
     addon.lastCalculatedSkill = 152
+    addon.lastCalculatedProfKey = "tailoring"
     startCallbacks.onUpdate()
-    check(p .. "onUpdate with unchanged skill does not recalc", #recalcs == 1)
+    check(p .. "onUpdate with unchanged skill and profession does not recalc", #recalcs == 1)
     line[2] = 153
     startCallbacks.onUpdate()
     check(p .. "onUpdate with changed skill recalcs", recalcs[2] == "skill changed", recalcs[2])
+    -- Another profession at the same skill while the window stays open.
+    addon.lastCalculatedSkill = 153
+    line[1] = "leatherworking"
+    startCallbacks.onUpdate()
+    check(p .. "onUpdate with another profession at the same skill recalcs",
+        recalcs[3] == "profession changed", recalcs[3])
+    addon.lastCalculatedProfKey = "leatherworking"
+    startCallbacks.onUpdate()
+    check(p .. "onUpdate after that recalc does not recalc again", #recalcs == 3, #recalcs)
+    -- A line with no registered profession (nil key) counts as a change too.
+    line[1] = nil
+    startCallbacks.onUpdate()
+    check(p .. "onUpdate switching to an unregistered line recalcs", recalcs[4] == "profession changed", recalcs[4])
+    line[1] = "tailoring"
 
     addon:OnBagUpdate()
     check(p .. "bag update while open refreshes the list", refreshes == 1)
