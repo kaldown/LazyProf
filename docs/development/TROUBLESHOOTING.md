@@ -110,9 +110,11 @@ are what the data needs fixing for.
 or you are not sure whether your auction data is current. Run it with a path calculated
 (open a profession window first). Works on every client.
 
-**Which price wins:** a vendor price first; then an Auctionator price from a scan made today
-(`seen today`); then the market sources in `order` (TSM first by default, with its own
-fallback values); then the vendor sell estimate. Closing the auction house drops the
+**Which price wins:** a vendor price first; then an Auctionator price `seen today`, once you
+have been at the auction house since login or /reload (a scan made this session is newer
+than the TSM data loaded at login; Auctionator only reports whole days, so "today" alone
+could be this morning); then the market sources in `order` (TSM first by default, with its
+own fallback values); then the vendor sell estimate. Closing the auction house expires the
 5-minute price cache, so the next path reads a scan you just made.
 
 | Line | Meaning |

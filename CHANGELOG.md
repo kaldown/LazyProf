@@ -30,7 +30,7 @@ All notable changes to LazyProf will be documented in this file.
 - Panel positions are kept, and a panel you closed stays closed until the profession window is reopened. Panels are restored correctly after combat.
 - With "Calculate from current skill" off, the bracket, shopping list and arrow now follow your real skill.
 - Panel rows are reused, so long crafting sessions no longer build up frames.
-- A price from an Auctionator scan made today is now used before TSM, for reagents and for recipes bought at the auction house. TSM's prices only reach the game at login or /reload, so a scan made just before planning is newer. Vendor prices still come first. Closing the auction house refreshes the prices, so a path calculated right after a scan uses it.
+- A price from an Auctionator scan you made this session (since login or /reload) is now used before TSM, for reagents and for recipes bought at the auction house. TSM's prices only reach the game at login or /reload, so a scan made just before planning is newer. Vendor prices still come first. Closing the auction house refreshes the path's prices when the profession window is open; the Planning window picks them up the next time you load a profession into it.
 
 ### Known limits
 

@@ -192,12 +192,12 @@ function Availability:GetAHPrice(itemId)
         return nil, nil
     end
 
-    -- An Auctionator price from a scan made today is newer than TSM's snapshot
-    -- (same rule as PriceManager:GetPriceInfo).
+    -- A fresh Auctionator price (seen today, auction house visited this
+    -- session) is newer than TSM's snapshot (same rule as PriceManager:GetPriceInfo).
     local auctionator = Auctionator and Auctionator.API and Auctionator.API.v1
     if auctionator and auctionator.GetAuctionAgeByItemID then
         local age = auctionator.GetAuctionAgeByItemID("LazyProf", itemId)
-        if age and age <= LazyProf.Constants.AUCTION_FRESH_DAYS then
+        if LazyProf.PriceManager:IsFreshAge(age) then
             local price = auctionator.GetAuctionPriceByItemID("LazyProf", itemId)
             if price and price > 0 then
                 return price, "Auctionator"

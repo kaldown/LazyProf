@@ -76,14 +76,14 @@ function PriceManager:GetPriceInfo(itemId)
         end
     end
 
-    -- Market providers: a price from a scan made today (a provider that
-    -- reports its age, AUCTION_FRESH_DAYS or less) wins at once; otherwise the
-    -- first price in the configured order.
+    -- Market providers: a fresh price (a provider that reports its age, see
+    -- IsFreshAge) wins at once; otherwise the first price in the configured
+    -- order.
     local first
     for _, provider in ipairs(self.providers) do
         local price, detail, ageDays = provider:GetPrice(itemId)
         if price and price > 0 then
-            if ageDays and ageDays <= Constants.AUCTION_FRESH_DAYS then
+            if self:IsFreshAge(ageDays) then
                 return record(provider, price, detail, ageDays)
             end
             first = first or { provider = provider, price = price, detail = detail, ageDays = ageDays }
@@ -143,12 +143,34 @@ function PriceManager:GetPrices(itemIds)
     return prices
 end
 
--- Clear price cache; silent skips the chat line (automatic clears).
-function PriceManager:ClearCache(silent)
+-- Clear price cache
+function PriceManager:ClearCache()
     self.cache = {}
     self.flooredItems = {}
-    if not silent then
-        LazyProf:Print("Price cache cleared.")
+    LazyProf:Print("Price cache cleared.")
+end
+
+-- True once the player has been at the auction house since login or /reload.
+-- Runtime only: a reload also reloads TSM's snapshot, which may be newer.
+PriceManager.auctionHouseVisited = false
+
+-- An auction price of this age (days) counts as fresh: seen today, and the
+-- auction house was visited this session, so the scan is newer than the TSM
+-- snapshot loaded at login. Auctionator only reports whole days, so a scan
+-- from this morning alone would not prove that.
+function PriceManager:IsFreshAge(ageDays)
+    return self.auctionHouseVisited and ageDays ~= nil and ageDays <= Constants.AUCTION_FRESH_DAYS
+end
+
+-- The player left the auction house: a scan may just have run. Fresh prices
+-- now win (IsFreshAge), and every cached price is expired so the next lookup
+-- re-reads the sources. Entries stay in the cache until then: the shopping
+-- list, Planning and the price reports read the prices of the last
+-- calculation from it. Items waiting for item data stay tracked.
+function PriceManager:OnAuctionHouseVisited()
+    self.auctionHouseVisited = true
+    for _, info in pairs(self.cache) do
+        info.timestamp = 0
     end
 end
 

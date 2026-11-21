@@ -83,13 +83,15 @@ function LazyProf:OnEnable()
     self:RegisterEvent("AUCTION_HOUSE_CLOSED", "OnAuctionHouseClosed")
 end
 
--- Leaving the auction house: a scan may just have run there, so drop the
--- cached prices (5-minute cache) and let the next calculation read the new
--- ones. The event can fire twice per close; the recalculation debounce
--- coalesces that.
+-- Leaving the auction house: a scan may just have run there, so fresh
+-- auction prices now win and the cached prices (5-minute cache) are expired
+-- for the next calculation. The event can fire twice per close; the
+-- recalculation debounce coalesces that. Planning is not recalculated here
+-- (that would reset its view while shopping); it uses the new prices the
+-- next time a profession is loaded into it.
 function LazyProf:OnAuctionHouseClosed()
     if self.PriceManager then
-        self.PriceManager:ClearCache(true)
+        self.PriceManager:OnAuctionHouseVisited()
     end
     if self.Client and self.Client:IsOpen() then
         self:ScheduleRecalculation("auction house closed")

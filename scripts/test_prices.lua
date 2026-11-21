@@ -199,6 +199,10 @@ section("fresh scan", function()
         tostring(addon.Constants.AUCTION_FRESH_DAYS))
 
     local info = pm:GetPriceInfo(2770)
+    check(p .. "no auction house visit this session: TSM first", info.source == "TSM" and info.price == 50,
+        info.source .. " " .. tostring(info.price))
+    pm:OnAuctionHouseVisited()
+    info = pm:GetPriceInfo(2770)
     check(p .. "Auctionator seen today beats TSM", info.source == "Auctionator" and info.price == 45
         and info.ageDays == 0, info.source .. " " .. tostring(info.price))
     info = pm:GetPriceInfo(2589)
@@ -209,11 +213,13 @@ section("fresh scan", function()
         info.source .. " " .. tostring(info.price))
 
     addon = loadPricing({ age = false })
+    addon.PriceManager:OnAuctionHouseVisited()
     info = addon.PriceManager:GetPriceInfo(2770)
     check(p .. "without the age call the order holds", info.source == "TSM" and info.price == 50,
         info.source .. " " .. tostring(info.price))
 
     addon = loadPricing()
+    addon.PriceManager:OnAuctionHouseVisited()
     auctionatorPrices[2770] = nil
     info = addon.PriceManager:GetPriceInfo(2770)
     resetAuctionator()
@@ -229,6 +235,10 @@ section("fresh scan", function()
     addon = loadPricing()
     local Av = addon.RecipeAvailability
     local price, source = Av:GetAHPrice(5000)
+    check(p .. "recipe item: no visit this session: TSM first", price == 1000 and source == "TSM",
+        tostring(price) .. " " .. tostring(source))
+    addon.PriceManager:OnAuctionHouseVisited()
+    price, source = Av:GetAHPrice(5000)
     check(p .. "recipe item: Auctionator today beats TSM min buyout", price == 800 and source == "Auctionator",
         tostring(price) .. " " .. tostring(source))
     auctionatorAges[5000] = 2
@@ -237,23 +247,29 @@ section("fresh scan", function()
         tostring(price) .. " " .. tostring(source))
     resetAuctionator()
     addon = loadPricing({ age = false })
+    addon.PriceManager:OnAuctionHouseVisited()
     price, source = addon.RecipeAvailability:GetAHPrice(5000)
     check(p .. "recipe item: without the age call TSM first", price == 1000 and source == "TSM",
         tostring(price) .. " " .. tostring(source))
 end)
 
-section("clear cache", function()
+section("auction house visit", function()
+    local p = "visit: "
     local addon = loadPricing({ uncached = { [7777] = true } })
     local printed = 0
     function addon:Print() printed = printed + 1 end
     local pm = addon.PriceManager
     pm:GetPriceInfo(2589)
     pm:GetPriceInfo(7777)
-    pm:ClearCache(true)
-    check("clear: silent clear empties the cache", next(pm.cache) == nil and next(pm.flooredItems) == nil)
-    check("clear: silent clear prints nothing", printed == 0, printed)
-    pm:ClearCache()
-    check("clear: a plain clear still says so", printed == 1, printed)
+    pm:OnAuctionHouseVisited()
+    check(p .. "cached prices kept for readers of the last calculation", pm.cache[2589]
+        and pm.cache[2589].price == 120, pm.cache[2589] and pm.cache[2589].price)
+    check(p .. "items waiting for item data stay tracked", pm.flooredItems[7777] == true)
+    check(p .. "nothing printed", printed == 0, printed)
+    tsmValues.DBRecent["i:2589"] = 999
+    local info = pm:GetPriceInfo(2589)
+    resetTsm()
+    check(p .. "next lookup re-reads the sources", info.price == 999, info.price)
 end)
 
 -- ===========================================================================
