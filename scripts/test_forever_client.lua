@@ -53,7 +53,8 @@ end
 -- Forever stubs: C_TradeSkillUI, ProfessionsFrame + recipe ScrollBox,
 -- GetProfessions/GetProfessionInfo, C_Item, timers, scroll-box events.
 -- ===========================================================================
-_G.Enum = { TradeskillRelativeDifficulty = { Optimal = 0, Medium = 1, Easy = 2, Trivial = 3 } }
+_G.Enum = { TradeskillRelativeDifficulty = { Optimal = 0, Medium = 1, Easy = 2, Trivial = 3 },
+            CraftingReagentType = { Modifying = 0, Basic = 1, Finishing = 2, Automatic = 3 } }
 _G.BaseScrollBoxEvents = { OnScroll = "OnScroll" }
 _G.ScrollBoxListMixin = { Event = { OnDataRangeChanged = "OnDataRangeChanged" } }
 
@@ -477,7 +478,8 @@ end)
 section("hint", function()
     local p = "hint: "
     harness.stubWow({ interface = 16001 })
-    _G.Enum = { TradeskillRelativeDifficulty = { Optimal = 0, Medium = 1, Easy = 2, Trivial = 3 } }
+    _G.Enum = { TradeskillRelativeDifficulty = { Optimal = 0, Medium = 1, Easy = 2, Trivial = 3 },
+            CraftingReagentType = { Modifying = 0, Basic = 1, Finishing = 2, Automatic = 3 } }
     _G.C_Timer = { After = function() end }
     local LazyProf = harness.loadLazyProf({
         "Core/Constants.lua",
@@ -608,6 +610,106 @@ section("diagnostic", function()
     check(p .. "nil ids reported, later sections still print",
         text:find("nil", 1, true) ~= nil and text:find("steps=2", 1, true) ~= nil, text)
     _G.CraftLib = nil
+end)
+
+-- ===========================================================================
+-- Diagnostic: the window is closed / CraftLib data checked against the client
+-- ===========================================================================
+section("diagnostic closed window", function()
+    local p = "diag closed: "
+    resetProfessionInfo()
+    externalView = nil
+    _G.ProfessionsFrame = makeProfessionsFrame()
+    _G.ProfessionsFrame.visible = false
+    local addon = loadAdapter(16001, 18, 18)
+    _G.C_AddOns = { GetAddOnMetadata = function() return "0.11.0" end }
+    _G.CraftLib = { IsReady = function() return true end, GetActiveProfile = function() return "FOREVER" end,
+                    GetProfessions = function() return {} end }
+    addon.Pathfinder = {}
+    local lines = {}
+    local ok, err = pcall(addon.Client.RunDiagnostic, addon.Client, lines)
+    local text = table.concat(lines, "\n")
+    check(p .. "no Lua error", ok, err)
+    check(p .. "says the window is closed", text:find("profession window is closed", 1, true) ~= nil, text)
+    check(p .. "no check against CraftLib", text:find("check difficulty", 1, true) == nil, text)
+
+    _G.ProfessionsFrame.visible = true
+    childInfo = { professionID = 0, skillLevel = 0, maxSkillLevel = 0 }
+    baseInfo = { professionID = 0, skillLevel = 0, maxSkillLevel = 0 }
+    lines = {}
+    addon.Client:RunDiagnostic(lines)
+    text = table.concat(lines, "\n")
+    check(p .. "no profession: no misleading notInCraftLib count",
+        text:find("notInCraftLib=", 1, true) == nil and text:find("no open profession to compare", 1, true) ~= nil, text)
+    _G.CraftLib = nil
+end)
+
+section("diagnostic check", function()
+    local p = "diag check: "
+    resetProfessionInfo()
+    externalView = nil
+    _G.ProfessionsFrame = makeProfessionsFrame()
+    local addon = loadAdapter(16001, 18, 18)
+    _G.C_AddOns = { GetAddOnMetadata = function() return "0.11.0" end }
+    _G.CraftLib = { IsReady = function() return true end, GetActiveProfile = function() return "FOREVER" end,
+                    GetProfessions = function() return {} end }
+    addon.Pathfinder = {}
+    -- CraftLib: every recipe orange 1 / yellow 20 / green 40 / gray 60, product id + 100000.
+    addon.Professions.registry.alchemy.recipes[1].reagents = { { itemId = 2589, count = 2 }, { itemId = 3371, count = 1 } }
+    childInfo.skillLevel = 30          -- between yellow and green: medium
+    childInfo.skillModifier = 0
+    local saved = deepcopy(recipeInfos)
+    recipeInfos[2329].maxTrivialLevel = 60   -- agrees
+    recipeInfos[2330].maxTrivialLevel = 65   -- differs
+    recipeInfos[3170].maxTrivialLevel = 0    -- client gives none
+    -- 2329 learned medium (agrees), 3170 learned optimal (differs), 2330 not learned (skipped)
+    C_TradeSkillUI.GetRecipeSchematic = function(id, isRecraft)
+        assert(isRecraft == false, "isRecraft")
+        if id == 2329 then
+            return { outputItemID = 102329, reagentSlotSchematics = {
+                { reagentType = 1, quantityRequired = 1, reagents = { { itemID = 3371 } } },
+                { reagentType = 1, quantityRequired = 2, reagents = { { itemID = 2589 } } },
+                { reagentType = 0, quantityRequired = 1, reagents = { { itemID = 5555 } } },
+            } }
+        end
+        if id == 2330 then
+            return { outputItemID = 999, reagentSlotSchematics = {
+                { reagentType = 1, quantityRequired = 1, reagents = { { itemID = 2447 } } },
+            } }
+        end
+        error("no schematic")
+    end
+    local lines = {}
+    local ok, err = pcall(addon.Client.RunDiagnostic, addon.Client, lines)
+    C_TradeSkillUI.GetRecipeSchematic = nil
+    recipeInfos = saved
+    local text = table.concat(lines, "\n")
+    print(text)
+    check(p .. "no Lua error", ok, err)
+    check(p .. "no SECTION ERROR", not text:find("SECTION ERROR", 1, true), text)
+    check(p .. "what was compared", text:find("check: alchemy, 3 recipes in both the client and CraftLib", 1, true) ~= nil, text)
+    check(p .. "difficulty at the current skill",
+        text:find("check difficulty at skill 30 (+0): agree=1 differ=1 sample(id:client/craftlib)=[3170:optimal/medium]", 1, true) ~= nil, text)
+    check(p .. "gray level",
+        text:find("check gray (client maxTrivialLevel): agree=1 differ=1 noClientValue=1 sample(id:client/craftlib)=[2330:65/60]", 1, true) ~= nil, text)
+    check(p .. "reagents (basic slots only)",
+        text:find("check reagents: agree=1 differ=1 errors=1 sample(id)=[2330]", 1, true) ~= nil, text)
+    check(p .. "product",
+        text:find("check product: agree=1 differ=1 sample(id:client/craftlib)=[2330:999/102330]", 1, true) ~= nil, text)
+    check(p .. "plain ASCII", not text:find("[\128-\255]"))
+
+    -- The racial modifier counts toward the skill the colours use.
+    resetProfessionInfo()
+    childInfo.skillLevel = 15
+    childInfo.skillModifier = 15
+    C_TradeSkillUI.GetRecipeSchematic = function() return { reagentSlotSchematics = {} } end
+    lines = {}
+    addon.Client:RunDiagnostic(lines)
+    C_TradeSkillUI.GetRecipeSchematic = nil
+    text = table.concat(lines, "\n")
+    check(p .. "skill includes the modifier", text:find("check difficulty at skill 30 (+15)", 1, true) ~= nil, text)
+    _G.CraftLib = nil
+    resetProfessionInfo()
 end)
 
 print(string.format("\n%d/%d checks passed", total - failures, total))

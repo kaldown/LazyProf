@@ -355,6 +355,114 @@ local function SortedKeys(t)
     return table.concat(keys, ",")
 end
 
+-- The difficulty name the client would show for a recipe at this skill, from
+-- CraftLib's thresholds (same bands as Utils.GetSkillColor; below yellow is
+-- orange).
+local function ExpectedDifficulty(skill, range)
+    if skill < range.yellow then return "optimal" end
+    if skill < range.green then return "medium" end
+    if skill < range.gray then return "easy" end
+    return "trivial"
+end
+
+-- "itemId x count" pairs, sorted, for comparing two reagent lists.
+local function ReagentKey(pairsList)
+    table.sort(pairsList)
+    return table.concat(pairsList, ",")
+end
+
+-- Basic reagent slots of a client recipe schematic (the client's reagent
+-- list: Blizzard_APIDocumentationGenerated/TradeSkillUITypesDocumentation.lua
+-- CraftingRecipeSchematic / CraftingReagentSlotSchematic). Slots without an
+-- item (currency) are left out.
+local function ClientReagents(schematic)
+    local list = {}
+    for _, slot in ipairs(schematic.reagentSlotSchematics or {}) do
+        local first = slot.reagents and slot.reagents[1]
+        if slot.reagentType == Enum.CraftingReagentType.Basic and first and first.itemID then
+            list[#list + 1] = tostring(first.itemID) .. "x" .. tostring(slot.quantityRequired)
+        end
+    end
+    return ReagentKey(list)
+end
+
+local function LibReagents(recipe)
+    local list = {}
+    for _, r in ipairs(recipe.reagents or {}) do
+        if r.itemId then list[#list + 1] = tostring(r.itemId) .. "x" .. tostring(r.count) end
+    end
+    return ReagentKey(list)
+end
+
+-- /lp diag forever "check" lines: CraftLib's data for the open profession
+-- against what the client itself says about each recipe both know:
+--   difficulty  the client's difficulty at the current skill (learned recipes
+--               at or above their orange level) vs CraftLib's thresholds
+--   gray        the client's maxTrivialLevel (TradeSkillRecipeInfo) vs gray
+--   reagents    the schematic's basic reagents vs CraftLib's reagents
+--   product     the schematic's output item vs CraftLib's itemId
+-- Each line counts agreements and differences and samples the differences.
+local function CheckAgainstCraftLib(profKey, prof, add)
+    local byId = {}
+    for _, r in ipairs(prof.recipes or {}) do byId[r.id] = r end
+    local child = C_TradeSkillUI.GetChildProfessionInfo() or {}
+    local modifier = child.skillModifier or 0
+    local skill = (child.skillLevel or 0) + modifier
+
+    local function tally() return { agree = 0, differ = {}, nDiffer = 0 } end
+    local difficulty, gray, reagents, product = tally(), tally(), tally(), tally()
+    local function count(t, same, sample)
+        if same then t.agree = t.agree + 1 else t.nDiffer = t.nDiffer + 1; t.differ[sample] = true end
+    end
+    local compared, noClientGray, schematicErrors = 0, 0, 0
+
+    for _, id in ipairs(C_TradeSkillUI.GetAllRecipeIDs() or {}) do
+        local recipe = byId[id]
+        local info = recipe and C_TradeSkillUI.GetRecipeInfo(id)
+        if info then
+            compared = compared + 1
+            local range = recipe.skillRange
+            local clientDifficulty = DIFFICULTY[info.relativeDifficulty]
+            if range and info.learned and clientDifficulty and skill >= range.orange then
+                local mine = ExpectedDifficulty(skill, range)
+                count(difficulty, mine == clientDifficulty, tostring(id) .. ":" .. clientDifficulty .. "/" .. mine)
+            end
+            if range then
+                if info.maxTrivialLevel and info.maxTrivialLevel > 0 then
+                    count(gray, info.maxTrivialLevel == range.gray,
+                        tostring(id) .. ":" .. tostring(info.maxTrivialLevel) .. "/" .. tostring(range.gray))
+                else
+                    noClientGray = noClientGray + 1
+                end
+            end
+            local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, id, false)
+            if ok and schematic then
+                count(reagents, ClientReagents(schematic) == LibReagents(recipe), tostring(id))
+                if recipe.itemId and schematic.outputItemID and schematic.outputItemID > 0 then
+                    count(product, schematic.outputItemID == recipe.itemId,
+                        tostring(id) .. ":" .. tostring(schematic.outputItemID) .. "/" .. tostring(recipe.itemId))
+                end
+            else
+                schematicErrors = schematicErrors + 1
+            end
+        end
+    end
+
+    local function sample(t) return select(2, SortedSample(t.differ, 10)) end
+    add("check: " .. tostring(profKey) .. ", " .. tostring(compared)
+        .. " recipes in both the client and CraftLib")
+    add("check difficulty at skill " .. tostring(skill) .. " (+" .. tostring(modifier) .. "): agree="
+        .. tostring(difficulty.agree) .. " differ=" .. tostring(difficulty.nDiffer)
+        .. " sample(id:client/craftlib)=[" .. sample(difficulty) .. "]")
+    add("check gray (client maxTrivialLevel): agree=" .. tostring(gray.agree) .. " differ="
+        .. tostring(gray.nDiffer) .. " noClientValue=" .. tostring(noClientGray)
+        .. " sample(id:client/craftlib)=[" .. sample(gray) .. "]")
+    add("check reagents: agree=" .. tostring(reagents.agree) .. " differ=" .. tostring(reagents.nDiffer)
+        .. " errors=" .. tostring(schematicErrors) .. " sample(id)=[" .. sample(reagents) .. "]")
+    add("check product: agree=" .. tostring(product.agree) .. " differ=" .. tostring(product.nDiffer)
+        .. " sample(id:client/craftlib)=[" .. sample(product) .. "]")
+end
+
 function Client:RunDiagnostic(lines)
     local function add(text) lines[#lines + 1] = text end
     local function section(name, fn)
@@ -369,6 +477,10 @@ function Client:RunDiagnostic(lines)
             .. " WOW_PROJECT_CAMELOT=" .. tostring(WOW_PROJECT_CAMELOT)
             .. " family=" .. tostring(LazyProf.ClientFamily))
     end)
+
+    if not self:IsOpen() then
+        add("NOTE: the profession window is closed - open a profession for the profession, recipes and check lines.")
+    end
 
     section("craftlib", function()
         local cl = _G.CraftLib
@@ -446,12 +558,24 @@ function Client:RunDiagnostic(lines)
         local missingLib, missingClient = {}, {}
         for id in pairs(inClient) do if not inLib[id] then missingLib[id] = true end end
         for id in pairs(inLib) do if not inClient[id] then missingClient[id] = true end end
+        if not prof then
+            add("recipes=" .. tostring(#ids) .. " learned=" .. tostring(learned)
+                .. " (no open profession to compare with CraftLib)")
+            return
+        end
         add("recipes=" .. tostring(#ids) .. " learned=" .. tostring(learned)
-            .. " craftlibMatched=" .. tostring(matched) .. " craftlibRecipes=" .. tostring(prof and #prof.recipes or "n/a"))
+            .. " craftlibMatched=" .. tostring(matched) .. " craftlibRecipes=" .. tostring(#prof.recipes))
         local n, sample = SortedSample(missingLib, 10)
         add("notInCraftLib=" .. tostring(n) .. " sample=[" .. sample .. "]")
         n, sample = SortedSample(missingClient, 10)
         add("notInClient=" .. tostring(n) .. " sample=[" .. sample .. "]")
+    end)
+
+    section("check", function()
+        local registry = LazyProf.Professions and LazyProf.Professions.registry
+        local prof = profKey and registry and registry[profKey]
+        if not prof or not self:IsOpen() then return end
+        CheckAgainstCraftLib(profKey, prof, add)
     end)
 
     section("filters", function()
