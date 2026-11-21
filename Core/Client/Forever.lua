@@ -4,10 +4,12 @@
 -- spell-book profession list and C_Item. Forever plays like Classic but runs
 -- the retail engine, so none of the Classic trade-skill globals exist there.
 --
--- Facts below cite Blizzard's UI source for this client (1.60.1 build 70938,
--- paths under Interface/AddOns/) or the dump of the running client's globals
--- (GlobalAPI.lua / Events.lua / LuaEnum.lua). Ones that could not be settled
--- from source are listed for an in-game check where they are used.
+-- Facts below cite Blizzard's UI source for this client (Gethe/wow-ui-source,
+-- forever branch, 1.60.1 build 70938; paths under Interface/AddOns/) or the
+-- dump of the running client's globals (Ketho BlizzardInterfaceResources,
+-- forever branch: Resources/GlobalAPI.lua / Events.lua / LuaEnum.lua /
+-- AtlasInfo.lua). Ones that could not be settled from source are listed for
+-- an in-game check where they are used.
 local ADDON_NAME, LazyProf = ...
 
 if LazyProf.ClientFamily ~= "forever" then return end

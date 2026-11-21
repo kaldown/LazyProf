@@ -807,8 +807,9 @@ function Pathfinder:GetCurrentRecommendation()
 end
 
 -- The step the arrow points at: the first step the player's real skill has not
--- finished. Inside a gap there is no step to point at (returns nil); past the
--- last step it falls back to the first step.
+-- finished. Inside a gap, or past the last step, there is no step to point at
+-- (returns nil). A path without a real skill (actualSkill nil) points at its
+-- first step.
 function Pathfinder:GetArrowStep(path)
     if not path or not path.steps or #path.steps == 0 then
         return nil

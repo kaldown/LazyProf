@@ -134,13 +134,14 @@ end
 -- Panel chrome. opts.bg / opts.border are the classic backdrop colours.
 -- Classic: the tooltip-style backdrop. Forever: Blizzard's own panel frame -
 -- a NineSlice child with the "ButtonFrameTemplateNoPortrait" layout, the layout
--- every plain portrait-less framed panel uses (Blizzard_SharedXML/Mainline/
+-- every plain portrait-less framed panel uses (Blizzard UI source,
+-- Gethe/wow-ui-source forever branch: Blizzard_SharedXML/Mainline/
 -- NineSliceLayouts.lua:43, picked by DefaultPanelBaseTemplate at
 -- Blizzard_SharedXML/Mainline/SharedUIPanelTemplates.xml:480; the Camelot
 -- overrides in Blizzard_SharedXML/Camelot/NineSliceLayoutOverrides.lua adjust
--- its offsets on this client). NineSlicePanelTemplate:
--- kbir-forever Resources/Templates.lua:2311, applied with
--- NineSliceUtil.ApplyLayoutByName (Blizzard_SharedXML/NineSlice.lua:226).
+-- its offsets on this client). NineSlicePanelTemplate: Ketho
+-- BlizzardInterfaceResources, forever branch, Resources/Templates.lua:2311;
+-- applied with NineSliceUtil.ApplyLayoutByName (Blizzard_SharedXML/NineSlice.lua:226).
 -- Background: the rock tile at the anchors DefaultPanelTemplate uses
 -- (SharedUIPanelTemplates.xml:531-537). The panel's own title bar strip is
 -- hidden; the title font stays GameFontNormal. Call after the title bar
