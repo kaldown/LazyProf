@@ -24,6 +24,8 @@ LazyProf.defaults = {
         includeGuildBank = false,
         -- Side-panel positions the user dragged to: [key] = { point, relPoint, x, y }
         panelPositions = {},
+        -- Sizes of resizable panels the user changed: [key] = { width, height }
+        panelSizes = {},
 
         -- Minimap button
         minimap = {
@@ -249,8 +251,8 @@ LazyProf.options = {
                     end,
                 },
                 showMilestonePanel = {
-                    name = "Show milestone breakdown",
-                    desc = "Display skill bracket breakdown panel",
+                    name = "Show the LazyProf window",
+                    desc = "Open the LazyProf window beside the profession window",
                     type = "toggle",
                     order = 2,
                     width = "full",
@@ -274,8 +276,8 @@ LazyProf.options = {
                 },
                 resetPanelPositions = {
                     name = "Reset panel positions",
-                    desc = "Move the milestone, shopping list and recipe details panels " ..
-                           "back next to the profession window.\n\n" ..
+                    desc = "Move the LazyProf window and its side panels back next to the " ..
+                           "profession window, at their default size.\n\n" ..
                            "Same as /lp resetpanels",
                     type = "execute",
                     order = 4.5,

@@ -58,5 +58,16 @@ check("money 123456", Utils.FormatMoney(123456), "12g 34s 56c")
 check("money 0", Utils.FormatMoney(0), "0c")
 check("money gold only", Utils.FormatMoney(30000), "3g")
 
+-- FormatMoneyShort: the two largest units, for narrow columns
+check("short money gold and silver", Utils.FormatMoneyShort(123456), "12g 34s")
+check("short money silver and copper", Utils.FormatMoneyShort(3405), "34s 5c")
+check("short money copper", Utils.FormatMoneyShort(42), "42c")
+check("short money round gold", Utils.FormatMoneyShort(30000), "3g")
+check("short money round silver", Utils.FormatMoneyShort(8200), "82s")
+check("short money large", Utils.FormatMoneyShort(1234567), "123g")
+check("short money zero", Utils.FormatMoneyShort(0), "0c")
+check("short money nil", Utils.FormatMoneyShort(nil), "0c")
+check("short money fraction rounds", Utils.FormatMoneyShort(149.6), "1s 50c")
+
 print(string.format("\n%d/%d checks passed", total - failures, total))
 os.exit(failures == 0 and 0 or 1)

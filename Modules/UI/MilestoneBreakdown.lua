@@ -1668,7 +1668,3 @@ end
 function MilestonePanelClass:IsVisible()
     return self.frame and self.frame:IsVisible()
 end
-
--- Create the main standalone instance (backwards compatible)
--- Empty name keeps frame as "LazyProfMilestonePanel" for other modules that reference it
-LazyProf.MilestonePanel = MilestonePanelClass:New({ name = "", embedded = false })

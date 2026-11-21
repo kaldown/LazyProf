@@ -17,7 +17,7 @@ local DEFAULT_WIDTH = 300
 function MissingPanel:Initialize()
     self.frame = CreateFrame("Frame", "LazyProfMissingPanel", UIParent, "BackdropTemplate")
     self.frame:SetSize(DEFAULT_WIDTH, 150)
-    self.frame:SetPoint("TOPLEFT", LazyProfMilestonePanel or UIParent, "BOTTOMLEFT", 0, -10)
+    self.frame:SetPoint("TOPLEFT", UIParent, "CENTER", 0, 0)
     self.frame:SetFrameStrata("MEDIUM")
     self.frame:SetFrameLevel(10)
 
@@ -118,14 +118,15 @@ function MissingPanel:Initialize()
     end)
 
     -- The panel shell owns position, dragging, closed state and combat
-    -- hide/restore. Default spot: below the milestone panel when it is shown,
-    -- else right of the profession window (at the client's panel offset), lower down.
+    -- hide/restore. Default spot: right of the LazyProf window when it is
+    -- shown, else right of the profession window (at the client's panel
+    -- offset), lower down.
     LazyProf.PanelShell:Attach(self.frame, "shoppingList", {
         planning = true,   -- the Planning window shows it too
         anchor = function()
-            local milestone = LazyProf.MilestonePanel and LazyProf.MilestonePanel.frame
-            if milestone and milestone:IsShown() then
-                return milestone, "TOPLEFT", "BOTTOMLEFT", 0, -10
+            local window = LazyProf.GuideWindow and LazyProf.GuideWindow.frame
+            if window and window:IsShown() then
+                return window, "TOPLEFT", "TOPRIGHT", 10, 0
             end
             local anchor = LazyProf.Client:AnchorFrame()
             if anchor then
@@ -135,20 +136,11 @@ function MissingPanel:Initialize()
     })
 end
 
--- Refresh layout after resize (routes through bracket filter if available)
+-- Refresh layout after resize
 function MissingPanel:RefreshLayout()
     local path = LazyProf.Pathfinder and LazyProf.Pathfinder.currentPath
     if not path then return end
-
-    -- Route through milestone panel's bracket filter
-    if LazyProf.MilestonePanel and LazyProf.MilestonePanel.currentPath then
-        local mp = LazyProf.MilestonePanel
-        local breakdown = mp:FilterBreakdownByBracket(path.milestoneBreakdown or {})
-        local bracket = mp:GetEffectiveBracket()
-        mp:UpdateShoppingList(path, breakdown, bracket)
-    else
-        self:Update(path.missingMaterials)
-    end
+    LazyProf:UpdateShoppingPanel()
 end
 
 -- Update panel with missing materials

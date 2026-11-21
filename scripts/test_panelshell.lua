@@ -643,7 +643,7 @@ section("init", function()
     local updates = 0
     addon.Pathfinder = { currentPath = { steps = { {} } } }
     addon.ArrowManager = { Update = function() updates = updates + 1 end }
-    addon.MilestonePanel = { Update = function() updates = updates + 1 end }
+    addon.GuideWindow = { Update = function() updates = updates + 1 end }
     open = false
     addon:UpdateDisplay()
     check(p .. "UpdateDisplay with the window closed does nothing", updates == 0, updates)
@@ -654,7 +654,7 @@ section("init", function()
     -- No path for the open profession: the stale path is dropped.
     local hidden = 0
     addon.ArrowManager = { Hide = function() hidden = hidden + 1 end, InvalidateCache = function() end }
-    addon.MilestonePanel = { Hide = function() hidden = hidden + 1 end }
+    addon.GuideWindow = { Hide = function() hidden = hidden + 1 end }
     addon.MissingMaterialsPanel = { Hide = function() hidden = hidden + 1 end }
     addon.Pathfinder.Calculate = function() return nil end
     addon:Recalculate("test")
@@ -666,14 +666,14 @@ section("init", function()
     -- No path because the open profession has no recipe data: one notice row.
     local notices = {}
     local order = {}
-    addon.MilestonePanel = {
+    addon.GuideWindow = {
         Hide = function() order[#order + 1] = "hide" end,
         ShowNotice = function(_self, text) notices[#notices + 1] = text; order[#order + 1] = "notice" end,
     }
     local noData = "Engineering"
     addon.Client.NoDataProfessionName = function() return noData end
     addon:Recalculate("test")
-    check(p .. "no data: the milestone panel shows the notice",
+    check(p .. "no data: the window shows the notice",
         notices[1] == "No recipe data for Engineering yet.", notices[1])
     check(p .. "no data: notice after the panels were hidden", table.concat(order, ",") == "hide,notice",
         table.concat(order, ","))
@@ -690,8 +690,12 @@ section("init", function()
     -- Shopping-list refresh queued before the window closed does not show the list.
     local refreshed = 0
     addon.Pathfinder.currentPath = { steps = { {} }, milestoneBreakdown = {} }
-    addon.MilestonePanel = nil
-    addon.MissingMaterialsPanel = { Update = function() refreshed = refreshed + 1 end }
+    local windowRefreshes = 0
+    addon.GuideWindow = {
+        Refresh = function() windowRefreshes = windowRefreshes + 1 end,
+        ShoppingSteps = function() return {}, "75-150" end,
+    }
+    addon.MissingMaterialsPanel = { frame = {}, Update = function() refreshed = refreshed + 1 end }
     addon.Inventory = { ScanAll = function() return {}, {} end }
     addon.PriceManager = { cache = {} }
     addon.Pathfinder.CalculateMissingMaterials = function() return {} end
@@ -701,6 +705,7 @@ section("init", function()
     open = true
     addon:RefreshShoppingList()
     check(p .. "shopping-list refresh with the window open updates", refreshed == 1, refreshed)
+    check(p .. "and redraws the window from the new stock", windowRefreshes == 1, windowRefreshes)
 end)
 
 -- ===========================================================================

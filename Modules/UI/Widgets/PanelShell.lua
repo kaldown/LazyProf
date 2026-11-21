@@ -17,6 +17,13 @@
 --   taking that frame's strata when it is higher than the panel's own. It is
 --   never put below its own strata or level. Without an anchor frame it goes
 --   back to its own strata and level.
+-- Own owner: a frame attached with opts.owner (the LazyProf window, the
+--   merchant panel) says itself whether it should be showing: the function
+--   is asked when combat ends and replaces the profession-window / Planning
+--   rule below. Such a frame may also name its saved spot with a function
+--   (opts.key), so it can keep one spot docked and another undocked.
+-- Size: SaveSize / ApplySize keep a resizable frame's size in
+--   db.profile.panelSizes[key]; "/lp resetpanels" forgets sizes too.
 -- Combat (rule 7, ruling L4): panels hide when combat starts. A Show asked for
 --   during combat is remembered instead of shown. When combat ends a panel
 --   shows again only if it was shown or asked for, the user did not close it,
@@ -49,6 +56,22 @@ end
 local function Positions()
     local profile = LazyProf.db and LazyProf.db.profile
     return profile and profile.panelPositions
+end
+
+local function Sizes()
+    local profile = LazyProf.db and LazyProf.db.profile
+    if not profile then return nil end
+    profile.panelSizes = profile.panelSizes or {}
+    return profile.panelSizes
+end
+
+-- The name a frame's position and size are saved under (a frame may switch
+-- between two, e.g. docked and undocked).
+local function Key(shell)
+    if type(shell.key) == "function" then
+        return shell.key()
+    end
+    return shell.key
 end
 
 -- A current path: the live path has steps, or gap rows the milestone panel shows.
@@ -86,17 +109,22 @@ local function RaiseTarget(shell, anchorFrame)
     return strata, level   -- own strata already draws above the anchor
 end
 
--- Attach a panel frame. key names its saved position; opts.anchor is a
--- function returning (anchorFrame, point, relPoint, x, y) for the default
--- spot, or nil when there is nothing to anchor to; opts.planning marks a
--- panel the Planning window also shows. Call after the frame's own strata and
--- level are set (the floor for the raise and the fallback when not anchored).
+-- Attach a panel frame. key names its saved position (a string, or a function
+-- returning one); opts.anchor is a function returning (anchorFrame, point,
+-- relPoint, x, y) for the default spot, or nil when there is nothing to
+-- anchor to; opts.planning marks a panel the Planning window also shows;
+-- opts.owner is a function(frame) saying whether the frame should be showing
+-- (asked when combat ends); opts.onReset(frame) runs after "/lp resetpanels".
+-- Call after the frame's own strata and level are set (the floor for the
+-- raise and the fallback when not anchored).
 function PanelShell:Attach(frame, key, opts)
     opts = opts or {}
     frame._shell = {
         key = key,
         anchor = opts.anchor,
         planning = opts.planning and true or false,
+        owner = opts.owner,
+        onReset = opts.onReset,
         baseStrata = frame:GetFrameStrata(),
         baseLevel = frame:GetFrameLevel(),
     }
@@ -217,8 +245,29 @@ function PanelShell:SavePosition(frame)
     local left, top = frame:GetLeft(), frame:GetTop()
     local positions = Positions()
     if not (left and top and positions) then return end
-    positions[shell.key] = { point = "TOPLEFT", relPoint = "BOTTOMLEFT", x = left, y = top }
-    LazyProf:Debug("ui", string.format("PanelShell: saved %s at %.0f, %.0f", shell.key, left, top))
+    local key = Key(shell)
+    positions[key] = { point = "TOPLEFT", relPoint = "BOTTOMLEFT", x = left, y = top }
+    LazyProf:Debug("ui", string.format("PanelShell: saved %s at %.0f, %.0f", tostring(key), left, top))
+end
+
+-- Remember a resizable frame's size (call when the user lets go of the grip).
+function PanelShell:SaveSize(frame)
+    local shell, sizes = frame._shell, Sizes()
+    if not (shell and sizes) then return end
+    local width, height = frame:GetWidth(), frame:GetHeight()
+    if not (width and height) then return end
+    sizes[Key(shell)] = { width = width, height = height }
+end
+
+-- Size a frame: the saved size, else the given default.
+function PanelShell:ApplySize(frame, defaultWidth, defaultHeight)
+    local shell, sizes = frame._shell, Sizes()
+    local saved = shell and sizes and sizes[Key(shell)]
+    if saved and type(saved.width) == "number" and type(saved.height) == "number" then
+        frame:SetSize(saved.width, saved.height)
+    else
+        frame:SetSize(defaultWidth, defaultHeight)
+    end
 end
 
 -- Position the panel (saved spot, else the anchor) and raise it above its anchor.
@@ -233,7 +282,7 @@ function PanelShell:Place(frame)
     end
 
     local positions = Positions()
-    local saved = positions and positions[shell.key]
+    local saved = positions and positions[Key(shell)]
     if saved and type(saved.x) == "number" and type(saved.y) == "number" then
         frame:ClearAllPoints()
         frame:SetPoint(saved.point or "TOPLEFT", UIParent, saved.relPoint or "BOTTOMLEFT", saved.x, saved.y)
@@ -295,15 +344,22 @@ function PanelShell:ResetClosedForPlanning()
     end
 end
 
--- Forget every saved position; shown panels go back to their default spot.
+-- Forget every saved position and size; shown panels go back to their
+-- default spot (and, through their onReset, their default size).
 function PanelShell:ResetPositions()
-    local positions = Positions()
-    if positions then
-        for k in pairs(positions) do
-            positions[k] = nil
+    for _, saved in ipairs({ Positions() or false, Sizes() or false }) do
+        if saved then
+            for k in pairs(saved) do
+                saved[k] = nil
+            end
         end
     end
     if not InCombat() then
+        for _, frame in ipairs(shells) do
+            if frame._shell.onReset then
+                frame._shell.onReset(frame)
+            end
+        end
         self:PlaceShown()
     end
 end
@@ -327,10 +383,15 @@ function PanelShell:RestoreAfterCombat(frame)
     local live = WindowOpen() and (HasCurrentPath() or frame.showsNotice == true)
     local planning = frame._shell and frame._shell.planning and PlanningShown() or false
     local restore = not frame.userClosed and (live or planning)
+    local owner = frame._shell and frame._shell.owner
+    if owner then
+        -- The frame decides itself (the LazyProf window, the merchant panel)
+        restore = not frame.userClosed and (owner(frame) and true or false)
+    end
     if LazyProf:IsDebugEnabled("ui") then
         LazyProf:Debug("ui", string.format(
             "PanelShell: after combat %s -> %s (closed=%s, window=%s, path=%s, planning=%s)",
-            frame._shell and frame._shell.key or "?", restore and "show" or "stay hidden",
+            frame._shell and tostring(Key(frame._shell)) or "?", restore and "show" or "stay hidden",
             tostring(frame.userClosed == true), tostring(WindowOpen()), tostring(HasCurrentPath()),
             tostring(planning)))
     end
