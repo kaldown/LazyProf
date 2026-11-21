@@ -221,4 +221,215 @@ T.section("search", function()
     T.eq("no matches", Views.SearchResults({}, {})[1].text, "No recipes found")
 end)
 
+T.section("path bar", function()
+    local view = makeView(makePath(), { range = "all" })
+    local bar = Views.PathBar(view)
+    T.eq("a profession the character has: the bar starts at 1", bar.from, 1)
+    T.eq("and ends at the target", bar.to, 300)
+    T.eq("one dim block for the skill already gained, then every craft and gap stage", #bar.segments, 6)
+    T.eq("first segment is the done block", bar.segments[1].kind, "done")
+    local total, prevEnd, contiguous = 0, 0, true
+    for _, seg in ipairs(bar.segments) do
+        total = total + seg.width
+        if math.abs(seg.left - prevEnd) > 1e-9 then contiguous = false end
+        prevEnd = seg.left + seg.width
+    end
+    T.check("segments cover the bar exactly", math.abs(total - 1) < 1e-9, total)
+    T.check("and follow each other", contiguous)
+    local gloves, shirt, gap = bar.segments[2], bar.segments[3], bar.segments[4]
+    T.check("a craft stage has its start colour (orange)", gloves.color[1] == 1 and gloves.color[2] == 0.5)
+    T.eq("its width is its share of the bar", gloves.width, (160 - 143) / 299)
+    T.eq("it knows its stage", gloves.stage, view.stages[1])
+    T.check("a gap is red", gap.kind == "gap" and gap.color[1] > 0.7 and gap.color[2] < 0.2)
+    T.eq("hover text names the stage", gloves.tooltip[1].text, "19x Gloves")
+    T.eq("hover text of a gap", gap.tooltip[1].text, "No recipe for 180-200: train elsewhere or missing data")
+    T.eq("marker at the real skill", bar.marker, (143 - 1) / 299)
+    T.eq("marker skill", bar.markerSkill, 143)
+    T.eq("no ticks without rank steps", #bar.ticks, 0)
+    T.eq("stages ahead are fully drawn", shirt.alpha, 1)
+
+    -- Done stages are dimmed; the selected one is marked.
+    local path = makePath({ actualSkill = 165 })
+    view = makeView(path, { range = "all" })
+    view.selectedStage = view.stages[2]
+    bar = Views.PathBar(view)
+    T.check("a finished stage is dimmed", bar.segments[2].alpha < 1)
+    T.check("the selected stage is marked", bar.segments[3].selected == true and not bar.segments[2].selected)
+
+    -- Rank steps become ticks.
+    local stages = Stages.Build(makePath(), { liveCap = 150 })
+    view = makeView(makePath(), { range = "all" })
+    view.stages = stages
+    bar = Views.PathBar(view)
+    T.eq("one tick per rank still to train", #bar.ticks, 2)
+    T.eq("tick at the cap", bar.ticks[1].skill, 150)
+    T.eq("tick position", bar.ticks[1].pos, (150 - 1) / 299)
+
+    -- A profession not learned yet, and a what-if from 1.
+    local fresh = makePath({ hasProfession = false, currentSkill = 1, actualSkill = 1,
+        steps = { step(A, 1, 300, 300, 30000) }, gaps = {}, totalCost = 30000 })
+    bar = Views.PathBar(makeView(fresh, { range = "all" }))
+    T.eq("not learned: starts where the path does", bar.from, 1)
+    T.eq("no done block", bar.segments[1].kind, "craft")
+    local whatIf = makePath({ planFromOne = true, currentSkill = 1, actualSkill = 143,
+        steps = { step(A, 1, 143, 143, 14300), step(B, 143, 300, 157, 31400) }, gaps = {}, totalCost = 45700 })
+    bar = Views.PathBar(makeView(whatIf, { range = "all" }))
+    T.eq("what-if from 1: no extra done block", bar.segments[1].kind, "craft")
+    T.check("its finished stage is dimmed instead", bar.segments[1].alpha < 1)
+    T.eq("marker still at the real skill", bar.markerSkill, 143)
+
+    local done = makePath({ steps = {}, gaps = {}, totalCost = 0, nothingLeft = true, actualSkill = 300, currentSkill = 300 })
+    bar = Views.PathBar(makeView(done, { range = "all" }))
+    T.eq("nothing left: the whole bar is done", #bar.segments, 1)
+    T.eq("no path: empty bar", #Views.PathBar({}).segments, 0)
+end)
+
+T.section("guide card", function()
+    local D = recipe(4, "Boots", 100, 150, 160, 170, { unlearned = true, sourceInfo = { type = "vendor", cost = 2000 } })
+    D.source = { type = "vendor" }
+    local E = recipe(5, "Hat", 100, 150, 160, 170)
+    E._isUnavailable = true
+    E._unavailableReason = "Needs Alchemy"
+    local F, G = recipe(6, "Belt", 100, 150, 160, 170), recipe(7, "Bag", 100, 150, 160, 170)
+    local prices = { [101] = 100, [102] = 200, [104] = 90, [105] = 50, [106] = 150, [107] = 400 }
+    local alts = {
+        { recipe = A, score = 1, color = "orange", expectedSkillups = 1, craftCost = 100 },
+        { recipe = D, score = 2, color = "orange", expectedSkillups = 1, craftCost = 90 },
+        { recipe = E, score = math.huge, color = "yellow", expectedSkillups = 0.5, craftCost = 50 },
+        { recipe = F, score = 3, color = "orange", expectedSkillups = 0.5, craftCost = 150 },
+        { recipe = G, score = 4, color = "orange", expectedSkillups = 1, craftCost = 400 },
+    }
+    local function cardPath(extra)
+        local path = makePath(extra)
+        path.prices = prices
+        path.steps[1].alternatives = alts
+        return path
+    end
+    local calls = {}
+    local ctx = {
+        onShowRecipe = function(r, skill) calls[#calls + 1] = "recipe:" .. r.name .. ":" .. tostring(skill) end,
+        onUseAlternative = function(stage, alt) calls[#calls + 1] = "use:" .. alt.recipe.name .. ":" .. stage.from .. "-" .. stage.to end,
+        onResetPin = function(stage) calls[#calls + 1] = "reset:" .. stage.from end,
+        onShowAllAlts = function(on) calls[#calls + 1] = "all:" .. tostring(on) end,
+        onOpenStage = function(stage) calls[#calls + 1] = "open:" .. stage.index end,
+    }
+    local function texts(rows)
+        local out = {}
+        for _, r in ipairs(rows) do
+            if r.kind == "sep" then
+                out[#out + 1] = "---"
+            else
+                out[#out + 1] = (r.lead and (r.lead .. " | ") or "") .. (r.text or "")
+                    .. (r.cols and (" | " .. table.concat(r.cols, ",")) or "")
+                    .. ((r.right and r.right ~= "") and (" | " .. r.right) or "")
+                    .. (r.button and (" [" .. r.button.text .. "]") or "")
+            end
+        end
+        return out
+    end
+
+    local view = makeView(cardPath(), { range = "all" })
+    view.selectedStage = Views.SelectedStage(view.stages, view.summary, nil)
+    T.eq("the current stage is selected by default", view.selectedStage, view.stages[1])
+    local rows = Views.GuideCard(view, ctx)
+    local t = texts(rows)
+    T.eq("card header", t[1], "Step 1 of 5 - craft (current step)")
+    T.eq("title and range", t[2], "19x Gloves | 143 to 160")
+    T.eq("colour changes", t[3], "orange until 150, then yellow")
+    T.eq("reagent table header", t[4], "Reagent | Need,Have,Buy,Cost")
+    T.eq("reagent row", t[5], "MatGloves | 19,0,19,19s")
+    T.eq("step cost", t[6], " | Step cost  19s")
+    T.eq("alternatives header after a separator", t[7] .. " " .. t[8], "--- Alternatives")
+    -- Sorted: usable and cheapest for the player first; unavailable last.
+    T.eq("first alternative: fewer or more crafts and the cost difference",
+        t[9], "Boots |cFFFF8800[!]|r | |cFF66FF66-2 crafts|r  |cFFFF6666+16s 30c|r [Use this]")
+    T.eq("second alternative", t[10], "Belt | |cFFFF6666+15 crafts|r  |cFFFF6666+32s|r [Use this]")
+    T.eq("third alternative", t[11], "Bag | |cFF66FF66-2 crafts|r  |cFFFF6666+49s|r [Use this]")
+    T.eq("the rest is behind Show all", t[12], "Show all 4")
+    T.eq("next stages after a separator", t[13] .. " " .. t[14], "--- Next")
+    T.eq("next stage row", t[15], "160-180 | |cFF888888craft|r  20x Shirt (green: no better recipe) | 40s")
+    T.eq("second next row is the gap", t[16], "180-200 | |cFF888888gap|r  No recipe for 180-200: train elsewhere or missing data")
+    T.eq("two next rows only", #t, 16)
+
+    rows[2].onClick()
+    T.eq("title click opens the recipe details", calls[#calls], "recipe:Gloves:143")
+    rows[9].button.onClick()
+    T.eq("Use this pins over the stage's exact range", calls[#calls], "use:Boots:143-160")
+    rows[9].onClick()
+    T.eq("alternative click opens its recipe", calls[#calls], "recipe:Boots:143")
+    rows[12].onClick()
+    T.eq("Show all asks to expand", calls[#calls], "all:true")
+    rows[15].onClick()
+    T.eq("a next row opens that stage", calls[#calls], "open:2")
+    local tip = rows[9].tooltip
+    T.eq("alternative tooltip: unlearned source", tip[2].text, "[!] Unlearned: Vendor")
+    T.check("alternative tooltip: learning fee", tip[5].text:find("to learn the recipe", 1, true) ~= nil, tip[5].text)
+
+    view.showAllAlts = true
+    rows = Views.GuideCard(view, ctx)
+    t = texts(rows)
+    T.eq("expanded: the unavailable one is last", t[12], "Hat | |cFFFF6666+15 crafts|r  |cFF66FF66-2s|r [Use this]")
+    T.eq("and dimmed", rows[12].alpha, 0.5)
+    T.eq("with today's reason in its tooltip", rows[12].tooltip[2].text, "Needs Alchemy")
+    T.eq("Show fewer closes it", t[13], "Show fewer")
+    T.check("the Use button warns about an unobtainable recipe", rows[12].button.tooltip[3].text:find("obtain", 1, true) ~= nil)
+
+    -- Pinned stage
+    local pins = {}
+    LazyProf.Pins.Add(pins, 143, 160, 1)
+    view = makeView(cardPath(), { range = "all" })
+    view.stages = Stages.Build(cardPath(), { prices = prices, pins = pins })
+    view.selectedStage = view.stages[1]
+    rows = Views.GuideCard(view, ctx)
+    t = texts(rows)
+    T.eq("a pinned stage says so and offers Reset", t[4], "Pinned: you chose this recipe for the step. [Reset]")
+    rows[4].button.onClick()
+    T.eq("Reset asks to unpin the stage", calls[#calls], "reset:143")
+
+    -- Owned stock and margin on the card
+    view = makeView(cardPath(), { range = "all", inventory = { [101] = 10 }, margin = 15 })
+    view.selectedStage = view.stages[1]
+    t = texts(Views.GuideCard(view, ctx))
+    T.eq("stock: have and buy columns", t[5], "MatGloves | 22,10,12,12s")
+    T.eq("stock: step cost with the market price beside it", t[6], "|cFF888888market price 22s|r | Step cost  12s")
+    T.eq("margin: both counts", t[7], "19 crafts expected, 22 with margin")
+
+    -- Bridge and gap cards
+    view = makeView(cardPath(), { range = "all" })
+    view.selectedStage = view.stages[2]
+    t = texts(Views.GuideCard(view, ctx))
+    T.eq("bridge card header", t[1], "Step 2 of 5 - craft")
+    T.check("bridge explanation", t[4]:find("green recipe keeps you leveling", 1, true) ~= nil, t[4])
+    view.selectedStage = view.stages[3]
+    t = texts(Views.GuideCard(view, ctx))
+    T.eq("gap card header", t[1], "Step 3 of 5 - gap")
+    T.eq("gap card text", t[2], "No recipe for 180-200: train elsewhere or missing data")
+    T.eq("gap card explanation", t[3], "No available recipe gives skill-ups in this range.")
+    view.selectedStage = view.stages[5]
+    t = texts(Views.GuideCard(view, ctx))
+    T.eq("the last stage has no next rows", t[#t], "The path continues after the gap; totals exclude it.")
+
+    -- Selection
+    view = makeView(cardPath(), { range = "all" })
+    T.eq("selection by key", Views.SelectedStage(view.stages, view.summary, { key = view.stages[4].key, from = 200 }), view.stages[4])
+    T.eq("a key that is gone falls back to the stage covering that skill",
+        Views.SelectedStage(view.stages, view.summary, { key = "craft:999:143", from = 143 }), view.stages[1])
+    T.eq("nothing matching: the current stage", Views.SelectedStage(view.stages, view.summary, { key = "x", from = 999 }), view.stages[1])
+    T.check("no stages: nothing selected", Views.SelectedStage({}, {}, nil) == nil)
+
+    -- Navigation
+    view.selectedStage = view.stages[1]
+    local nav = Views.GuideNav(view)
+    T.check("first stage: no Prev, Next allowed, not away from current", nav.prev == false and nav.next == true and nav.current == false)
+    view.selectedStage = view.stages[5]
+    nav = Views.GuideNav(view)
+    T.check("last stage: Prev allowed, no Next, Current step offered", nav.prev == true and nav.next == false and nav.current == true)
+    T.check("a gap has no recipe to show", nav.recipe == false)
+
+    -- Nothing left
+    local done = makePath({ steps = {}, gaps = {}, totalCost = 0, nothingLeft = true, actualSkill = 300, currentSkill = 300 })
+    view = makeView(done, { range = "all" })
+    T.eq("nothing left on the card too", Views.GuideCard(view, ctx)[1].text, "Nothing left: Tailoring is at its cap of 300.")
+end)
+
 T.finish()

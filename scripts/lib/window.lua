@@ -72,6 +72,7 @@ local FILES = {
     "Modules/UI/Widgets/Controls.lua",
     "Modules/UI/Widgets/Tabs.lua",
     "Modules/UI/Widgets/RowList.lua",
+    "Modules/UI/PathBar.lua",
     "Modules/UI/GuideWindow.lua",
 }
 
