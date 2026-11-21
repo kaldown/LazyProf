@@ -11,8 +11,8 @@
 --   owns the panels attached with opts.planning (shopping list, recipe details).
 -- Closed: the close button sets frame.userClosed. Show does nothing while it
 --   is set. ResetClosed (the profession window opened again) clears it on
---   every panel, ResetClosedForPlanning (Planning loads a profession) on the
---   Planning panels.
+--   every panel, ResetClosedForPlanning (the user opens Planning or picks a
+--   profession in it) on the Planning panels.
 -- Raise: on Place the panel sits RAISE_LEVELS above the frame it anchors to,
 --   taking that frame's strata when it is higher than the panel's own. It is
 --   never put below its own strata or level. Without an anchor frame it goes
@@ -210,7 +210,8 @@ function PanelShell:ResetClosed()
     end
 end
 
--- The Planning window loaded a profession: its closed panels may show again.
+-- The user opened Planning or picked a profession in it: its closed panels
+-- may show again (not on programmatic reloads).
 function PanelShell:ResetClosedForPlanning()
     for _, frame in ipairs(shells) do
         if frame._shell.planning then

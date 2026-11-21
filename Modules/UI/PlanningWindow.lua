@@ -224,6 +224,14 @@ function PlanningWindow:Open(profKey)
         self:Initialize()
     end
 
+    -- Planning also owns the shopping list and recipe details: opening it or
+    -- picking a profession (both land here) may show them again even if the
+    -- user closed them. Programmatic reloads call LoadProfession directly and
+    -- leave them closed.
+    if LazyProf.PanelShell then
+        LazyProf.PanelShell:ResetClosedForPlanning()
+    end
+
     -- Show the main frame FIRST so child frames can become visible
     self.frame:Show()
     -- Then load the profession (which updates the embedded MilestonePanel)
@@ -243,12 +251,6 @@ function PlanningWindow:LoadProfession(profKey)
     if not profInfo then
         LazyProf:Print("Unknown profession: " .. tostring(profKey))
         return
-    end
-
-    -- Planning also owns the shopping list and recipe details: a profession
-    -- loaded here may show them again even if they were closed earlier.
-    if LazyProf.PanelShell then
-        LazyProf.PanelShell:ResetClosedForPlanning()
     end
 
     -- Update title

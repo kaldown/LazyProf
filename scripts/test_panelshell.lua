@@ -489,21 +489,38 @@ section("planning", function()
         not list.userClosed and not details.userClosed)
     check(p .. "ResetClosedForPlanning leaves the milestone panel closed", milestone.userClosed == true)
 
-    -- PlanningWindow:LoadProfession clears it (Open calls LoadProfession).
-    env.shell:Close(list)
+    -- Only user actions in Planning reopen them: opening the window or picking
+    -- a profession (both PlanningWindow:Open). Programmatic reloads
+    -- (LoadProfession after a live skill-up, the strategy toggle) do not.
     local addon = env.addon
-    addon.Constants = { PROFESSIONS = { tailoring = { name = "Tailoring" } } }
+    addon.Constants = { PROFESSIONS = {
+        tailoring = { name = "Tailoring" }, blacksmithing = { name = "Blacksmithing" },
+    } }
     addon.Utils.GetRacialProfessionBonus = function() return 0 end
     addon.Client.PlayerSkill = function() return 0 end
     addon.Pathfinder.CalculateForProfession = function() return nil end
     addon.db.profile.calculateFromCurrentSkill = false
     assert(loadfile("Modules/UI/PlanningWindow.lua"))("LazyProf", addon)
     local stubText = { SetText = function() end, SetTextColor = function() end, ClearFocus = function() end }
-    addon.PlanningWindow.frame = { title = stubText, status = stubText, searchBox = stubText }
-    addon.PlanningWindow:LoadProfession("tailoring")
-    check(p .. "Planning LoadProfession reopens the closed shopping list", not list.userClosed)
+    local planningShown = false
+    addon.PlanningWindow.frame = {
+        title = stubText, status = stubText, searchBox = stubText,
+        Show = function() planningShown = true end,
+    }
+    addon.PlanningWindow:Open("tailoring")
+    check(p .. "opening Planning shows its window", planningShown)
     env.shell:Show(list)
-    check(p .. "the shopping list then shows for Planning", list.shown)
+    check(p .. "Planning open: the shopping list shows", list.shown)
+    env.shell:Close(list)
+    -- A live recalculation reloads Planning the way Core/Init.lua does.
+    addon.PlanningWindow:LoadProfession(addon.PlanningWindow.currentProfession)
+    env.shell:Show(list)
+    check(p .. "live recalculation reloading Planning keeps the list closed",
+        list.userClosed == true and not list.shown)
+    addon.PlanningWindow:Open("blacksmithing")
+    check(p .. "picking another profession in Planning reopens the list", not list.userClosed)
+    env.shell:Show(list)
+    check(p .. "the shopping list then shows again", list.shown)
 
     -- After combat: Planning shown, profession window closed, no live path.
     fresh()
@@ -700,6 +717,12 @@ section("wiring", function()
     check(p .. "shopping list is shared with Planning", mm:find("planning = true", 1, true))
     check(p .. "recipe details is shared with Planning", rd:find("planning = true", 1, true))
     check(p .. "milestone panel is not shared with Planning", not mb:find("planning = true", 1, true))
+    -- The programmatic Planning reloads stay plain LoadProfession calls (no reopen).
+    local init = read("Core/Init.lua")
+    check(p .. "live recalculation reloads Planning with LoadProfession",
+        init:find("self.PlanningWindow:LoadProfession(self.PlanningWindow.currentProfession)", 1, true))
+    check(p .. "strategy toggle reloads Planning with LoadProfession",
+        mb:find("pw:LoadProfession(pw.currentProfession)", 1, true))
     check(p .. "milestone close button closes through the shell", mb:find("PanelShell:Close(self.frame)", 1, true))
     check(p .. "shopping list close button closes through the shell", mm:find("PanelShell:Close(self.frame)", 1, true))
     for name, src in pairs({ milestone = mb, shopping = mm, details = rd }) do
