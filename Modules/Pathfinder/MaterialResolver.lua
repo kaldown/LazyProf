@@ -1,5 +1,15 @@
 -- Modules/Pathfinder/MaterialResolver.lua
--- Resolves intermediate materials (e.g., smelt ore into bars) for cost optimization
+-- Craft or buy: for a reagent the shopping list needs, decides whether the
+-- character makes it from its own reagents (e.g. smelt ore into bars) or buys
+-- it. One level deep. Used by the shopping list only; path scoring always
+-- uses market prices.
+--
+-- The decision per item:
+--   an explicit choice ("craft" / "buy", set per character in the Shopping
+--   tab) wins, under every strategy;
+--   otherwise ("automatic") the material-resolution setting decides, as it
+--   always has: never, when cheaper, or always - and only under the Cheapest
+--   strategy (the caller passes the mode).
 local ADDON_NAME, LazyProf = ...
 local Constants = LazyProf.Constants
 local Utils = LazyProf.Utils
@@ -7,219 +17,156 @@ local Utils = LazyProf.Utils
 LazyProf.MaterialResolver = {}
 local Resolver = LazyProf.MaterialResolver
 
--- Reference to CraftLib
-local CraftLib = _G.CraftLib
+-- Can this character craft the recipe? It can when the recipe is in the
+-- learned-recipe list the profession window filled for that profession
+-- (matched by profession key). When that list is empty - the profession
+-- window was never opened on this character - fall back to the older guess:
+-- the character has the profession and the recipe is trainer-taught.
+function Resolver:CanCraft(recipeInfo)
+    local profKey = recipeInfo and recipeInfo.professionKey
+    local recipe = recipeInfo and recipeInfo.recipe
+    if not (profKey and recipe) then return false end
 
--- Cache for player's known professions
-local playerProfessions = nil
-
--- Get player's profession names (cached)
-local function GetPlayerProfessions()
-    if playerProfessions then return playerProfessions end
-
-    playerProfessions = {}
-    local prof1, prof2, archaeology, fishing, cooking, firstAid = GetProfessions()
-
-    local function addProf(index)
-        if index then
-            local name = GetProfessionInfo(index)
-            if name then
-                playerProfessions[name:lower()] = true
-            end
-        end
+    local cache = LazyProf.db and LazyProf.db.char and LazyProf.db.char.learnedRecipes
+    local learned = cache and cache[profKey]
+    if type(learned) == "table" and next(learned) ~= nil then
+        return learned[recipe.id] and true or false
     end
 
-    addProf(prof1)
-    addProf(prof2)
-    addProf(archaeology)
-    addProf(fishing)
-    addProf(cooking)
-    addProf(firstAid)
-
-    return playerProfessions
-end
-
--- Clear profession cache (call on login/profession change)
-function Resolver:ClearCache()
-    playerProfessions = nil
-end
-
--- Check if player can likely craft this recipe
--- For v1, we assume trainer recipes are known if player has the profession
-local function CanPlayerCraft(recipeInfo)
-    local professions = GetPlayerProfessions()
-
-    -- Check if player has this profession
-    local profName = recipeInfo.professionKey
-    if not profName then return false end
-
-    -- Map profession keys to display names (CraftLib uses lowercase keys)
-    local profDisplayName = profName:lower()
-    if not professions[profDisplayName] then
+    if (LazyProf.Client:PlayerSkill(profKey) or 0) <= 0 then
         return false
     end
-
-    -- For v1, we only handle trainer recipes (safe assumption player knows them)
-    local recipe = recipeInfo.recipe
-    if recipe.source and recipe.source.type then
-        if recipe.source.type == "trainer" then
-            return true
-        end
-    end
-
-    -- Skip non-trainer recipes for v1 (drops, reputation, etc.)
-    return false
+    return (recipe.source and recipe.source.type == "trainer") or false
 end
 
--- Resolve a material: determine if it should be crafted or bought
--- Returns: { shouldCraft = bool, craftRecipe = recipe/nil, sourceItems = {}, craftCost = num, buyCost = num }
-function Resolver:ResolveMaterial(itemId, quantity, inventory, prices, visitedSet, resolutionMode)
+-- Recipes of the data that make an item and that this character can craft.
+function Resolver:CraftOptions(itemId)
+    local CraftLib = _G.CraftLib
+    local options = {}
+    if not (CraftLib and CraftLib.GetRecipeByProduct) then return options end
+    for _, recipeInfo in ipairs(CraftLib:GetRecipeByProduct(itemId) or {}) do
+        if self:CanCraft(recipeInfo) then
+            options[#options + 1] = recipeInfo
+        end
+    end
+    return options
+end
+
+local function BuyResult(prices, itemId, quantity, craftable)
+    local buyCost = (prices[itemId] or 0) * quantity
+    return {
+        shouldCraft = false,
+        craftable = craftable or false,
+        craftRecipe = nil,
+        sourceItems = {},
+        craftCost = 0,
+        buyCost = buyCost,
+        effectiveCost = buyCost,
+    }
+end
+
+-- Resolve a material: determine if it should be crafted or bought.
+-- choice: "craft" | "buy" | nil (automatic: resolutionMode decides)
+-- Returns: { shouldCraft, craftable, craftRecipe, professionKey, sourceItems,
+--            craftCost, buyCost, effectiveCost, yield, craftsNeeded }
+function Resolver:ResolveMaterial(itemId, quantity, inventory, prices, visitedSet, resolutionMode, choice)
     -- Default to cost-compare if not specified
     resolutionMode = resolutionMode or Constants.MATERIAL_RESOLUTION.COST_COMPARE
 
-    -- If mode is NONE, never craft
-    if resolutionMode == Constants.MATERIAL_RESOLUTION.NONE then
-        local buyCost = (prices[itemId] or 0) * quantity
-        return {
-            shouldCraft = false,
-            craftRecipe = nil,
-            sourceItems = {},
-            craftCost = 0,
-            buyCost = buyCost,
-            effectiveCost = buyCost,
-        }
-    end
-
-    -- Loop detection
+    -- Loop detection: a circular dependency falls back to buying
     visitedSet = visitedSet or {}
     if visitedSet[itemId] then
-        -- Circular dependency - fall back to buying
-        local buyCost = (prices[itemId] or 0) * quantity
-        return {
-            shouldCraft = false,
-            craftRecipe = nil,
-            sourceItems = {},
-            craftCost = 0,
-            buyCost = buyCost,
-            effectiveCost = buyCost,
-        }
+        return BuyResult(prices, itemId, quantity, false)
     end
 
-    -- Check if CraftLib can tell us how to craft this item
-    if not CraftLib or not CraftLib.GetRecipeByProduct then
-        local buyCost = (prices[itemId] or 0) * quantity
-        return {
-            shouldCraft = false,
-            craftRecipe = nil,
-            sourceItems = {},
-            craftCost = 0,
-            buyCost = buyCost,
-            effectiveCost = buyCost,
-        }
+    local options = self:CraftOptions(itemId)
+    local craftable = #options > 0
+    if not craftable then
+        return BuyResult(prices, itemId, quantity, false)
     end
 
-    local recipes = CraftLib:GetRecipeByProduct(itemId)
-    if not recipes or #recipes == 0 then
-        -- Item is not craftable
-        local buyCost = (prices[itemId] or 0) * quantity
-        return {
-            shouldCraft = false,
-            craftRecipe = nil,
-            sourceItems = {},
-            craftCost = 0,
-            buyCost = buyCost,
-            effectiveCost = buyCost,
-        }
+    -- What decides: the player's choice, else the setting.
+    local mode = resolutionMode
+    if choice == "buy" then
+        mode = Constants.MATERIAL_RESOLUTION.NONE
+    elseif choice == "craft" then
+        mode = Constants.MATERIAL_RESOLUTION.ALWAYS_CRAFT
+    end
+    if mode == Constants.MATERIAL_RESOLUTION.NONE then
+        return BuyResult(prices, itemId, quantity, true)
     end
 
-    -- Find a recipe the player can craft
+    -- Find the cheapest recipe the player can craft
     local bestCraftOption = nil
     local bestCraftCost = math.huge
 
-    for _, recipeInfo in ipairs(recipes) do
-        if CanPlayerCraft(recipeInfo) then
-            local recipe = recipeInfo.recipe
-            local yield = recipeInfo.yield or 1
+    for _, recipeInfo in ipairs(options) do
+        local recipe = recipeInfo.recipe
+        local yield = recipeInfo.yield or 1
 
-            -- Calculate how many times we need to craft
-            local craftsNeeded = math.ceil(quantity / yield)
+        -- Calculate how many times we need to craft
+        local craftsNeeded = math.ceil(quantity / yield)
 
-            -- Mark as visited to prevent loops
-            visitedSet[itemId] = true
+        -- Calculate cost of source materials (single level, no recursion)
+        local craftCost = 0
+        local sourceItems = {}
+        local usable = true
 
-            -- Calculate cost of source materials
-            local craftCost = 0
-            local sourceItems = {}
-            local canCraft = true
+        for _, reagent in ipairs(recipe.reagents) do
+            local reagentNeeded = reagent.count * craftsNeeded
+            local reagentInInventory = inventory[reagent.itemId] or 0
+            local reagentToBuy = math.max(0, reagentNeeded - reagentInInventory)
+            local reagentPrice = prices[reagent.itemId] or 0
+            local reagentCost = reagentPrice * reagentToBuy
 
-            for _, reagent in ipairs(recipe.reagents) do
-                local reagentNeeded = reagent.count * craftsNeeded
-                local reagentInInventory = inventory[reagent.itemId] or 0
-                local reagentToBuy = math.max(0, reagentNeeded - reagentInInventory)
-
-                -- For ALWAYS_CRAFT mode, we don't recursively resolve (v1 simplification)
-                -- For COST_COMPARE mode, we also don't recurse in v1 (single level)
-                local reagentPrice = prices[reagent.itemId] or 0
-                local reagentCost = reagentPrice * reagentToBuy
-
-                if reagentPrice == 0 and reagentToBuy > 0 then
-                    -- Can't get price for required material, skip this recipe
-                    canCraft = false
-                    break
-                end
-
-                craftCost = craftCost + reagentCost
-                table.insert(sourceItems, {
-                    itemId = reagent.itemId,
-                    name = reagent.name,
-                    totalNeeded = reagentNeeded,
-                    fromInventory = math.min(reagentInInventory, reagentNeeded),
-                    toBuy = reagentToBuy,
-                    cost = reagentCost,
-                })
+            -- No price for a material that must be bought: the comparison
+            -- cannot be made, so this recipe is skipped - unless the player
+            -- said "I craft it", which needs no comparison.
+            if reagentPrice == 0 and reagentToBuy > 0 and choice ~= "craft" then
+                usable = false
+                break
             end
 
-            -- Clear visited
-            visitedSet[itemId] = nil
+            craftCost = craftCost + reagentCost
+            table.insert(sourceItems, {
+                itemId = reagent.itemId,
+                name = reagent.name,
+                totalNeeded = reagentNeeded,
+                fromInventory = math.min(reagentInInventory, reagentNeeded),
+                toBuy = reagentToBuy,
+                cost = reagentCost,
+            })
+        end
 
-            if canCraft and craftCost < bestCraftCost then
-                bestCraftCost = craftCost
-                bestCraftOption = {
-                    recipe = recipe,
-                    professionKey = recipeInfo.professionKey,
-                    yield = yield,
-                    craftsNeeded = craftsNeeded,
-                    sourceItems = sourceItems,
-                }
-            end
+        if usable and craftCost < bestCraftCost then
+            bestCraftCost = craftCost
+            bestCraftOption = {
+                recipe = recipe,
+                professionKey = recipeInfo.professionKey,
+                yield = yield,
+                craftsNeeded = craftsNeeded,
+                sourceItems = sourceItems,
+            }
         end
     end
 
-    -- Calculate buy cost
-    local buyCost = (prices[itemId] or 0) * quantity
-
-    -- No craftable recipe found
+    -- No usable recipe found
     if not bestCraftOption then
-        return {
-            shouldCraft = false,
-            craftRecipe = nil,
-            sourceItems = {},
-            craftCost = 0,
-            buyCost = buyCost,
-            effectiveCost = buyCost,
-        }
+        return BuyResult(prices, itemId, quantity, true)
     end
 
     -- Decide: craft or buy?
+    local buyCost = (prices[itemId] or 0) * quantity
     local shouldCraft = false
-    if resolutionMode == Constants.MATERIAL_RESOLUTION.ALWAYS_CRAFT then
+    if mode == Constants.MATERIAL_RESOLUTION.ALWAYS_CRAFT then
         shouldCraft = true
-    elseif resolutionMode == Constants.MATERIAL_RESOLUTION.COST_COMPARE then
+    elseif mode == Constants.MATERIAL_RESOLUTION.COST_COMPARE then
         shouldCraft = bestCraftCost < buyCost
     end
 
     return {
         shouldCraft = shouldCraft,
+        craftable = true,
         craftRecipe = bestCraftOption.recipe,
         professionKey = bestCraftOption.professionKey,
         yield = bestCraftOption.yield,
@@ -232,7 +179,6 @@ function Resolver:ResolveMaterial(itemId, quantity, inventory, prices, visitedSe
 end
 
 -- Get effective price for a material (considering crafting)
--- This is the main entry point for the pricing system
 function Resolver:GetEffectivePrice(itemId, inventory, prices, resolutionMode)
     local result = self:ResolveMaterial(itemId, 1, inventory, prices, {}, resolutionMode)
 

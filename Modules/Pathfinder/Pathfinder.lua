@@ -268,8 +268,24 @@ function Pathfinder:SetTargetSkill(profKey, value, actualSkill, milestones)
     return value
 end
 
--- Calculate total missing materials for entire path
--- Returns { fromBank, fromMail, fromAuctions, fromGuildBank, fromAlts, toCraft, fromAH, recipeCosts }
+-- Calculate the shopping list of a set of steps (path steps, or the craft
+-- stages' { recipe, quantity, skillStart } entries).
+-- Returns the per-source lists { fromBank, fromMail, fromAuctions,
+-- fromGuildBank, fromAlts, toCraft, fromAH, recipeCosts } and, for the
+-- Shopping tab, one row per item in `rows`:
+--   itemId, name, icon, link, firstUsedAtSkill
+--   need        how many the steps use (as a reagent, and to craft other rows)
+--   have        how many the character owns across the enabled sources
+--   inBags      of those, in the bags
+--   sources     what to collect first: { bank, mail, auctions, guildBank, alts } counts
+--   toBuy       what is left to buy
+--   unitPrice   nil when the item has no price (unpriced = true); cost = unitPrice x toBuy
+--   priceSource the price's source ("Vendor", "TSM", ...); isVendor = sold by a vendor
+--   craftable   a recipe the character can craft makes it
+--   choice      the player's choice for the item ("craft" / "buy"), nil = automatic
+--   crafted     the item is crafted, not bought: craftRecipeName, professionKey,
+--               craftQuantity, craftCost and children = { { itemId, name, need }, ... }
+-- and buyTotal, the sum of the rows' costs.
 function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown, prices)
     local needed = {}
 
@@ -286,99 +302,116 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
         end
     end
 
-    -- Get resolution mode (only applies to Cheapest strategy)
+    -- Automatic craft-or-buy follows the setting, under the Cheapest strategy
+    -- only; an explicit per-item choice applies under both strategies.
     local resolutionMode = Constants.MATERIAL_RESOLUTION.NONE
     if LazyProf.db.profile.strategy == Constants.STRATEGY.CHEAPEST then
         resolutionMode = LazyProf.db.profile.materialResolution
     end
+    local choices = LazyProf.CharStore and LazyProf.CharStore:Get().craftChoices or {}
 
     -- Track intermediate crafts and resolved materials
     local toCraft = {}
     local resolvedNeeded = {} -- Final materials after resolution
     local bankPurpose = {}    -- Track why bank items are needed (for annotations)
+    local rowsById = {}       -- one shopping row per item
+
+    local function addResolved(itemId, count, nameFromData, firstUsedAtSkill)
+        local entry = resolvedNeeded[itemId]
+        if not entry then
+            entry = { count = 0, nameFromData = nameFromData, firstUsedAtSkill = firstUsedAtSkill }
+            resolvedNeeded[itemId] = entry
+        else
+            entry.firstUsedAtSkill = math.min(entry.firstUsedAtSkill, firstUsedAtSkill)
+        end
+        entry.count = entry.count + count
+    end
+
+    local bagCounts = LazyProf.Inventory:ScanBags()
 
     -- Process each needed material through MaterialResolver
     for itemId, data in pairs(needed) do
         local need = data.count
-        local inBags = LazyProf.Inventory:ScanBags()[itemId] or 0
+        local inBags = bagCounts[itemId] or 0
         local afterBags = math.max(0, need - inBags)
-
-        if afterBags > 0 and LazyProf.MaterialResolver then
-            -- Check if this material should be crafted
-            local resolution = LazyProf.MaterialResolver:ResolveMaterial(
-                itemId, afterBags, inventory, prices, {}, resolutionMode
+        local choice = choices[itemId]
+        local resolution = nil
+        if LazyProf.MaterialResolver then
+            -- Asked for at least one so "can the character craft it" is known
+            -- even when the bags already hold enough.
+            resolution = LazyProf.MaterialResolver:ResolveMaterial(
+                itemId, math.max(afterBags, 1), inventory, prices, {}, resolutionMode, choice
             )
+        end
+        local craftable = resolution and resolution.craftable or false
 
-            if resolution.shouldCraft and resolution.craftRecipe then
-                -- Add to toCraft list
-                local name, link, icon = Utils.GetItemInfo(itemId)
-                name = name or data.nameFromData or "Unknown"
-                icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark"
-                local recipeName = resolution.craftRecipe.name or "Unknown Recipe"
+        if afterBags > 0 and resolution and resolution.shouldCraft and resolution.craftRecipe then
+            -- Add to toCraft list
+            local name, link, icon = Utils.GetItemInfo(itemId)
+            name = name or data.nameFromData or "Unknown"
+            icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark"
+            local recipeName = resolution.craftRecipe.name or "Unknown Recipe"
 
-                -- Calculate source material breakdown
-                local sourceFromBank = 0
-                local sourceFromAH = 0
-                local sourceMaterialName = ""
+            -- Calculate source material breakdown
+            local sourceFromBank = 0
+            local sourceFromAH = 0
+            local sourceMaterialName = ""
+            local children = {}
 
-                for _, source in ipairs(resolution.sourceItems) do
-                    sourceFromBank = sourceFromBank + source.fromInventory
-                    sourceFromAH = sourceFromAH + source.toBuy
-                    sourceMaterialName = source.name or "Unknown"
+            for _, source in ipairs(resolution.sourceItems) do
+                sourceFromBank = sourceFromBank + source.fromInventory
+                sourceFromAH = sourceFromAH + source.toBuy
+                sourceMaterialName = source.name or "Unknown"
 
-                    if not resolvedNeeded[source.itemId] then
-                        resolvedNeeded[source.itemId] = { count = 0, nameFromData = source.name, firstUsedAtSkill = data.firstUsedAtSkill }
-                    else
-                        resolvedNeeded[source.itemId].firstUsedAtSkill = math.min(resolvedNeeded[source.itemId].firstUsedAtSkill, data.firstUsedAtSkill)
-                    end
-                    resolvedNeeded[source.itemId].count = resolvedNeeded[source.itemId].count + source.totalNeeded
+                addResolved(source.itemId, source.totalNeeded, source.name, data.firstUsedAtSkill)
+                children[#children + 1] = { itemId = source.itemId, name = source.name or "Unknown", need = source.totalNeeded }
 
-                    if source.fromInventory > 0 then
-                        bankPurpose[source.itemId] = string.format("for %s", recipeName:lower())
-                    end
+                if source.fromInventory > 0 then
+                    bankPurpose[source.itemId] = string.format("for %s", recipeName:lower())
                 end
-
-                -- Build source description for UI
-                local totalSourceNeeded = sourceFromBank + sourceFromAH
-                local sourceDesc = string.format("%dx %s", totalSourceNeeded, sourceMaterialName)
-                local usingDesc = ""
-                if sourceFromBank > 0 and sourceFromAH > 0 then
-                    usingDesc = string.format("%dx from inventory + %dx from AH", sourceFromBank, sourceFromAH)
-                elseif sourceFromBank > 0 then
-                    usingDesc = string.format("%dx from inventory", sourceFromBank)
-                else
-                    usingDesc = string.format("%dx from AH", sourceFromAH)
-                end
-
-                table.insert(toCraft, {
-                    itemId = itemId,
-                    name = name,
-                    icon = icon,
-                    link = link,
-                    quantity = afterBags,
-                    recipeName = recipeName,
-                    professionKey = resolution.professionKey,
-                    sourceDesc = sourceDesc,
-                    usingDesc = usingDesc,
-                    craftCost = resolution.craftCost,
-                    sourceItems = resolution.sourceItems,
-                    firstUsedAtSkill = data.firstUsedAtSkill,
-                })
-            else
-                if not resolvedNeeded[itemId] then
-                    resolvedNeeded[itemId] = { count = 0, nameFromData = data.nameFromData, firstUsedAtSkill = data.firstUsedAtSkill }
-                else
-                    resolvedNeeded[itemId].firstUsedAtSkill = math.min(resolvedNeeded[itemId].firstUsedAtSkill, data.firstUsedAtSkill)
-                end
-                resolvedNeeded[itemId].count = resolvedNeeded[itemId].count + need
             end
-        elseif afterBags > 0 then
-            if not resolvedNeeded[itemId] then
-                resolvedNeeded[itemId] = { count = 0, nameFromData = data.nameFromData, firstUsedAtSkill = data.firstUsedAtSkill }
+
+            -- Build source description for UI
+            local totalSourceNeeded = sourceFromBank + sourceFromAH
+            local sourceDesc = string.format("%dx %s", totalSourceNeeded, sourceMaterialName)
+            local usingDesc = ""
+            if sourceFromBank > 0 and sourceFromAH > 0 then
+                usingDesc = string.format("%dx from inventory + %dx from AH", sourceFromBank, sourceFromAH)
+            elseif sourceFromBank > 0 then
+                usingDesc = string.format("%dx from inventory", sourceFromBank)
             else
-                resolvedNeeded[itemId].firstUsedAtSkill = math.min(resolvedNeeded[itemId].firstUsedAtSkill, data.firstUsedAtSkill)
+                usingDesc = string.format("%dx from AH", sourceFromAH)
             end
-            resolvedNeeded[itemId].count = resolvedNeeded[itemId].count + need
+
+            table.insert(toCraft, {
+                itemId = itemId,
+                name = name,
+                icon = icon,
+                link = link,
+                quantity = afterBags,
+                recipeName = recipeName,
+                professionKey = resolution.professionKey,
+                sourceDesc = sourceDesc,
+                usingDesc = usingDesc,
+                craftCost = resolution.craftCost,
+                sourceItems = resolution.sourceItems,
+                firstUsedAtSkill = data.firstUsedAtSkill,
+            })
+
+            rowsById[itemId] = {
+                itemId = itemId, name = name, icon = icon, link = link,
+                firstUsedAtSkill = data.firstUsedAtSkill,
+                need = need, have = inventory[itemId] or 0, inBags = inBags, sources = {},
+                toBuy = 0, cost = 0, unitPrice = prices[itemId],
+                craftable = true, choice = choice, crafted = true,
+                craftRecipeName = recipeName, professionKey = resolution.professionKey,
+                craftQuantity = afterBags, craftCost = resolution.craftCost, children = children,
+            }
+        else
+            -- Bought (or already owned): its full need goes on, so an item
+            -- that is also the source of a crafted one is counted once, whole.
+            addResolved(itemId, need, data.nameFromData, data.firstUsedAtSkill)
+            rowsById[itemId] = { itemId = itemId, craftable = craftable, choice = choice, crafted = false }
         end
     end
 
@@ -410,6 +443,8 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
         return total
     end
 
+    local pm = LazyProf.PriceManager
+
     for itemId, data in pairs(resolvedNeeded) do
         local need = data.count
         local inBags = getSourceCount(itemId, "bags")
@@ -418,138 +453,158 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
         -- How many do we still need after bags?
         local remaining = math.max(0, need - inBags)
 
-        if remaining > 0 then
-            local name, link, icon = Utils.GetItemInfo(itemId)
-            local price = prices[itemId] or 0
-            name = name or data.nameFromData or "Unknown"
-            icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark"
+        local name, link, icon = Utils.GetItemInfo(itemId)
+        local price = prices[itemId] or 0
+        name = name or data.nameFromData or "Unknown"
+        icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark"
 
-            -- Waterfall: bank -> mail -> auctions -> guildBank -> alts -> AH
+        -- Waterfall: bank -> mail -> auctions -> guildBank -> alts -> AH
 
-            -- 1. Bank
-            local inBank = getSourceCount(itemId, "bank")
-            local fromBankCount = math.min(remaining, inBank)
-            remaining = remaining - fromBankCount
+        -- 1. Bank
+        local inBank = getSourceCount(itemId, "bank")
+        local fromBankCount = math.min(remaining, inBank)
+        remaining = remaining - fromBankCount
 
-            -- 2. Mail
-            local inMail = getSourceCount(itemId, "mail")
-            local fromMailCount = math.min(remaining, inMail)
-            remaining = remaining - fromMailCount
+        -- 2. Mail
+        local inMail = getSourceCount(itemId, "mail")
+        local fromMailCount = math.min(remaining, inMail)
+        remaining = remaining - fromMailCount
 
-            -- 3. Auctions (active AH listings)
-            local inAuctions = getSourceCount(itemId, "auctions")
-            local fromAuctionsCount = math.min(remaining, inAuctions)
-            remaining = remaining - fromAuctionsCount
+        -- 3. Auctions (active AH listings)
+        local inAuctions = getSourceCount(itemId, "auctions")
+        local fromAuctionsCount = math.min(remaining, inAuctions)
+        remaining = remaining - fromAuctionsCount
 
-            -- 4. Guild bank
-            local inGuildBank = getSourceCount(itemId, "guildBank")
-            local fromGuildBankCount = math.min(remaining, inGuildBank)
-            remaining = remaining - fromGuildBankCount
+        -- 4. Guild bank
+        local inGuildBank = getSourceCount(itemId, "guildBank")
+        local fromGuildBankCount = math.min(remaining, inGuildBank)
+        remaining = remaining - fromGuildBankCount
 
-            -- 5. Alts (with per-character breakdown)
-            local fromAltCount = 0
-            local altCharacters = {}
-            local bd = sourceBreakdown and sourceBreakdown[itemId]
-            if remaining > 0 and bd and bd.alts then
-                local altRemaining = remaining
-                for charName, charSources in pairs(bd.alts) do
-                    local charTotal = 0
-                    for _, count in pairs(charSources) do
-                        charTotal = charTotal + count
-                    end
-                    local useFromChar = math.min(altRemaining, charTotal)
-                    if useFromChar > 0 then
-                        fromAltCount = fromAltCount + useFromChar
-                        altRemaining = altRemaining - useFromChar
-                        table.insert(altCharacters, { name = charName, count = useFromChar })
-                    end
-                    if altRemaining <= 0 then break end
+        -- 5. Alts (with per-character breakdown)
+        local fromAltCount = 0
+        local altCharacters = {}
+        local bd = sourceBreakdown and sourceBreakdown[itemId]
+        if remaining > 0 and bd and bd.alts then
+            local altRemaining = remaining
+            for charName, charSources in pairs(bd.alts) do
+                local charTotal = 0
+                for _, count in pairs(charSources) do
+                    charTotal = charTotal + count
                 end
-                remaining = remaining - fromAltCount
+                local useFromChar = math.min(altRemaining, charTotal)
+                if useFromChar > 0 then
+                    fromAltCount = fromAltCount + useFromChar
+                    altRemaining = altRemaining - useFromChar
+                    table.insert(altCharacters, { name = charName, count = useFromChar })
+                end
+                if altRemaining <= 0 then break end
             end
+            remaining = remaining - fromAltCount
+        end
 
-            -- 6. AH (remainder)
-            local fromAHCount = remaining
+        -- 6. AH (remainder)
+        local fromAHCount = remaining
 
-            -- Build result entries for each source
-            if fromBankCount > 0 then
-                local purpose = bankPurpose[itemId]
-                table.insert(fromBank, {
-                    itemId = itemId,
-                    name = name,
-                    icon = icon,
-                    link = link,
-                    have = inBank,
-                    need = fromBankCount,
-                    missing = fromBankCount,
-                    estimatedCost = 0,
-                    purpose = purpose,
-                    firstUsedAtSkill = data.firstUsedAtSkill,
-                })
-            end
+        -- The item's shopping row
+        local row = rowsById[itemId] or { itemId = itemId, craftable = false, crafted = false }
+        rowsById[itemId] = row
+        if not row.crafted then
+            local info = pm and pm.PeekPriceInfo and pm:PeekPriceInfo(itemId) or nil
+            row.name, row.icon, row.link = name, icon, link
+            row.firstUsedAtSkill = data.firstUsedAtSkill
+            row.need = need
+            row.have = totalHave
+            row.inBags = inBags
+            row.sources = {
+                bank = fromBankCount, mail = fromMailCount, auctions = fromAuctionsCount,
+                guildBank = fromGuildBankCount, alts = fromAltCount,
+            }
+            row.toBuy = fromAHCount
+            row.unitPrice = prices[itemId]
+            row.unpriced = (prices[itemId] == nil) or nil
+            row.cost = price * fromAHCount
+            row.priceSource = info and info.source or nil
+            row.isVendor = (info ~= nil and info.source == "Vendor")
+        end
 
-            if fromMailCount > 0 then
-                table.insert(fromMail, {
-                    itemId = itemId,
-                    name = name,
-                    icon = icon,
-                    link = link,
-                    have = inMail,
-                    missing = fromMailCount,
-                    firstUsedAtSkill = data.firstUsedAtSkill,
-                })
-            end
+        -- Build result entries for each source
+        if fromBankCount > 0 then
+            local purpose = bankPurpose[itemId]
+            table.insert(fromBank, {
+                itemId = itemId,
+                name = name,
+                icon = icon,
+                link = link,
+                have = inBank,
+                need = fromBankCount,
+                missing = fromBankCount,
+                estimatedCost = 0,
+                purpose = purpose,
+                firstUsedAtSkill = data.firstUsedAtSkill,
+            })
+        end
 
-            if fromAuctionsCount > 0 then
-                table.insert(fromAuctions, {
-                    itemId = itemId,
-                    name = name,
-                    icon = icon,
-                    link = link,
-                    have = inAuctions,
-                    missing = fromAuctionsCount,
-                    firstUsedAtSkill = data.firstUsedAtSkill,
-                })
-            end
+        if fromMailCount > 0 then
+            table.insert(fromMail, {
+                itemId = itemId,
+                name = name,
+                icon = icon,
+                link = link,
+                have = inMail,
+                missing = fromMailCount,
+                firstUsedAtSkill = data.firstUsedAtSkill,
+            })
+        end
 
-            if fromGuildBankCount > 0 then
-                table.insert(fromGuildBank, {
-                    itemId = itemId,
-                    name = name,
-                    icon = icon,
-                    link = link,
-                    have = inGuildBank,
-                    missing = fromGuildBankCount,
-                    firstUsedAtSkill = data.firstUsedAtSkill,
-                })
-            end
+        if fromAuctionsCount > 0 then
+            table.insert(fromAuctions, {
+                itemId = itemId,
+                name = name,
+                icon = icon,
+                link = link,
+                have = inAuctions,
+                missing = fromAuctionsCount,
+                firstUsedAtSkill = data.firstUsedAtSkill,
+            })
+        end
 
-            if fromAltCount > 0 then
-                table.insert(fromAlts, {
-                    itemId = itemId,
-                    name = name,
-                    icon = icon,
-                    link = link,
-                    missing = fromAltCount,
-                    have = getAltTotal(itemId),
-                    characters = altCharacters,
-                    firstUsedAtSkill = data.firstUsedAtSkill,
-                })
-            end
+        if fromGuildBankCount > 0 then
+            table.insert(fromGuildBank, {
+                itemId = itemId,
+                name = name,
+                icon = icon,
+                link = link,
+                have = inGuildBank,
+                missing = fromGuildBankCount,
+                firstUsedAtSkill = data.firstUsedAtSkill,
+            })
+        end
 
-            if fromAHCount > 0 then
-                table.insert(fromAH, {
-                    itemId = itemId,
-                    name = name,
-                    icon = icon,
-                    link = link,
-                    have = totalHave,
-                    need = need,
-                    missing = fromAHCount,
-                    estimatedCost = price * fromAHCount,
-                    firstUsedAtSkill = data.firstUsedAtSkill,
-                })
-            end
+        if fromAltCount > 0 then
+            table.insert(fromAlts, {
+                itemId = itemId,
+                name = name,
+                icon = icon,
+                link = link,
+                missing = fromAltCount,
+                have = getAltTotal(itemId),
+                characters = altCharacters,
+                firstUsedAtSkill = data.firstUsedAtSkill,
+            })
+        end
+
+        if fromAHCount > 0 then
+            table.insert(fromAH, {
+                itemId = itemId,
+                name = name,
+                icon = icon,
+                link = link,
+                have = totalHave,
+                need = need,
+                missing = fromAHCount,
+                estimatedCost = price * fromAHCount,
+                firstUsedAtSkill = data.firstUsedAtSkill,
+            })
         end
     end
 
@@ -567,6 +622,14 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
     table.sort(fromAlts, sortBySkillThenName)
     table.sort(fromAH, sortBySkillThenName)
     table.sort(toCraft, sortBySkillThenName)
+
+    local rows = {}
+    local buyTotal = 0
+    for _, row in pairs(rowsById) do
+        rows[#rows + 1] = row
+        buyTotal = buyTotal + (row.cost or 0)
+    end
+    table.sort(rows, sortBySkillThenName)
 
     -- Calculate recipe acquisition costs (one-time costs for unlearned recipes)
     local seenRecipes = {}
@@ -592,6 +655,8 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
         toCraft = toCraft,
         fromAH = fromAH,
         recipeCosts = recipeCosts,
+        rows = rows,
+        buyTotal = buyTotal,
     }
 end
 
