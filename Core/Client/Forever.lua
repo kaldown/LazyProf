@@ -225,7 +225,7 @@ end
 -- True when the recipe list could show unlearned recipes but its "show
 -- unlearned" filter is off (Blizzard_APIDocumentationGenerated/
 -- TradeSkillUIDocumentation.lua:849-856): the arrow cannot point at an
--- unlearned next recipe, so the milestone panel says so instead.
+-- unlearned next recipe, so the window's learn step says so instead.
 function Client:UnlearnedHiddenByFilter()
     return not C_TradeSkillUI.GetShowUnlearned()
 end
@@ -309,7 +309,7 @@ local function HookFrame(callbacks)
 end
 
 -- The "show unlearned" filter changed during this open: re-render the
--- current path (the milestone panel's hint depends on it; nothing to
+-- current path (the learn step's hint depends on it; nothing to
 -- recalculate). The first list update of an open only records the value, so
 -- a previous profession's path is never redrawn for the one just opened.
 local function CheckUnlearnedFilter()

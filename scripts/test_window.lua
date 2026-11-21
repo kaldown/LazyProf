@@ -174,11 +174,11 @@ T.section("states", function()
     T.check("no path: no shopping steps", (function() window:SetPath(nil); return window:ShoppingSteps() end)() == nil)
 
     -- The setting that turns the window off.
-    addon.db.profile.showMilestonePanel = false
+    addon.db.profile.openWithProfession = false
     window:Update(W.path())
     T.check("turned off: not built, not shown", window.frame == nil)
     T.check("turned off: the path is still kept for the shopping list", window.path ~= nil)
-    addon.db.profile.showMilestonePanel = true
+    addon.db.profile.openWithProfession = true
 
     window:Update(W.path())
     window:SelectTab("steps")
@@ -588,6 +588,172 @@ T.section("learn and rank steps", function()
     window:Update(path())
     T.check("cap unknown: no rank rows", W.findRow(window, "Train the next rank") == nil)
     T.eq("cap unknown: status without a cap", window.status.text, "Skill 143")
+end)
+
+T.section("planning mode", function()
+    local env = W.load("forever", { "Modules/UI/ProfessionBrowser.lua" })
+    local window, ui, addon = env.window, env.ui, env.addon
+    local function escapeCloses()
+        for _, name in ipairs(UISpecialFrames) do
+            if name == "LazyProfGuideWindow" then return true end
+        end
+        return false
+    end
+    local function anchoredTo(frame)
+        local pt = window.frame.points[#window.frame.points]
+        return pt and pt[2] == frame
+    end
+
+    -- Opened with no profession window: undocked, on any profession.
+    env.open = false
+    window:OpenPlanning("tailoring")
+    local frame = window.frame
+    T.check("planning: shown", frame ~= nil and frame.shown)
+    T.eq("planning: mode", window.mode, "planning")
+    T.check("planning: not docked to the profession window", anchoredTo(UIParent))
+    T.check("planning: Escape closes it", escapeCloses())
+    T.eq("planning: title", frame.title.text, "LazyProf - Tailoring")
+    T.eq("planning: status of a profession not learned", window.status.text, "Not learned yet - planned from skill 1")
+    T.check("planning: profession picker shown", window.planRow.shown)
+    T.eq("planning: picker names the profession", window.professionDropdown.button.overrideText, "Tailoring")
+    T.check("planning: no what-if for a profession not learned", not window.fromOneBox.frame.shown)
+    T.eq("planning: the path is the planner's for that profession", env.planCalls[1].key, "tailoring")
+    T.eq("planning: tabs work as when docked", W.rowTexts(window)[1], "Step 1 of 7 - train (current step)")
+
+    -- The picker lists professions that have data and opens the chosen one.
+    local root = fakeui.openMenu(window.professionDropdown.button)
+    local names = {}
+    for _, radio in ipairs(root.radios) do names[#names + 1] = radio.text end
+    T.eq("picker: professions with recipe data, by name", table.concat(names, ","), "Alchemy,Tailoring")
+    root.radios[1].setSelected()
+    T.eq("picker: another profession is planned", env.planCalls[#env.planCalls].key, "alchemy")
+    T.eq("picker: and shown", frame.title.text, "LazyProf - Alchemy")
+
+    -- A profession the character has: planned from the real skill, what-if offered.
+    env.playerSkill, env.playerCap = 143, 150
+    window:OpenPlanning("tailoring")
+    T.eq("learned: status with the cap the client reports", window.status.text, "Skill 143 / 150")
+    T.check("learned: what-if offered, off", window.fromOneBox.frame.shown and not window.fromOneBox:GetChecked())
+    window.fromOneBox.frame.checked = true
+    ui.fire(window.fromOneBox.frame, "OnClick")
+    T.check("what-if: remembered for the character and profession", addon.CharStore:Get().planFromOne.tailoring == true)
+    T.check("what-if: planned again from 1", env.planCalls[#env.planCalls].opts.planFromOne == true)
+    T.eq("what-if: status says so", window.status.text, "Skill 143 / 150 - planned from skill 1")
+    window.fromOneBox.frame.checked = false
+    ui.fire(window.fromOneBox.frame, "OnClick")
+    T.check("what-if: off again", env.planCalls[#env.planCalls].opts.planFromOne == false)
+
+    -- Header controls plan the shown profession, not the open one.
+    local plans, recalcs = #env.planCalls, #env.recalcs
+    window.targetInput.frame.focused = true
+    window.targetInput.frame.text = "225"
+    ui.fire(window.targetInput.frame, "OnEnterPressed")
+    T.eq("target: planning is planned again", #env.planCalls, plans + 1)
+    T.eq("target: the live planner is not asked", #env.recalcs, recalcs)
+    ui.fire(window.strategyGroup.buttons.fastest, "OnClick")
+    T.eq("strategy: planning is planned again", #env.planCalls, plans + 2)
+
+    -- Its own saved spot.
+    frame.left, frame.top = 500, 800
+    ui.fire(frame, "OnDragStop")
+    T.check("planning keeps its own saved spot", addon.db.profile.panelPositions.guidePlanning ~= nil
+        and addon.db.profile.panelPositions.guide == nil)
+
+    -- A profession window opens: the window docks; when it closes, planning is back.
+    env.open = true
+    window:OnProfessionOpened()
+    window:Update(W.path({ profession = "Alchemy", professionKey = "alchemy" }))
+    T.eq("dock: live mode", window.mode, "live")
+    T.eq("dock: shows the open profession", frame.title.text, "LazyProf - Alchemy")
+    T.check("dock: beside the profession window", anchoredTo(env.anchor))
+    T.check("dock: Escape no longer closes it", not escapeCloses())
+    T.check("dock: no profession picker", not window.planRow.shown)
+    env.open = false
+    window:OnProfessionClosed()
+    T.eq("undock: back to planning", window.mode, "planning")
+    T.eq("undock: on the profession it had", frame.title.text, "LazyProf - Tailoring")
+    T.check("undock: shown, undocked, Escape closes again", frame.shown and escapeCloses())
+    T.check("undock: at its own saved spot", frame.points[#frame.points][4] == 500)
+
+    -- Planning opened on top of an open profession window stays put.
+    env.open = true
+    window:Update(W.path())
+    T.eq("on top: a live path does not take the window", window.mode, "planning")
+    T.check("on top: but is kept", window.livePath ~= nil)
+    window:OnProfessionClosed()
+    T.check("on top: closing the profession window leaves planning", frame.shown and window.mode == "planning")
+
+    -- Closing planning.
+    env.open = false
+    ui.fire(frame.closeBtn, "OnClick")
+    T.check("close button: hidden, no planning view left", not frame.shown and window.planning == nil)
+    T.check("close button: Escape entry removed", not escapeCloses())
+    T.check("closing planning closes its recipe details", env.calls[#env.calls] == "detailsHide")
+    window:OpenPlanning("tailoring")
+    T.check("reopened after a close", frame.shown)
+    frame:Hide()   -- what Escape does
+    T.check("Escape closes planning", window.planning == nil and window.mode ~= "planning")
+
+    -- Closing planning while a profession window is open: the window is that
+    -- window's again, closed until it is opened again.
+    env.open = true
+    window:Update(W.path())
+    window:OpenPlanning("alchemy")
+    ui.fire(frame.closeBtn, "OnClick")
+    T.check("closed over an open profession window: hidden", not frame.shown and window.mode == "live")
+    window:Update(W.path())
+    T.check("and stays closed on the next live update", not frame.shown)
+    env.shell:ResetClosed()
+    window:Update(W.path())
+    T.check("until the profession window is opened again", frame.shown and anchoredTo(env.anchor))
+    window:OnProfessionClosed()
+    T.check("no planning to return to: hidden", not frame.shown)
+
+    -- Combat
+    env.open = false
+    window:OpenPlanning("tailoring")
+    ui.event("PLAYER_REGEN_DISABLED")
+    ui.combat = true
+    T.check("combat: planning hides but is not closed", not frame.shown and window.planning ~= nil)
+    T.check("combat: counts as shown for the panels it owns", window:IsPlanningShown())
+    window:OpenPlanning("alchemy")
+    T.eq("combat: cannot be opened on another profession", window.planning.profKey, "tailoring")
+    ui.combat = false
+    ui.event("PLAYER_REGEN_ENABLED")
+    T.check("combat over: planning is back", frame.shown and window.mode == "planning")
+
+    -- A profession with no recipe data.
+    window:OpenPlanning("mining")
+    T.eq("no data: says so", W.rowTexts(window)[1], "No recipe data for Mining yet.")
+    T.check("no data: the picker stays usable", window.planRow.shown and window.controls.shown)
+    T.check("no data: the path controls are hidden", not window.targetInput.frame.shown and not window.bar.frame.shown)
+    window:OpenPlanning("tailoring")
+    T.check("a profession with data brings them back", window.targetInput.frame.shown)
+
+    -- A live recalculation plans the planning view again; a stock change reaches it.
+    plans = #env.planCalls
+    window:RefreshPlanning("setting changed")
+    T.eq("refresh: planned again", #env.planCalls, plans + 1)
+    T.check("the planning path is exposed for stock refreshes", window:PlanningPath() == window.path)
+
+    -- "Open with the profession window" off: planning is not set aside.
+    addon.db.profile.openWithProfession = false
+    env.open = true
+    window:OnProfessionOpened()
+    window:Update(W.path())
+    T.check("setting off: planning stays when a profession window opens", frame.shown and window.mode == "planning")
+    addon.db.profile.openWithProfession = true
+    ui.fire(frame.closeBtn, "OnClick")
+    env.open = false
+    window:OnProfessionClosed()
+
+    -- The profession browser opens planning.
+    addon.ProfessionBrowser:Initialize()
+    local browserRow = ui.find(function(f) return f.ftype == "Button" and f.parent == addon.ProfessionBrowser.frame
+        and f.scripts.OnClick ~= nil end)
+    T.check("browser: has a clickable profession row", browserRow ~= nil)
+    ui.fire(browserRow, "OnClick")
+    T.check("browser: a click opens planning in the window", frame.shown and window.mode == "planning")
 end)
 
 T.finish()

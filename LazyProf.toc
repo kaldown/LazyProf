@@ -99,10 +99,7 @@ Modules\UI\Arrow\Strategies\ArrowTooltip.lua
 Modules\UI\Arrow\ArrowManager.lua
 Modules\UI\PathBar.lua
 Modules\UI\GuideWindow.lua
-Modules\UI\MilestoneBreakdown.lua
-Modules\UI\MissingMaterials.lua
 Modules\UI\RecipeDetails.lua
-Modules\UI\PlanningWindow.lua
 Modules\UI\ProfessionBrowser.lua
 Modules\UI\MinimapButton.lua
 

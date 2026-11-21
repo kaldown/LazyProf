@@ -899,3 +899,97 @@ function Views.ShoppingTotal(view)
     end
     return text
 end
+
+-- Arrow tooltip ------------------------------------------------------------------
+
+-- What the arrow's tooltip says: the current step, the next two, the totals
+-- and where the prices came from. (The whole path is on the Steps tab.)
+-- Returns { { text, right, r, g, b, rr, rg, rb, wrap }, ... }; a line with
+-- `right` is a two-column line.
+function Views.ArrowTooltip(view)
+    local lines = {}
+    local function add(text, r, g, b, wrap)
+        lines[#lines + 1] = { text = text, r = r or 1, g = g or 1, b = b or 1, wrap = wrap }
+    end
+    local function addDouble(text, right, r, g, b, rr, rg, rb)
+        lines[#lines + 1] = { text = text, right = right, r = r or 1, g = g or 1, b = b or 1,
+                              rr = rr or 1, rg = rg or 0.82, rb = rb or 0 }
+    end
+    add("LazyProf - Optimal Path", 1, 0.82, 0)
+    local path = view and view.path
+    if not path then return lines end
+    add(" ")
+
+    local stages = view.stages or {}
+    local summary = view.summary or {}
+    local current = summary.currentIndex and stages[summary.currentIndex]
+    local profile, profession = view.profile, path.profession
+
+    -- One stage as "<what>" and its cost (nil when it has none).
+    local function describe(stage)
+        if stage.kind == "craft" then
+            return Text.StageTitle(stage), Money(stage.outOfPocketCost)
+        elseif stage.kind == "learn" then
+            return "Learn " .. (stage.recipe.name or "the recipe"), stage.fee > 0 and Money(stage.fee) or nil
+        elseif stage.kind == "rank" then
+            return Text.RankShort(stage), nil
+        end
+        return Text.GapText(stage), nil
+    end
+
+    if not current then
+        for _, row in ipairs(Views.Notice(view) or {}) do
+            add(row.text, 0.8, 0.8, 0.8, true)
+        end
+    else
+        local what, cost = describe(current)
+        if cost then addDouble("Now: " .. what, cost) else add("Now: " .. what) end
+        if current.kind == "craft" then
+            add(string.format("   Skill %d to %d", current.fromDisplay, current.toDisplay), 0.5, 0.5, 0.5)
+        elseif current.kind == "learn" then
+            for _, line in ipairs(Text.LearnLines(current, profile, profession)) do
+                add("   " .. line.text, 0.7, 0.7, 0.7, true)
+            end
+        elseif current.kind == "rank" then
+            add("   " .. Text.RankLine(current, view.liveCap, profession, path.hasProfession), 0.7, 0.7, 0.7, true)
+        end
+        for i = current.index + 1, math.min(current.index + 2, #stages) do
+            local nextWhat, nextCost = describe(stages[i])
+            local text = "Then: " .. nextWhat
+            if nextCost then
+                addDouble(text, nextCost, 0.7, 0.7, 0.7, 0.7, 0.6, 0.2)
+            else
+                add(text, 0.7, 0.7, 0.7)
+            end
+        end
+        local more = #stages - math.min(current.index + 2, #stages)
+        if more > 0 then
+            add(string.format("... and %d more step%s (see the Steps tab)", more, more == 1 and "" or "s"), 0.5, 0.5, 0.5)
+        end
+    end
+
+    -- Totals: with gaps they cover only the path's steps, and say so.
+    if summary.cost then
+        add(" ")
+        if summary.pay < summary.cost then
+            addDouble(Text.TotalLabel(path, "You Pay"), Money(summary.pay), 1, 1, 1, 0.4, 1, 0.4)
+            addDouble(Text.TotalLabel(path, "Market Price"), Money(summary.cost), 0.5, 0.5, 0.5, 0.5, 0.5, 0.5)
+        else
+            addDouble(Text.TotalLabel(path, "Total Cost"), Money(summary.cost), 1, 1, 1, 1, 0.82, 0)
+        end
+        if summary.marginPay then
+            addDouble(string.format("With %d%% margin: ", view.marginPercent or 0), Money(summary.marginPay),
+                0.7, 0.7, 0.7, 0.7, 0.7, 0.7)
+        end
+    end
+
+    -- Where the reagent prices came from, and what to do when some are
+    -- missing, too old or only an estimate.
+    if view.priceLines and #view.priceLines > 0 then
+        add(" ")
+        for _, line in ipairs(view.priceLines) do
+            add(line.text, line.r, line.g, line.b, true)
+        end
+    end
+    return lines
+end

@@ -17,8 +17,8 @@ LazyProf.defaults = {
 
         -- Display
         displayMode = Constants.DISPLAY_MODE.ARROW_TOOLTIP,
-        showMilestonePanel = true,
-        showMissingMaterials = true,
+        -- Open the LazyProf window beside the profession window
+        openWithProfession = true,
         includeBankItems = false,
         includeAltCharacters = false,
         includeGuildBank = false,
@@ -250,27 +250,18 @@ LazyProf.options = {
                         LazyProf:UpdateDisplay()
                     end,
                 },
-                showMilestonePanel = {
-                    name = "Show the LazyProf window",
-                    desc = "Open the LazyProf window beside the profession window",
+                openWithProfession = {
+                    name = "Open with the profession window",
+                    desc = "Show the LazyProf window (Guide, Steps and Shopping) beside the " ..
+                           "profession window whenever you open a profession.\n\n" ..
+                           "When off, the arrow still points at the next recipe, and the " ..
+                           "window can be opened from the minimap button or /lp browse.",
                     type = "toggle",
                     order = 2,
                     width = "full",
-                    get = function() return LazyProf.db.profile.showMilestonePanel end,
+                    get = function() return LazyProf.db.profile.openWithProfession end,
                     set = function(_, v)
-                        LazyProf.db.profile.showMilestonePanel = v
-                        LazyProf:UpdateDisplay()
-                    end,
-                },
-                showMissingMaterials = {
-                    name = "Show missing materials",
-                    desc = "Display shopping list panel",
-                    type = "toggle",
-                    order = 3,
-                    width = "full",
-                    get = function() return LazyProf.db.profile.showMissingMaterials end,
-                    set = function(_, v)
-                        LazyProf.db.profile.showMissingMaterials = v
+                        LazyProf.db.profile.openWithProfession = v
                         LazyProf:UpdateDisplay()
                     end,
                 },
@@ -487,7 +478,7 @@ LazyProf.options = {
                 },
                 catUI = {
                     name = "UI Updates",
-                    desc = "Planning window and milestone panel state changes.\n\n" ..
+                    desc = "LazyProf window and panel state changes.\n\n" ..
                            "Shows when panels update, visibility changes, and frame state. " ..
                            "Useful for debugging display issues.",
                     type = "toggle",
@@ -547,6 +538,33 @@ LazyProf.options = {
         },
     },
 }
+
+-- Settings an older version saved under names that are gone. `sv` is the raw
+-- saved table (LazyProfDB), which holds only values that differ from the
+-- defaults of the version that wrote them.
+--   Show milestone breakdown / Show missing materials (both on by default)
+--     became "Open with the profession window": off only when both were off,
+--     so nobody's window appears or vanishes by itself.
+--   The saved spots of the two old panels and the retired "calculate from
+--     current skill" setting are dropped.
+function LazyProf.MigrateSettings(sv)
+    if type(sv) ~= "table" or type(sv.profiles) ~= "table" then return end
+    for _, profile in pairs(sv.profiles) do
+        if type(profile) == "table" then
+            if profile.showMilestonePanel == false and profile.showMissingMaterials == false
+                    and profile.openWithProfession == nil then
+                profile.openWithProfession = false
+            end
+            profile.showMilestonePanel = nil
+            profile.showMissingMaterials = nil
+            profile.calculateFromCurrentSkill = nil
+            if type(profile.panelPositions) == "table" then
+                profile.panelPositions.milestone = nil
+                profile.panelPositions.shoppingList = nil
+            end
+        end
+    end
+end
 
 -- Register config with Ace
 function LazyProf:SetupConfig()

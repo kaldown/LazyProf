@@ -487,4 +487,63 @@ T.section("learn and rank text", function()
     T.eq("learn row elsewhere", row.text, "|cFF888888learn|r  Boots - trainer")
 end)
 
+T.section("arrow tooltip", function()
+    local function lines(view)
+        local out = {}
+        for _, l in ipairs(Views.ArrowTooltip(view)) do
+            out[#out + 1] = l.right and ((l.text:gsub("%s+$", "")) .. " | " .. l.right) or l.text
+        end
+        return out
+    end
+    local view = makeView(makePath(), { range = "all",
+        priceLines = { { text = "Prices: TSM 2", r = 0.6, g = 0.6, b = 0.6 } } })
+    local t = lines(view)
+    T.eq("title", t[1], "LazyProf - Optimal Path")
+    T.eq("the current step and its cost", t[3], "Now: 19x Gloves | 19s")
+    T.eq("its skill range", t[4], "   Skill 143 to 160")
+    T.eq("the next step", t[5], "Then: 20x Shirt (green: no better recipe) | 40s")
+    T.eq("the one after", t[6], "Then: No recipe for 180-200: train elsewhere or missing data")
+    T.eq("the rest is on the Steps tab", t[7], "... and 2 more steps (see the Steps tab)")
+    T.eq("total, flagged when the path has gaps", t[9], "Total Cost (excluding gaps): | 59s")
+    T.eq("labels keep their colon and space for the two-column line", Views.ArrowTooltip(view)[9].text, "Total Cost (excluding gaps): ")
+    T.eq("price lines last", t[11], "Prices: TSM 2")
+    T.eq("no more lines than that", #t, 11)
+
+    -- Owned stock: you pay and the market price, as before.
+    view = makeView(makePath({ complete = true }), { range = "all", inventory = { [101] = 19 } })
+    t = lines(view)
+    T.eq("stock: the current step costs nothing", t[3], "Now: 19x Gloves | 0c")
+    T.eq("stock: you pay", t[9], "You Pay: | 40s")
+    T.eq("stock: market price", t[10], "Market Price: | 59s")
+
+    -- Margin
+    view = makeView(makePath({ complete = true }), { range = "all", margin = 15 })
+    t = lines(view)
+    T.eq("margin: the larger count", t[3], "Now: 22x Gloves | 22s")
+    T.eq("margin: its own total line", t[10], "With 15% margin: | 68s")
+
+    -- Learn and rank steps as the current step
+    local boots = recipe(8, "Boots", 143, 200, 210, 220, { unlearned = true, sourceInfo = { type = "vendor", cost = 1500 } })
+    local path = makePath({ complete = true, gaps = {}, totalCost = 3200, prices = { [108] = 100 },
+        steps = { step(boots, 143, 150, 7, 7 * 100 + 1500), step(boots, 150, 160, 10, 1000) } })
+    view = makeView(path, { range = "all" })
+    view.stages, view.summary = Stages.Build(path, { includeLearn = true, liveCap = 150 })
+    view.profile, view.liveCap = "FOREVER", 150
+    t = lines(view)
+    T.eq("learn step first, with its fee", t[3], "Now: Learn Boots | 15s")
+    T.eq("where it comes from", t[4], "   Sold by a vendor.")
+    T.eq("then the craft", t[7], "Then: 7x Boots | 7s")
+    T.eq("then the rank step", t[8], "Then: Train the next rank before 150")
+    T.eq("total includes the fee", t[11], "Total Cost: | 32s")
+
+    -- Nothing left, and no path
+    local done = makePath({ steps = {}, gaps = {}, totalCost = 0, nothingLeft = true, actualSkill = 300, currentSkill = 300 })
+    t = lines(makeView(done, { range = "all" }))
+    T.eq("nothing left says so", t[3], "Nothing left: Tailoring is at its cap of 300.")
+    T.eq("no path: just the title", #lines({}), 1)
+    for _, l in ipairs(Views.ArrowTooltip(view)) do
+        if l.text:find("[\128-\255]") then T.check("tooltip text is plain ASCII", false, l.text) end
+    end
+end)
+
 T.finish()

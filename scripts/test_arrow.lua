@@ -5,7 +5,8 @@
 -- combat handling (rule 7: hidden during combat; after combat it comes back
 -- only while the profession window is open and a path exists, a Show asked
 -- for during combat is honoured then, and a Hide always cancels a restore)
--- and the tooltip's total label for a path with gaps.
+-- and the tooltip drawing the lines the views give it (their content is
+-- checked in scripts/test_views.lua).
 --
 -- Run from the addon root:  lua5.1 scripts/test_arrow.lua
 -- Not shipped: scripts/ is excluded from the package via .pkgmeta.
@@ -112,14 +113,12 @@ local function fresh()
         currentPath = env.path,
         GetArrowStep = function(_self, path) return path and path.steps and path.steps[1] end,
     }
-    addon.PriceManager = {
-        PathSummary = function() return { total = 0 } end,
-        SummaryLines = function() return {} end,
-    }
     assert(loadfile("Core/Utils.lua"))("LazyProf", addon)
     assert(loadfile("Modules/UI/Arrow/Strategies/ArrowTooltip.lua"))("LazyProf", addon)
     assert(loadfile("Modules/UI/Arrow/ArrowManager.lua"))("LazyProf", addon)
-    assert(loadfile("Modules/UI/MilestoneBreakdown.lua"))("LazyProf", addon)
+    -- The tooltip's lines come from the window's view of the live path.
+    addon.GuideWindow = { LiveView = function() return env.view end }
+    addon.GuideViews = { ArrowTooltip = function(view) env.asked = view; return env.lines or {} end }
     addon.ArrowManager:Initialize()
     env.addon = addon
     env.arrow = addon.ArrowManager
@@ -253,69 +252,42 @@ section("hide", function()
 end)
 
 -- ===========================================================================
--- 2. Tooltip totals: "excluding gaps" when the path has gaps (as the panel says)
+-- 2. Tooltip: draws the lines built for the live path
 -- ===========================================================================
-local function tooltipLabels(path)
-    env.tooltip = { left = {}, right = {} }
-    env.arrow:Update(path)
-    env.arrow.frame.scripts.OnEnter(env.arrow.frame)
-    -- Skip the per-step lines; the totals are the last double lines.
-    local labels = {}
-    for i = #path.steps + 1, #env.tooltip.left do labels[#labels + 1] = env.tooltip.left[i] end
-    return table.concat(labels, "|")
-end
-
 section("tooltip", function()
     local p = "tooltip: "
     fresh()
-    local path = env.path
-    path.complete = true
-    local labels = tooltipLabels(path)
-    check(p .. "complete path: Total Cost", labels == "Total Cost: ", labels)
-
-    path.complete = false
-    labels = tooltipLabels(path)
-    check(p .. "path with gaps: Total Cost (excluding gaps)", labels == "Total Cost (excluding gaps): ", labels)
-
-    path.outOfPocketTotal = 200   -- inventory covers part of it
-    labels = tooltipLabels(path)
-    check(p .. "path with gaps, inventory saves: both totals say excluding gaps",
-        labels == "You Pay (excluding gaps): |Market Price (excluding gaps): ", labels)
-    path.complete = nil
-    labels = tooltipLabels(path)
-    check(p .. "path without a complete flag: plain labels", labels == "You Pay: |Market Price: ", labels)
-end)
-
--- ===========================================================================
--- 3. Tooltip price lines: the path's price summary goes under the totals
--- ===========================================================================
-section("tooltip prices", function()
-    local p = "tooltip prices: "
-    fresh()
-    local added, summarized = {}, nil
-    local savedAddLine = rawget(GameTooltip, "AddLine")
-    function GameTooltip:AddLine(text) added[#added + 1] = text end
-    env.addon.PriceManager = {
-        PathSummary = function(_self, path) summarized = path; return { total = 2 } end,
-        SummaryLines = function(s)
-            if s.total == 0 then return {} end
-            return { { text = "Prices: TSM 2", r = 0.6, g = 0.6, b = 0.6 },
-                     { text = "Auctionator prices up to 4 days old - rescan the auction house.", r = 1, g = 0.5, b = 0 } }
-        end,
+    local plain, shown = {}, 0
+    function GameTooltip:AddLine(text, r, g, b, wrap) plain[#plain + 1] = { text = text, r = r, wrap = wrap } end
+    function GameTooltip:Show() shown = shown + 1 end
+    env.view = { path = env.path }
+    env.lines = {
+        { text = "LazyProf - Optimal Path", r = 1, g = 0.82, b = 0 },
+        { text = "Now: 5x Linen Bandage", right = "5s", r = 1, g = 1, b = 1, rr = 1, rg = 0.82, rb = 0 },
+        { text = "   Skill 1 to 30", r = 0.5, g = 0.5, b = 0.5 },
+        { text = "Total Cost: ", right = "5s", r = 1, g = 1, b = 1 },
+        { text = "Prices: TSM 2", r = 0.6, g = 0.6, b = 0.6, wrap = true },
     }
     env.arrow:Update(env.path)
     env.arrow.frame.scripts.OnEnter(env.arrow.frame)
-    local text = table.concat(added, "|")
-    check(p .. "summary of the shown path", summarized == env.path)
-    check(p .. "lines shown", text:find("Prices: TSM 2|Auctionator prices up to 4 days old", 1, true) ~= nil, text)
-    check(p .. "no fixed stale warning", text:find("Prices may be stale", 1, true) == nil, text)
+    check(p .. "asks for the live path's view", env.asked == env.view)
+    check(p .. "plain lines drawn in order", #plain == 3 and plain[1].text == "LazyProf - Optimal Path"
+        and plain[2].text == "   Skill 1 to 30", #plain)
+    check(p .. "two-column lines drawn as such", env.tooltip.left[1] == "Now: 5x Linen Bandage" and env.tooltip.right[1] == "5s"
+        and env.tooltip.left[2] == "Total Cost: ", table.concat(env.tooltip.left, "|"))
+    check(p .. "wrapping passed on", plain[3].wrap == true)
+    check(p .. "the tooltip is shown once", shown == 1, shown)
 
-    added = {}
-    env.addon.PriceManager.PathSummary = function() return { total = 0 } end
+    -- No live view (no path): nothing is drawn.
+    plain, shown = {}, 0
+    env.view = nil
     env.arrow.frame.scripts.OnEnter(env.arrow.frame)
-    text = table.concat(added, "|")
-    check(p .. "no reagents: no price lines", text:find("Prices", 1, true) == nil, text)
-    GameTooltip.AddLine = savedAddLine
+    check(p .. "no view: no tooltip", #plain == 0 and shown == 0)
+
+    -- The simple arrow has no tooltip at all.
+    env.view = { path = env.path }
+    env.addon.ArrowStrategies.simpleArrow.OnEnter({}, env.arrow)
+    check(p .. "simple arrow: no tooltip", shown == 0)
 end)
 
 print(string.format("\n%d/%d checks passed", total - failures, total))

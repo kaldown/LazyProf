@@ -103,8 +103,8 @@ function Browser:CreateProfessionRow(profKey, index)
     else
         row:SetScript("OnClick", function()
             self:Hide()
-            if LazyProf.PlanningWindow then
-                LazyProf.PlanningWindow:Open(profKey)
+            if LazyProf.GuideWindow then
+                LazyProf.GuideWindow:OpenPlanning(profKey)
             end
         end)
         row:SetScript("OnEnter", function()

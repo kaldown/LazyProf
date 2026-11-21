@@ -1,63 +1,9 @@
 -- Modules/UI/Arrow/Strategies/ArrowTooltip.lua
+-- How the arrow beside the recommended recipe behaves: where it points, and
+-- what its tooltip says. The tooltip's content is built as data by
+-- Views.ArrowTooltip (Modules/Guide/Views.lua): the current step, the next
+-- two, the totals and where the prices came from.
 local ADDON_NAME, LazyProf = ...
-local Utils = LazyProf.Utils
-
--- Format source info for tooltip display
-local function AddSourceTooltipLines(tooltip, recipe)
-    if recipe.learned then
-        return  -- No additional info needed for learned recipes
-    end
-
-    local sourceInfo = recipe._sourceInfo
-    if not sourceInfo then
-        tooltip:AddLine("Source unknown", 1, 0.5, 0)
-        return
-    end
-
-    tooltip:AddLine(" ")
-
-    if sourceInfo.type == "inventory" then
-        local loc = sourceInfo.location
-        if loc.type == "bags" then
-            tooltip:AddLine("Recipe is in your bags", 0, 1, 0)
-        elseif loc.type == "bank" then
-            tooltip:AddLine("Recipe is in your bank", 0, 1, 0.5)
-        elseif loc.type == "alt" then
-            tooltip:AddLine("Recipe is on alt: " .. loc.character, 0.5, 1, 1)
-        end
-    elseif sourceInfo.type == "trainer" then
-        local trainerText = sourceInfo.npcName or "Any Trainer"
-        tooltip:AddLine("Learn from: " .. trainerText, 1, 1, 1)
-        if sourceInfo.cost and sourceInfo.cost > 0 then
-            tooltip:AddLine("Cost: " .. Utils.FormatMoney(sourceInfo.cost), 1, 0.82, 0)
-        end
-    elseif sourceInfo.type == "vendor" then
-        if sourceInfo.vendors and #sourceInfo.vendors > 0 then
-            local v = sourceInfo.vendors[1]
-            tooltip:AddLine("Buy from: " .. (v.npcName or "Vendor"), 1, 1, 1)
-            if v.location then
-                tooltip:AddLine("Location: " .. v.location, 0.7, 0.7, 0.7)
-            end
-        else
-            tooltip:AddLine("Available from vendor", 1, 1, 1)
-        end
-        if sourceInfo.cost and sourceInfo.cost > 0 then
-            tooltip:AddLine("Cost: " .. Utils.FormatMoney(sourceInfo.cost), 1, 0.82, 0)
-        end
-        if Utils.FormatCurrency(sourceInfo.currency) then
-            tooltip:AddLine("Recipe: " .. Utils.FormatCurrency(sourceInfo.currency), 1, 0.82, 0)
-        end
-    elseif sourceInfo.type == "ah" then
-        tooltip:AddLine("Available on Auction House", 0.5, 1, 0.5)
-        tooltip:AddLine("Price: " .. Utils.FormatMoney(sourceInfo.price) .. " (" .. sourceInfo.source .. ")", 1, 0.82, 0)
-    end
-
-    -- Add Wowhead link for recipe item
-    if sourceInfo.itemId then
-        tooltip:AddLine(" ")
-        tooltip:AddLine("Wowhead: " .. Utils.GetWowheadItemUrl(sourceInfo.itemId), 0.4, 0.6, 1)
-    end
-end
 
 LazyProf.ArrowStrategies = LazyProf.ArrowStrategies or {}
 
@@ -82,75 +28,18 @@ LazyProf.ArrowStrategies.arrowWithTooltip = {
     end,
 
     OnEnter = function(self, manager)
-        local path = manager.currentPath
-        if not path then return end
+        if not manager.currentPath then return end
+        local view = LazyProf.GuideWindow and LazyProf.GuideWindow:LiveView()
+        if not view then return end
 
         GameTooltip:SetOwner(manager.frame, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("LazyProf - Optimal Path", 1, 0.82, 0)
-        GameTooltip:AddLine(" ")
-
-        -- Show each step
-        for i, step in ipairs(path.steps) do
-            local learnedColor = step.recipe.learned and "|cFFFFFFFF" or "|cFF888888"
-            local learnTag = step.recipe.learned and "" or " [Learn]"
-
-            GameTooltip:AddDoubleLine(
-                string.format("%d. %s%s x%d%s|r",
-                    i, learnedColor, step.recipe.name, step.quantity, learnTag),
-                Utils.FormatMoney(step.totalCost),
-                1, 1, 1,
-                1, 0.82, 0
-            )
-
-            GameTooltip:AddLine(
-                string.format("   Skill %d -> %d",
-                    math.floor(step.skillStart), math.floor(step.skillEnd)),
-                0.5, 0.5, 0.5
-            )
-
-            -- Add source details for unlearned recipes (first step only to avoid clutter)
-            if i == 1 and not step.recipe.learned then
-                AddSourceTooltipLines(GameTooltip, step.recipe)
+        for _, line in ipairs(LazyProf.GuideViews.ArrowTooltip(view)) do
+            if line.right then
+                GameTooltip:AddDoubleLine(line.text, line.right, line.r, line.g, line.b, line.rr, line.rg, line.rb)
+            else
+                GameTooltip:AddLine(line.text, line.r, line.g, line.b, line.wrap)
             end
         end
-
-        GameTooltip:AddLine(" ")
-        -- With gaps the totals cover only the path's steps: the same
-        -- "(excluding gaps)" labels as the milestone panel.
-        local TotalLabel = LazyProf.MilestonePanelClass.TotalLabel
-        local oopTotal = path.outOfPocketTotal or path.totalCost
-        if oopTotal < path.totalCost then
-            GameTooltip:AddDoubleLine(
-                TotalLabel(path, "You Pay"),
-                Utils.FormatMoney(oopTotal),
-                1, 1, 1,
-                0.4, 1, 0.4
-            )
-            GameTooltip:AddDoubleLine(
-                TotalLabel(path, "Market Price"),
-                Utils.FormatMoney(path.totalCost),
-                0.5, 0.5, 0.5,
-                0.5, 0.5, 0.5
-            )
-        else
-            GameTooltip:AddDoubleLine(
-                TotalLabel(path, "Total Cost"),
-                Utils.FormatMoney(path.totalCost),
-                1, 1, 1,
-                1, 0.82, 0
-            )
-        end
-
-        -- Where the reagent prices came from, and what to do when some are
-        -- missing, too old or only an estimate.
-        local priceLines = LazyProf.PriceManager.SummaryLines(LazyProf.PriceManager:PathSummary(path))
-        if #priceLines > 0 then
-            GameTooltip:AddLine(" ")
-            for _, l in ipairs(priceLines) do
-                GameTooltip:AddLine(l.text, l.r, l.g, l.b, true)
-            end
-        end
-
         GameTooltip:Show()
     end,
 

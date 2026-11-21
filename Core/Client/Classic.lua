@@ -209,7 +209,7 @@ function Client:FindRecipeRow(recipe)
 end
 
 -- The Classic trade-skill window has no "show unlearned" filter (it lists
--- learned recipes only), so the milestone panel's hidden-recipe hint, which
+-- learned recipes only), so the window's hidden-recipe hint, which
 -- is about that filter, never applies here.
 function Client:UnlearnedHiddenByFilter()
     return false

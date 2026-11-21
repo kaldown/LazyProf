@@ -1,7 +1,17 @@
 -- Modules/UI/GuideWindow.lua
--- The LazyProf window: one framed, tabbed window beside the profession window.
--- A shared header (status, target, strategy, margin, range) sits above the
--- tab's list and a footer with the totals.
+-- The LazyProf window: one framed, tabbed window. A shared header (status,
+-- target, strategy, margin, range, path bar) sits above the tab's list and a
+-- footer with the totals.
+--
+-- There is one window. It has two modes:
+--   live      docked beside the open profession window, showing its path
+--   planning  undocked, for any profession picked from the minimap button, the
+--             addon compartment or /lp browse; a profession dropdown and, for
+--             a profession the character has, a "plan from skill 1" what-if
+--             appear in the header; Escape closes it
+-- A profession window that opens docks the window and shows that profession;
+-- when it closes the window goes back to the planning view it had, or hides.
+-- Planning opened while a profession window is open stays until it is closed.
 --
 -- This file only places widgets and passes clicks on. What each tab shows is
 -- built as plain data by Modules/Guide/Views.lua from the stages of the path
@@ -17,9 +27,11 @@ local DEFAULT_WIDTH = 420
 local MIN_WIDTH, MAX_WIDTH = 380, 640
 local MIN_HEIGHT, MAX_HEIGHT = 360, 900
 local FALLBACK_HEIGHT = 480
+local PLANNING_HEIGHT = 540
 local CONTROLS_TOP = 48       -- below the title and the status line
 local CONTROLS_HEIGHT = 92    -- target row, range row, path bar
-local HEADER_HEIGHT = CONTROLS_TOP + CONTROLS_HEIGHT
+local PLAN_ROW_TOP = 62       -- where the path bar sits (and planning's extra row)
+local PLAN_ROW_HEIGHT = 30
 local FOOTER_HEIGHT = 40      -- two lines of totals
 local SEARCH_HEIGHT = 26
 local NAV_HEIGHT = 28
@@ -32,8 +44,12 @@ GuideWindow.TABS = {
 }
 
 GuideWindow.frame = nil
-GuideWindow.mode = nil        -- "live": follows the open profession window
-GuideWindow.path = nil
+GuideWindow.mode = nil        -- "live" | "planning"
+GuideWindow.path = nil        -- the path shown (the live one, or planning's)
+GuideWindow.livePath = nil    -- the open profession's path, also while planning is shown
+GuideWindow.liveNotice = nil  -- its "no recipe data" text
+GuideWindow.planning = nil    -- { profKey, path, notice } while a planning view exists
+GuideWindow.returnToPlanning = false   -- planning was set aside for a profession window
 GuideWindow.profKey = nil
 GuideWindow.rangeSel = nil    -- nil: current range; a bracket index; "all"
 GuideWindow.expanded = {}     -- [stage.key] = true, rows opened on the Steps tab
@@ -79,9 +95,23 @@ end
 -- Everything the tabs are drawn from (see Modules/Guide/Views.lua). Works
 -- without the frame, so the shopping list can be computed while it is hidden.
 function GuideWindow:ComputeView()
-    local path = self.path
-    local view = { path = path, expanded = self.expanded, marginPercent = MarginPercent() }
+    return self:BuildView(self.path, self.mode)
+end
+
+-- The view of the open profession's path whatever the window is showing (the
+-- arrow tooltip reads it). nil without a live path.
+function GuideWindow:LiveView()
+    local path = LazyProf.Pathfinder.currentPath
+    if not path then return nil end
+    return self:BuildView(path, "live", true)
+end
+
+-- plain: leave out what belongs to the window's own state (chosen range,
+-- selected step, opened rows, shopping list).
+function GuideWindow:BuildView(path, mode, plain)
+    local view = { path = path, expanded = plain and {} or self.expanded, marginPercent = MarginPercent() }
     if not path then return view end
+    local rangeSel = (not plain) and self.rangeSel or nil
 
     -- The cap the character works under: the open profession's as its window
     -- reports it, else the one the client reports for the profession; the
@@ -89,7 +119,7 @@ function GuideWindow:ComputeView()
     local liveCap
     if path.hasProfession == false then
         liveCap = LazyProf.Stages.LiveCap(nil, path.milestones)
-    elseif self.mode == "live" then
+    elseif mode == "live" then
         local _, _, cap = LazyProf.Client:GetLine()
         liveCap = cap
     else
@@ -113,16 +143,17 @@ function GuideWindow:ComputeView()
     view.stages, view.summary = stages, summary
     view.brackets = brackets
     view.skill = path.actualSkill
-    view.bracket = Range.Effective(self.rangeSel, brackets, path.actualSkill)
-    view.rangeLabel = Range.Label(self.rangeSel, brackets, path.actualSkill)
+    view.bracket = Range.Effective(rangeSel, brackets, path.actualSkill)
+    view.rangeLabel = Range.Label(rangeSel, brackets, path.actualSkill)
     view.rangeStages = Range.FilterStages(stages, view.bracket)
     view.rangeTotals = LazyProf.Stages.Totals(view.rangeStages)
-    view.selectedStage = LazyProf.GuideViews.SelectedStage(stages, summary, self.selection)
-    view.showAllAlts = self.showAllAlts
+    view.selectedStage = LazyProf.GuideViews.SelectedStage(stages, summary, (not plain) and self.selection or nil)
+    view.showAllAlts = (not plain) and self.showAllAlts or false
     view.hideOwned = LazyProf.CharStore:Get().hideOwned and true or false
+    view.planning = (mode == "planning") or nil
     -- The shopping list of the chosen range, from the stages' quantities (so
     -- the margin is in it). Only worked out for the tab that shows it.
-    if self.tab == "shopping" then
+    if self.tab == "shopping" and not plain then
         view.missing = self:Missing(view)
     end
 
@@ -134,7 +165,7 @@ function GuideWindow:ComputeView()
 
     -- The next recipe is unlearned and the profession window hides unlearned
     -- recipes, so the arrow has no row to point at: its learn step says so.
-    if self.mode == "live" then
+    if mode == "live" then
         local step = LazyProf.Pathfinder:GetArrowStep(path)
         local recipe = step and step.recipe
         if recipe and not recipe.learned and LazyProf.Client:UnlearnedHiddenByFilter() then
@@ -165,8 +196,22 @@ end
 function GuideWindow:WantsShown()
     if self.mode == "live" then
         return LazyProf.Client:IsOpen() and (self.path ~= nil or self.notice ~= nil)
+    elseif self.mode == "planning" then
+        return self.planning ~= nil
     end
     return false
+end
+
+-- Planning is on screen, or will be again once combat ends.
+function GuideWindow:IsPlanningShown()
+    local frame = self.frame
+    if not (frame and self.mode == "planning" and self.planning) then return false end
+    return frame:IsShown() or frame._wasShownBeforeCombat == true
+end
+
+-- The path planning shows (nil when there is no planning view).
+function GuideWindow:PlanningPath()
+    return self.planning and self.planning.path or nil
 end
 
 -- Frames -----------------------------------------------------------------------
@@ -221,9 +266,21 @@ function GuideWindow:Build()
     frame.closeBtn = CreateFrame("Button", nil, body, "UIPanelCloseButton")
     frame.closeBtn:SetPoint("TOPRIGHT", -2, -2)
     frame.closeBtn:SetSize(20, 20)
-    -- Stays closed until the profession window is opened again
+    -- Docked: stays closed until the profession window is opened again.
+    -- Planning: closes the planning view.
     frame.closeBtn:SetScript("OnClick", function()
-        PanelShell:Close(frame)
+        if self.mode == "planning" then
+            self:ClosePlanning()
+        else
+            PanelShell:Close(frame)
+        end
+    end)
+    -- Escape (planning only, see SetEscapeCloses) hides the frame directly:
+    -- treat it as closing planning. Not when combat or this file hid it.
+    frame:HookScript("OnHide", function(f)
+        if self.mode == "planning" and not self.hidingSelf and not f._wasShownBeforeCombat then
+            self:ClosePlanning()
+        end
     end)
 
     -- Status line: skill and cap on the left, where prices come from on the right
@@ -289,10 +346,29 @@ function GuideWindow:Build()
         self:OnRange(value)
     end)
 
+    -- Planning only: which profession, and the "from skill 1" what-if
+    local planRow = CreateFrame("Frame", nil, controls)
+    self.planRow = planRow
+    planRow:SetPoint("TOPLEFT", 0, -PLAN_ROW_TOP)
+    planRow:SetPoint("TOPRIGHT", 0, -PLAN_ROW_TOP)
+    planRow:SetHeight(PLAN_ROW_HEIGHT)
+    self.professionLabel = planRow:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    self.professionLabel:SetPoint("LEFT", 12, 0)
+    self.professionLabel:SetText("Profession")
+    self.professionDropdown = Widgets.CreateDropdown(planRow, "LazyProfGuideProfession", 110)
+    self.professionDropdown:SetPoint("LEFT", planRow, "LEFT", 58, 0)
+    self.professionDropdown:SetOptions(function()
+        return self:ProfessionOptions()
+    end, function(profKey)
+        self:OpenPlanning(profKey)
+    end)
+    self.fromOneBox = Widgets.CreateCheckbox(planRow, "LazyProfGuideFromOne", "Plan from skill 1", function(checked)
+        self:OnPlanFromOne(checked)
+    end, "Show the whole path from skill 1 as a what-if. The bar marks what you have already done.")
+    self.fromOneBox:SetPoint("LEFT", self.professionDropdown.frame, "RIGHT", -8, 0)
+
     -- The path bar: the whole journey, one segment per stage
     self.bar = LazyProf.PathBar.Create(controls)
-    self.bar.frame:SetPoint("TOPLEFT", 14, -62)
-    self.bar.frame:SetPoint("TOPRIGHT", -14, -62)
 
     -- Guide tab: step navigation under the card
     local nav = CreateFrame("Frame", nil, body)
@@ -340,8 +416,6 @@ function GuideWindow:Build()
     self.searchBox = Widgets.CreateSearchBox(body, "LazyProfGuideSearch", "Search recipes...", function(text)
         self:OnSearch(text)
     end)
-    self.searchBox.frame:SetPoint("TOPLEFT", 16, -HEADER_HEIGHT - 2)
-    self.searchBox.frame:SetPoint("TOPRIGHT", -30, -HEADER_HEIGHT - 2)
 
     -- The tab's list
     self.list = Widgets.CreateRowList(body, "LazyProfGuideList")
@@ -373,8 +447,14 @@ function GuideWindow:Build()
         self:SelectTab(self.TABS[index].key, true)
     end)
 
-    PanelShell:Attach(frame, "guide", {
+    -- Docked and undocked keep a saved spot and size each.
+    PanelShell:Attach(frame, function()
+        return self.mode == "planning" and "guidePlanning" or "guide"
+    end, {
         anchor = function()
+            if self.mode == "planning" then
+                return UIParent, "CENTER", "CENTER", 0, 0
+            end
             local anchor = LazyProf.Client:AnchorFrame()
             if anchor then
                 return anchor, "TOPLEFT", "TOPRIGHT", LazyProf.Client:PanelOffsetX(), 0
@@ -394,22 +474,67 @@ function GuideWindow:Build()
     self:SelectTab(LazyProf.CharStore:Get().lastTab or self.tab)
 end
 
--- Default size: as tall as the profession window, within sensible limits;
--- the size the player dragged it to wins.
+-- Default size: docked, as tall as the profession window, within sensible
+-- limits; undocked, a fixed height. The size the player dragged it to wins.
 function GuideWindow:ApplySize()
-    local anchor = LazyProf.Client:AnchorFrame()
-    local height = anchor and anchor.GetHeight and anchor:GetHeight() or 0
-    if not height or height <= 0 then height = FALLBACK_HEIGHT end
-    height = math.max(MIN_HEIGHT + 60, math.min(700, height))
+    local height = PLANNING_HEIGHT
+    if self.mode ~= "planning" then
+        local anchor = LazyProf.Client:AnchorFrame()
+        height = anchor and anchor.GetHeight and anchor:GetHeight() or 0
+        if not height or height <= 0 then height = FALLBACK_HEIGHT end
+        height = math.max(MIN_HEIGHT + 60, math.min(700, height))
+    end
     LazyProf.PanelShell:ApplySize(self.frame, DEFAULT_WIDTH, height)
-    self.sized = true
+    self.sized = self.mode
     self:Layout()
+end
+
+-- Escape closes the window only while it is undocked: docked it follows the
+-- profession window. (UISpecialFrames is the client's list of frame names
+-- that Escape hides.)
+function GuideWindow:SetEscapeCloses(on)
+    local name = self.frame:GetName()
+    for i = #UISpecialFrames, 1, -1 do
+        if UISpecialFrames[i] == name then
+            if on then return end
+            tremove(UISpecialFrames, i)
+        end
+    end
+    if on then
+        tinsert(UISpecialFrames, name)
+    end
+end
+
+-- Professions that can be planned (those with recipe data), by name.
+function GuideWindow:ProfessionOptions()
+    local options = {}
+    for key, info in pairs(LazyProf.Constants.PROFESSIONS) do
+        if LazyProf.Professions:Get(key) then
+            options[#options + 1] = { text = info.name, value = key, checked = (key == self.profKey) }
+        end
+    end
+    table.sort(options, function(a, b) return a.text < b.text end)
+    return options
 end
 
 -- Place the list for the selected tab and tell it how wide its rows are.
 function GuideWindow:Layout()
     local frame = self.frame
-    local top, bottom = HEADER_HEIGHT + 4, FOOTER_HEIGHT + 2
+    -- Planning adds a row (profession, what-if) above the path bar.
+    local planning = self.mode == "planning"
+    local controlsHeight = CONTROLS_HEIGHT + (planning and PLAN_ROW_HEIGHT or 0)
+    local barTop = PLAN_ROW_TOP + (planning and PLAN_ROW_HEIGHT or 0)
+    self.controls:SetHeight(controlsHeight)
+    self.planRow:SetShown(planning)
+    self.bar.frame:ClearAllPoints()
+    self.bar.frame:SetPoint("TOPLEFT", self.controls, "TOPLEFT", 14, -barTop)
+    self.bar.frame:SetPoint("TOPRIGHT", self.controls, "TOPRIGHT", -14, -barTop)
+    local headerHeight = CONTROLS_TOP + controlsHeight
+    self.searchBox.frame:ClearAllPoints()
+    self.searchBox.frame:SetPoint("TOPLEFT", self.body, "TOPLEFT", 16, -headerHeight - 2)
+    self.searchBox.frame:SetPoint("TOPRIGHT", self.body, "TOPRIGHT", -30, -headerHeight - 2)
+
+    local top, bottom = headerHeight + 4, FOOTER_HEIGHT + 2
     if self.tab == "steps" then
         top = top + SEARCH_HEIGHT
     elseif self.tab == "guide" or self.tab == "shopping" then
@@ -426,56 +551,176 @@ end
 
 -- Showing and hiding -------------------------------------------------------------
 
--- A live path arrived (the profession window is open).
-function GuideWindow:Update(path)
+-- Bring the built window in line with the mode it is in: Escape, size, layout.
+function GuideWindow:ApplyMode()
+    self:SetEscapeCloses(self.mode == "planning")
+    if self.sized ~= self.mode then
+        self:ApplySize()
+    end
+end
+
+-- Show the open profession's path (or its "no data" notice), docked.
+function GuideWindow:DisplayLive()
     self.mode = "live"
-    self.notice = nil
-    self:SetPath(path)
-    if not LazyProf.db.profile.showMilestonePanel then
+    self:SetPath(self.livePath)
+    self.notice = self.liveNotice
+    if not LazyProf.db.profile.openWithProfession then
         self:Hide()
         return
     end
     self:Build()
-    self.frame.showsNotice = nil
+    self.frame.showsNotice = (self.notice ~= nil) or nil
+    self:ApplyMode()
     self:Render()
-    self:Show()
+    LazyProf.PanelShell:Show(self.frame)
+end
+
+-- A live path arrived (the profession window is open). While planning is
+-- shown it is only kept: planning stays until the player closes it.
+function GuideWindow:Update(path)
+    self.livePath, self.liveNotice = path, nil
+    if self.mode == "planning" then return end
+    self:DisplayLive()
 end
 
 -- The open profession has no recipe data: say so instead of showing a path.
 function GuideWindow:ShowNotice(text)
-    self.mode = "live"
-    self:SetPath(nil)
-    self.notice = text
-    if not LazyProf.db.profile.showMilestonePanel then
-        self:Hide()
-        return
-    end
-    self:Build()
-    self.frame.showsNotice = true
-    self:Render()
-    self:Show()
+    self.livePath, self.liveNotice = nil, text
+    if self.mode == "planning" then return end
+    self:DisplayLive()
 end
 
-function GuideWindow:Show()
-    if not self.sized then
-        self:ApplySize()
-    end
-    LazyProf.PanelShell:Show(self.frame)
+-- There is no path for the open profession (and no notice): the live view
+-- goes; a planning view is not touched.
+function GuideWindow:HideLive()
+    self.livePath, self.liveNotice = nil, nil
+    if self.mode == "planning" then return end
+    self:SetPath(nil)
+    self.notice = nil
+    self:Hide()
 end
 
 function GuideWindow:Hide()
     if not self.frame then return end
     self.frame.showsNotice = nil
+    self.hidingSelf = true
     LazyProf.PanelShell:Hide(self.frame)
+    self.hidingSelf = nil
 end
 
 function GuideWindow:IsShown()
     return self.frame ~= nil and self.frame:IsShown()
 end
 
--- The profession window closed.
+-- A profession window opened: the window docks and shows that profession
+-- (its path arrives through Update). A planning view is set aside and comes
+-- back when the profession window closes.
+function GuideWindow:OnProfessionOpened()
+    if self.mode == "planning" and self.planning and LazyProf.db.profile.openWithProfession then
+        self.returnToPlanning = true
+        self.mode = "live"
+    end
+end
+
+-- The profession window closed: back to the planning view that was set
+-- aside, else hide. Planning opened on top of the profession window stays.
 function GuideWindow:OnProfessionClosed()
+    self.livePath, self.liveNotice = nil, nil
+    if self.mode == "planning" then return end
+    if self.returnToPlanning and self.planning then
+        self.returnToPlanning = false
+        self:DisplayPlanning()
+        return
+    end
+    self:SetPath(nil)
+    self.notice = nil
     self:Hide()
+end
+
+-- Planning ---------------------------------------------------------------------
+
+-- Open the window undocked on a profession (minimap button, addon
+-- compartment, /lp browse, or the header's profession dropdown).
+function GuideWindow:OpenPlanning(profKey)
+    if InCombatLockdown() then return end
+    self:Build()
+    -- Opening planning is a user action: panels closed earlier may show again.
+    self.frame.userClosed = nil
+    LazyProf.PanelShell:ResetClosedForPlanning()
+    self.returnToPlanning = false
+    self.mode = "planning"
+    self:LoadPlanning(profKey, "planning opened")
+end
+
+-- Calculate the planning path of a profession and show it.
+function GuideWindow:LoadPlanning(profKey, reason)
+    local planFromOne = LazyProf.CharStore:Get().planFromOne
+    local path = LazyProf.Pathfinder:CalculateForProfession(profKey, {
+        planFromOne = planFromOne and planFromOne[profKey] or false,
+        reason = reason,
+    })
+    local info = LazyProf.Constants.PROFESSIONS[profKey]
+    self.planning = {
+        profKey = profKey,
+        path = path,
+        notice = (not path) and ("No recipe data for " .. (info and info.name or tostring(profKey)) .. " yet.") or nil,
+    }
+    if self.mode == "planning" then
+        self:DisplayPlanning()
+    end
+end
+
+function GuideWindow:DisplayPlanning()
+    local planning = self.planning
+    if not planning then return end
+    self.mode = "planning"
+    self:Build()
+    self:SetPath(planning.path)
+    self.profKey = planning.profKey
+    self.notice = planning.notice
+    self.frame.showsNotice = (self.notice ~= nil) or nil
+    self:ApplyMode()
+    self:Render()
+    LazyProf.PanelShell:Show(self.frame)
+end
+
+-- Plan the shown profession again (a setting changed, a recipe was learned).
+function GuideWindow:RefreshPlanning(reason)
+    if not self.planning then return end
+    self:LoadPlanning(self.planning.profKey, reason)
+end
+
+-- Close the planning view (its close button, or Escape). With a profession
+-- window open the window goes back to being that window's, closed until it is
+-- opened again.
+function GuideWindow:ClosePlanning()
+    if not self.frame then return end
+    self.planning = nil
+    self.returnToPlanning = false
+    self:SetEscapeCloses(false)
+    if LazyProf.Client:IsOpen() and (self.livePath or self.liveNotice) then
+        self.mode = "live"
+        self:SetPath(self.livePath)
+        self.notice = self.liveNotice
+        self.frame.userClosed = true
+    else
+        self.mode = nil
+        self:SetPath(nil)
+        self.notice = nil
+    end
+    self:Hide()
+    if LazyProf.RecipeDetails then
+        LazyProf.RecipeDetails:Hide()
+    end
+end
+
+-- "Plan from skill 1": a what-if for a profession the character has.
+function GuideWindow:OnPlanFromOne(checked)
+    if not self.planning then return end
+    local store = LazyProf.CharStore:Get()
+    store.planFromOne = store.planFromOne or {}
+    store.planFromOne[self.planning.profKey] = checked or nil
+    self:LoadPlanning(self.planning.profKey, "plan from skill 1 changed")
 end
 
 -- Redraw from the stored path (stock changed, a setting changed).
@@ -500,7 +745,14 @@ function GuideWindow:Render()
     self.prices:SetText(header.priceText)
     self.prices:SetTextColor(header.priceColor[1], header.priceColor[2], header.priceColor[3])
 
-    self.controls:SetShown(path ~= nil)
+    -- Without a path only the profession picker (planning) is left of the controls
+    self.controls:SetShown(path ~= nil or self.mode == "planning")
+    for _, widget in ipairs({ self.targetInput.frame, self.strategyGroup.frame, self.marginBox.frame,
+                              self.rangeDropdown.frame, self.bar.frame }) do
+        widget:SetShown(path ~= nil)
+    end
+    self.targetLabel:SetShown(path ~= nil)
+    self.rangeLabel:SetShown(path ~= nil)
     if path then
         self.targetInput:SetValue(path.targetSkill)
         self.strategyGroup:SetSelected(LazyProf.db.profile.strategy)
@@ -516,6 +768,13 @@ function GuideWindow:Render()
         self.recipeBtn:SetEnabled(nav.recipe)
         self.shopTotal:SetText(Views.ShoppingTotal(view))
         self.hideOwnedBox:SetChecked(view.hideOwned)
+        -- The what-if only makes sense for a profession the character has
+        self.fromOneBox:SetShown(path.hasProfession ~= false)
+        self.fromOneBox:SetChecked(path.planFromOne)
+    end
+    if self.mode == "planning" then
+        local info = LazyProf.Constants.PROFESSIONS[self.profKey or ""]
+        self.professionDropdown:SetText(info and info.name or "Profession")
     end
 
     local line1, line2 = Views.Footer(view)
@@ -638,9 +897,15 @@ end
 
 -- Header controls -----------------------------------------------------------------
 
--- A new path is needed. The live path is the planner's; LazyProf:Recalculate
--- brings it back through Update.
+-- A new path is needed. The live path is the planner's (LazyProf:Recalculate
+-- brings it back through Update); planning calculates its own.
 function GuideWindow:Recalculate(reason)
+    if self.mode == "planning" then
+        if self.planning then
+            self:LoadPlanning(self.planning.profKey, reason)
+        end
+        return
+    end
     LazyProf:Recalculate(reason)
 end
 
@@ -656,9 +921,15 @@ function GuideWindow:OnTargetCommit(value)
     return target
 end
 
+-- The strategy is one setting for every path: the shown one is planned
+-- again, and so is the open profession's when planning is shown.
 function GuideWindow:OnStrategy(value)
     if LazyProf.db.profile.strategy == value then return end
     LazyProf.db.profile.strategy = value
+    if self.mode == "planning" and LazyProf.Client:IsOpen() then
+        LazyProf:Recalculate("strategy change")
+        return   -- LazyProf:Recalculate refreshes planning too
+    end
     self:Recalculate("strategy change")
 end
 

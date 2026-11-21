@@ -431,10 +431,9 @@ section("init", function()
     local hidden = 0
     local panel = { Hide = function() hidden = hidden + 1 end }
     panel.OnProfessionClosed = panel.Hide
-    addon.ArrowManager, addon.GuideWindow, addon.MissingMaterialsPanel, addon.RecipeDetails =
-        panel, panel, panel, panel
+    addon.ArrowManager, addon.GuideWindow, addon.RecipeDetails = panel, panel, panel
     startCallbacks.onClose()
-    check(p .. "onClose hides the arrow, the window and the two panels", hidden == 4, hidden)
+    check(p .. "onClose hides the arrow, the window and the recipe details", hidden == 3, hidden)
 
     local refreshed = 0
     addon.ArrowManager = { RefreshPosition = function() refreshed = refreshed + 1 end }

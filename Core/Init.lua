@@ -18,6 +18,10 @@ function LazyProf:OnInitialize()
     end
 
     self.db = LibStub("AceDB-3.0"):New("LazyProfDB", self.defaults, true)
+    -- Settings an older version saved under names that no longer exist
+    if self.MigrateSettings then
+        self.MigrateSettings(self.db.sv)
+    end
     self:RegisterChatCommand("lazyprof", "SlashCommand")
     self:RegisterChatCommand("lp", "SlashCommand")
     if self.SetupConfig then
@@ -48,14 +52,8 @@ function LazyProf:OnEnable()
     if self.GuideWindow then
         self.GuideWindow:Initialize()
     end
-    if self.MissingMaterialsPanel then
-        self.MissingMaterialsPanel:Initialize()
-    end
     if self.RecipeDetails then
         self.RecipeDetails:Initialize()
-    end
-    if self.PlanningWindow then
-        self.PlanningWindow:Initialize()
     end
     if self.ProfessionBrowser then
         self.ProfessionBrowser:Initialize()
@@ -158,6 +156,11 @@ function LazyProf:OnTradeSkillShow()
     if self.PanelShell then
         self.PanelShell:ResetClosed()
     end
+    -- The LazyProf window docks to the profession window (a planning view is
+    -- set aside until it closes).
+    if self.GuideWindow then
+        self.GuideWindow:OnProfessionOpened()
+    end
     self:ScheduleRecalculation("trade skill opened")
 end
 
@@ -182,14 +185,13 @@ function LazyProf:OnTradeSkillClose()
     if self.ArrowManager then
         self.ArrowManager:Hide()
     end
-    if self.GuideWindow then
-        self.GuideWindow:OnProfessionClosed()
-    end
-    if self.MissingMaterialsPanel then
-        self.MissingMaterialsPanel:Hide()
-    end
+    -- Before the window: it may go back to a planning view, which keeps its
+    -- own recipe details.
     if self.RecipeDetails then
         self.RecipeDetails:Hide()
+    end
+    if self.GuideWindow then
+        self.GuideWindow:OnProfessionClosed()
     end
 end
 
@@ -199,7 +201,7 @@ function LazyProf:OnBagUpdate()
     -- quantities change. Use lightweight RefreshShoppingList() instead of full recalc.
     -- DO NOT REVERT THIS to ScheduleRecalculation() - it causes severe FPS hitches
     -- during batch crafting as reported by users with both old and high-end hardware.
-    if self.Client:IsOpen() then
+    if self.Client:IsOpen() or (self.GuideWindow and self.GuideWindow:PlanningPath()) then
         self:ScheduleShoppingListRefresh()
     end
 end
@@ -269,20 +271,28 @@ end
 -- which re-runs the entire pathfinding algorithm with recipe scoring.
 -- Called on BAG_UPDATE instead of full recalculation.
 function LazyProf:RefreshShoppingList()
-    -- A refresh queued just before the window closed must not show the list.
-    if not self.Client:IsOpen() then
-        return
+    -- A refresh queued just before the window closed must not show anything.
+    local window = self.GuideWindow
+    local live = self.Client:IsOpen() and self.Pathfinder.currentPath or nil
+    if live and not (live.steps and #live.steps > 0) then
+        live = nil
     end
-    local path = self.Pathfinder.currentPath
-    if not path or not path.steps or #path.steps == 0 then
+    local planning = window and window:PlanningPath() or nil
+    if not (live or planning) then
         return
     end
 
     -- Rescan inventory; the stages and the shopping list are drawn from it
-    path.inventory, path.sourceBreakdown = self.Inventory:ScanAll()
+    local inventory, sourceBreakdown = self.Inventory:ScanAll()
+    if live then
+        live.inventory, live.sourceBreakdown = inventory, sourceBreakdown
+    end
+    if planning then
+        planning.inventory, planning.sourceBreakdown = inventory, sourceBreakdown
+    end
 
-    if self.GuideWindow then
-        self.GuideWindow:Refresh()
+    if window then
+        window:Refresh()
     end
 end
 
@@ -308,9 +318,9 @@ function LazyProf:Recalculate(reason)
         self:ShowNoDataNotice()
     end
 
-    -- Also refresh PlanningWindow if visible (it calculates independently)
-    if self.PlanningWindow and self.PlanningWindow:IsVisible() then
-        self.PlanningWindow:LoadProfession(self.PlanningWindow.currentProfession)
+    -- A planning view calculates its own path: plan it again too
+    if self.GuideWindow then
+        self.GuideWindow:RefreshPlanning(reason)
     end
 end
 
@@ -330,16 +340,17 @@ function LazyProf:HideDisplay()
         self.ArrowManager:Hide()
     end
     if self.GuideWindow then
-        self.GuideWindow:Hide()
-    end
-    if self.MissingMaterialsPanel then
-        self.MissingMaterialsPanel:Hide()
+        self.GuideWindow:HideLive()
     end
 end
 
 function LazyProf:UpdateDisplay()
-    -- The live panels belong to the open profession window; settings changed
-    -- with it closed must not bring them back with an old path.
+    -- A planning view only needs redrawing (a display setting changed).
+    if self.GuideWindow and self.GuideWindow:PlanningPath() then
+        self.GuideWindow:Refresh()
+    end
+    -- The live view belongs to the open profession window; settings changed
+    -- with it closed must not bring it back with an old path.
     if not self.Client:IsOpen() then
         return
     end

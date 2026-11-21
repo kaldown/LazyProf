@@ -24,16 +24,15 @@ local FILES = {
     "Modules/Pathfinder/Strategies/Cheapest.lua",
     "Modules/Pathfinder/Strategies/Fastest.lua",
     "Modules/Pathfinder/Pathfinder.lua",
-    "Modules/UI/Widgets/RowPool.lua",
-    "Modules/UI/Widgets/Dropdown.lua",
-    "Modules/UI/Widgets/Controls.lua",
-    "Modules/UI/MilestoneBreakdown.lua",
+    "Modules/Guide/Text.lua",
+    "Modules/Guide/Range.lua",
+    "Modules/Guide/Stages.lua",
 }
 
 harness.stubWow({ interface = 11508 })
 local LazyProf = harness.loadLazyProf(FILES)
 local Utils = LazyProf.Utils
-local Panel = LazyProf.MilestonePanelClass
+local Text, Stages, Range = LazyProf.GuideText, LazyProf.Stages, LazyProf.GuideRange
 
 local failures, total = 0, 0
 local function check(name, cond, detail)
@@ -291,43 +290,48 @@ section("pathfinder", function()
         path.gaps and #path.gaps)
     check(p .. "totalCost sums existing steps", path.totalCost == Utils.Sum(path.steps, "totalCost"))
     local bridged = false
-    for _, mb in ipairs(path.milestoneBreakdown) do
-        if mb.bridge then bridged = true end
+    local stages = Stages.Build(path, {})
+    for _, stage in ipairs(stages) do
+        if stage.bridge then bridged = true end
     end
-    check(p .. "milestone breakdown carries the bridge flag", bridged)
+    check(p .. "the stages carry the bridge flag", bridged)
+    check(p .. "the path carries what the stages are built from",
+        path.prices ~= nil and path.inventory ~= nil and path.milestones ~= nil)
 end)
 
 -- ===========================================================================
--- 9. Milestone panel text and ordering (pure helpers, no frames)
+-- 9. Gap text and ordering in the stage list (pure helpers, no frames)
 -- ===========================================================================
-section("panel", function()
-    local p = "panel: "
-    local gapText = Panel.GapText({ from = 38.01, to = 50 })
+section("stages", function()
+    local p = "stages: "
+    local gapText = Text.GapText({ from = 38.01, to = 50 })
     check(p .. "gap row text", gapText == "No recipe for 38-50: train elsewhere or missing data", gapText)
     check(p .. "gap row text is ASCII", not hasHighBytes(gapText))
-    local bridgeText = Panel.StepRecipeText({ quantity = 3, recipe = { name = "A" }, bridge = true })
+    local bridgeText = Text.StepRecipeText({ quantity = 3, recipe = { name = "A" }, bridge = true })
     check(p .. "bridge suffix", bridgeText == "3x A (green: no better recipe)", bridgeText)
-    local plainText = Panel.StepRecipeText({ quantity = 3, recipe = { name = "A" } })
+    local plainText = Text.StepRecipeText({ quantity = 3, recipe = { name = "A" } })
     check(p .. "no suffix on normal steps", plainText == "3x A", plainText)
-    check(p .. "total label excluding gaps", Panel.TotalLabel({ complete = false }, "Total") == "Total (excluding gaps): ",
-        Panel.TotalLabel({ complete = false }, "Total"))
-    check(p .. "total label complete", Panel.TotalLabel({ complete = true }, "Total") == "Total: ")
-    check(p .. "total label old path", Panel.TotalLabel({}, "Total") == "Total: ")
+    check(p .. "total label excluding gaps", Text.TotalLabel({ complete = false }, "Total") == "Total (excluding gaps): ",
+        Text.TotalLabel({ complete = false }, "Total"))
+    check(p .. "total label complete", Text.TotalLabel({ complete = true }, "Total") == "Total: ")
+    check(p .. "total label old path", Text.TotalLabel({}, "Total") == "Total: ")
 
-    local steps = { { from = 1, to = 30 }, { from = 30, to = 38 }, { from = 50, to = 70 } }
-    local gaps = { { from = 38, to = 50 }, { from = 78, to = 90 } }
-    local merged = Panel.MergeStepsAndGaps(steps, gaps)
+    local function st(r, from, to) return { recipe = r, skillStart = from, skillEnd = to, quantity = 1, totalCost = 0, alternatives = {} } end
+    local path = { targetSkill = 90, steps = { st(A, 1, 30), st(A, 30, 38), st(B, 50, 70) },
+        gaps = { { from = 38, to = 50, reason = "no recipe" }, { from = 78, to = 90, reason = "no recipe" } } }
+    local stages = Stages.Build(path, { prices = PRICES })
     local order = {}
-    for _, e in ipairs(merged) do order[#order + 1] = e.gap and "gap" or "step" end
-    check(p .. "gaps interleave by skill", table.concat(order, ",") == "step,step,gap,step,gap",
-        table.concat(order, ","))
+    for _, stage in ipairs(stages) do order[#order + 1] = stage.kind end
+    check(p .. "gaps interleave by skill", table.concat(order, ",") == "craft,gap,craft,gap", table.concat(order, ","))
 
-    local inBracket = Panel.FilterGapsForBracket(gaps, { min = 75, max = 150 })
-    check(p .. "bracket keeps overlapping gaps", #inBracket == 1 and inBracket[1].from == 78, #inBracket)
-    local none = Panel.FilterGapsForBracket(gaps, { min = 1, max = 38 })
-    check(p .. "bracket drops non-overlapping gaps", #none == 0, #none)
-    check(p .. "no bracket keeps all gaps", #Panel.FilterGapsForBracket(gaps, nil) == 2)
+    local inRange = Range.FilterStages(stages, { min = 75, max = 150 })
+    check(p .. "a range keeps the gap that starts in it", #inRange == 1 and inRange[1].kind == "gap" and inRange[1].from == 78,
+        #inRange)
+    local first = Range.FilterStages(stages, { min = 1, max = 38 })
+    check(p .. "a range without a gap has none", #first == 1 and first[1].kind == "craft", #first)
+    check(p .. "no range keeps every stage", #Range.FilterStages(stages, nil) == 4)
 end)
+
 
 print(string.format("\n%d/%d checks passed", total - failures, total))
 os.exit(failures == 0 and 0 or 1)
