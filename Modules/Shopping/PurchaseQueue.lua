@@ -66,7 +66,7 @@ function Queue.Plan(rows, items)
                 local bundle = (item.bundle and item.bundle > 0) and item.bundle or 1
                 local quantity = math.ceil(row.toBuy / bundle) * bundle
                 local unitPrice = item.price / bundle
-                local cost = quantity * unitPrice
+                local cost = (quantity / bundle) * item.price   -- whole bundles: whole copper
                 plan.entries[#plan.entries + 1] = {
                     itemId = row.itemId, name = name, quantity = quantity, unitPrice = unitPrice, cost = cost,
                 }
