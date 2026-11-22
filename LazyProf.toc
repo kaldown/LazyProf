@@ -87,6 +87,7 @@ Modules\Pathfinder\Pathfinder.lua
 Modules\Guide\Text.lua
 Modules\Guide\Range.lua
 Modules\Guide\Stages.lua
+Modules\Guide\TrainerMemory.lua
 Modules\Guide\Views.lua
 Modules\Shopping\PurchaseQueue.lua
 

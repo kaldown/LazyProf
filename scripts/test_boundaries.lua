@@ -11,6 +11,9 @@ local FORBIDDEN = {
     "C_Item.GetItemInfo",
     -- Merchant window and calls (the adapter's MerchantItems / BuyFromMerchant / Money)
     "MerchantFrame", "GetMerchant", "BuyMerchantItem",
+    -- Trainer window calls and the map (the adapter's TrainerInfo / TrainerServices)
+    "GetTrainer", "GetNumTrainerServices", "IsTradeskillTrainer", "BuyTrainerService", "ClassTrainerFrame",
+    "C_Map", "GetRealZoneText", "GetSubZoneText",
 }
 
 local EXEMPT_DIRS = { "Core/Client/", "Modules/UI/Widgets/" }

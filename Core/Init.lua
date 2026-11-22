@@ -58,6 +58,9 @@ function LazyProf:OnEnable()
     if self.MerchantPanel then
         self.MerchantPanel:Initialize()
     end
+    if self.TrainerMemory then
+        self.TrainerMemory:Initialize()
+    end
     if self.ProfessionBrowser then
         self.ProfessionBrowser:Initialize()
     end
@@ -139,10 +142,13 @@ function LazyProf:SlashCommand(input)
         end
         self:Print("Diagnostics: /lp diag prices - lists every reagent price of the path and where it came from.")
         self:Print("Diagnostics: /lp diag merchant - at a merchant: what it sells as LazyProf reads it, and what would be bought.")
+        self:Print("Diagnostics: /lp diag trainer - at a profession trainer: what it lists as LazyProf reads it, and what is remembered.")
     elseif cmd == "diag prices" then
         self:RunPriceDiagnostic()
     elseif cmd == "diag merchant" then
         self:RunMerchantDiagnostic()
+    elseif cmd == "diag trainer" then
+        self:RunTrainerDiagnostic()
     elseif cmd == "diag learned" and self.ClientFamily ~= "forever" then
         self:RunLearnedDiagnostic()
     elseif cmd == "diag forever" and self.ClientFamily == "forever" then
@@ -571,6 +577,46 @@ function LazyProf:RunMerchantDiagnostic()
     if not ok then add("SECTION ERROR: plan: " .. tostring(err)) end
 
     self:Print("diag merchant: output ready - copy it from the window that opened.")
+    self:ShowDiagnosticOutput(table.concat(out, "\n"))
+end
+
+-- /lp diag trainer: the open trainer's raw values, what the adapter makes of
+-- them, and what is remembered of visited trainers. Read-only; run it with a
+-- profession trainer's window open.
+function LazyProf:RunTrainerDiagnostic()
+    local out = {}
+    local function add(text) out[#out + 1] = text end
+    local version, build, _, interface = GetBuildInfo()
+    add("diag trainer: build=" .. tostring(version) .. " (" .. tostring(build) .. ") interface=" .. tostring(interface)
+        .. " family=" .. tostring(self.ClientFamily))
+    local ok, err = pcall(self.Client.RunTrainerDiagnostic, self.Client, out)
+    if not ok then add("SECTION ERROR: adapter: " .. tostring(err)) end
+
+    ok, err = pcall(function()
+        local memory = self.TrainerMemory
+        local counts = memory:Counts()
+        add("remembered: professions=" .. tostring(counts.professions) .. " trainers=" .. tostring(counts.trainers)
+            .. " fees=" .. tostring(counts.fees))
+        -- What this visit matched: the profession, and the listed recipes with a fee.
+        local info = self.Client:TrainerInfo()
+        if info then
+            local services = self.Client:TrainerServices()
+            local profKey = memory:Record(info, services)
+            add("this trainer: profession=" .. tostring(profKey) .. " services=" .. tostring(#services))
+            if profKey then
+                for _, trainer in ipairs(memory:Trainers(profKey)) do
+                    local listed = 0
+                    for _ in pairs(trainer.teaches or {}) do listed = listed + 1 end
+                    add("known " .. tostring(profKey) .. " trainer: " .. self.GuideText.TrainerLine(trainer)
+                        .. " mapId=" .. tostring(trainer.mapId) .. " faction=" .. tostring(trainer.faction)
+                        .. " recipesListed=" .. tostring(listed))
+                end
+            end
+        end
+    end)
+    if not ok then add("SECTION ERROR: memory: " .. tostring(err)) end
+
+    self:Print("diag trainer: output ready - copy it from the window that opened.")
     self:ShowDiagnosticOutput(table.concat(out, "\n"))
 end
 

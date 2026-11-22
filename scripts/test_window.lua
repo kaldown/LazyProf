@@ -756,4 +756,75 @@ T.section("planning mode", function()
     T.check("browser: a click opens planning in the window", frame.shown and window.mode == "planning")
 end)
 
+T.section("visited trainers", function()
+    local env = W.load("forever", { "Modules/Guide/TrainerMemory.lua" })
+    local window, ui, addon = env.window, env.ui, env.addon
+    env.cap = 150
+    _G.CraftLib = { GetActiveProfile = function() return "FOREVER" end }
+    _G.GetServerTime = function() return 1 end
+    local boots = W.recipe(9, "Boots", 150, 200, 210, 220, { unlearned = true, sourceInfo = { type = "trainer", cost = 250, costSeen = true } })
+    addon.Professions.registry = { tailoring = { name = "Tailoring", recipes = { boots, W.GLOVES } } }
+    local function path()
+        return W.path({
+            steps = { W.step(W.GLOVES, 143, 150, 7, 700), W.step(boots, 150, 225, 75, 7750), W.step(boots, 225, 300, 75, 7500) },
+            gaps = {}, totalCost = 15950, complete = true, prices = { [101] = 100, [109] = 100 },
+        })
+    end
+    window:Update(path())
+    window:SelectTab("steps")
+    window.rangeSel = "all"
+    window:Render()
+
+    -- Nothing remembered: the cards name nobody.
+    ui.fire(W.findRow(window, "Train the next rank before 150"), "OnClick", "LeftButton")
+    T.check("rank card: no trainer named before any visit", W.findRow(window, "trainers you have visited") == nil)
+    ui.fire(window.nextBtn, "OnClick")
+    T.eq("learn card", W.rowTexts(window)[2], "Learn Boots | at 150")
+    T.check("learn card: no trainer named before any visit", W.findRow(window, "Trainers you visited") == nil)
+    T.check("a remembered fee says where it comes from", W.findRow(window, "Cost: 2s 50c (as charged at a trainer you visited)") ~= nil)
+
+    -- Two visits: one trainer listed Boots, the other did not.
+    local Memory = addon.TrainerMemory
+    Memory:Record({ name = "Georgio Bolero", npcId = 1346, zone = "Stormwind City", mapId = 84, x = 0.53, y = 0.81, faction = "Alliance" },
+        { { name = "Boots", cost = 250, state = "available" }, { name = "Gloves", cost = 10, state = "used" } })
+    Memory:Record({ name = "Sellandus", npcId = 1103, zone = "Stormwind City", mapId = 84, x = 0.44, y = 0.77, faction = "Alliance" },
+        { { name = "Gloves", cost = 10, state = "available" } })
+    Memory:Record({ name = "Magar", npcId = 3363, zone = "Orgrimmar", mapId = 85, x = 0.6, y = 0.5, faction = "Horde" },
+        { { name = "Boots", cost = 250, state = "available" } })
+    window:Refresh()
+    T.check("learn card: the label", W.findRow(window, "Trainers you visited that teach it:") ~= nil)
+    T.check("learn card: the trainer that listed the recipe, with where the player stood",
+        W.findRow(window, "Georgio Bolero - Stormwind City (53, 81)") ~= nil)
+    T.check("learn card: a trainer that did not list it is not named", W.findRow(window, "Sellandus") == nil)
+    T.check("learn card: the other faction's trainer is not named", W.findRow(window, "Magar") == nil)
+
+    ui.fire(window.prevBtn, "OnClick")
+    T.check("rank card: the label does not promise the rank",
+        W.findRow(window, "Tailoring trainers you have visited (not every trainer teaches every rank):") ~= nil)
+    T.check("rank card: both visited trainers of the faction", W.findRow(window, "Georgio Bolero") ~= nil
+        and W.findRow(window, "Sellandus - Stormwind City (44, 77)") ~= nil and W.findRow(window, "Magar") == nil)
+
+    -- The VANILLA profile never names a trainer on a learn step.
+    _G.CraftLib = { GetActiveProfile = function() return "VANILLA" end }
+    Memory:Record({ name = "Era Trainer", npcId = 5, zone = "Ironforge", faction = "Alliance" },
+        { { name = "Boots", cost = 250, state = "available" } })
+    window:Refresh()
+    ui.fire(window.nextBtn, "OnClick")
+    T.check("VANILLA: the learn card names no trainer", W.findRow(window, "Trainers you visited") == nil
+        and W.findRow(window, "Era Trainer") == nil)
+    _G.CraftLib = nil
+
+    -- A visit refreshes a shown window.
+    _G.CraftLib = { GetActiveProfile = function() return "FOREVER" end }
+    addon.Client.TrainerInfo = function()
+        return { name = "New Trainer", npcId = 9, zone = "Darnassus", faction = "Alliance" }
+    end
+    addon.Client.TrainerServices = function() return { { name = "Boots", cost = 250, state = "available" } } end
+    Memory:Capture()
+    T.check("a trainer visit shows up in the open window at once", W.findRow(window, "New Trainer - Darnassus") ~= nil)
+    addon.Client.TrainerInfo = function() return nil end
+    T.check("no profession trainer open: capture does nothing", pcall(Memory.Capture, Memory))
+    _G.CraftLib = nil
+end)
+
 T.finish()
