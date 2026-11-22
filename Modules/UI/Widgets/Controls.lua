@@ -74,16 +74,35 @@ end
 local ButtonGroup = {}
 ButtonGroup.__index = ButtonGroup
 
+-- The stock panel button has no pushed texture of its own: its three art
+-- pieces (Left / Middle / Right) are swapped to the "down" art while the
+-- mouse is held and back to "up" on release and on show (WoW Forever:
+-- Blizzard_SharedXML/SecureUIPanelTemplates.lua:44-67). The selected button
+-- is therefore given the "down" art here, again after each of those.
+local BUTTON_UP = "Interface\\Buttons\\UI-Panel-Button-Up"
+local BUTTON_DOWN = "Interface\\Buttons\\UI-Panel-Button-Down"
+
+local function ApplyButtonArt(button, selected)
+    if selected then
+        button:SetButtonState("PUSHED", true)
+        button:LockHighlight()
+    else
+        button:SetButtonState("NORMAL")
+        button:UnlockHighlight()
+    end
+    local art = selected and BUTTON_DOWN or BUTTON_UP
+    for _, key in ipairs({ "Left", "Middle", "Right" }) do
+        local piece = rawget(button, key)
+        if type(piece) == "table" and piece.SetTexture then
+            piece:SetTexture(art)
+        end
+    end
+end
+
 function ButtonGroup:SetSelected(value)
     self.selected = value
     for _, button in ipairs(self.list) do
-        if button.value == value then
-            button:SetButtonState("PUSHED", true)
-            button:LockHighlight()
-        else
-            button:SetButtonState("NORMAL")
-            button:UnlockHighlight()
-        end
+        ApplyButtonArt(button, button.value == value)
     end
 end
 
@@ -117,6 +136,10 @@ function Widgets.CreateButtonGroup(parent, options, onSelect)
         end)
         button:SetScript("OnEnter", function(self) ShowTextTooltip(self, option.tooltip and option.text, option.tooltip) end)
         button:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        -- The template puts the "up" art back on release and on show.
+        local function reapply(self) ApplyButtonArt(self, group.selected == option.value) end
+        button:HookScript("OnMouseUp", reapply)
+        button:HookScript("OnShow", reapply)
         group.buttons[option.value] = button
         group.list[#group.list + 1] = button
         x = x + width

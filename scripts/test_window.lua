@@ -830,4 +830,97 @@ T.section("visited trainers", function()
     _G.CraftLib = nil
 end)
 
+T.section("review fixes", function()
+    local env = W.load("forever")
+    local window, ui, addon = env.window, env.ui, env.addon
+    local function escapeCloses()
+        for _, name in ipairs(UISpecialFrames) do
+            if name == "LazyProfGuideWindow" then return true end
+        end
+        return false
+    end
+    addon.Professions.active = "tailoring"
+
+    -- The target box is not overwritten while the player types in it.
+    window:Update(W.path())
+    window.targetInput.frame.focused = true
+    window.targetInput.frame.text = "22"
+    window:Refresh()
+    T.eq("target: a redraw while typing leaves the typed digits", window.targetInput.frame.text, "22")
+    window.targetInput.frame.focused = false
+    window:Refresh()
+    T.eq("target: shown again once the box is left", window.targetInput.frame.text, "300")
+
+    -- Resizing redraws the path bar and keeps the spot the frame was sized at.
+    local frame = window.frame
+    local before = window.bar.shown[2].width
+    frame.width, frame.height, frame.left, frame.top = 600, 600, 120, 880
+    ui.fire(window.resizeGrip, "OnMouseUp")
+    T.check("resize: the path bar is laid out for the new width", window.bar.shown[2].width > before)
+    T.eq("resize: the spot is saved with the size", addon.db.profile.panelPositions.guide.x, 120)
+    env.shell:ResetPositions()
+    T.eq("reset: the bar follows the default width again", window.bar.shown[2].width, before)
+
+    -- Planning the profession whose window is open: its own path follows too.
+    env.playerSkill, env.playerCap = 143, 300
+    window:OpenPlanning("tailoring")
+    local recalcs, plans = #env.recalcs, #env.planCalls
+    window.targetInput.frame.focused = true
+    window.targetInput.frame.text = "225"
+    ui.fire(window.targetInput.frame, "OnEnterPressed")
+    T.eq("planning the open profession: its live path is planned again", env.recalcs[#env.recalcs], "target changed")
+    T.eq("once", #env.recalcs, recalcs + 1)
+    window:OpenPlanning("alchemy")
+    recalcs, plans = #env.recalcs, #env.planCalls
+    window.targetInput.frame.focused = true
+    window.targetInput.frame.text = "226"
+    ui.fire(window.targetInput.frame, "OnEnterPressed")
+    T.eq("planning another profession: only planning is planned again", #env.recalcs, recalcs)
+    T.eq("planning another profession: planned", #env.planCalls, plans + 1)
+    ui.fire(frame.closeBtn, "OnClick")
+    env.shell:ResetClosed()
+
+    -- A profession window opening over planning: nothing changes until its
+    -- path arrives; then the window docks.
+    env.open = false
+    window:OpenPlanning("alchemy")
+    env.open = true
+    window:OnProfessionOpened()
+    T.eq("opened over planning: still planning until the path arrives", window.mode, "planning")
+    window:Refresh()
+    T.eq("a redraw in between still shows planning", frame.title.text, "LazyProf - Alchemy")
+    T.check("with its profession picker", window.planRow.shown)
+    window:Update(W.path())
+    T.eq("the path arrived: docked", window.mode, "live")
+    T.eq("docked on the open profession", frame.title.text, "LazyProf - Tailoring")
+
+    -- The docked window is closed with its button; the planning view that was
+    -- set aside still comes back when the profession window closes.
+    ui.fire(frame.closeBtn, "OnClick")
+    T.check("docked window closed by the player", not frame.shown and frame.userClosed == true)
+    env.open = false
+    window:OnProfessionClosed()
+    T.check("the planning view set aside is shown again", frame.shown and window.mode == "planning")
+    T.eq("on its profession", frame.title.text, "LazyProf - Alchemy")
+    T.check("and can be closed with Escape", escapeCloses())
+
+    -- A profession window that closes before its path arrived leaves planning alone.
+    env.open = true
+    window:OnProfessionOpened()
+    env.open = false
+    window:OnProfessionClosed()
+    T.check("opened and closed before a path: planning untouched", frame.shown and window.mode == "planning")
+    env.open = true
+    window:Update(W.path())
+    T.eq("a late path does not dock a window whose profession is gone", window.mode, "planning")
+
+    -- A profession without data docks with its notice.
+    window:OnProfessionOpened()
+    window:HideLive()
+    T.eq("no path yet for the opened profession: planning stays", window.mode, "planning")
+    window:ShowNotice("No recipe data for Engineering yet.")
+    T.eq("its notice docks the window", window.mode, "live")
+    T.eq("and is shown", W.rowTexts(window)[1], "No recipe data for Engineering yet.")
+end)
+
 T.finish()

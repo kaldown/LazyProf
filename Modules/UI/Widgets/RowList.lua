@@ -355,11 +355,14 @@ function RowList:Render(descriptors, toTop)
             SetBackground(row, desc.bg)
             SetRowScripts(row, desc)
         end
+        -- Placed and shown before it is filled, so wrapped text is measured
+        -- on a row that has its place and width.
         row:SetWidth(math.max(1, width - indent))
-        height = def.apply(row, desc, width - indent, height)
         row:SetHeight(height)
         row:SetPoint("TOPLEFT", self.content, "TOPLEFT", indent, -y)
         row:Show()
+        height = def.apply(row, desc, width - indent, height)
+        row:SetHeight(height)
         self.rows[#self.rows + 1] = row
         y = y + height
     end
