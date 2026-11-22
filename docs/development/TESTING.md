@@ -9,10 +9,11 @@ LazyProf is tested manually in-game.
 After making changes, run `/reload` and verify:
 
 1. Open any profession window (Cooking, First Aid, etc.)
-2. LazyProf panels should appear:
-   - Milestone Breakdown panel
-   - Missing Materials panel (shopping list)
+2. The LazyProf window should appear beside it, on the Guide tab, with Steps and Shopping tabs below
 3. Arrow should point to recommended recipe
+
+The pure logic (path, stages, shopping rows, purchase queue, view contents) and the frames
+(against a fake UI) also run headlessly: `bash scripts/run_tests.sh` must pass before every commit.
 
 ### Testing Commands
 
@@ -24,9 +25,9 @@ After making changes, run `/reload` and verify:
 ### Testing Path Calculation
 
 1. Open profession at various skill levels
-2. Verify milestones show correct path
+2. Verify the Steps tab shows the correct path and the Guide tab its current step
 3. Check that costs are reasonable (not 0, not astronomical)
-4. Verify shopping list matches milestone requirements
+4. Verify the Shopping tab matches what the steps need
 
 ### Testing Pricing Providers
 
@@ -63,21 +64,19 @@ After making changes, run `/reload` and verify:
 ### Testing Bracket Filter
 
 1. Open profession with a calculated path spanning multiple brackets
-2. Use bracket filter dropdown on milestone panel (1-75, 75-150, etc.)
-3. Verify milestone breakdown shows only steps in selected bracket
-4. Verify shopping list updates to show only materials for filtered brackets
-5. Select "Full Path" to restore complete view
+2. Use the Range dropdown in the window's header (1-75, 75-150, etc.)
+3. Verify the Steps tab shows only steps of the selected range
+4. Verify the Shopping tab shows only materials for that range
+5. Select "Full path" to restore the complete view
 
 ### Testing Alternative Recipes & Pinning
 
 1. Open profession with multiple recipe choices at same skill level
-2. Expand a step in milestone breakdown
-3. Verify ingredients show first, then collapsible "Alternatives (N)" section
-4. Expand alternatives, verify groups of 5
-5. Hover tooltip shows materials and source info for unlearned recipes (`[!]`)
-6. Click alternative to pin it - verify `[*]` indicator on skill range
-7. Verify "Recalculate with N pins" button appears (green, full-width)
-8. Click recalculate - verify path updates respecting pinned recipes
+2. On the Guide tab, verify the step's card lists "Alternatives" under its reagents: the best three, then "Show all N"
+3. Hover an alternative: the tooltip shows materials and, for unlearned recipes (`[!]`), the source
+4. Click "Use this" - verify the path is planned again at once and the step shows "Pinned" with a "Reset" button
+5. /reload - verify the pin is still there
+6. Click "Reset" - verify the planner's own recipe is back
 9. Test unpin by clicking pinned recipe again
 10. Test `/reload` clears all pins
 
@@ -157,7 +156,7 @@ Key files:
 ## Test Checklist for PRs
 
 - [ ] Opens without errors on each supported profession
-- [ ] Milestones display correctly
+- [ ] Guide, Steps and Shopping tabs display correctly
 - [ ] Shopping list is accurate
 - [ ] Works with TSM pricing
 - [ ] Works with Auctionator pricing

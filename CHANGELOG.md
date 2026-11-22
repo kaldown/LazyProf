@@ -6,12 +6,26 @@ All notable changes to LazyProf will be documented in this file.
 
 ### Added
 
+- One window with Guide, Steps and Shopping tabs replaces the milestone panel, the shopping list panel and the Planning window. It opens beside the profession window, can be moved and resized, and keeps its place and size.
+- Guide tab: the step to do now, shown large - the recipe and how many to craft, the skill range and where its colour changes, a reagent table (Need / Have / Buy / Cost) and the step's cost. Prev, Next and "Current step" move through the path.
+- A path bar across the top of the window: one coloured segment per step (orange, yellow, green), gaps in red, a tick at each rank still to train and a marker at your skill. Hover a segment to see the step, click to open it.
+- Steps: consecutive crafts of one recipe are shown as one step instead of many five-craft rows, with whole skill numbers.
+- Learning a recipe and training the next rank are steps of their own. A learn step says where the recipe comes from (trainer, vendor, your bags, bank or an alt, or the auction house with its price), the fee when it is known, and the skill it needs. A rank step sits at the skill cap it lifts ("train before 150").
+- Target skill: type the skill you want to reach in the window; the path, costs and shopping list end there. Remembered per character and profession.
+- "With margin": plans extra crafts and reagents for bad luck with skill-ups, rounded up once per step. The percentage is an option (5-30, default 15). The margin never changes which recipes are chosen; totals show both the expected and the with-margin figure.
+- Alternatives on the step itself: the best three other recipes with how many crafts and how much gold they would change, "Show all" for the rest, and "Use this" to switch, which replans at once. A switched step says so and has "Reset".
+- Shopping tab: one table per reagent with Need, Have, Buy and Cost, a "vendor" mark on vendor-sold reagents, the "Collect first" block (bank, mail, your auctions, guild bank, alts) and a "Hide what I have" box.
+- Craft or buy per reagent: reagents you can make yourself get an "I craft it" / "I buy it" button (right-click for automatic). The choice is per character, works under both strategies and changes the shopping list only.
+- Buying at a vendor: when the open merchant sells reagents on your list, a panel beside the merchant window lists them with a Buy button each and "Buy all" with the total. Purchases go out one stack at a time and stop when the merchant closes, the money runs out or the bags are full; limited-stock items and items not sold for gold are listed with the reason and never bought automatically. One line afterwards says what was bought and what was skipped.
+- LazyProf remembers vendor prices it sees at merchants (reagents sold for gold without a stock limit), so vendor reagents are priced and marked without TSM or Auctionator. The built-in vendor list is now used for prices too.
+- WoW Forever only: profession trainers you visit are remembered (name, zone, where you stood) together with the fees they charge. Learn and rank steps list the trainers you have visited, and a remembered fee is used where the recipe data has none. Other clients do not record trainers.
+- `/lp diag merchant` and `/lp diag trainer` report what LazyProf reads from an open merchant or trainer window in a copyable window.
 - WoW Forever (1.60) support from the same addon. LazyProf adapts to the Forever profession window, uses native dropdowns and panel frames, and opens from an addon compartment entry instead of a minimap button. The bundled CraftLib ships Forever recipe data for 7 professions: Alchemy (169 recipes), Blacksmithing (387), Enchanting (221), Leatherworking (467), Tailoring (373), Cooking (122) and First Aid (28). Engineering and Mining are not included yet while their data is being confirmed in game.
 - Recipes with an unknown source are only suggested once you have learned them, own them, or can buy them. They are labelled "Unknown source".
 - New option "Include recipes bought with currency" (off by default). Recipes bought with a currency such as Merchant's Favor are otherwise only suggested when already learned.
 - `/lp diag forever` reports the Forever client state (profession window, recipe data, CraftLib version) in a copyable window.
 - `/lp resetpanels` and a "Reset panel positions" option move the panels back to their default places.
-- When the open profession has no recipe data yet, the milestone panel says so ("No recipe data for Engineering yet.") instead of showing nothing.
+- When the open profession has no recipe data yet, the window says so ("No recipe data for Engineering yet.") instead of showing nothing.
 - Where each price comes from: the arrow tooltip lists how the path's reagents were priced (TSM, Auctionator, vendor, sell-value estimate) and warns when some have no price yet or none at all, when Auctionator prices are 3 or more days old, or when only the sell-value estimate was available. The shopping list tooltip shows each item's price and source.
 - `/lp diag prices` lists every reagent price of the path with what TSM, Auctionator, vendor and sell value each say, the age of Auctionator prices, and flags prices that are stale or where the sources disagree.
 - On WoW Forever, `/lp diag forever` checks the recipe data for the open profession against the game: difficulty at your skill, gray level, reagents and crafted item.
@@ -21,22 +35,34 @@ All notable changes to LazyProf will be documented in this file.
 - Opening a profession, crafting or a busy debug log no longer runs several full recalculations or refreshes in a row; bursts are combined into one as intended.
 - Switching to another profession at the same skill with the window open now updates the path.
 - The recipe arrow no longer reappears after combat over a closed profession window, and an arrow due during combat now appears when combat ends.
-- The arrow tooltip says "(excluding gaps)" on its totals when the path has gaps, like the milestone panel.
+- The arrow tooltip says "(excluding gaps)" on its totals when the path has gaps, like the window.
+- "Can I craft this reagent myself" now means the recipe is in your learned recipes (First Aid and non-trainer recipes were judged wrongly before); it falls back to the old guess only for a profession whose window was never opened on this character.
 - The arrow tooltip no longer says "Prices may be stale" on every path; the warning now appears only when prices really are old.
 
 ### Changed
 
 - Paths no longer stop silently at a skill gap. A gap is bridged with a green recipe while its skill-up chance is at least 10%; otherwise it is shown as a gap in the path.
 - Panel positions are kept, and a panel you closed stays closed until the profession window is reopened. Panels are restored correctly after combat.
-- With "Calculate from current skill" off, the bracket, shopping list and arrow now follow your real skill.
+- A profession you have is always planned from your real skill: every count, cost and shopping figure covers only what is left. The "Calculate from current skill" option is gone; the full path from skill 1 is a "Plan from skill 1" box in planning mode, and the path bar shows what you have already done.
+- Planning any profession now happens in the same window: open it from the minimap button, the addon compartment or `/lp browse`, pick the profession in its header, close it with Escape. A profession window that opens docks the window; when it closes, the planning view comes back.
+- Pinned recipes cover a skill range, take effect at once (the Recalculate button is gone) and are kept between sessions, per character and profession, until your skill has passed them.
+- The arrow tooltip shows the current step, the next two, the totals and the price sources instead of every step; the Steps tab has the full list.
+- "You pay" totals include recipe fees.
+- The two options "Show milestone breakdown" and "Show missing materials" became one, "Open with the profession window". It is off only if both were off.
+- The milestone panel and the shopping list can no longer be shown side by side; they are tabs of one window.
+- Target, pins, craft-or-buy choices and the last tab are stored per character under the character's id rather than its name and realm.
 - Panel rows are reused, so long crafting sessions no longer build up frames.
-- A price from an Auctionator scan you made this session (since login or /reload) is now used before TSM, for reagents and for recipes bought at the auction house. TSM's prices only reach the game at login or /reload, so a scan made just before planning is newer. Vendor prices still come first. Closing the auction house refreshes the path's prices when the profession window is open; the Planning window picks them up the next time you load a profession into it.
+- A price from an Auctionator scan you made this session (since login or /reload) is now used before TSM, for reagents and for recipes bought at the auction house. TSM's prices only reach the game at login or /reload, so a scan made just before planning is newer. Vendor prices still come first. Closing the auction house refreshes the path's prices when the profession window is open; a planning view picks them up the next time it is planned.
 
 ### Known limits
 
 - Racial profession bonuses on Forever are treated as 0 until confirmed.
 - Required tools (for example enchanting rods) are not taken into account when planning paths yet.
 - The skill cap on Forever is assumed to be 300 until confirmed.
+- Rank steps say only "train the next rank before N": the rank's name, fee and level requirement are not shown because they are not confirmed for any client.
+- On Classic Era (not Season of Discovery) a learn step says only "Learn the recipe": that client's recipe data lists every recipe as trainer-taught, so no source is named.
+- The merchant panel uses the shopping list of the path you last looked at in the current play session; before any profession or the LazyProf window was opened in a session it stays away.
+- Vendor buying, trainer memory and the new window were built for WoW Forever and are tested there. They use the same code on the Classic clients, where vendor buying stays inactive if a client lacks the calls it needs and trainers are not recorded.
 
 ## [0.9.0] - 2026-06-30
 
