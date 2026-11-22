@@ -51,6 +51,7 @@ GuideWindow.liveNotice = nil  -- its "no recipe data" text
 GuideWindow.planning = nil    -- { profKey, path, notice } while a planning view exists
 GuideWindow.shoppingPath = nil   -- the last path shown, kept after the window closes (merchant panel)
 GuideWindow.returnToPlanning = false   -- planning was set aside for a profession window
+GuideWindow.dockPending = false        -- a profession window opened over planning; its path has not arrived yet
 GuideWindow.profKey = nil
 GuideWindow.rangeSel = nil    -- nil: current range; a bracket index; "all"
 GuideWindow.expanded = {}     -- [stage.key] = true, rows opened on the Steps tab
@@ -453,10 +454,12 @@ function GuideWindow:Build()
     self.footer2:SetWordWrap(false)
     self.footer2:SetTextColor(0.7, 0.7, 0.7)
 
+    -- Sizing re-anchors the frame, so its spot is saved with its size; the
+    -- path bar is laid out in pixels, so everything is drawn again.
     self.resizeGrip = Widgets.CreateResizeGrip(frame, function()
         PanelShell:SaveSize(frame)
-        self:Layout()
-        self:RenderTab()
+        PanelShell:SavePosition(frame)
+        self:Render()
     end)
     self.resizeGrip:SetParent(body)
 
@@ -485,7 +488,7 @@ function GuideWindow:Build()
             self.sized = nil
             if frame:IsShown() then
                 self:ApplySize()
-                self:RenderTab()
+                self:Render()
             end
         end,
     })
@@ -595,18 +598,30 @@ function GuideWindow:DisplayLive()
     LazyProf.PanelShell:Show(self.frame)
 end
 
+-- Planning is shown and no profession window has just opened over it: what
+-- the open profession has to show is kept, not shown. When one has just
+-- opened (dockPending), planning is set aside now that there is something to
+-- dock with.
+local function PlanningKeepsTheWindow(self)
+    if self.mode ~= "planning" then return false end
+    if not self.dockPending then return true end
+    self.dockPending = false
+    self.returnToPlanning = true
+    return false
+end
+
 -- A live path arrived (the profession window is open). While planning is
 -- shown it is only kept: planning stays until the player closes it.
 function GuideWindow:Update(path)
     self.livePath, self.liveNotice = path, nil
-    if self.mode == "planning" then return end
+    if PlanningKeepsTheWindow(self) then return end
     self:DisplayLive()
 end
 
 -- The open profession has no recipe data: say so instead of showing a path.
 function GuideWindow:ShowNotice(text)
     self.livePath, self.liveNotice = nil, text
-    if self.mode == "planning" then return end
+    if PlanningKeepsTheWindow(self) then return end
     self:DisplayLive()
 end
 
@@ -633,12 +648,12 @@ function GuideWindow:IsShown()
 end
 
 -- A profession window opened: the window docks and shows that profession
--- (its path arrives through Update). A planning view is set aside and comes
--- back when the profession window closes.
+-- as soon as its path (or its "no data" notice) arrives through Update /
+-- ShowNotice. A planning view is set aside then and comes back when the
+-- profession window closes. Until then planning stays as it is.
 function GuideWindow:OnProfessionOpened()
     if self.mode == "planning" and self.planning and LazyProf.db.profile.openWithProfession then
-        self.returnToPlanning = true
-        self.mode = "live"
+        self.dockPending = true
     end
 end
 
@@ -646,9 +661,13 @@ end
 -- aside, else hide. Planning opened on top of the profession window stays.
 function GuideWindow:OnProfessionClosed()
     self.livePath, self.liveNotice = nil, nil
+    self.dockPending = false
     if self.mode == "planning" then return end
     if self.returnToPlanning and self.planning then
         self.returnToPlanning = false
+        -- Closing the docked window (its close button) does not close the
+        -- planning view that was set aside.
+        if self.frame then self.frame.userClosed = nil end
         self:DisplayPlanning()
         return
     end
@@ -668,6 +687,7 @@ function GuideWindow:OpenPlanning(profKey)
     self.frame.userClosed = nil
     LazyProf.PanelShell:ResetClosedForPlanning()
     self.returnToPlanning = false
+    self.dockPending = false
     self.mode = "planning"
     self:LoadPlanning(profKey, "planning opened")
 end
@@ -717,6 +737,7 @@ function GuideWindow:ClosePlanning()
     if not self.frame then return end
     self.planning = nil
     self.returnToPlanning = false
+    self.dockPending = false
     self:SetEscapeCloses(false)
     if LazyProf.Client:IsOpen() and (self.livePath or self.liveNotice) then
         self.mode = "live"
@@ -774,7 +795,10 @@ function GuideWindow:Render()
     self.targetLabel:SetShown(path ~= nil)
     self.rangeLabel:SetShown(path ~= nil)
     if path then
-        self.targetInput:SetValue(path.targetSkill)
+        -- Not while the player is typing in it (a bag update redraws the window)
+        if not self.targetInput.frame:HasFocus() then
+            self.targetInput:SetValue(path.targetSkill)
+        end
         self.strategyGroup:SetSelected(LazyProf.db.profile.strategy)
         self.marginBox:SetChecked(LazyProf.db.profile.useMargin)
         self.rangeDropdown:SetText(view.rangeLabel)
@@ -921,7 +945,14 @@ end
 -- brings it back through Update); planning calculates its own.
 function GuideWindow:Recalculate(reason)
     if self.mode == "planning" then
-        if self.planning then
+        if not self.planning then return end
+        -- The target and the pins are the profession's, whichever view set
+        -- them: when the planned profession is the one whose window is open,
+        -- its path and the arrow are planned again too (LazyProf:Recalculate
+        -- refreshes planning as well).
+        if LazyProf.Client:IsOpen() and self.planning.profKey == LazyProf.Professions.active then
+            LazyProf:Recalculate(reason)
+        else
             self:LoadPlanning(self.planning.profKey, reason)
         end
         return

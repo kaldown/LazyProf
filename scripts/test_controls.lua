@@ -95,6 +95,25 @@ T.section("controls", function()
     ui.fire(group.buttons.cheapest, "OnEnter")
     T.check("group: tooltip text", ui.tooltip:Text():find("Least gold", 1, true) ~= nil)
 
+    -- The stock button draws "pressed" by swapping its three art pieces, and
+    -- puts the "up" art back on release and on show: the selected button is
+    -- given the "down" art again after each.
+    for _, button in ipairs(group.list) do
+        for _, key in ipairs({ "Left", "Middle", "Right" }) do rawset(button, key, ui.newRegion("Texture", button)) end
+    end
+    group:SetSelected("fastest")
+    T.eq("group: the selected button gets the pressed art", group.buttons.fastest.Left.texture, "Interface\\Buttons\\UI-Panel-Button-Down")
+    T.eq("group: all three pieces", group.buttons.fastest.Right.texture, "Interface\\Buttons\\UI-Panel-Button-Down")
+    T.eq("group: the other button gets the normal art", group.buttons.cheapest.Middle.texture, "Interface\\Buttons\\UI-Panel-Button-Up")
+    group.buttons.fastest.Left.texture = "Interface\\Buttons\\UI-Panel-Button-Up"   -- what the template does on release
+    ui.fire(group.buttons.fastest, "OnMouseUp")
+    T.eq("group: pressed art back after the mouse is released", group.buttons.fastest.Left.texture, "Interface\\Buttons\\UI-Panel-Button-Down")
+    group.buttons.fastest.Left.texture = "Interface\\Buttons\\UI-Panel-Button-Up"   -- and on show
+    ui.fire(group.buttons.fastest, "OnShow")
+    T.eq("group: pressed art back after the button is shown again", group.buttons.fastest.Left.texture, "Interface\\Buttons\\UI-Panel-Button-Down")
+    ui.fire(group.buttons.cheapest, "OnMouseUp")
+    T.eq("group: an unselected button keeps the normal art", group.buttons.cheapest.Left.texture, "Interface\\Buttons\\UI-Panel-Button-Up")
+
     -- Numeric input
     local commits = {}
     local input = W.CreateNumericInput(parent, "TestTarget", 44, 3, function(n)
