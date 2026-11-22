@@ -2,6 +2,21 @@
 
 All notable changes to LazyProf will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- WoW Forever: Engineering and Mining can now be planned (bundled recipe data: 233 Engineering recipes and the 7 smelting recipes that give skill-ups). Mining's path ends where smelting stops giving skill-ups; the rest is leveled by mining.
+
+### Changed
+
+- WoW Forever recipe data refresh (bundled CraftLib): more recipes carry a known source, 19 recipes the game teaches automatically are available from skill 1, and 82 recipes left over from Season of Discovery are no longer offered.
+- WoW Forever: 209 recipes sold for Merchant's Favor now show that price instead of a gold price. As before, a recipe bought with a currency is planned only when you already know it, unless "Include recipes bought with currency" is on, so some paths now pick other recipes.
+
+### Known limits
+
+- WoW Forever: 113 recipes that exist in game are still missing from the bundled data because their learn skill or source could not be established, and 327 of the bundled recipes have an unknown source. Learn skills and sources taken from guide tables are not confirmed in game yet.
+
 ## [0.10.0] - 2026-11-22
 
 ### Added
