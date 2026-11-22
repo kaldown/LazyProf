@@ -2,7 +2,7 @@
 ## Title: LazyProf
 ## Notes: Optimal profession leveling path calculator
 ## Author: Kaldown
-## Version: 0.10.0
+## Version: 0.10.1
 ## IconTexture: Interface\AddOns\LazyProf\icon
 ## AddonCompartmentFunc: LazyProf_OnAddonCompartmentClick
 ## SavedVariables: LazyProfDB

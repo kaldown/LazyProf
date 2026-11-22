@@ -2,7 +2,7 @@
 
 All notable changes to LazyProf will be documented in this file.
 
-## [Unreleased]
+## [0.10.1] - 2026-11-22
 
 ### Added
 
