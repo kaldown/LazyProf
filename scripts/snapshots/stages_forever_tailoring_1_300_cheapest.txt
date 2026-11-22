@@ -26,11 +26,7 @@
 195 learn 12080 vendor 4000
 195.53-204.97 craft 12080 x11 72050 orange
 204 learn 12074 trainer 0
-204.97-205.97 craft 12074 x1 9511 orange
-205 learn 12072 trainer 0
-205.97-210.50 craft 12072 x5 47555 yellow
-210.50-215.01 craft 12074 x6 57066 yellow
-215.01-219.75 craft 12072 x8 76088 yellow
+204.97-219.75 craft 12074 x20 190220 orange
 219 learn 18402 trainer 0
 219.75-220.75 craft 18402 x1 15345 orange
 225 rank
