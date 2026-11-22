@@ -307,6 +307,12 @@ T.section("colours", function()
     local short = { targetSkill = 150, steps = { step(A, 100, 110, 10, 1000) }, gaps = {}, totalCost = 1000 }
     T.eq("no change inside the stage", Text.ColorChanges((Stages.Build(short, { prices = PRICES, milestones = MILESTONES }))[1]),
         "orange all the way")
+    -- Learned at 165, after its yellow threshold (160): never orange.
+    local B = recipe(2, "B", 165, 160, 180, 200)
+    local late = { targetSkill = 200, steps = { step(B, 165, 190, 40, 4000) }, gaps = {}, totalCost = 4000 }
+    local lateStages = Stages.Build(late, { prices = PRICES, milestones = MILESTONES })
+    T.eq("a recipe learned above yellow starts yellow", lateStages[1].color, "yellow")
+    T.eq("and only turns green", Text.ColorChanges(lateStages[1]), "yellow until 180, then green")
 end)
 
 T.section("alternatives and pins", function()

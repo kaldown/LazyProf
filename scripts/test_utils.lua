@@ -44,6 +44,19 @@ check("color yellow", Utils.GetSkillColor(150, range), "yellow")
 check("color green", Utils.GetSkillColor(175, range), "green")
 check("color gray", Utils.GetSkillColor(200, range), "gray")
 
+-- A recipe learned after its yellow threshold (CraftLib ships such recipes on WoW Forever:
+-- the learn skill is orange, and orange may exceed yellow). It is yellow, or already
+-- green, from the moment it is learned; the chance still runs from yellow to gray.
+local cables = { orange = 165, yellow = 160, green = 180, gray = 200 }   -- learned while yellow
+check("learned above yellow: yellow at the learn skill", Utils.GetSkillColor(165, cables), "yellow")
+check("learned above yellow: green", Utils.GetSkillColor(180, cables), "green")
+check("learned above yellow: gray", Utils.GetSkillColor(200, cables), "gray")
+check("learned above yellow: chance at the learn skill", Utils.GetSkillUpChance(165, cables), 0.875)
+local tin = { orange = 65, yellow = 50, green = 62, gray = 75 }          -- learned while green
+check("learned above green: green at the learn skill", Utils.GetSkillColor(65, tin), "green")
+check("learned above green: chance at the learn skill", Utils.GetSkillUpChance(65, tin), 0.4)
+check("learned above green: gray", Utils.GetSkillColor(75, tin), "gray")
+
 -- BuildSkillBrackets
 local brackets = Utils.BuildSkillBrackets({ 75, 150, 225, 300 })
 check("brackets count", #brackets, 4)
