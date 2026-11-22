@@ -691,6 +691,9 @@ T.section("planning mode", function()
     T.check("closing planning closes its recipe details", env.calls[#env.calls] == "detailsHide")
     window:OpenPlanning("tailoring")
     T.check("reopened after a close", frame.shown)
+    -- The whole interface hidden (the frame itself stays "shown"): planning is kept.
+    ui.fire(frame, "OnHide")
+    T.check("hiding the whole interface does not close planning", window.planning ~= nil)
     frame:Hide()   -- what Escape does
     T.check("Escape closes planning", window.planning == nil and window.mode ~= "planning")
 

@@ -294,9 +294,11 @@ function GuideWindow:Build()
         end
     end)
     -- Escape (planning only, see SetEscapeCloses) hides the frame directly:
-    -- treat it as closing planning. Not when combat or this file hid it.
+    -- treat it as closing planning. Not when combat or this file hid it, and
+    -- not when the frame is merely out of sight because the whole interface
+    -- is hidden (it is then still "shown").
     frame:HookScript("OnHide", function(f)
-        if self.mode == "planning" and not self.hidingSelf and not f._wasShownBeforeCombat then
+        if self.mode == "planning" and not self.hidingSelf and not f._wasShownBeforeCombat and not f:IsShown() then
             self:ClosePlanning()
         end
     end)

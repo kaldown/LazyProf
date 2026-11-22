@@ -45,8 +45,9 @@ local BG_GAP = { 0.35, 0.1, 0.1, 0.35 }
 local BG_GAP_HOVER = { 0.45, 0.15, 0.15, 0.6 }
 local BG_SUB = { 0.12, 0.12, 0.12, 0.5 }
 
+-- Whole copper only: a price per item of a bundle can be a fraction.
 local function Money(copper)
-    return Utils.FormatMoney(copper)
+    return Utils.FormatMoney(math.floor((copper or 0) + 0.5))
 end
 
 local function Green(text)
