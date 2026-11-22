@@ -9,7 +9,7 @@ LazyProf calculates the optimal path to level professions in World of Warcraft. 
 ```
 +------------------------------------------------------------------+
 |                        LazyProf UI                                |
-|   (Arrow, Milestones, Shopping List, Recipe Details, Planning)    |
+|   (Arrow, LazyProf window, Recipe Details, Merchant panel)        |
 |                           |                                       |
 |                           v                                       |
 |               +---------------------+                             |
@@ -49,8 +49,9 @@ LazyProf calculates the optimal path to level professions in World of Warcraft. 
 4. **Scan**: Inventory Scanner collects items from bags, bank, mail, AH listings, guild bank, alts
 5. **Check**: Availability module filters recipes by obtainability
 6. **Calculate**: Strategy scores all candidates per skill level, respecting pins and racial bonuses
-7. **Display**: UI shows milestone breakdown, shopping list (with source breakdown), and arrow
-8. **Pin** (optional): User browses alternatives, pins overrides, recalculates path
+7. **Stage**: path steps are folded into stages (craft runs, learn and rank steps, gaps)
+8. **Display**: the LazyProf window shows the stages (Guide / Steps / Shopping tabs) and the arrow marks the next recipe
+9. **Pin** (optional): "Use this" on an alternative pins it over the step's skill range and the path is planned again at once
 
 ## Key Modules
 
@@ -62,4 +63,6 @@ LazyProf calculates the optimal path to level professions in World of Warcraft. 
 | `Modules/Pricing/` | Price provider abstraction with fallback chain |
 | `Modules/Recipes/` | Recipe availability checking |
 | `Modules/Pathfinder/` | Path calculation strategies, material resolution, pin management |
-| `Modules/UI/` | Arrow, milestones, shopping list, recipe details, planning window, minimap |
+| `Modules/Guide/` | Stages, range filter, tab contents as data, remembered trainers |
+| `Modules/Shopping/` | Remembered vendor prices, merchant purchase queue |
+| `Modules/UI/` | Arrow, the LazyProf window and its widgets, recipe details, merchant panel, minimap |

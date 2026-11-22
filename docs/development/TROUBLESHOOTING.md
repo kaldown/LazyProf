@@ -16,6 +16,9 @@ Run these in-game to check addon health:
 /lp diag learned       -- Dump learned-recipe detection state (copyable window; Classic-family clients)
 /lp diag forever       -- Dump WoW Forever client facts and adapter results (copyable window)
 /lp diag prices        -- List every reagent price of the path and where it came from (copyable window)
+/lp diag merchant      -- At a merchant: what it sells as LazyProf reads it, and what would be bought (copyable window)
+/lp diag trainer       -- At a profession trainer: what it lists as LazyProf reads it, and what is remembered (copyable window)
+/lp resetpanels        -- Move the LazyProf window and its panels back to their default place and size
 /lp reset              -- Reset database to defaults
 ```
 
@@ -38,7 +41,7 @@ bug report or dev chat.
 ### `/lp diag learned` - learned-recipe detection
 
 **When to use:** recipes you have already learned are shown as "[!] Unlearned" in
-the Milestone Breakdown / alternatives / arrow tooltip, or the wrong recipes are
+the LazyProf window / alternatives / arrow tooltip, or the wrong recipes are
 treated as known. Open the profession window first, then run it.
 
 **What each line means:**
@@ -131,6 +134,48 @@ if they stay); `noPrice`, `stale` or `DISAGREE` items need a fresh auction scan 
 or a desktop-app sync (TSM). The arrow tooltip shows the same summary and warnings, and the
 shopping list tooltip shows each item's price and source.
 
+### `/lp diag merchant` - what a merchant sells, and what would be bought
+
+**When to use:** the panel beside the merchant window does not appear, lists the wrong
+reagents or amounts, "Buy all" stops early, or a vendor reagent is not marked "vendor".
+Run it **with the merchant window open**. Works on every client; the raw lines differ per
+client family.
+
+| Line | Meaning |
+|------|---------|
+| `diag merchant: build=.. interface=.. family=..` | Client build and which adapter is active. |
+| `NOTE: no merchant window is open ...` | The item lines below will be empty: open a merchant and run it again. |
+| `merchant: open=.. frameShown=.. numItems=N money=.. freeSlots=N` | Whether LazyProf saw the merchant open, how many items it lists, the character's copper and the free general-purpose bag slots (special bags are not counted). |
+| `raw[i] id=.. name=.. price=.. stackCount=.. numAvailable=.. isPurchasable=.. hasExtendedCost=.. currencyID=.. maxStack=..` | What the client reports for list index `i` (first 12). `numAvailable` is the stock: above zero is a limited supply, zero is sold out, **below zero is treated as unlimited**. `stackCount` is how many one purchase unit holds; `maxStack` the most one purchase may ask for. |
+| `adapter items=N` / `item[i] id=.. price=.. bundle=.. stock=.. maxStack=.. extendedCost=.. purchasable=..` | The same items as LazyProf uses them. |
+| `remembered vendor prices: N` | How many vendor prices LazyProf has seen at merchants so far (account-wide). Only reagents sold for gold without a stock limit are remembered. |
+| `purchases: onePerClick=.. running=..` | `onePerClick=true` means a purchase made after the click never arrived, so this session buys one stack per click ("click again to continue"). |
+| `shopping list: <profession range>, rows=N toBuyHere=N skipped=N total=..` | The list the panel works from (the path last shown in the LazyProf window this session) and what this merchant covers. `none yet this session` = open a profession or the LazyProf window first. |
+| `buy: Nx <name> (id ..) for ..` | One reagent "Buy all" would buy. |
+| `skip: <name> (id ..): <reason>` | A reagent this merchant sells that is not bought automatically: `limited stock`, `sold out`, `not sold for gold`, `not available to you`. |
+
+Reading it: an expected reagent with no `buy:` or `skip:` line is either not sold here (no
+`raw` line with its id), already owned (the Shopping tab shows Buy "-"), crafted instead of
+bought ("I craft it"), or outside the range chosen in the window. A wrong amount is the
+Shopping tab's Buy figure rounded up to whole bundles.
+
+### `/lp diag trainer` - what a trainer lists, and what is remembered
+
+**When to use:** learn or rank steps do not list a trainer you have visited, or a recipe's
+fee is missing or wrong. Run it **with the trainer's window open**. Trainers are recorded on
+WoW Forever only; on other clients the dump says so.
+
+| Line | Meaning |
+|------|---------|
+| `trainer: open=.. IsTradeskillTrainer=.. services=N` | Whether a trainer window is open, whether the client calls it a profession trainer, and how many services it lists (the trainer window's own filter applies). |
+| `npc: nameSecret=.. name=..` | The trainer's name. `nameSecret=true` means the client would not give the name out; such a trainer is not remembered (its fees are). |
+| `trainer rank values: rank=.. maxRank=.. modifier=..` | Your rank and cap in the trainer's profession, as the client reports them. |
+| `raw[i] name=.. type=.. reqLevel=.. subText=.. category=.. cost=.. isProfession=.. skillReq=.. skillLine=..` | What the client reports for service `i` (first 10). `type` is `available`, `unavailable` or `used`. |
+| `adapter info: name=.. npcId=.. zone=.. subZone=.. mapId=.. x=.. y=.. faction=..` | The trainer as LazyProf would remember it. `x` / `y` are **your** position on the map (0-1), not the NPC's. |
+| `remembered: professions=N trainers=N fees=N` | What is remembered for this client so far. |
+| `this trainer: profession=.. services=N` | The profession LazyProf matched this trainer to: the one most of whose recipe names appear in its list. `nil` means no listed service is a recipe LazyProf knows (a class trainer, a filter hiding everything, or a client language whose recipe names differ from the recipe data). |
+| `known <profession> trainer: Name - Zone (x, y) mapId=.. faction=.. recipesListed=N` | Each remembered trainer of that profession. A learn step names a trainer only when the trainer listed that recipe; a rank step names every remembered trainer of the profession. Only trainers visited by a character of your faction are shown. |
+
 ### Adding a new diagnostic
 
 `/lp diag` is meant to grow. To add `/lp diag <topic>`: add an `elseif cmd == "diag <topic>"`
@@ -140,9 +185,10 @@ collects lines into a table, and finish with `self:ShowDiagnosticOutput(table.co
 read-only (no `Show`/`Hide`/`SetAttribute`), so they are safe to run any time, including
 in combat-adjacent situations. Document the new topic's output lines in this section.
 Lines that read the profession window or other client APIs belong in the client
-adapter (`Core/Client/Classic.lua` for Classic clients): `/lp diag learned` gets its
-lines from `LazyProf.Client:RunDiagnostic(lines)`, so each client family reports
-what its own API sees.
+adapter (`Core/Client/Classic.lua` for Classic clients, `Core/Client/Forever.lua` for
+WoW Forever): `/lp diag learned` gets its lines from `LazyProf.Client:RunDiagnostic(lines)`,
+`/lp diag merchant` from `Client:RunMerchantDiagnostic(lines)` and `/lp diag trainer` from
+`Client:RunTrainerDiagnostic(lines)`, so each client family reports what its own API sees.
 
 ---
 
@@ -253,9 +299,26 @@ Verify CraftLib is loaded and has profession data:
    - LazyProf requires CraftLib to have data for the profession
    - Check CraftLib version matches LazyProf requirements
 
+### LazyProf Window Not Showing
+
+**Symptoms:** Open a profession window but no LazyProf window appears beside it
+
+**Check:**
+1. Is "Open with the profession window" on? (Settings, Display.) When off, the arrow still
+   works and the window opens only from the minimap button, the addon compartment or
+   `/lp browse`.
+2. Did you close it? A closed window stays closed until the profession window is opened
+   again.
+3. Is it off screen or tiny? `/lp resetpanels` puts it back beside the profession window at
+   its default size.
+4. Are you in combat? The window hides in combat and returns afterwards.
+5. Is a planning view open? Planning opened from the minimap button stays until you close it
+   (close button or Escape); the docked view comes back the next time the profession window
+   is opened.
+
 ### Empty Leveling Path
 
-**Symptoms:** Milestone panel shows no steps or "No path found"
+**Symptoms:** The window shows no steps, only a gap, or a "No recipe data" line
 
 **Check:**
 1. Is CraftLib loaded?
@@ -290,9 +353,17 @@ Verify CraftLib is loaded and has profession data:
    - Check which price provider is active in settings
    - Items with no AH data use vendor prices (may be 0)
 
+### Nothing Left / Target Reached
+
+**Symptoms:** The window says "Nothing left" or "Target reached" instead of a path
+
+The path runs to the number in the **Target** box. "Target reached" means your skill is at
+or past it: type a higher target. "Nothing left" means the skill is at the profession's last
+cap.
+
 ### Alternatives Not Showing
 
-**Symptoms:** Expand step but no "Alternatives" section appears
+**Symptoms:** The step's card on the Guide tab has no "Alternatives" section
 
 **Check:**
 1. Does the step have multiple candidates?
@@ -303,23 +374,55 @@ Verify CraftLib is loaded and has profession data:
 2. Are all other recipes gray?
    - Gray recipes are filtered from candidates
 
-### Pins Not Working After Recalculate
+### "Use this" Did Not Change the Step
 
-**Symptoms:** Click recalculate but pinned recipe not used
+**Symptoms:** Click "Use this" on an alternative but the step keeps its recipe, or the
+"Pinned" line is missing
 
 **Check:**
-1. Is the pinned recipe still valid at that skill level?
-   - If recipe went gray or lacks price data, pin is silently ignored
+1. Is the chosen recipe still usable in that skill range?
+   - A recipe that has gone gray there, or that cannot be learned yet at that skill, cannot
+     be used; the planner's own choice stays for those points.
 
 2. Check pathfinder debug:
    - Enable "Pathfinder Scoring" category
-   - Look for `>>> PINNED:` messages after recalculate
-   - If missing, the pin didn't match any candidate
+   - Look for `>>> PINNED:` messages after the click
+   - If missing, the pin did not match any candidate at that skill
 
-3. Verify pin state:
-   ```
-   /run for k,v in pairs(LazyProf.Pathfinder.pinnedRecipes) do print("Skill "..k..": "..v) end
-   ```
+3. Pins cover a skill range and are saved per character and profession. A pin is dropped
+   by itself once your skill has passed its range; "Reset" on the pinned step removes it at
+   once.
+
+### Merchant Panel Not Showing
+
+**Symptoms:** At a vendor that sells a reagent you need, no LazyProf panel appears
+
+**Check:**
+1. Was a path shown this play session? The panel works from the shopping list of the path
+   the LazyProf window showed last; after a login or /reload, open the profession (or the
+   LazyProf window) once.
+2. Is the reagent in the chosen range and still to buy? The Shopping tab must show a Buy
+   number for it; reagents you chose to craft are not bought.
+3. Run `/lp diag merchant` with the merchant open (see above): it shows what the merchant
+   sells as LazyProf reads it and why a reagent is skipped.
+
+### Buy All Stops Early
+
+**Symptoms:** "Buy all" buys one stack and stops, or reports a reason
+
+The report line says why: `the merchant window closed`, `not enough money`, `no free bag
+slot` (special-purpose bags are not counted), or `The game allows one purchase per click
+here` (click again for each stack). `the purchase did not go through` means nothing arrived
+for the first purchase; `/lp diag merchant` shows the stock, price and stack values involved.
+
+### Trainers Not Listed on a Learn or Rank Step
+
+**Symptoms:** A learn or rank step names no trainer
+
+No trainer or vendor names are shipped: steps list only trainers **you have visited** with
+LazyProf installed, on WoW Forever. A learn step lists a trainer only if that trainer's list
+contained the recipe (the trainer window's filter must show it). Run `/lp diag trainer` at
+the trainer to see what was matched.
 
 ### Settings Not Saving
 

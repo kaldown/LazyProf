@@ -26,21 +26,25 @@ See [CraftLib's profession coverage](https://github.com/kaldown/CraftLib#profess
 ## Features
 
 - **Optimal leveling path** - Calculates which recipes to craft based on current AH prices
-- **Two strategies** - Cheapest (minimize gold) or Fastest (minimize crafts)
-- **Material Resolution** - Automatically suggests crafting intermediates (e.g., smelt ore into bars) when cheaper than buying
+- **One window: Guide, Steps, Shopping** - A tabbed window beside the profession window. Guide shows the one step to do now, large, with its reagents and the alternatives; Steps lists the whole path; Shopping says what to collect and what to buy
+- **Path bar** - The whole journey as one coloured strip: orange, yellow and green stretches, gaps in red, a tick at each rank still to train and a marker at your skill. Hover a stretch to see the step, click to open it
+- **Steps a person follows** - Runs of one recipe are shown as one step ("41x Heavy Woolen Gloves, 143 to 165"), with learning a recipe and training the next rank as steps of their own
+- **Target skill and margin** - Plan to any skill, not just the cap; tick "With margin" to plan extra crafts and reagents for bad luck (5 to 30 percent, 15 by default)
+- **Two strategies** - Cheapest (minimize gold) or Fastest (minimize crafts), switched with one click
+- **Alternative recipes & pinning** - Each step shows its best alternatives with how many crafts and how much gold they would change; "Use this" swaps the recipe and replans at once, "Reset" undoes it. Pins are kept between sessions
+- **Need / Have / Buy** - The shopping list is one table per reagent, with what is in your bags, bank, mail, auctions, guild bank and on alts taken off (with Syndicator), and a "vendor" mark on vendor-sold reagents
+- **Craft or buy per reagent** - For reagents you can make yourself, choose "I craft it" or "I buy it" per item; otherwise LazyProf crafts intermediates (e.g., smelt ore into bars) when that is cheaper
+- **Buy vendor reagents in one click** - At a merchant that sells reagents on your list, a small panel offers a Buy button per reagent and "Buy all" with the total on the button. Limited-stock items and items not sold for gold are listed but never bought automatically
+- **Skill gaps** - Paths bridge a gap with a green recipe while its skill-up chance is at least 10%, otherwise the gap is shown
 - **Recipe Availability Filtering** - Only suggests recipes you can actually obtain - checks inventory, trainers, vendors, and Auction House listings
-- **Missing materials list** - Shows what you need from bank, mail, guild bank, alts, what to craft, and total cost
-- **Milestone tracking** - See your progress through each skill bracket with bracket filtering
-- **Alternative recipes & pinning** - Browse all candidates at each step, pin overrides, and recalculate custom paths
-- **Recipe details panel** - View ingredients, difficulty thresholds, vendor locations, and Wowhead links
-- **Planning mode** - Plan any profession's leveling path without learning it first
-- **Extended inventory** - Checks bags, bank, mailbox, active AH listings, guild bank, and alt characters (with Syndicator)
+- **Recipe details panel** - View ingredients, difficulty thresholds, sources, and Wowhead links
+- **Planning mode** - The same window, opened from the minimap button or `/lp browse`, plans any profession without opening it - or without having learned it
 - **Every Classic expansion** - One install plans correctly on Classic Era / Vanilla, Season of Discovery, The Burning Crusade, and Wrath of the Lich King (including Inscription, skill cap 450)
-- **WoW Forever** - Runs on WoW Forever 1.60 from the same install, with native dropdowns and panels and an addon compartment entry instead of a minimap button. Forever recipe data covers Alchemy, Blacksmithing, Enchanting, Leatherworking, Tailoring, Cooking and First Aid (Engineering and Mining to follow). Known limits: racial bonuses are not applied, required tools are not used for paths yet, and the skill cap is assumed to be 300 until confirmed
+- **WoW Forever** - Runs on WoW Forever 1.60 from the same install, with native frames, tabs and dropdowns and an addon compartment entry instead of a minimap button. On Forever LazyProf also remembers the profession trainers you visit and the fees they charge, and shows them on learn and rank steps. Forever recipe data covers Alchemy, Blacksmithing, Enchanting, Leatherworking, Tailoring, Cooking and First Aid (Engineering and Mining to follow). Known limits: racial bonuses are not applied, required tools are not used for paths yet, and the skill cap is assumed to be 300 until confirmed
 
 ## Pricing
 
-**Vendor prices always come first** - reagents sold by NPCs (dyes, threads, vials, flux, etc.) use their fixed vendor price, sourced from TSM or Auctionator's recorded merchant data. This prevents AH markup from inflating recipe costs.
+**Vendor prices always come first** - reagents sold by NPCs (dyes, threads, vials, flux, etc.) use their fixed vendor price: from TSM or Auctionator's recorded merchant data, from merchants you have visited with LazyProf installed (it remembers what they sell for gold without a stock limit), or from the built-in vendor list. This prevents AH markup from inflating recipe costs.
 
 For non-vendor items, market sources are checked in order:
 1. **TSM** - Configurable pricing (Recent, MinBuyout, Market, or Regional)
@@ -50,16 +54,21 @@ For non-vendor items, market sources are checked in order:
 
 ## Usage
 
-1. **Minimap button** - Click to browse all professions
+1. **Open any profession window** - The LazyProf window opens beside it on the Guide tab, and an arrow marks the next recipe in the profession's list
+2. **Follow the card** - Craft what it says; the card moves on by itself as your skill goes up. Steps and Shopping are the other two tabs
+3. **Minimap button** (addon compartment on WoW Forever) - Plan any profession without opening it
    - Left-click: Open profession browser
    - Right-click: Open settings
-2. **Open any profession window** - LazyProf shows optimal path
-3. **Shopping List** - Shows materials needed with source breakdown
+4. **At a vendor** - If the vendor sells reagents on your list, the LazyProf panel next to the merchant window buys them
+
+The merchant panel uses the shopping list of the path you last looked at in this play session, so open the profession (or the LazyProf window) once before shopping.
 
 Commands:
 - `/lazyprof` or `/lp` - Open settings
 - `/lp browse` - Open profession browser
+- `/lp resetpanels` - Move the window and panels back to their default place and size
 - `/lp log` - Open debug log window
+- `/lp diag` - List the diagnostic dumps (prices, merchant, trainer, client)
 
 ## Required Addon
 

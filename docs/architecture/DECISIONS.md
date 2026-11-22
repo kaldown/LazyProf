@@ -423,6 +423,44 @@ Both strategies share one core loop and differ only in how they score candidates
 
 ---
 
+## ADR-016: One tabbed window, drawn from stages
+
+**Date:** 2026-11-22
+**Status:** Accepted
+
+### Context
+
+The path was shown as 60-100 five-craft rows spread over a milestone panel, a shopping list panel and a separate Planning window. Nothing answered "what do I do now", progress and the expensive part of the path were invisible, alternatives were three clicks deep, and state (expanded rows, the chosen bracket, pins) was lost on every recalculation. Training a rank and learning a recipe were a grey separator and a tooltip.
+
+### Decision
+
+- One native window with Guide / Steps / Shopping tabs replaces the two panels and the Planning window. Docked beside the profession window it shows the open profession; undocked, with a profession picker, it is planning mode. There is one instance.
+- The window is drawn from **stages**: the planner's steps folded into craft runs of one recipe, learn-the-recipe steps, train-the-next-rank steps and gaps (`Modules/Guide/Stages.lua`). The planner's own steps are not re-cut, so its output and its snapshots are unchanged.
+- Each tab's content is built as plain row descriptors by pure code (`Modules/Guide/Views.lua`) and drawn by one pooled row list (`Modules/UI/Widgets/RowList.lua`). Frame code places widgets and passes clicks on.
+- A profession the character has is always planned from the real skill, to a target the player may set. Pins cover a skill range and are saved. The margin scales stage quantities and never changes the recipes.
+- Per-character planner data (target, pins, craft-or-buy choices, last tab) is stored under the character's GUID.
+- Nothing is shown that is not known: no trainer or vendor is named unless the player visited it, rank steps carry no rank name, fee or level, and on the Vanilla data a learn step names no source.
+
+### Alternatives Considered
+
+- **A standalone custom-skinned window**: needs a full control kit and a second visual language beside the native panels and the settings.
+- **Evolving the three panels in place**: delivers the features but keeps the panel sprawl, the duplicated Planning chrome and the shared shopping list.
+
+### Trade-offs Accepted
+
+- The steps and the shopping list can no longer be seen side by side.
+- Native art differs per client, so the window looks different on Classic clients and on WoW Forever.
+- A stage after a rank step may begin a few points below the cap, because steps are not re-cut.
+- The merchant panel works from the path shown last in the session; there is none before a profession was opened.
+
+### Consequences
+
+- New window content is a change to a pure function with a headless test, not to frame code.
+- Client calls for merchants, trainers and the map exist only in the client adapters; the boundary test enforces it.
+- The Classic clients run the same code but are not tested in game; where a client call could not be confirmed (merchant calls, the skill line's cap, trainer lists) the feature checks first and stays inactive otherwise.
+
+---
+
 ## Template for New ADRs
 
 ```markdown

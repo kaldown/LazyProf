@@ -7,45 +7,56 @@ LazyProf/
 ├── LazyProf.toc               # Addon manifest (load order, dependencies, metadata)
 ├── Core/
 │   ├── DependencyCheck.lua    # CraftLib validation on startup
-│   ├── Constants.lua          # Skill brackets, colors, profession keys, enums
+│   ├── Constants.lua          # Profession keys, enums, tuning constants
 │   ├── Utils.lua              # FormatMoney, GetSkillUpChance, GetRacialProfessionBonus
-│   ├── Config.lua             # AceConfig options table, default SavedVariables
-│   └── Init.lua               # Addon initialization, slash commands, events, debug system
+│   ├── Client/
+│   │   ├── Family.lua         # Which client family is running ("classic" or "forever")
+│   │   ├── Classic.lua        # Client adapter for the Classic clients
+│   │   └── Forever.lua        # Client adapter for WoW Forever
+│   ├── Config.lua             # AceConfig options table, default SavedVariables, settings migration
+│   ├── CharStore.lua          # Per-character planner data, kept under the character's GUID
+│   └── Init.lua               # Addon initialization, slash commands, events, diagnostics, debug system
 ├── Professions/
 │   └── Registry.lua           # CraftLib integration, learned recipe tracking
 ├── Modules/
 │   ├── Inventory/
 │   │   └── Scanner.lua        # Multi-source inventory scanning (bags/bank/mail/AH/guild/alts)
 │   ├── Pricing/
-│   │   ├── PriceManager.lua   # Provider orchestration, caching, fallback chain
-│   │   └── Providers/
-│   │       ├── TSM.lua        # TSM API integration (DBMinBuyout/DBMarket/DBRegionMarketAvg)
-│   │       ├── Auctionator.lua # Auctionator API integration
-│   │       └── Vendor.lua     # Vendor price fallback
+│   │   ├── PriceManager.lua   # Provider orchestration, caching, price provenance
+│   │   └── Providers/         # TSM, Auctionator, Vendor (buy price), VendorSell (sell-value estimate)
 │   ├── Recipes/
-│   │   └── Availability.lua   # Recipe source checking (trainer/vendor/drop/inventory/AH)
+│   │   ├── Availability.lua   # Recipe source checking (trainer/vendor/drop/inventory/AH)
+│   │   └── SelfFound.lua      # Self-Found mode: what is obtainable without the auction house
 │   ├── Pathfinder/
-│   │   ├── Pathfinder.lua     # Path calculation orchestrator, pin management API
-│   │   ├── MaterialResolver.lua # Intermediate material crafting (smelt ore to bars)
-│   │   └── Strategies/
-│   │       ├── Cheapest.lua   # Minimize gold spent strategy
-│   │       └── Fastest.lua    # Minimize crafts strategy
+│   │   ├── Pins.lua           # Pinned recipes as skill ranges
+│   │   ├── StrategyCore.lua   # The simulation loop both strategies share (gaps, bridges, pins)
+│   │   ├── Strategies/        # Cheapest.lua, Fastest.lua: scoring and step sizes
+│   │   ├── MaterialResolver.lua # Craft-or-buy for intermediate reagents (one level)
+│   │   └── Pathfinder.lua     # Path calculation, target skill, pin API, shopping list
+│   ├── Guide/                 # Pure logic behind the window (no frames)
+│   │   ├── Text.lua           # Wording shared by tabs, tooltip and tests
+│   │   ├── Range.lua          # The range (skill bracket) filter
+│   │   ├── Stages.lua         # Folds path steps into craft / learn / rank / gap stages, margin, totals
+│   │   ├── TrainerMemory.lua  # Visited trainers and the fees they charged
+│   │   └── Views.lua          # What each tab shows, as row descriptors
+│   ├── Shopping/
+│   │   ├── VendorMemory.lua   # Vendor prices seen at merchants
+│   │   └── PurchaseQueue.lua  # What to buy at a merchant, and buying it chunk by chunk
 │   └── UI/
-│       ├── Arrow/
-│       │   ├── ArrowManager.lua          # Arrow positioning, scroll caching
-│       │   └── Strategies/
-│       │       └── ArrowTooltip.lua      # Tooltip display modes (full vs simple)
-│       ├── MilestoneBreakdown.lua        # Step-by-step path panel, alternatives, pinning
-│       ├── MissingMaterials.lua          # Shopping list with multi-source breakdown
-│       ├── RecipeDetails.lua             # Recipe info panel (reagents, vendors, difficulty bar)
-│       ├── PlanningWindow.lua            # Standalone profession planning window
-│       ├── ProfessionBrowser.lua         # Profession selection dropdown
-│       └── MinimapButton.lua             # LibDBIcon minimap button
-└── Libs/                                  # External dependencies (do not modify)
-    ├── Ace3/                              # UI/Event framework
-    ├── CraftLib/                          # Recipe database (git submodule)
-    ├── LibDBIcon-1.0/                     # Minimap button positioning
-    └── LibDataBroker-1.1/                 # Data broker protocol
+│       ├── Widgets/           # PanelShell, RowPool, RowList, Dropdown, Tabs, Controls
+│       ├── Arrow/             # ArrowManager.lua, Strategies/ArrowTooltip.lua
+│       ├── PathBar.lua        # The coloured path bar
+│       ├── GuideWindow.lua    # The LazyProf window: header, Guide / Steps / Shopping tabs, planning mode
+│       ├── RecipeDetails.lua  # Recipe info panel (reagents, sources, difficulty bar)
+│       ├── MerchantPanel.lua  # Panel beside the merchant window
+│       ├── ProfessionBrowser.lua # Profession selection popup
+│       └── MinimapButton.lua  # Minimap button / addon compartment entry
+├── scripts/                   # Headless test suites (lua5.1), not shipped
+└── Libs/                      # External dependencies (do not modify)
+    ├── Ace3/                  # UI/Event framework
+    ├── CraftLib/              # Recipe database (git submodule)
+    ├── LibDBIcon-1.0/         # Minimap button positioning
+    └── LibDataBroker-1.1/     # Data broker protocol
 ```
 
 ## Core Components
@@ -92,10 +103,9 @@ Defines `MILESTONES` (trainer skill thresholds), `STRATEGY`, `DISPLAY_MODE`, `PR
 
 **Responsibilities**:
 - Dispatch to selected strategy (Cheapest or Fastest)
-- Manage session-only recipe pins (`PinRecipe`/`UnpinRecipe`/`ClearPins`)
-- Track dirty pins for recalculate UI
-- Generate milestone breakdown with skill brackets
-- Calculate missing materials with multi-source inventory breakdown
+- Plan from the character's real skill to the target skill set for the profession (the last cap by default)
+- Keep pinned recipes: a pin covers a skill range and is saved per character and profession (`PinRange`/`UnpinAt`/`ClearPins`)
+- Calculate the shopping list: per-source lists and one row per item (need / have / buy / cost, craft-or-buy)
 - Log calculation triggers and active pins for debugging
 
 ### Strategies/Cheapest.lua & Fastest.lua
@@ -149,33 +159,26 @@ Each implements `IsAvailable()` and `GetPrice(itemId)`. TSM supports configurabl
 
 ## UI Components
 
-### MilestoneBreakdown.lua
+### GuideWindow.lua
 
-**Purpose**: Step-by-step path display panel with alternatives and pinning.
+**Purpose**: The LazyProf window - one framed, tabbed window beside the profession window.
 
-Uses a class pattern (`MilestonePanelClass`) supporting standalone and embedded modes. Features:
-- Skill bracket headers with cost totals
-- Expandable steps showing ingredients
-- Collapsible "Alternatives" section with all scored candidates in groups of 5
-- Pin/unpin by clicking alternative rows
-- "Recalculate with N pins" button when pins are dirty
-- Bracket filter dropdown (1-75, 75-150, 150-225, 225-300, 300-375, Full Path)
+A shared header (status line, target box, Cheapest / Fastest, "With margin", range dropdown, path bar) sits above three tabs:
+- **Guide** - a card for one step (craft, learn, train, or gap) with its reagent table, the best alternatives with "Use this", and the next two steps
+- **Steps** - one row per stage, expandable to its reagents, plus recipe search
+- **Shopping** - "Collect first" (bank, mail, auctions, guild bank, alts) and a Need / Have / Buy / Cost table with a craft-or-buy button per craftable reagent
 
-### MissingMaterials.lua
+The window has two modes: docked to the profession window (live), and undocked for any profession picked from the minimap button or `/lp browse` (planning). The file only places widgets; what each tab shows is built as plain data by `Modules/Guide/Views.lua` from the stages of `Modules/Guide/Stages.lua`, and drawn by `Widgets/RowList.lua`.
 
-**Purpose**: Shopping list showing all materials needed with source breakdown.
+### PathBar.lua
 
-**Sections**:
-- From Bags (already owned)
-- From Bank (Syndicator)
-- Check Mail (mailbox items)
-- Cancel from AH (active auction listings, orange styling)
-- From Guild Bank (when enabled)
-- From Alts (with character names)
-- To Craft (intermediate materials)
-- To Buy (from AH, with cost)
+**Purpose**: The whole path as one strip - a coloured segment per stage, gaps in red, a tick per rank still to train, a marker at the real skill.
 
-Supports bracket filtering synchronized with milestone panel.
+### MerchantPanel.lua
+
+**Purpose**: Beside the merchant window, lists the shopping-list reagents the merchant sells, with Buy per row and "Buy all".
+
+The plan and the chunk-by-chunk buying are pure code in `Modules/Shopping/PurchaseQueue.lua`; the merchant is reached only through the client adapter.
 
 ### RecipeDetails.lua
 
@@ -189,15 +192,9 @@ Displays: reagent list with have/need counts, difficulty bar with four threshold
 
 Arrow manager handles positioning within the TradeSkill scroll frame, caching recipe indices for performance. Two tooltip strategies: full (shows path preview) and simple (recipe name only).
 
-### PlanningWindow.lua
-
-**Purpose**: Standalone window for planning any profession's leveling path.
-
-Embeds a `MilestonePanelClass` instance. Shows skill level, strategy toggle, and full path preview without needing to learn the profession.
-
 ### ProfessionBrowser.lua
 
-**Purpose**: Dropdown menu listing all available professions for planning.
+**Purpose**: Popup listing all available professions; a click opens the LazyProf window in planning mode on that profession.
 
 Accessible via minimap button left-click or `/lp browse`.
 
