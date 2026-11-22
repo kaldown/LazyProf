@@ -110,7 +110,8 @@ function Text.LearnLines(stage, profile, professionName)
         end
         add("Learn from: " .. who)
         if info.cost and info.cost > 0 then
-            add("Cost: " .. Utils.FormatMoney(info.cost), "cost")
+            add("Cost: " .. Utils.FormatMoney(info.cost)
+                .. (info.costSeen and " (as charged at a trainer you visited)" or ""), "cost")
         end
     elseif info.type == "vendor" then
         local vendor = info.vendors and info.vendors[1]
@@ -146,6 +147,19 @@ function Text.RankLine(stage, liveCap, professionName, hasProfession)
         return string.format("Your cap is %d. Train the next rank at %s before you reach %d.", cap, trainer, cap)
     end
     return string.format("Skill cap %d: train the next rank at %s before you reach %d.", cap, trainer, cap)
+end
+
+-- One visited trainer: "Name - Zone (53, 81)". The coordinates are where the
+-- player stood while talking to the trainer.
+function Text.TrainerLine(trainer)
+    local text = trainer.name or "Unknown"
+    if trainer.zone and trainer.zone ~= "" then
+        text = text .. " - " .. trainer.zone
+    end
+    if type(trainer.x) == "number" and type(trainer.y) == "number" then
+        text = text .. string.format(" (%d, %d)", math.floor(trainer.x * 100 + 0.5), math.floor(trainer.y * 100 + 0.5))
+    end
+    return text
 end
 
 function Text.RankShort(stage)

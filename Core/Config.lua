@@ -59,6 +59,10 @@ LazyProf.defaults = {
         -- Vendor prices seen at merchants: [itemId] = copper per item
         -- (Modules/Shopping/VendorMemory.lua)
         vendorPrices = {},
+        -- Profession trainers visited and the fees they charged, per client
+        -- profile (Modules/Guide/TrainerMemory.lua)
+        trainers = {},
+        trainerFees = {},
     },
     char = {
         -- Per-character price cache

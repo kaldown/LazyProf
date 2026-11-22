@@ -493,6 +493,141 @@ function Client:RunMerchantDiagnostic(lines)
     end)
 end
 
+-- Trainer ---------------------------------------------------------------------
+-- Events: TRAINER_SHOW / TRAINER_UPDATE / TRAINER_CLOSED (Events.lua:1906-1910).
+-- The trainer UI itself loads on demand; only the calls below are used, never
+-- its frames. Nothing here trains anything.
+
+local trainerOpen = false
+
+-- callbacks: onShow(), onUpdate(), onClose().
+function Client:StartTrainer(callbacks)
+    LazyProf:RegisterEvent("TRAINER_SHOW", function()
+        trainerOpen = true
+        callbacks.onShow()
+    end)
+    LazyProf:RegisterEvent("TRAINER_UPDATE", function()
+        if trainerOpen then callbacks.onUpdate() end
+    end)
+    LazyProf:RegisterEvent("TRAINER_CLOSED", function()
+        if not trainerOpen then return end
+        trainerOpen = false
+        callbacks.onClose()
+    end)
+end
+
+-- A value the client marks as secret must not be read or stored (unit names
+-- can be, in some situations).
+local function Readable(value)
+    if value == nil then return nil end
+    if issecretvalue and issecretvalue(value) then return nil end
+    return value
+end
+
+-- The open trainer, when it is a profession trainer: who and where.
+--   name      the trainer's name (the window's title is UnitName("npc"):
+--             Blizzard_TrainerUI/Mainline/Blizzard_TrainerUI.lua:440-449);
+--             nil when the client keeps it secret
+--   npcId     from the trainer's GUID (nil when unreadable)
+--   zone, subZone, mapId
+--   x, y      where the player stands, 0-1 on that map (nil where the client
+--             gives no position, e.g. indoors on some maps)
+--   faction   the player's
+-- nil when no trainer is open or it is not a profession trainer
+-- (IsTradeskillTrainer, used the same way at Blizzard_TrainerUI.lua:871).
+function Client:TrainerInfo()
+    if not trainerOpen or not IsTradeskillTrainer() then return nil end
+    local info = { faction = UnitFactionGroup("player") }
+    info.name = Readable(UnitName("npc"))
+    local guid = Readable(UnitGUID("npc"))
+    if type(guid) == "string" then
+        -- Creature-0-<server>-<instance>-<zone>-<npc id>-<spawn>
+        info.npcId = tonumber((select(6, strsplit("-", guid))))
+    end
+    info.zone = Readable(GetRealZoneText())
+    info.subZone = Readable(GetSubZoneText())
+    local mapId = C_Map.GetBestMapForUnit("player")
+    info.mapId = mapId
+    if mapId then
+        local position = C_Map.GetPlayerMapPosition(mapId, "player")
+        if position then
+            local x, y = position:GetXY()
+            if Readable(x) and Readable(y) then
+                info.x, info.y = x, y
+            end
+        end
+    end
+    return info
+end
+
+-- What the open trainer lists (as its window's filters show it):
+--   index, name, state ("available" | "unavailable" | "used"), cost (copper),
+--   reqLevel
+-- GetTrainerServiceInfo returns name, type, texture, reqLevel, subText,
+-- category on this client and GetTrainerServiceCost returns moneyCost,
+-- isProfession (Blizzard_TrainerUI.lua:469, 618, 692).
+function Client:TrainerServices()
+    local services = {}
+    if not trainerOpen then return services end
+    for index = 1, GetNumTrainerServices() or 0 do
+        local name, state, _, reqLevel = GetTrainerServiceInfo(index)
+        if Readable(name) and state ~= "header" then
+            services[#services + 1] = {
+                index = index,
+                name = name,
+                state = state,
+                cost = (GetTrainerServiceCost(index)),
+                reqLevel = reqLevel,
+            }
+        end
+    end
+    return services
+end
+
+-- /lp diag trainer: the raw trainer values and what the adapter makes of
+-- them. Read-only.
+function Client:RunTrainerDiagnostic(lines)
+    local function add(text) lines[#lines + 1] = text end
+    local function section(name, fn)
+        local ok, err = pcall(fn)
+        if not ok then add("SECTION ERROR: " .. name .. ": " .. tostring(err)) end
+    end
+    section("state", function()
+        add("trainer: open=" .. tostring(trainerOpen) .. " IsTradeskillTrainer=" .. tostring(IsTradeskillTrainer())
+            .. " services=" .. tostring(GetNumTrainerServices()))
+        local name = UnitName("npc")
+        local secret = issecretvalue ~= nil and name ~= nil and issecretvalue(name) or false
+        add("npc: nameSecret=" .. tostring(secret) .. " name=" .. (secret and "(secret)" or tostring(name)))
+        local rank, maxRank, modifier = GetTrainerTradeskillRankValues()
+        add("trainer rank values: rank=" .. tostring(rank) .. " maxRank=" .. tostring(maxRank)
+            .. " modifier=" .. tostring(modifier))
+    end)
+    section("raw", function()
+        for index = 1, math.min(GetNumTrainerServices() or 0, 10) do
+            local name, state, _, reqLevel, subText, category = GetTrainerServiceInfo(index)
+            local cost, isProfession = GetTrainerServiceCost(index)
+            local skill, rank, hasReq = GetTrainerServiceSkillReq(index)
+            add("raw[" .. tostring(index) .. "] name=" .. tostring(name) .. " type=" .. tostring(state)
+                .. " reqLevel=" .. tostring(reqLevel) .. " subText=" .. tostring(subText) .. " category=" .. tostring(category)
+                .. " cost=" .. tostring(cost) .. " isProfession=" .. tostring(isProfession)
+                .. " skillReq=" .. tostring(skill) .. "/" .. tostring(rank) .. "/" .. tostring(hasReq)
+                .. " skillLine=" .. tostring(GetTrainerServiceSkillLine(index)))
+        end
+    end)
+    section("adapter", function()
+        local info = self:TrainerInfo()
+        if not info then
+            add("adapter info: none (no profession trainer open)")
+        else
+            add("adapter info: name=" .. tostring(info.name) .. " npcId=" .. tostring(info.npcId)
+                .. " zone=" .. tostring(info.zone) .. " subZone=" .. tostring(info.subZone)
+                .. " mapId=" .. tostring(info.mapId) .. " x=" .. tostring(info.x) .. " y=" .. tostring(info.y)
+                .. " faction=" .. tostring(info.faction))
+        end
+        add("adapter services=" .. tostring(#self:TrainerServices()))
+    end)
+end
+
 -- /lp diag forever: a read-only dump of the client facts and of what this
 -- adapter makes of them (documented in docs/development/TROUBLESHOOTING.md).
 -- Each section runs under pcall so one failure prints "SECTION ERROR" and the

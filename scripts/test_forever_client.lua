@@ -197,7 +197,8 @@ local SURFACE = { "IsOpen", "AnchorFrame", "PanelOffsetX", "GetLine", "NoDataPro
                   "KnownRecipeIds", "PlayerSkill", "ProfessionRank", "GetItemInfo", "FindRecipeRow", "InvalidateRowCache",
                   "UnlearnedHiddenByFilter", "Start", "RunDiagnostic",
                   "StartMerchant", "IsMerchantOpen", "MerchantAnchorFrame", "MerchantItems", "BuyFromMerchant",
-                  "FreeBagSlots", "Money", "RunMerchantDiagnostic" }
+                  "FreeBagSlots", "Money", "RunMerchantDiagnostic",
+                  "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic" }
 
 -- Names of the functions an adapter installs.
 local function methodNames(client)
@@ -572,6 +573,122 @@ section("merchant", function()
     ok = pcall(Client.RunMerchantDiagnostic, Client, lines)
     check(p .. "diag: a failing section is reported, the rest still prints",
         ok and table.concat(lines, "\n"):find("SECTION ERROR", 1, true) ~= nil)
+end)
+
+-- ===========================================================================
+-- 4c. Trainer: who is open, what it lists; names the client keeps secret
+-- ===========================================================================
+section("trainer", function()
+    local p = "trainer: "
+    local addon = loadAdapter(16001)
+    local Client = addon.Client
+    local tradeskill = true
+    local secretName = false
+    local SECRET = {}
+    _G.IsTradeskillTrainer = function() return tradeskill end
+    _G.issecretvalue = function(value) return value == SECRET end
+    _G.UnitName = function(unit) return unit == "npc" and (secretName and SECRET or "Georgio Bolero") or "Player" end
+    _G.UnitGUID = function(unit) return unit == "npc" and "Creature-0-4444-0-12-1346-0000ABCDEF" or "Player-1-X" end
+    _G.UnitFactionGroup = function() return "Alliance", "Alliance" end
+    _G.GetRealZoneText = function() return "Stormwind City" end
+    _G.GetSubZoneText = function() return "Mage Quarter" end
+    _G.strsplit = function(sep, text)
+        local parts = {}
+        for part in (text .. sep):gmatch("(.-)%" .. sep) do parts[#parts + 1] = part end
+        return unpack(parts)
+    end
+    local position = { GetXY = function() return 0.5312, 0.8124 end }
+    _G.C_Map = {
+        GetBestMapForUnit = function() return 84 end,
+        GetPlayerMapPosition = function(mapId) return mapId == 84 and position or nil end,
+    }
+    -- name, type, texture, reqLevel, subText, category
+    local services = {
+        { "Tailoring (Journeyman)", "available", 1, 10, "", "", cost = 500 },
+        { "Linen Cloak", "available", 2, 0, "", "", cost = 50 },
+        { "Woolen Cape", "unavailable", 3, 0, "", "", cost = 300 },
+        { "Silk Robe", "used", 4, 0, "", "", cost = 0 },
+        { nil, "available", 5, 0, "", "", cost = 1 },   -- name not loaded yet
+    }
+    _G.GetNumTrainerServices = function() return #services end
+    _G.GetTrainerServiceInfo = function(index) return unpack(services[index], 1, 6) end
+    _G.GetTrainerServiceCost = function(index) return services[index].cost, true end
+    _G.GetTrainerServiceSkillReq = function() return "Tailoring", 50, true end
+    _G.GetTrainerServiceSkillLine = function() return "Tailoring" end
+    _G.GetTrainerTradeskillRankValues = function() return 60, 75, 0 end
+
+    local seen = {}
+    Client:StartTrainer({
+        onShow = function() seen[#seen + 1] = "show" end,
+        onUpdate = function() seen[#seen + 1] = "update" end,
+        onClose = function() seen[#seen + 1] = "close" end,
+    })
+    check(p .. "no trainer open: no info, no services", Client:TrainerInfo() == nil and #Client:TrainerServices() == 0)
+    addon.events.TRAINER_UPDATE()
+    check(p .. "an update with no trainer open is ignored", #seen == 0)
+    addon.events.TRAINER_SHOW()
+    check(p .. "open reported", seen[1] == "show")
+
+    local info = Client:TrainerInfo()
+    check(p .. "name of the trainer", info and info.name == "Georgio Bolero", info and info.name)
+    check(p .. "npc id from its GUID", info.npcId == 1346, info.npcId)
+    check(p .. "zone and sub-zone", info.zone == "Stormwind City" and info.subZone == "Mage Quarter")
+    check(p .. "map id and the player's position", info.mapId == 84 and info.x == 0.5312 and info.y == 0.8124)
+    check(p .. "the player's faction", info.faction == "Alliance")
+
+    local list = Client:TrainerServices()
+    check(p .. "one entry per named service", #list == 4, #list)
+    check(p .. "name, state and cost", list[2].name == "Linen Cloak" and list[2].state == "available" and list[2].cost == 50)
+    check(p .. "state passed as the client reports it", list[3].state == "unavailable" and list[4].state == "used")
+    check(p .. "index kept", list[3].index == 3)
+
+    -- A name the client keeps secret is not read out.
+    secretName = true
+    info = Client:TrainerInfo()
+    check(p .. "a secret name is not returned", info ~= nil and info.name == nil)
+    secretName = false
+
+    -- No position on this map.
+    _G.C_Map.GetPlayerMapPosition = function() return nil end
+    info = Client:TrainerInfo()
+    check(p .. "no position: info without coordinates", info.x == nil and info.mapId == 84)
+    _G.C_Map.GetBestMapForUnit = function() return nil end
+    check(p .. "no map: no error", pcall(Client.TrainerInfo, Client) and Client:TrainerInfo().mapId == nil)
+    _G.C_Map.GetBestMapForUnit = function() return 84 end
+    _G.C_Map.GetPlayerMapPosition = function() return position end
+
+    -- A class trainer is not a profession trainer.
+    tradeskill = false
+    check(p .. "not a profession trainer: no info", Client:TrainerInfo() == nil)
+    tradeskill = true
+
+    addon.events.TRAINER_UPDATE()
+    addon.events.TRAINER_CLOSED()
+    addon.events.TRAINER_CLOSED()
+    check(p .. "update, then one close", table.concat(seen, ",") == "show,update,close", table.concat(seen, ","))
+    check(p .. "closed: no info", Client:TrainerInfo() == nil)
+
+    -- Diagnostic
+    addon.events.TRAINER_SHOW()
+    local lines = {}
+    local ok, err = pcall(Client.RunTrainerDiagnostic, Client, lines)
+    check(p .. "diag: no Lua error", ok, err)
+    local text = table.concat(lines, "\n")
+    check(p .. "diag: state", text:find("IsTradeskillTrainer=true services=5", 1, true) ~= nil, text)
+    check(p .. "diag: raw service line", text:find("raw[2] name=Linen Cloak type=available", 1, true) ~= nil, text)
+    check(p .. "diag: adapter info", text:find("adapter info: name=Georgio Bolero npcId=1346", 1, true) ~= nil, text)
+    secretName = true
+    lines = {}
+    Client:RunTrainerDiagnostic(lines)
+    text = table.concat(lines, "\n")
+    check(p .. "diag: a secret name is reported as secret, not printed",
+        text:find("nameSecret=true name=(secret)", 1, true) ~= nil, text)
+    secretName = false
+    _G.GetTrainerServiceInfo = function() error("boom") end
+    lines = {}
+    ok = pcall(Client.RunTrainerDiagnostic, Client, lines)
+    check(p .. "diag: a failing section is reported", ok and table.concat(lines, "\n"):find("SECTION ERROR", 1, true) ~= nil)
+    _G.issecretvalue = nil
 end)
 
 -- ===========================================================================

@@ -70,9 +70,18 @@ function Availability:IsRecipeAvailableUncached(recipe)
     -- Trainer recipes - always available if requirements met
     if source.type == "trainer" then
         if self:MeetsTrainerRequirements(source) then
+            -- The fee from the recipe data; where it has none, the fee a
+            -- trainer the player visited charged for this recipe.
+            local cost = source.trainingCost or source.cost
+            local costSeen = nil
+            if not cost and LazyProf.TrainerMemory then
+                cost = LazyProf.TrainerMemory:Fee(recipe.id)
+                costSeen = cost and true or nil
+            end
             return true, {
                 type = "trainer",
-                cost = source.trainingCost or source.cost,
+                cost = cost,
+                costSeen = costSeen,
                 npcName = source.npcName
             }
         end

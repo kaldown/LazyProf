@@ -377,6 +377,27 @@ function Client:RunMerchantDiagnostic(lines)
     end
 end
 
+-- Trainer ---------------------------------------------------------------------
+-- Remembering visited trainers needs the trainer window's service list, whose
+-- return order on these clients could not be confirmed. Rather than read it
+-- on a guess, the Classic adapter reports nothing: no trainer is remembered
+-- and no fee is recorded here.
+
+function Client:StartTrainer(callbacks)
+end
+
+function Client:TrainerInfo()
+    return nil
+end
+
+function Client:TrainerServices()
+    return {}
+end
+
+function Client:RunTrainerDiagnostic(lines)
+    lines[#lines + 1] = "trainer: visited trainers are not recorded on this client"
+end
+
 -- /lp diag learned: append learned-recipe detection lines to `lines`. It
 -- contrasts what each id-resolution path sees: the legacy recipe-link scan
 -- (parsedIds), the active filter/header state, CraftLib match counts, the real

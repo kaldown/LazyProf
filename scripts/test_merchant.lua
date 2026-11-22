@@ -17,6 +17,7 @@ local function setup()
     local env = W.load("forever", {
         "Modules/Shopping/PurchaseQueue.lua",
         "Modules/Shopping/VendorMemory.lua",
+        "Modules/Guide/TrainerMemory.lua",
         "Modules/UI/MerchantPanel.lua",
     })
     local addon, ui = env.addon, env.ui
@@ -245,6 +246,50 @@ T.section("diag merchant", function()
     addon.Print = function(_, msg) printed[#printed + 1] = msg end
     addon:SlashCommand("diag")
     T.check("/lp diag lists the merchant dump", table.concat(printed, "\n"):find("/lp diag merchant", 1, true) ~= nil)
+end)
+
+T.section("diag trainer", function()
+    local env = setup()
+    local addon = env.addon
+    _G.CraftLib = { GetActiveProfile = function() return "FOREVER" end }
+    _G.GetServerTime = function() return 1 end
+    addon.Professions.registry = { tailoring = { name = "Tailoring", recipes = { W.GLOVES, W.SHIRT } } }
+    local open = true
+    addon.Client.StartTrainer = function() end
+    addon.Client.TrainerInfo = function()
+        if not open then return nil end
+        return { name = "Georgio Bolero", npcId = 1346, zone = "Stormwind City", mapId = 84, x = 0.53, y = 0.81, faction = "Alliance" }
+    end
+    addon.Client.TrainerServices = function()
+        return open and { { name = "Gloves", cost = 50, state = "available" }, { name = "Shirt", cost = 300, state = "available" } } or {}
+    end
+    addon.Client.RunTrainerDiagnostic = function(_, lines) lines[#lines + 1] = "trainer: open=" .. tostring(open) end
+
+    _G.LibStub = function() return { NewAddon = function(_, a) return a end } end
+    _G.GetBuildInfo = function() return "1.60.1", "70938", "", 16001 end
+    _G.strlower = string.lower
+    assert(loadfile("Core/Init.lua"))("LazyProf", addon)
+    local shown
+    addon.ShowDiagnosticOutput = function(_, text) shown = text end
+    addon.Print = function() end
+    addon:SlashCommand("diag trainer")
+    T.check("the dump opens in the copyable window", type(shown) == "string")
+    T.check("build line", shown:find("diag trainer: build=1.60.1 (70938) interface=16001 family=forever", 1, true) ~= nil, shown)
+    T.check("adapter lines included", shown:find("trainer: open=true", 1, true) ~= nil)
+    T.check("the visit is matched to its profession", shown:find("this trainer: profession=tailoring services=2", 1, true) ~= nil, shown)
+    T.check("the remembered trainer is listed", shown:find(
+        "known tailoring trainer: Georgio Bolero - Stormwind City (53, 81) mapId=84 faction=Alliance recipesListed=2", 1, true) ~= nil, shown)
+    T.eq("running the dump at a trainer records the visit", addon.TrainerMemory:Fee(1), 50)
+
+    open = false
+    addon:SlashCommand("diag trainer")
+    T.check("no trainer open: counts only", shown:find("remembered: professions=1 trainers=1 fees=2", 1, true) ~= nil
+        and shown:find("this trainer:", 1, true) == nil, shown)
+    local printed = {}
+    addon.Print = function(_, msg) printed[#printed + 1] = msg end
+    addon:SlashCommand("diag")
+    T.check("/lp diag lists the trainer dump", table.concat(printed, "\n"):find("/lp diag trainer", 1, true) ~= nil)
+    _G.CraftLib = nil
 end)
 
 T.finish()

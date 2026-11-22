@@ -192,7 +192,8 @@ section("selection", function()
     for _, m in ipairs({ "IsOpen", "GetLine", "KnownRecipeIds", "PlayerSkill", "ProfessionRank", "GetItemInfo",
                          "AnchorFrame", "PanelOffsetX", "NoDataProfessionName", "Start", "RunDiagnostic",
                          "StartMerchant", "IsMerchantOpen", "MerchantAnchorFrame", "MerchantItems", "BuyFromMerchant",
-                         "FreeBagSlots", "Money", "RunMerchantDiagnostic" }) do
+                         "FreeBagSlots", "Money", "RunMerchantDiagnostic",
+                         "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic" }) do
         check(p .. "Client:" .. m .. " exists", type(classic.Client[m]) == "function")
     end
 end)
@@ -406,6 +407,29 @@ section("merchant", function()
     check(p .. "no bag call: zero free slots", Client:FreeBagSlots() == 0)
     lines = {}
     check(p .. "diag without the calls: no Lua error", pcall(Client.RunMerchantDiagnostic, Client, lines))
+end)
+
+-- ===========================================================================
+-- 4c. Trainer: nothing is read on Classic clients
+-- ===========================================================================
+section("trainer", function()
+    local p = "trainer: "
+    local addon = loadAdapter(11508)
+    local Client = addon.Client
+    -- Trainer calls exist on these clients, but must not be relied on.
+    _G.GetNumTrainerServices = function() error("trainer list read on a Classic client") end
+    _G.GetTrainerServiceInfo = function() error("trainer service read on a Classic client") end
+    local called = false
+    Client:StartTrainer({ onShow = function() called = true end, onUpdate = function() called = true end,
+        onClose = function() called = true end })
+    check(p .. "no trainer events are registered", addon.events.TRAINER_SHOW == nil and addon.events.TRAINER_UPDATE == nil)
+    check(p .. "no trainer info", Client:TrainerInfo() == nil)
+    check(p .. "no services", #Client:TrainerServices() == 0)
+    local lines = {}
+    Client:RunTrainerDiagnostic(lines)
+    check(p .. "the diagnostic says so", lines[1] == "trainer: visited trainers are not recorded on this client", lines[1])
+    check(p .. "nothing called back", called == false)
+    _G.GetNumTrainerServices, _G.GetTrainerServiceInfo = nil, nil
 end)
 
 -- ===========================================================================

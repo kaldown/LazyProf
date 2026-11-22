@@ -560,6 +560,33 @@ local function CompactRow(stage, ctx, view)
     return row
 end
 
+-- Rows naming the trainers the player has visited for a path's profession
+-- (recipeId: only those that listed that recipe), under `label`. Empty when
+-- none is remembered: nothing is ever named that the game did not show.
+function Views.TrainerRows(path, recipeId, label)
+    local memory = LazyProf.TrainerMemory
+    if not (memory and path and path.professionKey) then return {} end
+    local faction = UnitFactionGroup and UnitFactionGroup("player") or nil
+    local trainers = memory:Trainers(path.professionKey, recipeId, faction)
+    if #trainers == 0 then return {} end
+    local rows = { { kind = "line", height = 16, color = GREY, text = label } }
+    for i, trainer in ipairs(trainers) do
+        if i > 6 then
+            rows[#rows + 1] = { kind = "line", height = 16, indent = 8, color = DIM,
+                text = string.format("... and %d more", #trainers - 6) }
+            break
+        end
+        rows[#rows + 1] = {
+            kind = "line", height = 16, indent = 8, color = WHITE, text = Text.TrainerLine(trainer),
+            tooltip = {
+                { text = trainer.name or "Unknown", r = 1, g = 1, b = 1 },
+                { text = "You visited this trainer. The position is where you stood.", r = 0.7, g = 0.7, b = 0.7 },
+            },
+        }
+    end
+    return rows
+end
+
 -- The card of the selected stage, the alternatives and the next two stages.
 -- view.selectedStage is the stage; view.showAllAlts expands the alternatives.
 -- ctx: onShowRecipe(recipe, skill), onUseAlternative(stage, alt),
@@ -664,6 +691,13 @@ function Views.GuideCard(view, ctx)
         for _, line in ipairs(Text.LearnLines(stage, view.profile, path and path.profession)) do
             rows[#rows + 1] = { kind = "line", wrap = true, text = line.text, color = LINE_COLOR[line.color] or WHITE }
         end
+        -- Trainers the player has visited that listed this recipe (never on
+        -- the VANILLA profile, where "trainer-taught" is not trusted).
+        if stage.sourceInfo and stage.sourceInfo.type == "trainer" and view.profile ~= "VANILLA" then
+            for _, row in ipairs(Views.TrainerRows(path, recipe.id, "Trainers you visited that teach it:")) do
+                rows[#rows + 1] = row
+            end
+        end
         -- The profession window's filter hides unlearned recipes, so the arrow
         -- has no row to point at for this one.
         if view.hiddenRecipeId and view.hiddenRecipeId == recipe.id then
@@ -675,6 +709,11 @@ function Views.GuideCard(view, ctx)
             text = "Train the next rank", right = "before " .. tostring(stage.cap), rightColor = GOLD }
         rows[#rows + 1] = { kind = "line", wrap = true, color = WHITE,
             text = Text.RankLine(stage, view.liveCap, path and path.profession, path and path.hasProfession) }
+        local label = string.format("%s trainers you have visited (not every trainer teaches every rank):",
+            tostring(path and path.profession))
+        for _, row in ipairs(Views.TrainerRows(path, nil, label)) do
+            rows[#rows + 1] = row
+        end
     end
 
     -- The next two stages
