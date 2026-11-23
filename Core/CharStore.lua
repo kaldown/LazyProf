@@ -9,7 +9,9 @@
 -- shard name there). A GUID is stable on all of them.
 --
 --   CharStore:Get()               this character's table
---   CharStore:Profession(key)     { target = number|nil, pins = { {from, to, recipeId}, ... } }
+--   CharStore:Profession(key)     { target = number|nil, pins = { {from, to, recipeId}, ... },
+--                                   route = the route kept last (ranges like pins, plus `at`,
+--                                   the skill it was planned from), or nil }
 --
 -- Before the GUID or the database exists (very early in loading) both return
 -- a working table that is simply not saved.
@@ -20,7 +22,7 @@ LazyProf.CharStore = CharStore
 
 local function NewCharacter()
     return {
-        professions = {},     -- [profKey] = { target, pins }
+        professions = {},     -- [profKey] = { target, pins, route (the route kept last, Pathfinder:RouteRanges) }
         craftChoices = {},    -- [itemId] = "craft" | "buy" (absent: automatic)
     }
 end

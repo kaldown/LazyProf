@@ -148,7 +148,10 @@ LazyProf.PathfinderStrategies.fastest = {
     -- Calculate how many crafts until next breakpoint
     -- Breakpoints: gray, target, new recipe unlocks, or color changes
     -- racialBonus: extends color ranges (e.g., Gnome +15 Engineering)
-    CalculateQuantity = function(self, recipe, currentSkill, targetSkill, recipes, racialBonus)
+    -- nextUnlock: optional; the lowest skill above currentSkill at which a recipe
+    --             unlocks when the caller already knows it (false: none), so
+    --             the recipe list is not walked again
+    CalculateQuantity = function(self, recipe, currentSkill, targetSkill, recipes, racialBonus, nextUnlock)
         racialBonus = racialBonus or 0
         local quantity = 0
         local simSkill = currentSkill
@@ -161,7 +164,11 @@ LazyProf.PathfinderStrategies.fastest = {
         local nextBreakpoint = grayAt  -- default: stop at gray
 
         -- Check for new recipe unlocks (uses base skill, not affected by racial bonus)
-        if recipes then
+        if nextUnlock ~= nil then
+            if nextUnlock and nextUnlock < nextBreakpoint then
+                nextBreakpoint = nextUnlock
+            end
+        elseif recipes then
             for _, r in ipairs(recipes) do
                 if r.skillRequired > currentSkill and r.skillRequired < nextBreakpoint then
                     nextBreakpoint = r.skillRequired

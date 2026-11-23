@@ -217,8 +217,10 @@ end
 
 function LazyProf:OnBagUpdate()
     -- PERFORMANCE FIX (GitHub Issue #3): Don't trigger full recalculation on bag changes.
-    -- Bag changes during crafting don't affect the optimal PATH - only the shopping list
-    -- quantities change. Use lightweight RefreshShoppingList() instead of full recalc.
+    -- A change of stock never plans again by itself: the shown route stays and only its
+    -- counts and the shopping list are redrawn (lightweight RefreshShoppingList()). The
+    -- route is planned again on the events that always did: profession window opened,
+    -- skill changed, target / strategy / pin / setting changed, item info, auction house.
     -- DO NOT REVERT THIS to ScheduleRecalculation() - it causes severe FPS hitches
     -- during batch crafting as reported by users with both old and high-end hardware.
     if self.Client:IsOpen() or (self.GuideWindow and self.GuideWindow:PlanningPath()) then

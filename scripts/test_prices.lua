@@ -452,6 +452,37 @@ section("diagnostic", function()
     check(p .. "stale price flagged", text:find("4306 Silk Cloth:[^\n]*STALE") ~= nil, text)
     check(p .. "uncached item named by id", text:find("7777 item:7777: ", 1, true) ~= nil, text)
     check(p .. "plain ASCII", not text:find("[\128-\255]"))
+    check(p .. "a path without route data prints no route line", text:find("route:", 1, true) == nil, text)
+
+    -- Which candidate route was kept, each candidate's amounts, the time it
+    -- took, and how the sale values stand.
+    local routed = pathWith(2589, 2592)
+    routed.route = { kept = "stock", ms = 12.4, keepMargin = 6500, candidates = {
+        { key = "market", net = 123456, spend = 130000, sale = 6544, gapLength = 0, eligible = true },
+        { key = "sale", net = 150000, spend = 160000, sale = 10000, gapLength = 6, eligible = false },
+        { key = "stock", net = -250, spend = 9750, sale = 10000, gapLength = 0, eligible = true },
+    } }
+    routed.sale = { mode = "vendor", values = { [1] = 5, [2] = 6, [3] = 7 }, rank = { [1] = 5 }, loading = 2,
+                    loadingItems = { 901, 902 } }
+    addon.SaleValue = { LoadingCount = function(_, sale) return #sale.loadingItems - 1 end }
+    addon.Pathfinder.currentPath = routed
+    lines = {}
+    ok, err = pcall(pm.RunDiagnostic, pm, lines)
+    text = table.concat(lines, "\n")
+    check(p .. "route: no Lua error", ok, err)
+    check(p .. "route: which candidate was kept and how long planning took",
+        text:find("route: kept=stock candidates=3 planned in 12 ms", 1, true) ~= nil, text)
+    check(p .. "route: the margin the plan in hand is given", text:find("keep margin=65s", 1, true) ~= nil, text)
+    check(p .. "route: a candidate's amounts",
+        text:find("candidate market: net=12g 34s 56c spend=13g sale=65s 44c", 1, true) ~= nil, text)
+    check(p .. "route: a candidate that covers less says so",
+        text:find("candidate sale: net=15g spend=16g sale=1g (not eligible: leaves 6 more skill points uncovered)", 1, true) ~= nil, text)
+    check(p .. "route: a net gain is printed as a gain",
+        text:find("candidate stock: net=gain 2s 50c spend=97s 50c sale=1g", 1, true) ~= nil, text)
+    check(p .. "sale values: mode and counts",
+        text:find("sale values: mode=vendor counted=3 ranked=1 loading=1", 1, true) ~= nil, text)
+    check(p .. "route: plain ASCII", not text:find("[\128-\255]"))
+    addon.SaleValue = nil
 
     addon.Pathfinder.currentPath = nil
     lines = {}

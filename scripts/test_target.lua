@@ -135,6 +135,10 @@ end)
 
 T.section("settings", function()
     T.check("calculate-from-current-skill is retired", LazyProf.defaults.profile.calculateFromCurrentSkill == nil)
+    T.eq("bank stock counts by default", LazyProf.defaults.profile.includeBankItems, true)
+    T.eq("alt stock counts by default", LazyProf.defaults.profile.includeAltCharacters, true)
+    T.eq("the guild bank does not (it is shared)", LazyProf.defaults.profile.includeGuildBank, false)
+    T.eq("crafts are counted as sold to a vendor by default", LazyProf.defaults.profile.saleValueMode, "vendor")
     T.eq("margin is off by default", LazyProf.defaults.profile.useMargin, false)
     T.eq("margin percent default", LazyProf.defaults.profile.marginPercent, 15)
     local opt = LazyProf.options.args.general.args.marginPercent
