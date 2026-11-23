@@ -1,10 +1,9 @@
 -- scripts/test_routes.lua
 --
 -- The route the planner keeps. Cheapest ranks recipes by what a craft costs
--- after what it sells for, can let owned stock shape the route, and builds up
--- to three candidate routes (market prices / with sale value / with stock and
--- sale value), keeping the one the player pays least for - so no route is
--- dearer for the player than the market-price route.
+-- after what it sells for and builds candidate routes (market prices / ranked
+-- with sale value), keeping the one the player pays least for - so no route
+-- is dearer for the player than the market-price route.
 --
 -- Run from the addon root:  lua5.1 scripts/test_routes.lua
 
@@ -178,13 +177,13 @@ local function loadRoutes()
     return LazyProf
 end
 
-local function plan(LazyProf, strategyName, from, to, recipes, prices, sale, inventory, breakdown, strategy)
+local function plan(LazyProf, strategyName, from, to, recipes, prices, sale, inventory, breakdown, strategy, pins)
     LazyProf.db.profile.strategy = strategyName
     LazyProf.RecipeAvailability:BeginRecalc()
     LazyProf.SelfFound:BeginRecalc({})
     local steps, meta, route = LazyProf.Pathfinder:PlanRoutes({
         strategy = strategy or LazyProf.PathfinderStrategies[strategyName], strategyName = strategyName,
-        startSkill = from, targetSkill = to, recipes = recipes, prices = prices, racialBonus = 0, pins = {},
+        startSkill = from, targetSkill = to, recipes = recipes, prices = prices, racialBonus = 0, pins = pins or {},
         inventory = inventory or {}, sourceBreakdown = breakdown or {}, sale = sale,
     })
     LazyProf.SelfFound:EndRecalc()
@@ -214,6 +213,46 @@ T.section("candidates: the owner's example", function()
     T.check("with its meta", meta.complete == true and #meta.gaps == 0)
     T.check("both are eligible", candidate(route, "market").eligible and candidate(route, "sale").eligible)
     T.eq("no gaps: no gap length", candidate(route, "sale").gapLength, 0)
+end)
+
+T.section("candidates: costed with what the player owns", function()
+    local LazyProf = loadRoutes()
+    -- A: X at 100, sells 10. B: Y at 150, sells 80. Ranked with sale values B
+    -- nets less per craft (70 against 90), so with nothing owned it wins.
+    local function fixture()
+        return {
+            recipe(1, "A", { itemId = 701, reagents = { { itemId = 50, count = 1, name = "X" } } }),
+            recipe(2, "B", { itemId = 702, reagents = { { itemId = 51, count = 1, name = "Y" } } }),
+        }
+    end
+    local prices = { [50] = 100, [51] = 150 }
+    local values = { [1] = 10, [2] = 80 }
+    local steps, _, route = plan(LazyProf, "cheapest", 100, 120, fixture(), prices, { values = values, rank = values })
+    T.eq("nothing owned: market route", candidate(route, "market").net, 20 * 100 - 20 * 10)
+    T.eq("nothing owned: sale route", candidate(route, "sale").net, 20 * 150 - 20 * 80)
+    T.eq("nothing owned: the sale route is kept", route.kept, "sale")
+
+    -- Twenty X in the bags: the market route costs nothing now.
+    steps, _, route = plan(LazyProf, "cheapest", 100, 120, fixture(), prices, { values = values, rank = values },
+        { [50] = 20 }, { [50] = { bags = 20 } })
+    T.eq("stock owned: the market route only sells", candidate(route, "market").net, -200)
+    T.eq("stock owned: nothing is spent on it", candidate(route, "market").spend, 0)
+    T.eq("stock owned: the sale route still buys everything", candidate(route, "sale").net, 1400)
+    T.eq("stock owned: the market route is kept", route.kept, "market")
+    T.eq("and returned", onlyRecipe(steps), 1)
+end)
+
+T.section("candidates: pins hold in every candidate", function()
+    local LazyProf = loadRoutes()
+    local recipes, prices, values = example()
+    local pins = {}
+    LazyProf.Pins.Add(pins, 100, 120, 1)
+    local steps, _, route = plan(LazyProf, "cheapest", 100, 120, recipes, prices, { values = values, rank = values },
+        nil, nil, nil, pins)
+    T.eq("two candidates are still built", #route.candidates, 2)
+    T.eq("the pinned recipe in the market route", candidate(route, "market").net, 70000)
+    T.eq("and in the sale route, although the other would rank better", candidate(route, "sale").net, 70000)
+    T.eq("every step is the pinned recipe", onlyRecipe(steps), 1)
 end)
 
 T.section("candidates: nothing to rank by", function()
@@ -305,15 +344,26 @@ T.section("candidates: fastest keeps its single run", function()
     local steps, _, route = plan(LazyProf, "fastest", 100, 120, recipes, prices, { values = values, rank = values })
     T.eq("one candidate", #route.candidates, 1)
     T.eq("named after the strategy", route.kept, "fastest")
-    T.eq("costed by the same accounting", route.candidates[1].net,
-        route.candidates[1].spend - route.candidates[1].sale)
+    -- Worked out here from the steps it returned: leather, the pattern when
+    -- shoes are on the route, and what each craft sells for.
+    local spend, back, shoes = 0, 0, false
+    for _, step in ipairs(steps) do
+        spend = spend + step.quantity * 4 * 1000
+        back = back + step.quantity * values[step.recipe.id]
+        if step.recipe.id == 2 then shoes = true end
+    end
+    if shoes then spend = spend + 20000 end
+    T.check("fixture: the run has steps", #steps > 0 and spend > 0)
+    T.eq("what it spends, by the same accounting", route.candidates[1].spend, spend)
+    T.eq("what comes back", route.candidates[1].sale, back)
+    T.eq("its net", route.candidates[1].net, spend - back)
     T.check("its steps carry the sale value", steps[1].saleEach == values[steps[1].recipe.id])
 end)
 
 T.section("the whole calculation", function()
     local LazyProf = loadRoutes()
     local PF = LazyProf.Pathfinder
-    local sell = { [501] = 500, [502] = 3500 }
+    local sell = { [501] = 500, [502] = 3500, [503] = 100, [504] = 100 }
     LazyProf.Client.GetItemInfo = function(_, itemId)
         if not sell[itemId] then return nil end
         return "Item " .. itemId, nil, 1, 1, 1, "", "", 1, "", "icon", sell[itemId]
@@ -324,14 +374,21 @@ T.section("the whole calculation", function()
         return prices
     end
     local milestones = { 75, 150, 225, 300 }
-    local function build()
+    local function build(profKey)
         local recipes = example()
+        -- Grey long before the start (80), and grey at 95: only a racial
+        -- bonus of 15 keeps the second one in range at skill 100.
+        recipes[#recipes + 1] = recipe(3, "Old Boots", { itemId = 503, orange = 50, yellow = 60, green = 70, gray = 80,
+            reagents = { { itemId = LEATHER, count = 1, name = "Leather" } } })
+        recipes[#recipes + 1] = recipe(4, "Old Gloves", { itemId = 504, orange = 55, yellow = 75, green = 85, gray = 95,
+            reagents = { { itemId = LEATHER, count = 1, name = "Leather" } } })
         return PF:BuildPath({
-            profKey = "leatherworking", profData = { name = "Leatherworking", milestones = milestones },
+            profKey = profKey or "leatherworking", profData = { name = "Leatherworking", milestones = milestones },
             recipes = recipes, startSkill = 100, actualSkill = 100, hasProfession = true,
         })
     end
     PF:SetTargetSkill("leatherworking", 120, 100, milestones)
+    PF:SetTargetSkill("engineering", 120, 100, milestones)
 
     local path = build()
     T.eq("the path carries the sale table", path.sale.values[2], 3500)
@@ -339,6 +396,18 @@ T.section("the whole calculation", function()
     T.eq("the route that was kept", path.route.kept, "sale")
     T.eq("the steps are that route's", onlyRecipe(path.steps), 2)
     T.eq("both candidates are reported", #path.route.candidates, 2)
+    T.check("a recipe grey before the start is not looked up", path.sale.values[3] == nil and path.sale.values[4] == nil)
+
+    -- The racial bonus reaches the sale table: a gnome's +15 Engineering
+    -- keeps the recipe that goes grey at 95 in range.
+    _G.CraftLib.GetActiveProfile = function() return "TBC" end
+    _G.UnitRace = function() return "Gnome", "Gnome" end
+    local gnome = build("engineering")
+    T.eq("fixture: the bonus is in force", gnome.racialBonus, 15)
+    T.eq("a recipe the racial bonus keeps alive is looked up", gnome.sale.values[4], 100)
+    T.check("one that is grey even so is not", gnome.sale.values[3] == nil)
+    _G.CraftLib.GetActiveProfile = nil
+    _G.UnitRace = function() return "Human", "Human" end
 
     LazyProf.db.profile.saleValueMode = "none"
     path = build()

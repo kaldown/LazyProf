@@ -406,6 +406,20 @@ T.section("what crafts sell for", function()
     T.eq("the dear one stays last", st.alternatives[2].recipe.id, 3)
     T.eq("its difference counts its small sale", st.alternatives[2].costDelta, (3000 - 100) - (1000 - 450))
 
+    -- Dearer to make but nets less: it comes before a cheaper one that sells for nothing.
+    local D = recipe(4, "D", 1, 400, 410, 420, { reagents = { { itemId = 103, count = 1, name = "Silk" } } })   -- 300 a craft
+    local E = recipe(5, "E", 1, 400, 410, 420, { reagents = { { itemId = 102, count = 1, name = "Wool" } } })   -- 120 a craft
+    local netAlts = {
+        { recipe = A, score = 1, color = "orange", expectedSkillups = 1, craftCost = 100 },
+        { recipe = E, score = 2, color = "orange", expectedSkillups = 1, craftCost = 120 },
+        { recipe = D, score = 3, color = "orange", expectedSkillups = 1, craftCost = 300 },
+    }
+    local netPath = { targetSkill = 75, steps = { step(A, 1, 11, 10, 1000, { alternatives = netAlts }) }, gaps = {}, totalCost = 1000 }
+    local netStages = Stages.Build(netPath, { prices = prices, milestones = MILESTONES, sale = { [1] = 45, [4] = 290 } })
+    T.eq("ordered by net: the dear one that sells well first", netStages[1].alternatives[1].recipe.id, 4)
+    T.eq("its net over the run", netStages[1].alternatives[1].projectedNet, 3000 - 2900)
+    T.eq("then the cheap one that sells for nothing", netStages[1].alternatives[2].recipe.id, 5)
+
     -- The margin: more crafts, more sold.
     stages, summary = Stages.Build(path(), { prices = prices, milestones = MILESTONES, sale = sale, marginPercent = 15 })
     T.eq("with 15 percent: twelve crafts sold", stages[1].sale, 540)
