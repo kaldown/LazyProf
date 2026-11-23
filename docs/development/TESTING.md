@@ -1,6 +1,6 @@
 # Testing Guide
 
-LazyProf is tested in two ways: headless suites that run outside the game, and by hand in game.
+LazyProf is tested in two ways: headless suites that run outside the game, and by hand in game with the steps below.
 
 ## Headless Suites
 
@@ -19,7 +19,7 @@ The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks ever
 | `test_routes.lua` | The route the planner keeps: ranking by cost after sale value, stock counted against whole runs, the candidate routes, the remembered route, range edges, the planner always finishing |
 | `test_account.lua` | The one accounting of what the player pays (shopping list of a set of steps, less what the crafts sell for), and on real recipe data that the receipt's amounts are the shopping list's |
 | `test_salevalue.lua` | What one craft sells for (vendor, auction after the cut, nothing), the loading wait, and which recipes may be ranked by it |
-| `test_loop.lua` | The whole loop on real recipe data: plan with stock, buy the list, craft point by point while the path is calculated again at every skill; following the planner must not cost more than following the plan that was shopped for |
+| `test_loop.lua` | The whole loop on real recipe data: plan with stock, buy the list, craft point by point while the path is calculated again at every skill; following the planner must not cost more than following the plan that was shopped for (within 1% of the list) |
 | `test_pins.lua` | Recipes chosen over a skill range |
 | `test_gaps.lua` | Skill gaps: bridging with a green recipe, or a reported gap |
 | `test_target.lua` | The target skill, where a path starts, and the settings migration |
@@ -219,7 +219,7 @@ Key files:
 
 **Path shows 0 cost**
 - Everything the path needs is already owned (the receipt says what your stock saves), or
-- No pricing addon available: check TSM/Auctionator are loaded
+- No price is known and "Estimate from vendor sell value when no AH price" is off: cost cells show "?" and the receipt says how many reagents have no price. With the option on (the default), missing auction prices are estimated, not 0
 
 **UI not appearing**
 - Check for Lua errors in BugSack

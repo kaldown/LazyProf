@@ -170,7 +170,7 @@ Returns the `combined` inventory and a `sourceBreakdown` that says where each it
 
 **Purpose**: Abstract pricing across multiple providers with caching, and remember where each price came from.
 
-**Reagent price chain**: a vendor buy price first; then an Auctionator price seen today, once the auction house was visited this session; then the market providers in the configured order (TSM, Auctionator); then the vendor sell value as an estimate (an option, on by default); then a 1-copper floor (item data still loading, or the item has no sell value). Prices are cached for 5 minutes; leaving the auction house expires the cache.
+**Reagent price chain**: a vendor buy price first; then an Auctionator price seen today, once the auction house was visited this session; then the market providers in the configured order (TSM, Auctionator); then, with the estimate option on (the default), the vendor sell value and after it a 1-copper floor (item data still loading, or the item has no sell value); with the option off, no price. Prices are cached for 5 minutes; leaving the auction house expires the cache.
 
 `MarketPrice` gives what the auction addons say an item goes for (never a vendor price, an estimate or the floor); the sale value of a crafted item is built on it. `PathSummary` / `SummaryLines` count a path's prices by source and word the warnings; `RunDiagnostic` is `/lp diag prices`.
 
@@ -216,7 +216,7 @@ The window has two modes: docked to the profession window (live), and undocked f
 
 ### Widgets (Modules/UI/Widgets)
 
-**Purpose**: The frame building blocks, the only UI code that differs per client.
+**Purpose**: The frame building blocks: the frame code that differs per client (the minimap button / addon compartment entry aside).
 
 `PanelShell` (saved position and size, closed state, combat hide and restore), `RowPool` and `RowList` (a scrolling list drawn from row descriptors with reused rows; its scroll bar shows only while something scrolls), `Dropdown` and `Tabs` (one implementation per client family), `Controls` (button group, number box, checkbox, search box, resize grip) and `Slider` (a whole-number slider that tells moving the handle from letting it go).
 

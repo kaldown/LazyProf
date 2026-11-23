@@ -35,11 +35,10 @@ Plan, then shop: open a profession, see the cheapest path from your real skill, 
 
 ### Removed
 
-- The coloured path bar, the Range dropdown, the footer with its totals, and Prev / Current step / Next. To shop for the next bracket only, set "Level to" to its end.
+- The coloured path bar, the Range dropdown, the footer with its totals (and the stray "|r" it showed beside the range total), and Prev / Current step / Next. To shop for the next bracket only, set "Level to" to its end.
 
 ### Fixed
 
-- The footer showed a stray "|r" beside the range total (the footer is gone).
 - The scroll bar and its buttons were drawn when there was nothing to scroll.
 - The selected strategy button (Cheapest / Fastest) could hardly be told from the other.
 - A recipe you chose with "Use" could keep the planner from ever finishing: with "Include green recipes" on, when its range reached the skill where the recipe turns grey, or when the recipe's yellow and grey skill are the same.

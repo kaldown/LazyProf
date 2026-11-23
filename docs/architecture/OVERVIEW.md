@@ -51,13 +51,13 @@ The addon is built around one loop: open a profession, see the cheapest path fro
 4. **Price**: PriceManager prices every reagent (vendor price first, then TSM / Auctionator, then the vendor sell value as an estimate) and records where each price came from
 5. **Sale value**: SaleValue works out what one craft of each usable recipe sells for (to a vendor by default)
 6. **Check**: Availability module filters recipes by obtainability
-7. **Calculate**: the strategy scores all candidates per skill level, respecting pins and racial bonuses. Under Cheapest the planner builds up to four candidate routes (market prices only; ranked with sale value; with the owned stock; the route kept last, carried on) and keeps the one the player pays least for
+7. **Calculate**: the strategy scores all candidates per skill level, respecting pins and racial bonuses. Under Cheapest the planner builds up to four candidate routes (market prices only; ranked with sale value; with the owned stock; the route kept last, carried on) and keeps the one the player pays least for; a plan already followed is kept over small differences, never above the market route
 8. **Account**: what the player pays is defined once - the shopping list of the path's crafts (stock taken off, craft-or-buy applied, recipes added), less what the crafts sell for. The route comparison and every total shown use it
 9. **Stage**: path steps are folded into stages (craft runs, learn and rank steps, gaps)
 10. **Display**: the LazyProf window shows the target ("Level to"), the receipt and the stages (Path / Shopping tabs), and the arrow marks the next recipe
 11. **Choose** (optional): moving the target plans again to the new skill; "Use" on an alternative pins it over the run's skill range and the path is planned again at once
 
-A change in the bags does not plan the route again: the stock is rescanned into the shown path and the window redrawn. The route is planned again when the profession window opens, the skill changes, the target, strategy, a pin or a setting changes, item data arrives, or the auction house closes.
+A change in the bags does not plan the route again: the stock is rescanned into the shown path and the window redrawn. The route is planned again when the profession window opens, the skill changes, the target, strategy, a pin or a setting changes, item data arrives, the auction house closes, or a merchant shows a vendor price not seen before (with the profession window open).
 
 ## Key Modules
 

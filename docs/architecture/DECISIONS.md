@@ -178,7 +178,7 @@ score = (reagent_cost + amortized_cost) / expected_skillup
 
 **Date**: 2026-02-08
 
-**Status**: Accepted
+**Status**: Superseded (since v0.10.0 a chosen recipe is saved per character and profession over a skill range and applies at once; see ADR-016)
 
 **Context**: Users want to override the optimizer's recipe choices (avoiding expensive patterns, specialization preferences, preferring safer orange/yellow over risky green). Need to decide whether pins persist across sessions.
 
@@ -258,7 +258,7 @@ score = (reagent_cost + amortized_cost) / expected_skillup
 
 **Date**: 2026-02-09
 
-**Status**: Accepted (implemented in v0.4.2+)
+**Status**: Superseded (the two panels became one window in v0.10.0, and its range filter was removed when the target slider took over that job; see ADR-016 and its amendment. The debug log keeps its own bracket filter)
 
 **Context**: Full-path views (1-375) are overwhelming for users who only need to see their current skill bracket. The milestone panel and shopping list needed filtering without affecting the underlying path calculation.
 

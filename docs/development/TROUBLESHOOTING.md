@@ -41,7 +41,7 @@ bug report or dev chat.
 ### `/lp diag learned` - learned-recipe detection
 
 **When to use:** recipes you have already learned are treated as still to learn (a
-"Learn first" line under a row of the Path tab, "(to learn)" or "[!] Unlearned" on
+"Learn first: ..." line under a row of the Path tab (on Classic Era data: "Learn the recipe first"), "(to learn)" or "[!] Unlearned" on
 an alternative, a learn step in the arrow tooltip), or the wrong recipes are
 treated as known. Open the profession window first, then run it.
 
@@ -384,7 +384,8 @@ Under the Cheapest strategy four things decide the route besides the reagent pri
    a recipe: your bags, and with Syndicator your bank, mail, auctions and alts (the guild
    bank if it is turned on). A bag change alone never plans again; the route is planned
    again when the profession window opens, your skill changes, you change the target, the
-   strategy, a recipe or a setting, item data arrives, or you close the auction house.
+   strategy, a recipe or a setting, item data arrives, you close the auction house, or a
+   merchant shows a vendor price LazyProf had not seen (with the profession window open).
 3. **The candidate routes.** Each calculation plans up to four routes and keeps the one you
    pay least for: `market` (market prices, nothing owned), `sale` (ranked with sale value),
    `stock` (as `sale`, with your stock) and `previous` (the plan you already follow).
@@ -575,7 +576,7 @@ browser, right click: settings). On the other clients:
    ```
    /lp
    ```
-   Look for "Show Minimap Button" option
+   Look for "Show minimap button" option
 
 2. Is LibDBIcon loaded?
    ```

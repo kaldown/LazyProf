@@ -95,7 +95,7 @@ Access via `/lp` or the Interface Options panel:
 
 - **Strategy** - Cheapest (minimize gold) or Fastest (minimize crafts); also in the window, under More options
 - **Count what crafts sell for** - Sold to a vendor (default), sold at auction after the 5% cut, or do not count; also "Selling" in the window, under More options
-- **Margin (percent)** - How many extra crafts "Spare crafts" plans per step (5-30, default 15)
+- **Spare crafts (percent)** - How many extra crafts "Spare crafts" plans per step (5-30, default 15)
 - **Material Resolution** - What reagents without a choice of their own do: never craft intermediates, craft when cheaper, or always craft
 - **Suggest unlearned recipes** - Include recipes you haven't learned yet
 - **Open with the profession window** - Show the LazyProf window whenever you open a profession (on by default)
