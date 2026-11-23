@@ -259,8 +259,25 @@ function Pathfinder:SetTargetSkill(profKey, value, actualSkill, milestones)
     return value
 end
 
+-- One-time cost of getting an unlearned recipe (0 when learned, free or unknown).
+local function RecipeCost(recipe)
+    local info = recipe and not recipe.learned and recipe._sourceInfo
+    if not info then return 0 end
+    if info.type == "trainer" or info.type == "vendor" then
+        return info.cost or 0
+    elseif info.type == "ah" then
+        return info.price or 0
+    end
+    return 0
+end
+
 -- Calculate the shopping list of a set of steps (path steps, or the craft
--- stages' { recipe, quantity, skillStart } entries).
+-- stages' { recipe, quantity, skillStart } entries). This is the addon's one
+-- accounting of what the player pays for reagents and recipes (see Account).
+-- It is a function of its arguments: `inventory` is what the character owns
+-- across the enabled sources and `sourceBreakdown` says where (bags, bank,
+-- mail, auctions, guildBank, alts); nothing is scanned here, so it can be
+-- asked "what if nothing were owned" with two empty tables.
 -- Returns the per-source lists { fromBank, fromMail, fromAuctions,
 -- fromGuildBank, fromAlts, toCraft, fromAH, recipeCosts } and, for the
 -- Shopping tab, one row per item in `rows`:
@@ -275,8 +292,13 @@ end
 --   craftable   a recipe the character can craft makes it
 --   choice      the player's choice for the item ("craft" / "buy"), nil = automatic
 --   crafted     the item is crafted, not bought: craftRecipeName, professionKey,
---               craftQuantity, craftCost and children = { { itemId, name, need }, ... }
--- and buyTotal, the sum of the rows' costs.
+--               craftQuantity, craftCost and children = { { itemId, name, need }, ... }.
+--               Owned stock of the item itself is used before any is crafted;
+--               what other crafted reagents take of it is bought (resolution is
+--               one level deep) and shows as the row's toBuy and cost.
+-- buyTotal, the sum of the rows' costs, and recipeRows = { { recipe, name,
+-- cost, sourceInfo }, ... }: one per unlearned recipe that costs something,
+-- by name; recipeCosts is their sum.
 function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown, prices)
     local needed = {}
 
@@ -318,25 +340,33 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
         entry.count = entry.count + count
     end
 
-    local bagCounts = LazyProf.Inventory:ScanBags()
+    -- Helper: get per-source count from sourceBreakdown
+    local function getSourceCount(itemId, sourceKey)
+        local bd = sourceBreakdown and sourceBreakdown[itemId]
+        if not bd then return 0 end
+        return bd[sourceKey] or 0
+    end
 
     -- Process each needed material through MaterialResolver
     for itemId, data in pairs(needed) do
         local need = data.count
-        local inBags = bagCounts[itemId] or 0
-        local afterBags = math.max(0, need - inBags)
+        local inBags = getSourceCount(itemId, "bags")
+        -- Owned stock of the item itself (every enabled source) is used
+        -- before any of it is crafted.
+        local owned = math.min(need, inventory[itemId] or 0)
+        local toMake = need - owned
         local choice = choices[itemId]
         local resolution = nil
         if LazyProf.MaterialResolver then
             -- Asked for at least one so "can the character craft it" is known
-            -- even when the bags already hold enough.
+            -- even when the stock already covers the need.
             resolution = LazyProf.MaterialResolver:ResolveMaterial(
-                itemId, math.max(afterBags, 1), inventory, prices, {}, resolutionMode, choice
+                itemId, math.max(toMake, 1), inventory, prices, {}, resolutionMode, choice
             )
         end
         local craftable = resolution and resolution.craftable or false
 
-        if afterBags > 0 and resolution and resolution.shouldCraft and resolution.craftRecipe then
+        if toMake > 0 and resolution and resolution.shouldCraft and resolution.craftRecipe then
             -- Add to toCraft list
             local name, link, icon = Utils.GetItemInfo(itemId)
             name = name or data.nameFromData or "Unknown"
@@ -379,7 +409,7 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
                 name = name,
                 icon = icon,
                 link = link,
-                quantity = afterBags,
+                quantity = toMake,
                 recipeName = recipeName,
                 professionKey = resolution.professionKey,
                 sourceDesc = sourceDesc,
@@ -389,6 +419,12 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
                 firstUsedAtSkill = data.firstUsedAtSkill,
             })
 
+            -- The owned part goes through the same waterfall as bought
+            -- reagents, so it shows under "collect first".
+            if owned > 0 then
+                addResolved(itemId, owned, data.nameFromData, data.firstUsedAtSkill)
+            end
+
             rowsById[itemId] = {
                 itemId = itemId, name = name, icon = icon, link = link,
                 firstUsedAtSkill = data.firstUsedAtSkill,
@@ -396,7 +432,8 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
                 toBuy = 0, cost = 0, unitPrice = prices[itemId],
                 craftable = true, choice = choice, crafted = true,
                 craftRecipeName = recipeName, professionKey = resolution.professionKey,
-                craftQuantity = afterBags, craftCost = resolution.craftCost, children = children,
+                craftQuantity = toMake, craftCost = resolution.craftCost, children = children,
+                ownedUse = owned,
             }
         else
             -- Bought (or already owned): its full need goes on, so an item
@@ -413,13 +450,6 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
     local fromGuildBank = {}
     local fromAlts = {}
     local fromAH = {}
-
-    -- Helper: get per-source count from sourceBreakdown
-    local function getSourceCount(itemId, sourceKey)
-        local bd = sourceBreakdown and sourceBreakdown[itemId]
-        if not bd then return 0 end
-        return bd[sourceKey] or 0
-    end
 
     -- Helper: get total alt count for an item across all sources
     local function getAltTotal(itemId)
@@ -499,17 +529,28 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
         -- The item's shopping row
         local row = rowsById[itemId] or { itemId = itemId, craftable = false, crafted = false }
         rowsById[itemId] = row
-        if not row.crafted then
-            local info = pm and pm.PeekPriceInfo and pm:PeekPriceInfo(itemId) or nil
+        local info = pm and pm.PeekPriceInfo and pm:PeekPriceInfo(itemId) or nil
+        local sources = {
+            bank = fromBankCount, mail = fromMailCount, auctions = fromAuctionsCount,
+            guildBank = fromGuildBankCount, alts = fromAltCount,
+        }
+        if row.crafted then
+            -- `need` here is the owned part used before crafting plus what
+            -- other crafted reagents take of this one; the latter is bought.
+            row.need = row.need + (need - (row.ownedUse or 0))
+            row.sources = sources
+            row.toBuy = fromAHCount
+            row.cost = price * fromAHCount
+            row.unpriced = (fromAHCount > 0 and prices[itemId] == nil) or nil
+            row.priceSource = info and info.source or nil
+            row.isVendor = (info ~= nil and info.source == "Vendor")
+        else
             row.name, row.icon, row.link = name, icon, link
             row.firstUsedAtSkill = data.firstUsedAtSkill
             row.need = need
             row.have = totalHave
             row.inBags = inBags
-            row.sources = {
-                bank = fromBankCount, mail = fromMailCount, auctions = fromAuctionsCount,
-                guildBank = fromGuildBankCount, alts = fromAltCount,
-            }
+            row.sources = sources
             row.toBuy = fromAHCount
             row.unitPrice = prices[itemId]
             row.unpriced = (prices[itemId] == nil) or nil
@@ -622,20 +663,27 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
     end
     table.sort(rows, sortBySkillThenName)
 
-    -- Calculate recipe acquisition costs (one-time costs for unlearned recipes)
+    -- One-time costs of the recipes still to learn
     local seenRecipes = {}
+    local recipeRows = {}
     local recipeCosts = 0
     for _, step in ipairs(steps) do
-        if not step.recipe.learned and step.recipe._sourceInfo and not seenRecipes[step.recipe.id] then
-            seenRecipes[step.recipe.id] = true
-            local srcType = step.recipe._sourceInfo.type
-            if srcType == "trainer" or srcType == "vendor" then
-                recipeCosts = recipeCosts + (step.recipe._sourceInfo.cost or 0)
-            elseif srcType == "ah" then
-                recipeCosts = recipeCosts + (step.recipe._sourceInfo.price or 0)
+        local recipe = step.recipe
+        if not seenRecipes[recipe.id] then
+            seenRecipes[recipe.id] = true
+            local cost = RecipeCost(recipe)
+            if cost > 0 then
+                recipeRows[#recipeRows + 1] = {
+                    recipe = recipe, name = recipe.name or "Unknown", cost = cost, sourceInfo = recipe._sourceInfo,
+                }
+                recipeCosts = recipeCosts + cost
             end
         end
     end
+    table.sort(recipeRows, function(a, b)
+        if a.name ~= b.name then return a.name < b.name end
+        return tostring(a.recipe.id) < tostring(b.recipe.id)
+    end)
 
     return {
         fromBank = fromBank,
@@ -646,9 +694,43 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
         toCraft = toCraft,
         fromAH = fromAH,
         recipeCosts = recipeCosts,
+        recipeRows = recipeRows,
         rows = rows,
         buyTotal = buyTotal,
     }
+end
+
+-- What a set of craft steps costs the player: the shopping list of the steps
+-- (CalculateMissingMaterials), minus what the crafts sell for. Every total the
+-- window shows and the choice between candidate routes use this.
+--   saleValues  { [recipeId] = copper per craft } or nil
+-- Returns { missing, reagents, recipes, spend, sale, net }:
+--   reagents = the shopping rows' costs, recipes = the recipes still to learn,
+--   spend = reagents + recipes, sale = crafts x sale value, net = spend - sale.
+function Pathfinder:Account(steps, inventory, sourceBreakdown, prices, saleValues)
+    local missing = self:CalculateMissingMaterials(steps, inventory or {}, sourceBreakdown or {}, prices or {})
+    local sale = 0
+    if saleValues then
+        for _, step in ipairs(steps) do
+            sale = sale + step.quantity * (saleValues[step.recipe.id] or 0)
+        end
+    end
+    local spend = missing.buyTotal + missing.recipeCosts
+    return {
+        missing = missing,
+        reagents = missing.buyTotal,
+        recipes = missing.recipeCosts,
+        spend = spend,
+        sale = sale,
+        net = spend - sale,
+    }
+end
+
+-- How much less the player spends on the steps thanks to owned stock: the
+-- same accounting with nothing owned, minus `spend`. Never below zero.
+function Pathfinder:StockSaving(steps, prices, spend)
+    local without = self:Account(steps, {}, {}, prices)
+    return math.max(0, without.spend - (spend or 0))
 end
 
 -- The step the arrow points at: the first step the player's real skill has not
