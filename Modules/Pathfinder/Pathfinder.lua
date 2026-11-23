@@ -174,6 +174,10 @@ function Pathfinder:BuildPath(run)
         complete = meta.complete,
         gaps = meta.gaps,
         nothingLeft = (#steps == 0 and #meta.gaps == 0) or nil,
+        -- The sum of the planner's step costs. For the market and sale
+        -- routes that is the market cost; for a route planned with stock it
+        -- is what the simulated stock does not cover. Nothing shown to the
+        -- player reads it: totals come from the stages and from Account.
         totalCost = Utils.Sum(steps, "totalCost"),
         -- What the stage builder and the shopping list are computed from
         prices = prices,
@@ -213,21 +217,27 @@ end
 -- market-price route and still be kept (a bridge can stop at a fractional skill).
 local GAP_TOLERANCE = 1
 
--- Does the character own a reagent of a recipe that can be on the path?
-local function OwnsUsableReagent(recipes, inventory, startSkill, targetSkill, racialBonus)
-    if not inventory or next(inventory) == nil then return false end
+-- The owned stock a route from startSkill to targetSkill can use: the counts
+-- of the reagents of recipes that can be on it. nil when there is none. (The
+-- strategy copies its inventory at every step, so it is handed this and not
+-- the whole scan.)
+local function UsableStock(recipes, inventory, startSkill, targetSkill, racialBonus)
+    if not inventory or next(inventory) == nil then return nil end
+    local stock
     for _, recipe in ipairs(recipes) do
         local range = recipe.skillRange
         if (recipe.skillRequired or 0) <= targetSkill
                 and (not range or (range.gray or math.huge) + racialBonus > startSkill) then
             for _, reagent in ipairs(recipe.reagents or {}) do
-                if (inventory[reagent.itemId] or 0) > 0 then
-                    return true
+                local owned = inventory[reagent.itemId] or 0
+                if owned > 0 then
+                    stock = stock or {}
+                    stock[reagent.itemId] = owned
                 end
             end
         end
     end
-    return false
+    return stock
 end
 
 -- A route as it is remembered between calculations: one { from, to, recipeId }
@@ -324,14 +334,14 @@ function Pathfinder:PlanRoutes(args)
         if sale.rank and next(sale.rank) ~= nil then
             built[#built + 1] = build("sale", {}, sale.rank)
         end
-        local ownsUsable = OwnsUsableReagent(args.recipes, args.inventory, args.startSkill, args.targetSkill,
+        local stock = UsableStock(args.recipes, args.inventory, args.startSkill, args.targetSkill,
             args.racialBonus or 0)
-        if ownsUsable then
-            built[#built + 1] = build("stock", args.inventory, sale.rank)
+        if stock then
+            built[#built + 1] = build("stock", stock, sale.rank)
         end
         local replay = ReplayPins(args.previous, args.pins, args.startSkill)
         if replay then
-            built[#built + 1] = build("previous", ownsUsable and args.inventory or {}, sale.rank, replay)
+            built[#built + 1] = build("previous", stock or {}, sale.rank, replay)
         end
     else
         built[1] = build(args.strategyName or "route", {}, nil)

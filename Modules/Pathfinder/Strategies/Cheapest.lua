@@ -91,7 +91,7 @@ LazyProf.PathfinderStrategies.cheapest = {
         -- against the whole run (StrategyCore.ReagentCostPerCraft). A reagent
         -- without a price makes the cost unknown: the recipe is not ranked.
         local actualCost, priced = LazyProf.StrategyCore.ReagentCostPerCraft(self, recipe, currentSkill, targetSkill,
-            inventory, prices, racialBonus, ctx and ctx.recipes)
+            inventory, prices, racialBonus, ctx)
         if not priced then
             return math.huge
         end
@@ -234,7 +234,10 @@ LazyProf.PathfinderStrategies.cheapest = {
     -- Calculate how many crafts until next breakpoint
     -- Breakpoints: gray, target, new recipe unlocks, or color changes
     -- racialBonus: extends color ranges (e.g., Gnome +15 Engineering)
-    CalculateQuantity = function(self, recipe, currentSkill, targetSkill, recipes, racialBonus)
+    -- nextUnlock: optional; the lowest skill above currentSkill at which a recipe
+    --             unlocks when the caller already knows it (false: none), so
+    --             the recipe list is not walked again
+    CalculateQuantity = function(self, recipe, currentSkill, targetSkill, recipes, racialBonus, nextUnlock)
         racialBonus = racialBonus or 0
         local quantity = 0
         local simSkill = currentSkill
@@ -248,7 +251,11 @@ LazyProf.PathfinderStrategies.cheapest = {
         local nextBreakpoint = grayAt  -- default: stop at gray
 
         -- Check for new recipe unlocks (uses base skill, not affected by racial bonus)
-        if recipes then
+        if nextUnlock ~= nil then
+            if nextUnlock and nextUnlock < nextBreakpoint then
+                nextBreakpoint = nextUnlock
+            end
+        elseif recipes then
             for _, r in ipairs(recipes) do
                 if r.skillRequired > currentSkill and r.skillRequired < nextBreakpoint then
                     nextBreakpoint = r.skillRequired

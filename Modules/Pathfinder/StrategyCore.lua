@@ -17,34 +17,92 @@ local Utils = LazyProf.Utils
 
 local GAP_NO_RECIPE = "no recipe"
 
+-- The lowest skill above `skill` at which a recipe becomes learnable; false
+-- when there is none. (A run is cut there: the new recipe may be better.)
+local function NextUnlock(recipes, skill)
+    local unlock = false
+    for _, recipe in ipairs(recipes or {}) do
+        local required = recipe.skillRequired
+        if required > skill and (not unlock or required < unlock) then
+            unlock = required
+        end
+    end
+    return unlock
+end
+
+-- How many of `quantity` crafts a green bridge gets: it stops at the skill
+-- where the recipe's chance falls under Constants.BRIDGE_MIN_CHANCE.
+local function BridgeCut(strategy, recipe, skill, quantity, racialBonus)
+    local minChance = LazyProf.Constants.BRIDGE_MIN_CHANCE
+    local allowed, simSkill = 0, skill
+    while allowed < quantity
+            and Utils.GetSkillUpChance(simSkill - racialBonus, recipe.skillRange) >= minChance do
+        allowed = allowed + 1
+        simSkill = simSkill + strategy:GetExpectedSkillups(recipe, simSkill, racialBonus)
+    end
+    return math.max(1, allowed)
+end
+
 -- What one craft of `recipe` costs in reagents at `skill`, counting owned
 -- stock against the whole run the recipe would get, not against one craft:
 -- owning enough for a single craft must not make a run of fifty look free.
 -- For a reagent the character owns, the run's quantity is worked out first
--- (strategy:CalculateQuantity) and the reagent costs
+-- (strategy:CalculateQuantity, cut like a bridge when ctx.bridge is set) and
+-- the reagent costs
 --   price x max(0, count x quantity - owned) / quantity
 -- per craft. A reagent with nothing owned costs price x count, exactly as it
 -- always did, so with an empty inventory the result is unchanged to the bit.
--- Returns cost, priced. priced is false when a reagent has no price (or one
--- not above zero); such a reagent adds nothing to the cost.
-local function ReagentCostPerCraft(strategy, recipe, skill, targetSkill, inventory, prices, racialBonus, recipes)
+-- ctx: the run's scoring context or nil ({ recipes, bridge, costMemo, ... }).
+--   Within one scoring pass (same skill, same stock) a recipe's result is
+--   kept in ctx.costMemo, and the next recipe unlock is looked up once.
+-- Returns cost, priced. priced is false when a reagent that has to be bought
+-- has no price (or one not above zero); such a reagent adds nothing to the
+-- cost. A reagent the stock covers for the whole run needs no price.
+local function ReagentCostPerCraft(strategy, recipe, skill, targetSkill, inventory, prices, racialBonus, ctx)
+    local memo = ctx and ctx.costMemo
+    local known = memo and memo[recipe]
+    if known then
+        return known[1], known[2]
+    end
+
     local cost, priced = 0, true
     local quantity
     for _, reagent in ipairs(recipe.reagents) do
         local price = prices[reagent.itemId]
-        if not price or price <= 0 then
-            priced = false
+        local hasPrice = (price ~= nil and price > 0)
+        if not hasPrice then
             price = 0
         end
         local owned = inventory[reagent.itemId] or 0
         if owned <= 0 then
+            if not hasPrice then priced = false end
             cost = cost + (price * reagent.count)
         else
             if not quantity then
-                quantity = math.max(1, strategy:CalculateQuantity(recipe, skill, targetSkill, recipes, racialBonus))
+                local unlock
+                if ctx then
+                    if ctx.unlockSkill ~= skill then
+                        ctx.unlockSkill = skill
+                        ctx.unlock = NextUnlock(ctx.recipes, skill)
+                    end
+                    unlock = ctx.unlock
+                end
+                quantity = math.max(1, strategy:CalculateQuantity(recipe, skill, targetSkill,
+                    ctx and ctx.recipes, racialBonus, unlock))
+                if ctx and ctx.bridge then
+                    quantity = BridgeCut(strategy, recipe, skill, quantity, racialBonus)
+                end
             end
-            cost = cost + price * math.max(0, reagent.count * quantity - owned) / quantity
+            local toBuy = math.max(0, reagent.count * quantity - owned)
+            if toBuy > 0 then
+                if not hasPrice then priced = false end
+                cost = cost + price * toBuy / quantity
+            end
         end
+    end
+
+    if memo then
+        memo[recipe] = { cost, priced }
     end
     return cost, priced
 end
@@ -53,9 +111,14 @@ end
 -- ScoreRecipe is called with the superset
 -- (recipe, skill, targetSkill, inventory, prices, racialBonus, purchasedRecipes, scoreCtx);
 -- a strategy ignores what it does not use. scoreCtx is the run's context
--- (see Run): { rankSale, sale, recipes }.
-local function ScoreCandidates(strategy, candidates, skill, targetSkill, inventory, prices, racialBonus, purchasedRecipes, label, scoreCtx)
+-- (see Run): { rankSale, sale, recipes }; this pass also marks it as a bridge
+-- pass or not and starts a fresh per-recipe cost memo.
+local function ScoreCandidates(strategy, candidates, skill, targetSkill, inventory, prices, racialBonus, purchasedRecipes, label, scoreCtx, bridge)
     local effectiveSkill = skill - racialBonus
+    if scoreCtx then
+        scoreCtx.bridge = bridge or nil
+        scoreCtx.costMemo = {}
+    end
     if strategy.logScoring and LazyProf:IsDebugEnabled("scoring") then
         LazyProf:Debug("scoring", "=== Scoring candidates at skill " .. skill .. " (effective: " .. effectiveSkill .. ")"
             .. (label or "") .. " ===")
@@ -68,7 +131,7 @@ local function ScoreCandidates(strategy, candidates, skill, targetSkill, invento
 
         -- Per-craft cost for display, by the same rule the scoring uses
         local craftCost = ReagentCostPerCraft(strategy, recipe, skill, targetSkill, inventory, prices,
-            racialBonus, scoreCtx and scoreCtx.recipes)
+            racialBonus, scoreCtx)
 
         table.insert(alternatives, {
             recipe = recipe,
@@ -169,7 +232,7 @@ LazyProf.StrategyCore = {
                 local effectiveSkill = simulatedSkill - racialBonus
                 local wideCandidates = self:GetCandidates(recipes, simulatedSkill, racialBonus, true)
                 local wideAlternatives = ScoreCandidates(self, wideCandidates, simulatedSkill, targetSkill,
-                    simulatedInventory, prices, racialBonus, purchasedRecipes, " [bridge: green allowed]", scoreCtx)
+                    simulatedInventory, prices, racialBonus, purchasedRecipes, " [bridge: green allowed]", scoreCtx, true)
                 best, bestScore = PickBest(wideAlternatives, pinnedId, function(recipe)
                     return Utils.GetSkillUpChance(effectiveSkill, recipe.skillRange) >= minChance
                 end)
@@ -191,14 +254,7 @@ LazyProf.StrategyCore = {
                 -- A bridge stops at the skill where its chance falls under the floor,
                 -- so the gap (if any) starts there.
                 if bridge then
-                    local minChance = LazyProf.Constants.BRIDGE_MIN_CHANCE
-                    local allowed, simSkill = 0, simulatedSkill
-                    while allowed < quantity
-                            and Utils.GetSkillUpChance(simSkill - racialBonus, best.skillRange) >= minChance do
-                        allowed = allowed + 1
-                        simSkill = simSkill + self:GetExpectedSkillups(best, simSkill, racialBonus)
-                    end
-                    quantity = math.max(1, allowed)
+                    quantity = BridgeCut(self, best, simulatedSkill, quantity, racialBonus)
                 end
 
                 local totalSkillups, totalCost = self:CalculateTotalCostAndSkillups(best, simulatedSkill, quantity, simulatedInventory, prices, racialBonus, purchasedRecipes)

@@ -317,9 +317,9 @@ LazyProf.options = {
                 },
                 includeBankItems = {
                     name = "Include bank items",
-                    desc = "When enabled, items in your bank count as owned: the path is " ..
-                           "planned around them when that is cheaper for you, and the " ..
-                           "shopping list shows only what you still need to buy.\n\n" ..
+                    desc = "When enabled, items in your bank count as owned: the shopping " ..
+                           "list shows only what you still need to buy, and the Cheapest " ..
+                           "strategy plans the path around them when that is cheaper for you.\n\n" ..
                            (Syndicator and "" or "Requires: Syndicator addon installed.\n\n") ..
                            "Example: You need 20 Thorium Bars but have 8 in your bank. " ..
                            "The shopping list shows 12 to buy from the AH.",
@@ -336,9 +336,9 @@ LazyProf.options = {
                 includeAltCharacters = {
                     name = "Include alt characters",
                     desc = "When enabled, materials on ALL your characters (bags, " ..
-                           "banks, mail, and AH listings) count as owned: the path is " ..
-                           "planned around them when that is cheaper for you, and they " ..
-                           "are subtracted from the shopping list.\n\n" ..
+                           "banks, mail, and AH listings) count as owned: they are " ..
+                           "subtracted from the shopping list, and the Cheapest strategy " ..
+                           "plans the path around them when that is cheaper for you.\n\n" ..
                            "Requires: Syndicator addon installed.\n\n" ..
                            "Example: Your alt has 200 Silk Cloth. The shopping list " ..
                            "will show 200 fewer Silk Cloth to buy from the AH.\n\n" ..
@@ -358,8 +358,9 @@ LazyProf.options = {
                 },
                 includeGuildBank = {
                     name = "Include guild bank",
-                    desc = "When enabled, materials in your guild bank are subtracted " ..
-                           "from the shopping list.\n\n" ..
+                    desc = "When enabled, materials in your guild bank count as owned: " ..
+                           "they are subtracted from the shopping list, and the Cheapest " ..
+                           "strategy plans the path around them when that is cheaper for you.\n\n" ..
                            "Requires: Syndicator addon installed.\n\n" ..
                            "Guild bank data is cached from your last visit. Only " ..
                            "tabs you have permission to view are included.\n\n" ..
