@@ -122,13 +122,23 @@ function Pathfinder:BuildPath(run)
         LazyProf:Debug("pathfinder", string.format("Racial bonus detected: +%d for %s", racialBonus, tostring(profKey)))
     end
 
-    -- Calculate path with empty inventory so scoring uses market prices only
-    -- (owned materials are handled separately by the shopping list)
+    -- What one craft of each usable recipe sells for (by the setting)
+    local sale = LazyProf.SaleValue:Build(run.recipes, {
+        mode = LazyProf.db.profile.saleValueMode,
+        from = startSkill, to = targetSkill, racialBonus = racialBonus,
+    })
+
+    -- Plan the candidate routes and keep the one the player pays least for.
     -- Memoize recipe availability for the duration of this synchronous scoring
     -- pass (IsRecipeAvailable is called per unlearned candidate per step).
     LazyProf.RecipeAvailability:BeginRecalc()
     LazyProf.SelfFound:BeginRecalc(inventory)
-    local steps, meta = strategy:Calculate(startSkill, targetSkill, run.recipes, {}, prices, racialBonus, pins)
+    local steps, meta, route = self:PlanRoutes({
+        strategy = strategy, strategyName = strategyName,
+        startSkill = startSkill, targetSkill = targetSkill, recipes = run.recipes,
+        prices = prices, racialBonus = racialBonus, pins = pins,
+        inventory = inventory, sourceBreakdown = sourceBreakdown, sale = sale,
+    })
     LazyProf.SelfFound:EndRecalc()
     LazyProf.RecipeAvailability:EndRecalc()
 
@@ -154,14 +164,106 @@ function Pathfinder:BuildPath(run)
         prices = prices,
         inventory = inventory,
         sourceBreakdown = sourceBreakdown,
+        -- What the crafts sell for (SaleValue:Build) and which candidate
+        -- route was kept (PlanRoutes)
+        sale = sale,
+        route = route,
     }
 
     if LazyProf:IsDebugEnabled("pathfinder") then
         LazyProf:Debug("pathfinder", string.format("Path calculated: %d steps, %d gaps, %s total",
             #steps, #meta.gaps, Utils.FormatMoney(path.totalCost)))
+        local parts = {}
+        for _, candidate in ipairs(route.candidates) do
+            parts[#parts + 1] = string.format("%s=%s%s", candidate.key, tostring(candidate.net),
+                candidate.eligible and "" or " (covers less)")
+        end
+        LazyProf:Debug("pathfinder", string.format("Route kept: %s (net copper per candidate: %s)",
+            route.kept, table.concat(parts, ", ")))
     end
 
     return path
+end
+
+-- Skill points the gaps leave uncovered.
+local function GapLength(gaps)
+    local length = 0
+    for _, gap in ipairs(gaps or {}) do
+        length = length + (gap.to - gap.from)
+    end
+    return length
+end
+
+-- A candidate may leave this much more of the range uncovered than the
+-- market-price route and still be kept (a bridge can stop at a fractional skill).
+local GAP_TOLERANCE = 1
+
+-- Plan the candidate routes of one calculation and keep the one the player
+-- pays least for.
+-- args: strategy, strategyName, startSkill, targetSkill, recipes, prices,
+--       racialBonus, pins, inventory, sourceBreakdown (the real stock),
+--       sale (SaleValue:Build; may be nil)
+-- Cheapest builds, in this order:
+--   market  market prices, nothing owned, sale values not used for ranking -
+--           the route as it was before sale values and stock counted. Always.
+--   sale    the same, ranking by cost after what the craft sells for. Only
+--           when some recipe has a sale value that may be used for ranking.
+-- Every candidate is costed the same way - Account over its steps with the
+-- real stock: what is left to buy, plus recipes, minus what the crafts sell
+-- for - and the lowest amount is kept; a tie keeps the earlier candidate.
+-- Because the market route is always a candidate, the kept route never costs
+-- the player more than it by this accounting. A candidate that leaves more of
+-- the range uncovered than the market route cannot win by doing less.
+-- Any other strategy is one run, costed the same way.
+-- Returns steps, meta, route = { kept = key, candidates = { { key, net,
+-- spend, sale, gapLength, eligible }, ... }, ms = milliseconds or nil }.
+function Pathfinder:PlanRoutes(args)
+    local strategy = args.strategy
+    local sale = args.sale or {}
+    local saleValues = sale.values or {}
+    local startedAt = debugprofilestop and debugprofilestop() or nil
+
+    local function build(key, inventory, rankSale)
+        local steps, meta = strategy:Calculate(args.startSkill, args.targetSkill, args.recipes, inventory,
+            args.prices, args.racialBonus, args.pins, { rankSale = rankSale, sale = saleValues })
+        local account = self:Account(steps, args.inventory, args.sourceBreakdown, args.prices, saleValues)
+        return {
+            key = key, steps = steps, meta = meta,
+            net = account.net, spend = account.spend, sale = account.sale,
+            gapLength = GapLength(meta.gaps), eligible = true,
+        }
+    end
+
+    local built = {}
+    if args.strategyName == Constants.STRATEGY.CHEAPEST then
+        built[1] = build("market", {}, nil)
+        if sale.rank and next(sale.rank) ~= nil then
+            built[#built + 1] = build("sale", {}, sale.rank)
+        end
+    else
+        built[1] = build(args.strategyName or "route", {}, nil)
+    end
+
+    local kept = built[1]
+    for i = 2, #built do
+        local candidate = built[i]
+        candidate.eligible = candidate.gapLength <= built[1].gapLength + GAP_TOLERANCE
+        if candidate.eligible and candidate.net < kept.net then
+            kept = candidate
+        end
+    end
+
+    local route = { kept = kept.key, candidates = {} }
+    for i, candidate in ipairs(built) do
+        route.candidates[i] = {
+            key = candidate.key, net = candidate.net, spend = candidate.spend, sale = candidate.sale,
+            gapLength = candidate.gapLength, eligible = candidate.eligible,
+        }
+    end
+    if startedAt then
+        route.ms = debugprofilestop() - startedAt
+    end
+    return kept.steps, kept.meta, route
 end
 
 -- Calculate the path for the open profession, from the character's real skill.

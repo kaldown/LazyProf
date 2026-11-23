@@ -161,6 +161,30 @@ section("C", function()
     LP:OnItemInfoReceived("e", 456, false)  -- success == false -> ignored
     check("C failed item-info -> no schedule", schedCount == 1, schedCount)
 
+    -- A crafted item a sale value is waiting for: its arrival plans again
+    -- through the same coalescing path, and so does its failure (the "still
+    -- loading" note has to go).
+    local waited = { [700] = true, [701] = true }
+    local told = {}
+    LP.SaleValue = { OnItemInfo = function(_self, itemId, success)
+        told[#told + 1] = tostring(itemId) .. ":" .. tostring(success)
+        local was = waited[itemId] or false
+        waited[itemId] = nil
+        return was
+    end }
+    LP:OnItemInfoReceived("e", 700, true)
+    check("C waited sale item -> one coalesced schedule", schedCount == 2, schedCount)
+    LP:OnItemInfoReceived("e", 701, false)
+    check("C waited sale item that failed -> scheduled too", schedCount == 3, schedCount)
+    check("C the sale module is told the outcome", told[1] == "700:true" and told[2] == "701:false", table.concat(told, " "))
+    LP:OnItemInfoReceived("e", 999, true)
+    check("C unrelated item with sale values present -> no schedule", schedCount == 3, schedCount)
+    LP.PriceManager.flooredItems[800] = true
+    waited[800] = true
+    LP:OnItemInfoReceived("e", 800, true)
+    check("C floored reagent that is also a waited item -> one schedule, not two", schedCount == 4, schedCount)
+    LP.SaleValue = nil
+
     LP.ScheduleItemInfoRecalc = saved
 end)
 

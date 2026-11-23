@@ -18,6 +18,7 @@ local LazyProf = harness.loadLazyProf({
     "Core/Client/Classic.lua",
     "Core/Config.lua",
     "Core/CharStore.lua",
+    "Modules/Pricing/SaleValue.lua",
     "Modules/Recipes/Availability.lua",
     "Modules/Recipes/SelfFound.lua",
     "Modules/Pathfinder/Pins.lua",
