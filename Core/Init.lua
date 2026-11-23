@@ -24,7 +24,11 @@ function LazyProf:OnInitialize()
     end
     -- At logout the database tidies the saved tables. Its shutdown notice
     -- comes before that: the moment for a last write that is sure to be kept.
-    self.db.RegisterCallback(self, "OnDatabaseShutdown", "OnDatabaseShutdown")
+    -- (The client's own logout event is heard as well, through the adapter;
+    -- which of the two comes first is not defined.)
+    if self.db.RegisterCallback then
+        self.db.RegisterCallback(self, "OnDatabaseShutdown", "OnDatabaseShutdown")
+    end
     self:RegisterChatCommand("lazyprof", "SlashCommand")
     self:RegisterChatCommand("lp", "SlashCommand")
     if self.SetupConfig then

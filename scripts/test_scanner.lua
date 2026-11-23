@@ -787,10 +787,32 @@ T.section("init wiring", function()
     T.eq("no recalculation from bag updates", recalcs, 0)
     Inventory.OnBagUpdate = realOnBagUpdate
 
-    -- The database's shutdown notice writes a waiting save too.
+    -- The database's shutdown notice writes a waiting save too. It is asked
+    -- for when the database is made (the notice comes before the database
+    -- tidies the saved tables at logout).
+    local shutdown = {}
+    local savedDb, savedLibStub = LazyProf.db, _G.LibStub
+    local fakeDb = { sv = {}, profile = savedDb.profile, char = savedDb.char, global = savedDb.global,
+        RegisterCallback = function(target, event, method) shutdown[#shutdown + 1] = { target = target, event = event, method = method } end }
+    _G.LibStub = function() return { New = function() return fakeDb end } end
+    LazyProf.RegisterChatCommand = function() end
+    local savedSetup, savedMigrate = LazyProf.SetupConfig, LazyProf.MigrateSettings
+    LazyProf.SetupConfig, LazyProf.MigrateSettings = nil, nil
+    LazyProf:OnInitialize()
+    T.check("the database's shutdown notice is asked for", #shutdown == 1 and shutdown[1].target == LazyProf
+        and shutdown[1].event == "OnDatabaseShutdown" and type(LazyProf[shutdown[1].method]) == "function",
+        #shutdown)
+    -- A database without notices (its callback library missing) must not stop the addon from loading.
+    fakeDb.RegisterCallback = nil
+    local loaded, loadError = pcall(LazyProf.OnInitialize, LazyProf)
+    T.check("a database without notices does not break loading", loaded, loadError)
+    LazyProf.SetupConfig, LazyProf.MigrateSettings = savedSetup, savedMigrate
+    _G.LibStub = savedLibStub
+    LazyProf.db = savedDb
+
     LazyProf:OnBagUpdate("BAG_UPDATE", 0)
     client.reads.bags = 0
-    LazyProf:OnDatabaseShutdown()
+    LazyProf[shutdown[1].method](LazyProf)
     T.eq("database shutdown writes the waiting bag save", client.reads.bags, 1)
 
     -- A refresh puts the stock's age on the shown paths with the stock itself.
