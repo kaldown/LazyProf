@@ -9,6 +9,7 @@
 --   ui.named[name]       frames made with a global name
 --   ui.count(pred)       how many frames match
 --   ui.fire(frame, "OnClick", ...)   run a script as the client would
+--   ui.slide(slider, value)          the player moves a slider's handle
 --   ui.combat = true     what InCombatLockdown() reports
 --   ui.event("PLAYER_REGEN_DISABLED")   deliver an event to registered frames
 --
@@ -191,6 +192,34 @@ function M.install(opts)
             function f:SetValue(v) self.value = v end
             function f:SetStatusBarTexture(t) self.barTexture = t end
             function f:SetStatusBarColor(cr, cg, cb, ca) self.barColor = { cr, cg, cb, ca } end
+        elseif ftype == "Slider" then
+            -- A value set by code runs OnValueChanged like the client does,
+            -- flagged as not coming from the player; ui.slide is the player.
+            -- Every range given is kept in rangeCalls.
+            f.min, f.max, f.value, f.step, f.rangeCalls = 0, 0, 0, 1, {}
+            function f:SetMinMaxValues(a, b)
+                self.min, self.max = a, b
+                self.rangeCalls[#self.rangeCalls + 1] = { a, b }
+                self:SetValue(self.value)
+            end
+            function f:GetMinMaxValues() return self.min, self.max end
+            function f:SetValue(v)
+                v = math.max(self.min, math.min(self.max, v))
+                if v == self.value then return end
+                self.value = v
+                if self.scripts.OnValueChanged then self.scripts.OnValueChanged(self, v, false) end
+            end
+            function f:GetValue() return self.value end
+            function f:SetValueStep(s) self.step = s end
+            function f:GetValueStep() return self.step end
+            function f:SetObeyStepOnDrag(o) self.obeyStep = o end
+            function f:SetOrientation(o) self.orientation = o end
+            function f:SetThumbTexture(t)
+                self.thumbTexture = self.thumbTexture or newRegion("Texture", self)
+                self.thumbTexture.texture = t
+            end
+            function f:GetThumbTexture() return self.thumbTexture end
+            function f:IsDraggingThumb() return self.draggingThumb or false end
         end
 
         -- A tab made from the Forever template joins its parent's Tabs array
@@ -202,6 +231,12 @@ function M.install(opts)
         end
         if template == "UICheckButtonTemplate" then
             f.Text = newRegion("FontString", f)
+        end
+        -- The stock plain slider: horizontal, 200 x 19, whole steps on a
+        -- drag, its handle under the key Thumb.
+        if template == "MinimalSliderTemplate" then
+            f.width, f.height, f.orientation, f.obeyStep = 200, 19, "HORIZONTAL", true
+            f.Thumb = newRegion("Texture", f)
         end
         return f
     end
@@ -240,6 +275,13 @@ function M.install(opts)
         local fn = frame.scripts[script]
         assert(fn, "no script " .. script .. " on " .. tostring(frame.name or frame.ftype))
         return fn(frame, ...)
+    end
+
+    -- The player moves a slider's handle to `value`: the frame reports it as
+    -- the player's.
+    function ui.slide(frame, value)
+        frame.value = value
+        if frame.scripts.OnValueChanged then frame.scripts.OnValueChanged(frame, value, true) end
     end
 
     -- Deliver an event to every frame registered for it.

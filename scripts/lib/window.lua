@@ -70,6 +70,7 @@ local FILES = {
     "Modules/UI/Widgets/RowPool.lua",
     "Modules/UI/Widgets/Dropdown.lua",
     "Modules/UI/Widgets/Controls.lua",
+    "Modules/UI/Widgets/Slider.lua",
     "Modules/UI/Widgets/Tabs.lua",
     "Modules/UI/Widgets/RowList.lua",
     "Modules/UI/PathBar.lua",

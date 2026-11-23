@@ -16,12 +16,184 @@ local function load(family)
     for _, path in ipairs({
         "Modules/UI/Widgets/RowPool.lua",
         "Modules/UI/Widgets/Controls.lua",
+        "Modules/UI/Widgets/Slider.lua",
         "Modules/UI/Widgets/Tabs.lua",
         "Modules/UI/Widgets/RowList.lua",
     }) do
         assert(loadfile(path))("LazyProf", addon)
     end
     return ui, addon.Widgets
+end
+
+-- The slider: one implementation per client family, same behaviour. Moving
+-- the handle only reports values; letting go commits once.
+for _, family in ipairs({ "forever", "classic" }) do
+    T.section(family .. " slider", function()
+        local p = family .. " slider: "
+        local ui, W = load(family)
+        local parent = CreateFrame("Frame", nil, UIParent)
+        local moving, released = {}, {}
+        local slider = W.CreateSlider(parent, "TestSlider", {
+            onChanging = function(v) moving[#moving + 1] = v end,
+            onReleased = function(v) released[#released + 1] = v end,
+        })
+        local frame = slider.frame
+        local function calls() return table.concat(moving, ",") .. " / " .. table.concat(released, ",") end
+        local function reset() moving, released = {}, {} end
+        -- No range ever reaches the frame empty or the wrong way round.
+        local function rangesSound()
+            for _, range in ipairs(frame.rangeCalls) do
+                if not (range[1] < range[2]) then return false end
+            end
+            return #frame.rangeCalls > 0
+        end
+
+        T.eq(p .. "a slider frame", frame.ftype, "Slider")
+        T.eq(p .. "with the given name", frame.name, "TestSlider")
+        T.check(p .. "child of the given parent", frame.parent == parent)
+        if family == "forever" then
+            T.eq(p .. "the client's plain slider", frame.template, "MinimalSliderTemplate")
+            T.check(p .. "no thumb of its own", frame.thumbTexture == nil)
+        else
+            T.check(p .. "no template", frame.template == nil)
+            T.eq(p .. "horizontal", frame.orientation, "HORIZONTAL")
+            T.eq(p .. "the stock thumb", frame.thumbTexture and frame.thumbTexture.texture,
+                "Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
+            T.check(p .. "a track of its own", slider.track ~= nil and slider.track.kind == "Texture")
+            T.check(p .. "a size of its own", frame.height > 0)
+        end
+        T.eq(p .. "whole steps", frame.step, 1)
+        T.check(p .. "steps obeyed while dragging", frame.obeyStep == true)
+        slider:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, -80)
+        T.check(p .. "SetPoint places the frame", frame.points[1][1] == "TOPLEFT" and frame.points[1][4] == 14)
+
+        -- Set from code: silent.
+        slider:SetRange(117, 300, 225)
+        T.eq(p .. "range on the frame", frame.min .. "-" .. frame.max, "117-300")
+        T.eq(p .. "value on the frame", frame.value, 225)
+        T.eq(p .. "GetValue", slider:GetValue(), 225)
+        T.check(p .. "enabled when there is room", frame.enabled == true)
+        slider:SetValue(200)
+        T.eq(p .. "SetValue moves the handle", frame.value, 200)
+        slider:SetValue(999)
+        T.eq(p .. "a value above the range is held at its end", slider:GetValue(), 300)
+        slider:SetValue(1)
+        T.eq(p .. "a value below it at its start", slider:GetValue(), 117)
+        slider:SetValue(224.6)
+        T.eq(p .. "values are whole numbers", slider:GetValue(), 225)
+        T.eq(p .. "values set from code call neither callback", calls(), " / ")
+        T.check(p .. "not held", slider:IsHeld() == false)
+
+        -- Dragging reports every new value and commits nothing.
+        ui.fire(frame, "OnMouseDown", "LeftButton")
+        T.check(p .. "held while the button is down", slider:IsHeld() == true)
+        ui.slide(frame, 117)
+        ui.slide(frame, 130)
+        ui.slide(frame, 160)
+        T.eq(p .. "dragging: a call per value, nothing released", calls(), "117,130,160 / ")
+        ui.slide(frame, 160)
+        ui.slide(frame, 160.3)
+        T.eq(p .. "dragging: the same whole number is not reported twice", #moving, 3)
+        T.eq(p .. "GetValue follows the drag", slider:GetValue(), 160)
+
+        -- A redraw while the handle is held leaves it alone.
+        slider:SetRange(120, 300, 300)
+        T.eq(p .. "SetRange while held: range untouched", frame.min .. "-" .. frame.max, "117-300")
+        T.eq(p .. "SetRange while held: value untouched", slider:GetValue(), 160)
+        slider:SetValue(250)
+        T.eq(p .. "SetValue while held: ignored too", slider:GetValue(), 160)
+
+        -- Letting go commits once.
+        ui.fire(frame, "OnMouseUp", "LeftButton")
+        T.eq(p .. "letting go releases once, with the value", calls(), "117,130,160 / 160")
+        T.check(p .. "no longer held", slider:IsHeld() == false)
+        ui.fire(frame, "OnMouseUp", "LeftButton")
+        T.eq(p .. "a second mouse-up releases nothing", #released, 1)
+
+        -- Back where it was committed: nothing to commit.
+        reset()
+        ui.fire(frame, "OnMouseDown", "LeftButton")
+        ui.slide(frame, 200)
+        ui.slide(frame, 160)
+        ui.fire(frame, "OnMouseUp", "LeftButton")
+        T.eq(p .. "dragged away and back: moving reported, nothing released", calls(), "200,160 / ")
+
+        -- A click that moves nothing.
+        ui.fire(frame, "OnMouseDown", "LeftButton")
+        ui.fire(frame, "OnMouseUp", "LeftButton")
+        T.eq(p .. "a click that moves nothing calls nothing", calls(), "200,160 / ")
+
+        -- The other mouse button is not a drag.
+        ui.fire(frame, "OnMouseDown", "RightButton")
+        T.check(p .. "the right button does not hold it", slider:IsHeld() == false)
+
+        -- A value from the player with no button held commits at once.
+        reset()
+        ui.slide(frame, 180)
+        T.eq(p .. "moved without a held button: committed at once", calls(), "180 / 180")
+
+        -- The client says the handle is being dragged although no mouse-down
+        -- was seen: values still wait for the release.
+        reset()
+        frame.draggingThumb = true
+        ui.slide(frame, 190)
+        T.eq(p .. "the client's own drag state also counts as held", calls(), "190 / ")
+        T.check(p .. "IsHeld says so", slider:IsHeld() == true)
+        frame.draggingThumb = false
+        ui.fire(frame, "OnMouseUp", "LeftButton")
+        T.eq(p .. "and its release commits", calls(), "190 / 190")
+
+        -- Hidden while held (combat, the window closing): the hold is gone,
+        -- nothing is committed.
+        reset()
+        ui.fire(frame, "OnMouseDown", "LeftButton")
+        ui.slide(frame, 210)
+        frame:Hide()
+        T.check(p .. "hiding the frame clears the hold", slider:IsHeld() == false)
+        T.eq(p .. "and commits nothing", #released, 0)
+        frame:Show()
+        ui.fire(frame, "OnMouseUp", "LeftButton")
+        T.eq(p .. "a late mouse-up commits nothing either", #released, 0)
+        slider:SetRange(117, 300, 190)
+        T.eq(p .. "the next range puts the handle back", slider:GetValue(), 190)
+        -- ...also when it is a parent that was hidden.
+        ui.fire(frame, "OnMouseDown", "LeftButton")
+        parent:Hide()
+        T.check(p .. "a hidden parent clears the hold as well", slider:IsHeld() == false)
+        parent:Show()
+        slider:SetRange(117, 300, 225)
+        T.eq(p .. "and the next range is applied", slider:GetValue(), 225)
+
+        -- No room to move: disabled, and never an empty or inverted range.
+        reset()
+        slider:SetRange(300, 300, 300)
+        T.check(p .. "no room: disabled", frame.enabled == false)
+        T.check(p .. "no room: the frame still has a real range", frame.min < frame.max)
+        T.eq(p .. "no room: the value is the end", slider:GetValue(), 300)
+        slider:SetRange(300, 299, 300)
+        T.check(p .. "inverted: disabled", frame.enabled == false)
+        T.check(p .. "inverted: the frame still has a real range", frame.min < frame.max)
+        T.check(p .. "no range ever reached the frame empty or inverted", rangesSound())
+        ui.fire(frame, "OnMouseDown", "LeftButton")
+        T.check(p .. "a disabled slider is not held by a press", slider:IsHeld() == false)
+        slider:SetEnabled(true)
+        T.check(p .. "it cannot be enabled without room", frame.enabled == false)
+        slider:SetRange(117, 300, 225)
+        T.check(p .. "room again: enabled again", frame.enabled == true)
+        slider:SetEnabled(false)
+        T.check(p .. "SetEnabled(false) disables", frame.enabled == false)
+        slider:SetRange(117, 300, 225)
+        T.check(p .. "and a new range does not enable it by itself", frame.enabled == false)
+        slider:SetEnabled(true)
+        T.check(p .. "SetEnabled(true) enables", frame.enabled == true)
+        T.eq(p .. "none of that called a callback", calls(), " / ")
+
+        -- Callbacks are optional.
+        local bare = W.CreateSlider(parent, nil)
+        bare:SetRange(1, 10, 5)
+        ui.slide(bare.frame, 7)
+        T.eq(p .. "works without callbacks", bare:GetValue(), 7)
+    end)
 end
 
 for _, family in ipairs({ "forever", "classic" }) do
