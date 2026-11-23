@@ -2,7 +2,8 @@
 -- How the arrow beside the recommended recipe behaves: where it points, and
 -- what its tooltip says. The tooltip's content is built as data by
 -- Views.ArrowTooltip (Modules/Guide/Views.lua): the current step, the next
--- two, the totals and where the prices came from.
+-- two, what the path costs (spent, back from selling, net) and where the
+-- prices came from.
 local ADDON_NAME, LazyProf = ...
 
 LazyProf.ArrowStrategies = LazyProf.ArrowStrategies or {}

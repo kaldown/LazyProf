@@ -82,7 +82,8 @@ function M.load(family, extraFiles)
         function string.trim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
     end
     local ui = fakeui.install({ family = family })
-    local env = { ui = ui, calls = {}, open = true, cap = 300, hidden = false, recalcs = {}, planCalls = {} }
+    local env = { ui = ui, calls = {}, open = true, cap = 300, hidden = false, recalcs = {}, planCalls = {},
+        accountCalls = {}, savingCalls = {} }
     local function called(name) env.calls[#env.calls + 1] = name end
 
     _G.UnitGUID = function() return "Player-1-WINDOW01" end
@@ -128,6 +129,23 @@ function M.load(family, extraFiles)
         end,
         GetArrowStep = function(_, path) return path.steps[1] end,
         CalculateMissingMaterials = function() return {} end,
+        -- The account of the whole path (the receipt is built from it):
+        -- env.account supplies it, else there is nothing to pay. env.stockSaves
+        -- is what the owned stock saves.
+        Account = function(_, steps, inventory, breakdown, prices, saleValues)
+            env.accountCalls[#env.accountCalls + 1] = { steps = steps, inventory = inventory, breakdown = breakdown,
+                prices = prices, saleValues = saleValues }
+            local account = {}
+            for k, v in pairs(env.account or { missing = { rows = {}, recipeRows = {}, buyTotal = 0, recipeCosts = 0 },
+                    reagents = 0, recipes = 0, spend = 0, sale = 0, net = 0 }) do
+                account[k] = v
+            end
+            return account
+        end,
+        StockSaving = function(_, steps, prices, spend)
+            env.savingCalls[#env.savingCalls + 1] = { steps = steps, prices = prices, spend = spend }
+            return env.stockSaves or 0
+        end,
         -- Planning: env.planPath(profKey, opts) may supply the path; nil data for "mining".
         CalculateForProfession = function(_, key, opts)
             called("plan")
@@ -149,6 +167,8 @@ function M.load(family, extraFiles)
         PeekPriceInfo = function(_, itemId) return (env.priceInfo or {})[itemId] or { price = M.PRICES[itemId], source = "TSM", detail = "DBRecent" } end,
         PriceLine = function(info) return "Price: " .. tostring(info and info.source) end,
     }
+    -- Crafted items still waiting for their data, as counted right now.
+    addon.SaleValue = { LoadingCount = function() return env.saleLoading or 0 end }
     addon.Professions = {
         active = "tailoring",
         Get = function(_, key)

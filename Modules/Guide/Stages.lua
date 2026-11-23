@@ -24,14 +24,21 @@ LazyProf.Stages = Stages
 
 local QUESTION_MARK = "Interface\\Icons\\INV_Misc_QuestionMark"
 
+-- Whole copper. A price can be a fraction of a copper; every cost is rounded
+-- where it is produced and sums add up the rounded costs, so what the window
+-- shows can be added up to the copper.
+local function Round(copper)
+    return math.floor(copper + 0.5)
+end
+
 -- One-time cost of getting an unlearned recipe (0 when learned, free or unknown).
 function Stages.RecipeFee(recipe)
     local info = recipe and not recipe.learned and recipe._sourceInfo
     if not info then return 0 end
     if info.type == "trainer" or info.type == "vendor" then
-        return info.cost or 0
+        return Round(info.cost or 0)
     elseif info.type == "ah" then
-        return info.price or 0
+        return Round(info.price or 0)
     end
     return 0
 end
@@ -51,7 +58,8 @@ end
 
 -- Reagent rows for `quantity` crafts against `remaining` (owned counts left
 -- after earlier stages), consuming what is used. Returns the rows, the market
--- cost of all reagents and the cost of what is missing.
+-- cost of all reagents and the cost of what is missing (each reagent's cost
+-- in whole copper, the sums of those).
 local function Materials(recipe, quantity, remaining, prices)
     local rows, cost, pay = {}, 0, 0
     for _, reagent in ipairs(recipe.reagents or {}) do
@@ -61,6 +69,7 @@ local function Materials(recipe, quantity, remaining, prices)
         local missing = need - used
         remaining[reagent.itemId] = have - used
         local price = prices[reagent.itemId]
+        local missingCost = Round((price or 0) * missing)
         local name, link, icon = Utils.GetItemInfo(reagent.itemId)
         rows[#rows + 1] = {
             itemId = reagent.itemId,
@@ -71,10 +80,10 @@ local function Materials(recipe, quantity, remaining, prices)
             have = have,
             missing = missing,
             price = price,
-            estimatedCost = (price or 0) * missing,
+            estimatedCost = missingCost,
         }
-        cost = cost + (price or 0) * need
-        pay = pay + (price or 0) * missing
+        cost = cost + Round((price or 0) * need)
+        pay = pay + missingCost
     end
     return rows, cost, pay
 end
@@ -96,34 +105,62 @@ local function Colors(recipe, from, to, racialBonus)
     return color, changes
 end
 
+-- How many crafts of a recipe it takes to bring the skill from `from` to
+-- `to`, counted the way the planner counts a run: craft by craft, each craft
+-- moving the skill by the recipe's skill-up chance at that skill. (The span
+-- over the chance at the start would be wrong for every recipe that changes
+-- colour on the way.) Returns the crafts, and the skill the recipe gets to
+-- when it cannot reach `to`: it goes grey first - the chance falls to zero as
+-- the skill nears the grey point, so it is never passed - or it would take
+-- more than MAX_RUN_CRAFTS.
+local MAX_RUN_CRAFTS = 1000
+local REACHED = 1e-6
+local function CraftsOver(recipe, from, to, racialBonus)
+    local range = recipe.skillRange
+    if not range then return 1, nil end
+    local greyAt = range.gray + racialBonus
+    if greyAt < to - REACHED then
+        return nil, math.max(from, greyAt)
+    end
+    local crafts, skill = 0, from
+    -- While the recipe is orange every craft is one point: those crafts are
+    -- counted in one go (the same number the loop below would give).
+    local orangeUntil = math.min(to - REACHED, range.yellow + racialBonus)
+    if range.yellow < range.gray and skill < orangeUntil then
+        crafts = math.ceil(orangeUntil - skill)
+        skill = skill + crafts
+    end
+    while skill < to - REACHED do
+        local chance = Utils.GetSkillUpChance(skill - racialBonus, range)
+        if chance <= 0 or crafts >= MAX_RUN_CRAFTS then
+            return nil, skill
+        end
+        crafts = crafts + 1
+        skill = skill + chance
+    end
+    return math.max(1, crafts), nil
+end
+
 -- The other recipes that could cover the stage, from the first fragment's
 -- scored list, with what choosing each would mean for the stage: crafts and
 -- cost over the stage's range, against what the stage costs the player. Both
 -- sides are net of what the crafts sell for (saleValues by recipe id) and both
 -- carry the margin when it is on, so like is compared with like.
-local function Alternatives(stage, inventoryBefore, prices, stagePay, saleValues, margin)
+-- An alternative that cannot bring the skill to the stage's end has
+-- covers = false and coversTo, the skill it gets to, and no projected figures
+-- or differences: they would compare a part of the run with the whole.
+local function Alternatives(stage, inventoryBefore, prices, stagePay, saleValues, margin, racialBonus)
     local out = {}
-    local span = stage.to - stage.from
     for _, alt in ipairs(stage.fragments[1].alternatives or {}) do
         if alt.recipe.id ~= stage.recipe.id then
-            local crafts = 1
-            if alt.expectedSkillups and alt.expectedSkillups > 0 and span > 0 then
-                crafts = math.ceil(span / alt.expectedSkillups - 1e-9)
-            end
-            crafts = WithMargin(crafts, margin)
-            local reagentCost, priced = 0, true
+            local priced = true
             for _, reagent in ipairs(alt.recipe.reagents or {}) do
                 local price = prices[reagent.itemId]
                 if not price or price <= 0 then priced = false end
-                local missing = math.max(0, reagent.count * crafts - (inventoryBefore[reagent.itemId] or 0))
-                reagentCost = reagentCost + (price or 0) * missing
             end
             local fee = Stages.RecipeFee(alt.recipe)
-            local projected = reagentCost + fee
             local saleEach = saleValues[alt.recipe.id] or 0
-            local projectedSale = crafts * saleEach
-            local projectedNet = projected - projectedSale
-            out[#out + 1] = {
+            local entry = {
                 recipe = alt.recipe,
                 score = alt.score,
                 color = alt.color,
@@ -131,21 +168,41 @@ local function Alternatives(stage, inventoryBefore, prices, stagePay, saleValues
                 craftCost = alt.craftCost,
                 fee = fee,
                 priced = priced,
-                projectedCrafts = crafts,
-                projectedCost = projected,
                 saleEach = saleEach,
-                projectedSale = projectedSale,
-                projectedNet = projectedNet,
-                craftsDelta = crafts - stage.quantity,
-                costDelta = projectedNet - (stagePay - stage.sale),
+                covers = true,
                 unavailable = alt.recipe._isUnavailable and true or false,
                 reason = alt.recipe._unavailableReason,
             }
+            local crafts, reached = CraftsOver(alt.recipe, stage.from, stage.to, racialBonus)
+            if crafts then
+                crafts = WithMargin(crafts, margin)
+                local reagentCost = 0
+                for _, reagent in ipairs(alt.recipe.reagents or {}) do
+                    local missing = math.max(0, reagent.count * crafts - (inventoryBefore[reagent.itemId] or 0))
+                    reagentCost = reagentCost + Round((prices[reagent.itemId] or 0) * missing)
+                end
+                entry.projectedCrafts = crafts
+                entry.projectedCost = reagentCost + fee
+                entry.projectedSale = crafts * saleEach
+                entry.projectedNet = entry.projectedCost - entry.projectedSale
+                entry.craftsDelta = crafts - stage.quantity
+                entry.costDelta = entry.projectedNet - (stagePay - stage.sale)
+            else
+                entry.covers = false
+                entry.coversTo = math.floor(reached + REACHED)
+            end
+            out[#out + 1] = entry
         end
     end
-    -- Usable ones first, cheapest for the player first.
+    -- Usable ones first; of those, the ones that cover the run, cheapest for
+    -- the player first, then the ones that do not, furthest reach first.
     table.sort(out, function(a, b)
         if a.unavailable ~= b.unavailable then return not a.unavailable end
+        if a.covers ~= b.covers then return a.covers end
+        if not a.covers then
+            if a.coversTo ~= b.coversTo then return a.coversTo > b.coversTo end
+            return (a.recipe.name or "") < (b.recipe.name or "")
+        end
         if a.priced ~= b.priced then return a.priced end
         if a.projectedNet ~= b.projectedNet then return a.projectedNet < b.projectedNet end
         return (a.recipe.name or "") < (b.recipe.name or "")
@@ -362,7 +419,7 @@ function Stages.Build(path, opts)
             stage.color, stage.colorChanges = Colors(stage.recipe, stage.from, stage.to, racialBonus)
             stage.pinned = (LazyProf.Pins.Find(opts.pins, stage.from) == stage.recipe.id) or nil
             stage.alternatives = Alternatives(stage, before, prices,
-                stage.outOfPocketCost + (stage.feeIncluded and 0 or stage.fee), saleValues, margin)
+                stage.outOfPocketCost + (stage.feeIncluded and 0 or stage.fee), saleValues, margin, racialBonus)
         end
     end
 

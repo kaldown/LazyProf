@@ -361,6 +361,33 @@ T.section("craft or buy does not count stock twice", function()
     LazyProf.db.char.learnedRecipes = { tailoring = { [500] = true } }
 end)
 
+-- Every cost is whole copper and the total adds up the rounded costs, so
+-- the Cost column of the shopping table adds up to the total shown under it.
+T.section("whole copper", function()
+    local prices = { [BOLT] = 500, [CLOTH] = 0.4, [THREAD] = 33.3, [BAR] = 300.5, [ORE] = 200 }
+    choose(BOLT, "buy")
+    local m = calc({ prices = prices, inventory = {}, breakdown = {}, bags = {} })
+    local cloth, thread, bar = rowOf(m, CLOTH), rowOf(m, THREAD), rowOf(m, BAR)
+    T.eq("5 cloth at 0.4", cloth.cost, 2)
+    T.eq("10 thread at 33.3", thread.cost, 333)
+    T.eq("5 bars at 300.5", bar.cost, 1503)
+    local sum = 0
+    for _, row in ipairs(m.rows) do
+        sum = sum + row.cost
+        T.eq(tostring(row.name) .. ": a whole amount", row.cost, math.floor(row.cost))
+    end
+    T.eq("the total is the sum of the rows", m.buyTotal, sum)
+    T.eq("to the copper", m.buyTotal, 10000 + 2 + 333 + 1503)
+    T.eq("the old per-source list carries the same amount", listHas(m.fromAH, BAR).estimatedCost, 1503)
+    choose(BOLT, nil)
+
+    local hat = { id = 40, name = "Hat", learned = false, _sourceInfo = { type = "ah", price = 250.5 },
+        reagents = { { itemId = THREAD, count = 1, name = "Thread" } } }
+    m = PF:CalculateMissingMaterials({ { recipe = hat, quantity = 1, skillStart = 1 } }, {}, {}, PRICES)
+    T.eq("a recipe's price is whole copper", m.recipeRows[1].cost, 251)
+    T.eq("and so is their sum", m.recipeCosts, 251)
+end)
+
 T.section("recipes to learn", function()
     local function unlearned(id, name, info)
         return { id = id, name = name, learned = false, _sourceInfo = info,
@@ -381,6 +408,27 @@ T.section("recipes to learn", function()
     T.eq("the other", m.recipeRows[2].cost, 250)
     T.eq("the sum is the recipe costs", m.recipeCosts, 650)
     T.eq("no steps: no rows", #PF:CalculateMissingMaterials({}, {}, {}, PRICES).recipeRows, 0)
+
+    -- A recipe paid for with a currency costs something too: it gets a row
+    -- (cost 0 in gold, with the currency), and the gold total is unchanged.
+    local favor = { name = "Merchant's Favor", amount = 5 }
+    steps = {
+        { recipe = unlearned(34, "Favor Hat", { type = "vendor", cost = 0, currency = favor }), quantity = 1, skillStart = 1 },
+        { recipe = unlearned(35, "Both Hat", { type = "vendor", cost = 120, currency = favor }), quantity = 1, skillStart = 2 },
+        { recipe = unlearned(31, "Zebra Hat", { type = "vendor", cost = 250 }), quantity = 1, skillStart = 3 },
+        { recipe = unlearned(36, "Odd Hat", { type = "vendor", cost = 0, currency = { amount = 3 } }), quantity = 1, skillStart = 4 },
+        { recipe = { id = 37, name = "Known Hat", learned = true, _sourceInfo = { type = "vendor", currency = favor },
+            reagents = { { itemId = THREAD, count = 1, name = "Thread" } } }, quantity = 1, skillStart = 5 },
+    }
+    m = PF:CalculateMissingMaterials(steps, {}, {}, PRICES)
+    T.eq("currency: a row for it as well", #m.recipeRows, 3)
+    T.eq("currency: by name", m.recipeRows[1].name .. "," .. m.recipeRows[2].name .. "," .. m.recipeRows[3].name,
+        "Both Hat,Favor Hat,Zebra Hat")
+    T.eq("currency only: no gold", m.recipeRows[2].cost, 0)
+    T.check("currency only: the currency", m.recipeRows[2].currency == favor)
+    T.check("gold and currency: both", m.recipeRows[1].cost == 120 and m.recipeRows[1].currency == favor)
+    T.check("gold only: no currency", m.recipeRows[3].currency == nil)
+    T.eq("the gold total is the gold", m.recipeCosts, 370)
 end)
 
 T.finish()

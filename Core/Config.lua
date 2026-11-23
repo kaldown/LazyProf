@@ -21,6 +21,8 @@ LazyProf.defaults = {
         displayMode = Constants.DISPLAY_MODE.ARROW_TOOLTIP,
         -- Open the LazyProf window beside the profession window
         openWithProfession = true,
+        -- Show the window's advanced controls and details ("More options")
+        showAdvanced = false,
         -- Which owned stock counts (for the route, every total and the
         -- shopping list). The guild bank is shared, so it stays off.
         includeBankItems = true,

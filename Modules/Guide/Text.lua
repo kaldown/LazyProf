@@ -56,6 +56,44 @@ function Text.ColorChanges(stage)
     return table.concat(parts, ", ") .. ", then " .. color
 end
 
+-- An amount to the copper ("1g 2s 3c"). Every amount that is added to
+-- another, or is the sum of amounts shown, is written this way: the short
+-- format drops the smallest unit, and then what is shown does not add up.
+function Text.Money(copper)
+    return LazyProf.Utils.FormatMoney(math.floor((copper or 0) + 0.5))
+end
+
+-- Sale value ----------------------------------------------------------------------
+
+local function CutPercent()
+    return math.floor(LazyProf.Constants.AUCTION_CUT * 100 + 0.5)
+end
+
+-- How the crafts that sell were counted, for the receipt's note: "vendor",
+-- "auction", or "both" when some values are auction prices and others fell
+-- back to the vendor's price.
+function Text.SoldNote(how)
+    if how == "both" then
+        return string.format("crafts sold at auction (after the %d%% cut) or to a vendor, whichever pays more", CutPercent())
+    elseif how == LazyProf.Constants.SALE_MODE.AUCTION then
+        return string.format("crafts sold at auction, after the %d%% cut", CutPercent())
+    end
+    return "crafts sold to a vendor"
+end
+
+-- One craft's sale value, to the copper: "Sells for 45s each (vendor)".
+-- `source` is where the value comes from ("vendor" | "auction"); unknown: no
+-- bracket.
+function Text.SellsFor(saleEach, source)
+    local text = "Sells for " .. Text.Money(saleEach) .. " each"
+    if source == "auction" then
+        return text .. string.format(" (auction, after the %d%% cut)", CutPercent())
+    elseif source == "vendor" then
+        return text .. " (vendor)"
+    end
+    return text
+end
+
 -- Learn and rank steps -----------------------------------------------------------
 
 -- On the VANILLA profile the recipe data types every recipe as trainer-taught,
@@ -87,6 +125,23 @@ function Text.LearnShort(stage, profile)
     end
     if info.type == "ah" then return "auction house" end
     return nil
+end
+
+-- The line under a recipe run whose recipe is still to learn: "Learn first:
+-- trainer, 4s" - where it comes from and the fee (to the copper: it is part
+-- of what is spent) when it is known. Where
+-- nothing may be said about the source (the VANILLA profile, or a source kind
+-- there are no words for) it says only to learn it, without a fee.
+function Text.LearnFirst(stage, profile)
+    local short = Text.LearnShort(stage, profile)
+    if not short then
+        return "Learn the recipe first"
+    end
+    local text = "Learn first: " .. short
+    if (stage.fee or 0) > 0 then
+        text = text .. ", " .. Text.Money(stage.fee)
+    end
+    return text
 end
 
 -- The body of a learn step's card: { { text, color = "plain" | "good" | "warn" | "cost" }, ... }.

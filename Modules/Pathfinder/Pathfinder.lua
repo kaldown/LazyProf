@@ -568,14 +568,21 @@ function Pathfinder:SetTargetSkill(profKey, value, actualSkill, milestones)
     return value
 end
 
--- One-time cost of getting an unlearned recipe (0 when learned, free or unknown).
+-- Whole copper: a price can be a fraction of a copper, a cost that is shown
+-- and added up cannot.
+local function WholeCopper(copper)
+    return math.floor(copper + 0.5)
+end
+
+-- One-time cost of getting an unlearned recipe (0 when learned, free or
+-- unknown), in whole copper.
 local function RecipeCost(recipe)
     local info = recipe and not recipe.learned and recipe._sourceInfo
     if not info then return 0 end
     if info.type == "trainer" or info.type == "vendor" then
-        return info.cost or 0
+        return WholeCopper(info.cost or 0)
     elseif info.type == "ah" then
-        return info.price or 0
+        return WholeCopper(info.price or 0)
     end
     return 0
 end
@@ -599,7 +606,8 @@ end
 --   inBags      of those, in the bags
 --   sources     what to collect first: { bank, mail, auctions, guildBank, alts } counts
 --   toBuy       what is left to buy
---   unitPrice   nil when the item has no price (unpriced = true); cost = unitPrice x toBuy
+--   unitPrice   nil when the item has no price (unpriced = true); cost = unitPrice x toBuy,
+--               in whole copper
 --   priceSource the price's source ("Vendor", "TSM", ...); isVendor = sold by a vendor
 --   craftable   a recipe the character can craft makes it
 --   choice      the player's choice for the item ("craft" / "buy"), nil = automatic
@@ -608,9 +616,10 @@ end
 --               Owned stock of the item itself is used before any is crafted;
 --               what other crafted reagents take of it is bought (resolution is
 --               one level deep) and shows as the row's toBuy and cost.
--- buyTotal, the sum of the rows' costs, and recipeRows = { { recipe, name,
--- cost, sourceInfo }, ... }: one per unlearned recipe that costs something,
--- by name; recipeCosts is their sum.
+-- buyTotal, the sum of the rows' (whole-copper) costs, and recipeRows = { { recipe, name,
+-- cost, sourceInfo, currency }, ... }: one per unlearned recipe that costs
+-- something, by name - gold (cost), a currency (the source's currency table;
+-- cost is 0 when it is the only price) or both; recipeCosts is the gold.
 function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown, prices)
     local needed = {}
 
@@ -873,7 +882,7 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
             row.need = row.need + (need - (row.ownedUse or 0))
             row.sources = sources
             row.toBuy = fromAHCount
-            row.cost = price * fromAHCount
+            row.cost = WholeCopper(price * fromAHCount)
             row.unpriced = (fromAHCount > 0 and prices[itemId] == nil) or nil
             row.priceSource = info and info.source or nil
             row.isVendor = (info ~= nil and info.source == "Vendor")
@@ -887,7 +896,7 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
             row.toBuy = fromAHCount
             row.unitPrice = prices[itemId]
             row.unpriced = (prices[itemId] == nil) or nil
-            row.cost = price * fromAHCount
+            row.cost = WholeCopper(price * fromAHCount)
             row.priceSource = info and info.source or nil
             row.isVendor = (info ~= nil and info.source == "Vendor")
         end
@@ -967,7 +976,7 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
                 have = totalHave,
                 need = need,
                 missing = fromAHCount,
-                estimatedCost = price * fromAHCount,
+                estimatedCost = WholeCopper(price * fromAHCount),
                 firstUsedAtSkill = data.firstUsedAtSkill,
             })
         end
@@ -1005,9 +1014,13 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
         if not seenRecipes[recipe.id] then
             seenRecipes[recipe.id] = true
             local cost = RecipeCost(recipe)
-            if cost > 0 then
+            -- A recipe paid for with a currency costs something too.
+            local info = (not recipe.learned) and recipe._sourceInfo or nil
+            local currency = (info and Utils.FormatCurrency(info.currency)) and info.currency or nil
+            if cost > 0 or currency then
                 recipeRows[#recipeRows + 1] = {
                     recipe = recipe, name = recipe.name or "Unknown", cost = cost, sourceInfo = recipe._sourceInfo,
+                    currency = currency,
                 }
                 recipeCosts = recipeCosts + cost
             end

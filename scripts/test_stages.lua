@@ -317,13 +317,14 @@ end)
 
 T.section("alternatives and pins", function()
     local A = recipe(1, "A", 1, 400, 410, 420)
-    local B = recipe(2, "B", 1, 400, 410, 420, { unlearned = true, sourceInfo = { type = "vendor", cost = 1000 } })
+    -- B turns yellow at 11 and green at 21: the run's twenty points take it 24 crafts.
+    local B = recipe(2, "B", 1, 11, 21, 31, { unlearned = true, sourceInfo = { type = "vendor", cost = 1000 } })
     local C = recipe(3, "C", 1, 400, 410, 420)
     C._isUnavailable = true
     C._unavailableReason = "Needs Alchemy"
     local alts = {
         { recipe = A, score = 1, color = "orange", expectedSkillups = 1, craftCost = 100 },
-        { recipe = B, score = 2, color = "orange", expectedSkillups = 0.5, craftCost = 200 },
+        { recipe = B, score = 2, color = "orange", expectedSkillups = 1, craftCost = 200 },
         { recipe = C, score = math.huge, color = "orange", expectedSkillups = 1, craftCost = 300 },
     }
     local path = { targetSkill = 75, steps = { step(A, 1, 11, 10, 1000, { alternatives = alts }), step(A, 11, 21, 10, 1000) },
@@ -335,14 +336,107 @@ T.section("alternatives and pins", function()
     T.eq("the stage's own recipe is not an alternative", #st.alternatives, 2)
     local b = st.alternatives[1]
     T.eq("alternatives come from the first fragment", b.recipe.id, 2)
-    T.eq("crafts projected over the stage's range", b.projectedCrafts, 40)
-    T.eq("crafts delta against the stage", b.craftsDelta, 20)
-    T.eq("projected cost uses owned stock and adds the recipe fee", b.projectedCost, (40 - 5) * 200 + 1000)
-    T.eq("cost delta against what the stage costs you", b.costDelta, (40 - 5) * 200 + 1000 - 2000)
+    T.eq("crafts projected over the stage's range", b.projectedCrafts, 24)
+    T.eq("crafts delta against the stage", b.craftsDelta, 4)
+    T.eq("projected cost uses owned stock and adds the recipe fee", b.projectedCost, (24 - 5) * 200 + 1000)
+    T.eq("cost delta against what the stage costs you", b.costDelta, (24 - 5) * 200 + 1000 - 2000)
     T.check("an unavailable alternative stays, flagged", st.alternatives[2].unavailable == true)
     T.eq("with its reason", st.alternatives[2].reason, "Needs Alchemy")
     T.check("pinned stage is marked", st.pinned == true)
     T.check("without pins it is not", not Stages.Build(path, { prices = PRICES, milestones = MILESTONES })[1].pinned)
+end)
+
+-- An alternative's crafts are counted the way the planner counts a run:
+-- craft by craft, each craft moving the skill by its chance at that skill.
+T.section("an alternative's crafts over the run", function()
+    -- The rule, written out.
+    local function crafts(r, from, to, bonus)
+        local n, skill = 0, from
+        while skill < to - 1e-6 do
+            local chance = LazyProf.Utils.GetSkillUpChance(skill - (bonus or 0), r.skillRange)
+            if chance <= 0 or n >= 1000 then return n, false end
+            n = n + 1
+            skill = skill + chance
+        end
+        return n, true
+    end
+    local function alt(r, color) return { recipe = r, score = 1, color = color or "orange", expectedSkillups = 1, craftCost = 0 } end
+    local function byId(stage, id)
+        for i, a in ipairs(stage.alternatives) do
+            if a.recipe.id == id then return a, i end
+        end
+    end
+
+    -- A run of ten crafts from 5 to 15, and what else could do those points.
+    local A = recipe(1, "A", 1, 400, 410, 420)
+    -- Orange until 10, grey at 20: five crafts to 10, then a craft moves the
+    -- skill by 1, 0.9, 0.81, ... - seven more to pass 15.
+    local Fades = recipe(2, "Fades", 1, 10, 15, 20, { reagents = { { itemId = 101, count = 1, name = "MatA" } } })
+    -- Grey at 12: it never gets to 15. Half the price a craft.
+    local Greys = recipe(3, "Greys", 1, 8, 10, 12, { reagents = { { itemId = 104, count = 1, name = "Cheap" } } })
+    -- Grey before the run starts.
+    local Dead = recipe(4, "Dead", 1, 2, 3, 4, { reagents = { { itemId = 104, count = 1, name = "Cheap" } } })
+    local path = { targetSkill = 75, gaps = {}, totalCost = 1000,
+        steps = { step(A, 5, 15, 10, 1000, { alternatives = { alt(A), alt(Greys), alt(Dead, "gray"), alt(Fades) } }) } }
+    local st = Stages.Build(path, { prices = PRICES, milestones = MILESTONES })[1]
+    local fades, at = byId(st, 2)
+    T.eq("crafts: five while orange, then seven as the chance falls", fades.projectedCrafts, 12)
+    T.eq("the rule written out agrees", fades.projectedCrafts, (crafts(Fades, 5, 15)))
+    T.eq("two crafts more than the run", fades.craftsDelta, 2)
+    T.eq("the cost of those crafts", fades.projectedCost, 1200)
+    T.eq("dearer by the two crafts", fades.costDelta, 200)
+    T.check("it covers the run", fades.covers == true and fades.coversTo == nil)
+    T.eq("the one that covers the run comes first, although another is cheaper a craft", at, 1)
+
+    local greys = byId(st, 3)
+    T.check("one that goes grey inside the run is marked", greys.covers == false)
+    T.eq("with the skill it gets to", greys.coversTo, 12)
+    T.check("and has no differences: they would compare unlike things",
+        greys.craftsDelta == nil and greys.costDelta == nil and greys.projectedCrafts == nil and greys.projectedCost == nil)
+    T.check("its reagents are still known to be priced", greys.priced == true)
+    local dead = byId(st, 4)
+    T.check("one that is grey from the start covers nothing", dead.covers == false and dead.coversTo == 5)
+    T.eq("further reach first among those that do not cover the run", st.alternatives[2].recipe.id, 3)
+
+    -- A racial bonus moves the thresholds: grey at 27 now.
+    st = Stages.Build(path, { prices = PRICES, milestones = MILESTONES, racialBonus = 15 })[1]
+    greys = byId(st, 3)
+    T.check("racial bonus: the same recipe covers the run", greys.covers == true)
+    T.eq("racial bonus: in ten crafts", greys.projectedCrafts, 10)
+    T.eq("racial bonus: at half the cost", greys.costDelta, -500)
+
+    -- The margin is applied to the counted crafts.
+    st = Stages.Build(path, { prices = PRICES, milestones = MILESTONES, marginPercent = 15 })[1]
+    T.eq("margin: on the counted crafts", byId(st, 2).projectedCrafts, 14)
+    T.eq("margin: against the run's own", byId(st, 2).craftsDelta, 14 - 12)
+
+    -- A twin of the run's recipe (same thresholds, same reagent), with the
+    -- run planned by the planner itself across a colour change: the same
+    -- crafts and the same cost, not fewer because it starts orange.
+    local R = recipe(5, "R", 1, 10, 15, 20, { reagents = { { itemId = 101, count = 1, name = "MatA" } } })
+    local Twin = recipe(6, "Twin", 1, 10, 15, 20, { reagents = { { itemId = 101, count = 1, name = "MatA" } } })
+    LazyProf.db.profile.strategy = "cheapest"
+    LazyProf.RecipeAvailability:BeginRecalc()
+    LazyProf.SelfFound:BeginRecalc({})
+    local steps, meta = LazyProf.PathfinderStrategies.cheapest:Calculate(5, 15, { R, Twin }, {}, PRICES, 0, {})
+    LazyProf.SelfFound:EndRecalc()
+    LazyProf.RecipeAvailability:EndRecalc()
+    local planned = Stages.Build({ targetSkill = 15, steps = steps, gaps = meta.gaps }, { prices = PRICES, milestones = MILESTONES })
+    local crossed, twins = false, 0
+    for _, stage in ipairs(planned) do
+        if stage.kind == "craft" then
+            if #stage.colorChanges > 0 then crossed = true end
+            local other = byId(stage, stage.recipe.id == 5 and 6 or 5)
+            if other then
+                twins = twins + 1
+                T.eq("twin over " .. stage.fromDisplay .. "-" .. stage.toDisplay .. ": the same crafts", other.craftsDelta, 0)
+                T.eq("twin over " .. stage.fromDisplay .. "-" .. stage.toDisplay .. ": the same cost", other.costDelta, 0)
+            end
+        end
+    end
+    T.check("the planned run passes a colour change", crossed)
+    T.check("and its twin was compared", twins > 0, twins)
+    T.eq("the planner's own count is the rule's", planned[1].baseQuantity, (crafts(R, planned[1].from, planned[1].to)))
 end)
 
 T.section("alternatives with the margin on", function()
@@ -449,6 +543,38 @@ T.section("what crafts sell for", function()
     local _, feeSum = Stages.Build(feePath, { prices = prices, milestones = MILESTONES })
     T.eq("fee inside the stage: pay includes it", feeSum.pay, 1700)
     T.eq("fee inside the stage: the cost column does not", feeSum.columnPay, 1000)
+end)
+
+-- Costs are whole copper where they are produced, and sums add up the
+-- rounded values: what is shown can then be added up to the copper.
+T.section("whole copper", function()
+    local A = recipe(1, "A", 1, 400, 410, 420, { reagents = {
+        { itemId = 201, count = 3, name = "Grain" }, { itemId = 202, count = 1, name = "Oil" } } })
+    local B = recipe(2, "B", 1, 400, 410, 420, { unlearned = true, sourceInfo = { type = "ah", price = 12.5 },
+        reagents = { { itemId = 201, count = 1, name = "Grain" } } })
+    local prices = { [201] = 0.4, [202] = 33.3 }
+    local alts = { { recipe = A, score = 1, color = "orange", expectedSkillups = 1 }, { recipe = B, score = 2, color = "orange", expectedSkillups = 1 } }
+    local path = { targetSkill = 75, gaps = {}, totalCost = 0,
+        steps = { step(A, 1, 4, 3, 0, { alternatives = alts }), step(B, 4, 11, 7, 0) } }
+    local stages, summary = Stages.Build(path, { prices = prices, milestones = MILESTONES, includeLearn = true })
+    local a, learn, b = stages[1], stages[2], stages[3]
+    -- 9 Grain at 0.4 is 3.6, 3 Oil at 33.3 is 99.9.
+    T.eq("a reagent's cost is whole copper", a.materials[1].estimatedCost, 4)
+    T.eq("the other", a.materials[2].estimatedCost, 100)
+    T.eq("the run's cost is the sum of its reagents' costs", a.outOfPocketCost, 104)
+    T.eq("so is its market cost", a.cost, 104)
+    T.eq("a recipe's price is whole copper", learn.fee, 13)
+    T.eq("7 Grain at 0.4 is 2.8", b.outOfPocketCost, 3)
+    T.eq("the cost column is the sum of the runs", summary.columnPay, 107)
+    T.eq("the totals add up the same whole amounts", summary.pay, 107 + 13)
+    local alt = a.alternatives[1]
+    T.eq("an alternative's cost is whole copper too (3 Grain: 1.2, and the recipe)", alt.projectedCost, 1 + 13)
+
+    -- With stock: 4 Grain owned, 5 to buy at 0.4.
+    stages = Stages.Build(path, { prices = prices, milestones = MILESTONES, includeLearn = true, inventory = { [201] = 4 } })
+    T.eq("stock: what is left to buy, rounded", stages[1].materials[1].estimatedCost, 2)
+    T.eq("stock: the run", stages[1].outOfPocketCost, 102)
+    T.eq("stock: its market cost is unchanged", stages[1].cost, 104)
 end)
 
 T.section("range filter", function()
