@@ -457,7 +457,7 @@ T.section("amounts add up as shown", function()
     T.eq("fixture: the making line is in the sums", s.making, 2020)
     T.eq("fixture: a recipe fee is in the sums", s.fees, 6789)
 
-    local closedRuns = { ["craft:50:100"] = false, ["craft:51:110"] = false }
+    local closedRuns = { ["craft:50"] = false, ["craft:51"] = false }
     local rows = Views.Path(shopView(pricey(), { expanded = closedRuns }), {})
     T.eq("to the copper: a run's cost", rows[2].cols[3], "37g 3s 50c")
     T.eq("to the copper: the fee of a learn sub-line", rows[4].text, "Learn first: auction house, 67s 89c")
@@ -485,7 +485,7 @@ T.section("amounts add up as shown", function()
     T.eq("dimmed too", rows[4].alpha, 0.5)
 
     -- Opened runs: the reagent table's Cost cells add up to the run's cost.
-    view = shopView(pricey(), { inventory = { [GEM] = 7 }, expanded = { ["craft:50:100"] = true, ["craft:51:110"] = true } })
+    view = shopView(pricey(), { inventory = { [GEM] = 7 }, expanded = { ["craft:50"] = true, ["craft:51"] = true } })
     local run, cells
     for _, row in ipairs(Views.Path(view, {})) do
         if row.layout == "path" and row.stage then
@@ -504,9 +504,9 @@ T.section("amounts add up as shown", function()
     altPath.sale = nil
     altPath.steps[1].alternatives = { { recipe = big, score = 1, color = "orange", expectedSkillups = 1 },
         { recipe = pants, score = 2, color = "orange", expectedSkillups = 1 } }
-    rows = Views.Path(shopView(altPath, { expanded = { ["craft:50:100"] = false, ["craft:51:110"] = false }, advanced = true }), {})
+    rows = Views.Path(shopView(altPath, { expanded = { ["craft:50"] = false, ["craft:51"] = false }, advanced = true }), {})
     T.eq("an alternative's difference stays short", rows[3].text, "or: Pants, +2g 96s")
-    rows = Views.Path(shopView(altPath, { expanded = { ["craft:50:100"] = true }, advanced = true }), {})
+    rows = Views.Path(shopView(altPath, { expanded = { ["craft:50"] = true }, advanced = true }), {})
     T.check("the per-craft figure stays short", rows[3].text:find("; 3g 70s per craft", 1, true) ~= nil, rows[3].text)
 end)
 
@@ -998,14 +998,16 @@ T.section("path list", function()
             gaps = { { from = 170, to = 190, reason = "no recipe" } },
         }
     end
-    local BOOTS_KEY, SHOULDERS_KEY, KIT_KEY = "craft:31:117", "craft:32:125", "craft:33:140"
+    -- What is open is kept per recipe (Views.RowKey), so it survives the
+    -- run's start moving with the skill.
+    local BOOTS_KEY, SHOULDERS_KEY, KIT_KEY = "craft:31", "craft:32", "craft:33"
     local calls = {}
     local ctx = {
-        onToggleExpand = function(stage) calls[#calls + 1] = "toggle:" .. stage.key end,
+        onToggleExpand = function(stage, open) calls[#calls + 1] = "toggle:" .. Views.RowKey(stage) .. ":" .. tostring(open) end,
         onShowRecipe = function(r, skill) calls[#calls + 1] = "recipe:" .. r.name .. ":" .. tostring(skill) end,
         onUseAlternative = function(stage, alt) calls[#calls + 1] = "use:" .. alt.recipe.name .. ":" .. stage.from .. "-" .. stage.to end,
-        onResetPin = function(stage) calls[#calls + 1] = "reset:" .. stage.key end,
-        onShowAllAlts = function(stage, on) calls[#calls + 1] = "all:" .. stage.key .. ":" .. tostring(on) end,
+        onResetPin = function(stage) calls[#calls + 1] = "reset:" .. Views.RowKey(stage) end,
+        onShowAllAlts = function(stage, on) calls[#calls + 1] = "all:" .. Views.RowKey(stage) .. ":" .. tostring(on) end,
     }
     -- One line per row: sub-lines indented, columns, right text, button.
     local function texts(rows)
@@ -1071,10 +1073,17 @@ T.section("path list", function()
     T.eq("craft tooltip: title", boots.tooltip[1].text, "10x Dark Boots")
     T.eq("craft tooltip: how to open", boots.tooltip[#boots.tooltip].text, "Click to open or close")
 
+    -- A click says which state it asks for; the row says which it is in.
+    T.eq("a closed run says so", boots.open, false)
     boots.onClick()
-    T.eq("a click on a run asks to open or close it", calls[#calls], "toggle:" .. BOOTS_KEY)
+    T.eq("a click on a closed run asks to open it", calls[#calls], "toggle:" .. BOOTS_KEY .. ":true")
     rows[3].onClick()
-    T.eq("so does a click on its learn sub-line", calls[#calls], "toggle:" .. BOOTS_KEY)
+    T.eq("so does a click on its learn sub-line", calls[#calls], "toggle:" .. BOOTS_KEY .. ":true")
+    local opened = list(nil, { expanded = {} })
+    T.eq("the run the player is on is open while nothing is stored", opened[2].open, true)
+    opened[2].onClick()
+    T.eq("a click on it asks to close it", calls[#calls], "toggle:" .. BOOTS_KEY .. ":false")
+    T.eq("another run is closed while nothing is stored", (find(opened, "Armor Kit")).open, false)
     rows[5].button.onClick()
     T.eq("Use pins the alternative over the run's exact range", calls[#calls], "use:Dark Pants:125-140")
     rows[5].onClick()
@@ -1132,14 +1141,65 @@ T.section("path list", function()
     T.eq("cheaper: always shown, in green", texts(rows)[5], "  or: Dark Pants, |cFF66FF66-6s|r [Use]")
     rows = list({ pantsPrice = 100 })
     T.eq("the same cost", texts(rows)[5], "  or: Dark Pants, same cost [Use]")
-    -- A run that pays for itself: only a cheaper alternative.
-    local sale = { mode = "vendor", values = { [32] = 100 }, sources = { [32] = "vendor" } }
+    -- "What the run costs the player" is its net cost: after what its crafts
+    -- sell for. Shoulders: 15s of reagents, 9s back, 6s net. Dark Pants sell
+    -- for the same and cost 1s 50c more: inside a tenth of the 15s, outside a
+    -- tenth of the 6s.
+    local sale = { mode = "vendor", values = { [32] = 60, [35] = 60 }, sources = { [32] = "vendor", [35] = "vendor" } }
+    T.check("measured against the net cost, not the gross", find(list({ sale = sale, pantsPrice = 110 }), "or:") == nil)
+    T.check("inside a tenth of the net cost: shown", find(list({ sale = sale, pantsPrice = 104 }), "or: Dark Pants, +60c") ~= nil)
+    T.check("a copper over: not shown", find(list({ sale = sale, pantsPrice = 105 }), "or:") == nil)
+    -- A recipe that has to be learned first: its fee is part of what the run
+    -- costs. Dark Boots: 10s of reagents and 4s at the trainer; an alternative
+    -- 1s 20c dearer (eight crafts for the eight points) is inside a tenth of
+    -- the 14s, outside a tenth of the 10s.
+    local feeRun = listPath()
+    feeRun.prices[143] = 190
+    feeRun.steps[1].alternatives = {
+        { recipe = feeRun.steps[1].recipe, score = 1, color = "orange", expectedSkillups = 1 },
+        { recipe = recipe(43, "Sandals", 110, 150, 160, 170), score = 2, color = "orange", expectedSkillups = 1 },
+    }
+    rows = Views.Path(shopView(feeRun, { liveCap = 150, expanded = closed() }), ctx)
+    T.eq("the learn fee counts in what the run costs", texts(rows)[4], "  or: Sandals, +1s 20c [Use]")
+    feeRun.prices[143] = 193
+    T.check("over a tenth of reagents and fee: not shown",
+        find(Views.Path(shopView(feeRun, { liveCap = 150, expanded = closed() }), ctx), "or: Sandals") == nil)
+    -- A run that pays for itself gets no alternative at all: with nothing to
+    -- save, the "cheaper" one is the one whose crafts sell for more, and the
+    -- list does not chase profit.
+    sale = { mode = "vendor", values = { [32] = 100 }, sources = { [32] = "vendor" } }
     T.check("run with no net cost: a dearer alternative is not shown", find(list({ sale = sale }), "or:") == nil)
     sale = { mode = "vendor", values = { [32] = 100, [35] = 120 }, sources = { [32] = "vendor", [35] = "vendor" } }
-    rows = list({ sale = sale })
-    T.eq("run with no net cost: a cheaper one is", texts(rows)[5], "  or: Dark Pants, |cFF66FF66-1s 50c|r [Use]")
-    local gain = { mode = "vendor", values = { [32] = 150 }, sources = { [32] = "vendor" } }
-    T.check("run that gains money: a dearer alternative is not shown either", find(list({ sale = gain, pantsPrice = 60 }), "or:") == nil)
+    T.check("run with no net cost: nor one that nets less", find(list({ sale = sale }), "or:") == nil)
+    local gain = { mode = "vendor", values = { [32] = 150, [35] = 200 }, sources = { [32] = "vendor", [35] = "vendor" } }
+    T.check("run that gains money: none either", find(list({ sale = gain, pantsPrice = 60 }), "or:") == nil)
+    -- Only the best alternative is considered: when that one cannot be
+    -- obtained or has no price, none is offered.
+    local onlyHat = listPath()
+    onlyHat.steps[3].alternatives = { onlyHat.steps[3].alternatives[1], onlyHat.steps[3].alternatives[6] }
+    T.eq("fixture: the unobtainable one is cheaper", Stages.Build(onlyHat, {})[2].alternatives[1].costDelta, -750)
+    T.check("best alternative unobtainable: none offered",
+        find(Views.Path(shopView(onlyHat, { liveCap = 150, expanded = closed() }), ctx), "or:") == nil)
+    local noPrice = listPath()
+    noPrice.steps[3].alternatives = { noPrice.steps[3].alternatives[1], noPrice.steps[3].alternatives[2] }
+    noPrice.prices[135] = nil
+    T.check("best alternative without a price: none offered",
+        find(Views.Path(shopView(noPrice, { liveCap = 150, expanded = closed() }), ctx), "or:") == nil)
+    -- A run whose own cost is not known has nothing to compare with: one of
+    -- its two reagents has no price, and against the part that is known the
+    -- alternative would look close.
+    local unknownRun = listPath({ pantsPrice = 110 })
+    unknownRun.steps[3].recipe.reagents = { { itemId = 132, count = 1, name = "MatShoulders" }, { itemId = 144, count = 1, name = "Odd Thread" } }
+    rows = Views.Path(shopView(unknownRun, { liveCap = 150, expanded = closed() }), ctx)
+    T.eq("fixture: the run's cost is not known", rows[4].cols[3], "?")
+    T.check("unpriced run: no inline alternative", find(rows, "or:") == nil)
+    T.eq("unpriced run: its tooltip says why there is no cost", rows[4].tooltip[4].text, "A reagent has no price, so the cost is not known.")
+    T.check("unpriced run: and states none", (function()
+        for _, line in ipairs(rows[4].tooltip) do
+            if line.text:find("Cost", 1, true) or line.text:find("Per craft", 1, true) then return false end
+        end
+        return true
+    end)())
     -- An alternative whose recipe has to be learned says so.
     local learnAlt = listPath()
     for _, itemId in ipairs({ 135, 136, 138 }) do learnAlt.prices[itemId] = 500 end
@@ -1171,7 +1231,9 @@ T.section("path list", function()
 
     -- The alternative's tooltip says what the row says: cost over the run,
     -- what its crafts sell for, and the net.
+    sale = { mode = "vendor", values = { [32] = 50, [35] = 120 }, sources = { [32] = "vendor", [35] = "vendor" } }
     rows = list({ sale = sale })
+    T.eq("fixture: the alternative nets less than the run", texts(rows)[5], "  or: Dark Pants, |cFF66FF66-9s|r [Use]")
     local tip = {}
     for _, line in ipairs(rows[5].tooltip) do tip[#tip + 1] = line.text end
     tip = table.concat(tip, " / ")
@@ -1259,6 +1321,28 @@ T.section("path list", function()
     rows = list({ onlyScarf = true })
     T.check("goes grey inside the run: never the inline alternative", find(rows, "or:") == nil)
 
+    -- What the player opened or closed is found again after a skill-up: the
+    -- run of the same recipe then starts at another skill.
+    T.eq("row key of a craft run: its recipe", Views.RowKey({ kind = "craft", recipe = { id = 31 }, key = "craft:31:117" }), "craft:31")
+    T.eq("row key of any other row: its own key", Views.RowKey({ kind = "gap", key = "gap::170" }), "gap::170")
+    local later = listPath({ skill = 119 })
+    later.currentSkill = 119
+    later.steps[1] = step(later.steps[1].recipe, 119, 121, 2, 0)
+    local laterView = shopView(later, { liveCap = 150, expanded = { [BOOTS_KEY] = false, [SHOULDERS_KEY] = true },
+        showAllAlts = { [SHOULDERS_KEY] = true } })
+    T.eq("fixture: the run's own key moved with the skill", laterView.stages[2].key, "craft:31:119")
+    rows = Views.Path(laterView, ctx)
+    T.eq("after a skill-up: the run the player closed stays closed", rows[2].text .. ":" .. tostring(rows[2].open), "> Dark Boots:false")
+    T.eq("after a skill-up: the run the player opened stays open", rows[4].text .. ":" .. tostring(rows[4].open), "Shoulders:true")
+    T.check("after a skill-up: and still lists every alternative", find(rows, "Show fewer") ~= nil)
+
+    -- A finished run can be opened, but nothing can be changed there: no
+    -- other recipes are listed.
+    rows = list({ skill = 141 }, { expanded = { [SHOULDERS_KEY] = true, [KIT_KEY] = false } })
+    T.eq("finished run, opened: its reagents", texts(rows)[5], "Reagent | Need,Have,Buy,Cost")
+    T.check("finished run, opened: no other recipes", find(rows, "Other recipes") == nil and find(rows, "Show all") == nil)
+    T.eq("finished run, opened: the details button stays", texts(rows)[7], " [Recipe details]")
+
     -- A pinned run says so and offers Reset.
     rows = list(nil, { expanded = closed({ [SHOULDERS_KEY] = true }), pins = pins })
     t = texts(rows)
@@ -1270,8 +1354,13 @@ T.section("path list", function()
     rows = list(nil, { expanded = {}, advanced = true })
     T.eq("more options: colour changes and cost per craft", texts(rows)[4], "orange all the way; 1s per craft")
     rows = list(nil, { expanded = {}, advanced = true, inventory = { [131] = 4 } })
-    T.eq("more options, with stock: the market price too", texts(rows)[4],
-        "orange all the way; 60c per craft; market price 10s")
+    T.eq("more options, with stock: what the run costs at market prices too", texts(rows)[4],
+        "orange all the way; 60c per craft; 10s at market prices for the run")
+    -- A run with a reagent that has no price: the colours only.
+    local advancedUnknown = listPath()
+    advancedUnknown.prices[131] = nil
+    rows = Views.Path(shopView(advancedUnknown, { liveCap = 150, expanded = {}, advanced = true, inventory = { [131] = 4 } }), ctx)
+    T.eq("more options, unpriced run: no cost per craft and no market amount", texts(rows)[4], "orange all the way")
     rows = list(nil, { expanded = {}, inventory = { [131] = 4 } })
     T.eq("without more options: straight to the reagents", texts(rows)[4], "Reagent | Need,Have,Buy,Cost")
     T.eq("stock in the reagent table", texts(rows)[5], "MatDark Boots | 10,4,6,6s")
@@ -1313,12 +1402,16 @@ T.section("path list", function()
     T.eq("rank tooltip: visited trainers", rankRow.tooltip[#rankRow.tooltip].text, "  Ann - Stormwind (53, 81)")
     rows = list(nil, { expanded = {}, profile = "VANILLA" })
     T.check("VANILLA: no trainer is named for a recipe", find(rows, "Trainers you visited that teach it:") == nil)
+    -- Barbaric Gloves come from the auction house: no trainer teaches them.
+    local auctioned = list(nil, { expanded = closed({ ["craft:34"] = true }) })
+    T.check("fixture: the run is open and still to learn", find(auctioned, "Listed on the auction house.") ~= nil)
+    T.check("trainers are named only for a trainer-taught recipe", find(auctioned, "Trainers you visited that teach it:") == nil)
     T.eq("VANILLA: the opened run says only to learn it", texts(rows)[6], "Learn the recipe. The recipe details show what is known about it.")
     LazyProf.TrainerMemory = nil
 
     -- A green recipe bridging a gap says why it is there.
     local bridge = makePath({ complete = true })
-    rows = Views.Path(shopView(bridge, { expanded = { ["craft:1:143"] = false, ["craft:2:160"] = true } }), ctx)
+    rows = Views.Path(shopView(bridge, { expanded = { ["craft:1"] = false, ["craft:2"] = true } }), ctx)
     T.check("bridge: the sentence", find(rows, "No orange or yellow recipe is available here") ~= nil)
     T.eq("colour changes of a run that crosses a threshold", LazyProf.GuideText.ColorChanges(Stages.Build(bridge)[1]),
         "orange until 150, then yellow")

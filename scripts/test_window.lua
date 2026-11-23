@@ -588,7 +588,7 @@ T.section("the view carries the account", function()
     window:Update(W.path())
     T.check("no sale values: nothing counted as sold",
         env.accountCalls[#env.accountCalls].saleValues == nil and window.view.sale == nil)
-    T.eq("nothing waited for", window.view.saleLoading, 2)
+    T.eq("what is still loading is counted now, whatever the path carries", window.view.saleLoading, 2)
 
     -- No path, no account.
     T.check("no path: no account", window:BuildView(nil, "live").account == nil)

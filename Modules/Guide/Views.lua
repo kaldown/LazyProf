@@ -19,10 +19,11 @@
 --   skill, cap                   the real skill and the live cap (nil when unknown)
 --   priceSummary, priceLines     PriceManager:PathSummary / SummaryLines of the path
 --   marginPercent                nil when the margin is off
---   expanded                     { [stage.key] = true } rows opened on the Steps tab; in
---                                the path list also false = closed by the player
---   showAllAlts                  path list: { [stage.key] = true } runs that list
---                                every alternative (the Guide card: one boolean)
+--   expanded                     { [stage.key] = true } rows opened on the Steps tab; the
+--                                path list keys it by Views.RowKey(stage), and there
+--                                false = closed by the player
+--   showAllAlts                  path list: { [Views.RowKey(stage)] = true } runs that
+--                                list every alternative (the Guide card: one boolean)
 --   profile, liveCap             the client profile ("VANILLA", ...) and the cap the
 --                                character works under
 --   hiddenRecipeId               the next recipe when the profession window hides it
@@ -974,9 +975,21 @@ end
 -- Path tab ---------------------------------------------------------------------
 
 -- An alternative is close when it costs the player at most this share of the
--- run's own cost more (a cheaper one always is): it is then offered right
+-- run's own net cost more (a cheaper one always is): it is then offered right
 -- under the run's row.
 Views.CLOSE_ALTERNATIVE = 0.10
+
+-- The key under which a row's state (opened or closed, every alternative
+-- listed) is kept. A craft run is keyed by its recipe: its own key carries
+-- the skill it starts at, which moves at every skill-up for the run the
+-- player is on, and the state has to survive that. (Two separate runs of one
+-- recipe share their state.) Any other row keeps its stage's key.
+function Views.RowKey(stage)
+    if stage.kind == "craft" and stage.recipe then
+        return "craft:" .. tostring(stage.recipe.id)
+    end
+    return stage.key
+end
 
 local OPEN_INDENT = 14
 local PATH_COLUMNS = { "skill", "crafts", "cost" }
@@ -1028,18 +1041,23 @@ local function AlternativeName(alt, profile)
 end
 
 -- The alternative to offer under a run's row: the best usable one, when it is
--- close (Views.CLOSE_ALTERNATIVE of what the run costs the player after its
--- crafts are sold, so for a run that pays for itself only one that is no
--- dearer) or cheaper. Only the first of the stage's sorted alternatives is
--- considered: when that one cannot be obtained, cannot cover the run or has
--- no price, none is offered. None either on a run the player pinned or has
--- finished, or whose own cost is not known.
+-- cheaper for the player or close - at most Views.CLOSE_ALTERNATIVE of what
+-- the run costs the player dearer. That cost is the run's net cost: its
+-- reagents still to buy and the recipe's fee, less what its crafts sell for.
+-- A run that pays for itself (no net cost, or a gain) gets none: with nothing
+-- left to save, the "cheaper" recipe is the one whose crafts sell for more,
+-- and chasing that is not what the list is for.
+-- Only the first of the stage's alternatives is considered. They are sorted
+-- usable, covering the run and priced first, so when that one cannot be
+-- obtained, cannot cover the run or has no price, there is none to offer.
+-- None either on a run the player pinned or has finished, or whose own cost
+-- is not known.
 local function CloseAlternative(stage)
     if stage.pinned or stage.done or UnpricedToBuy(stage) then return nil end
     local alt = stage.alternatives and stage.alternatives[1]
     if not alt or alt.unavailable or alt.covers == false or not alt.priced then return nil end
     local net = stage.outOfPocketCost + (stage.feeIncluded and 0 or (stage.fee or 0)) - (stage.sale or 0)
-    if alt.costDelta <= Views.CLOSE_ALTERNATIVE * math.max(0, net) then
+    if net > 0 and alt.costDelta <= Views.CLOSE_ALTERNATIVE * net then
         return alt
     end
     return nil
@@ -1066,12 +1084,14 @@ local function PathAlternativeRow(stage, alt, view, ctx)
 end
 
 -- What an opened run shows under its row, indented: with More options the
--- colour changes, the cost per craft and the market price; "Your choice" and
--- Reset on a pinned run; why a green recipe is there; the reagent table; what
--- a craft sells for; how to learn the recipe while that is still to do
--- (`learn` is the run's learn step, nil once learned); both craft counts when
--- spare crafts changed the count; the other recipes for the run's range; and
--- a last line with the Recipe details button.
+-- colour changes, the cost per craft and what the run costs at market prices
+-- when owned stock lowers it (the colour changes only when a price is
+-- missing); "Your choice" and Reset on a pinned run; why a green recipe is
+-- there; the reagent table; what a craft sells for; how to learn the recipe
+-- while that is still to do (`learn` is the run's learn step, nil once
+-- learned); both craft counts when spare crafts changed the count; the other
+-- recipes for the run's range (not on a finished run: nothing can be changed
+-- there); and a last line with the Recipe details button.
 local function AddOpenedRun(rows, stage, learn, view, ctx)
     local path, recipe = view.path, stage.recipe
     local function add(row)
@@ -1086,7 +1106,7 @@ local function AddOpenedRun(rows, stage, learn, view, ctx)
                 parts[#parts + 1] = Short(stage.outOfPocketCost / stage.quantity) .. " per craft"
             end
             if stage.outOfPocketCost < stage.cost then
-                parts[#parts + 1] = "market price " .. Money(stage.cost)
+                parts[#parts + 1] = Money(stage.cost) .. " at market prices for the run"
             end
         end
         add({ kind = "line", height = 16, wrap = true, color = GREY, text = table.concat(parts, "; ") })
@@ -1137,10 +1157,10 @@ local function AddOpenedRun(rows, stage, learn, view, ctx)
         button = { text = "Recipe details", width = 96, onClick = function() ctx.onShowRecipe(recipe, stage.fromDisplay) end },
     }
     local alts = stage.alternatives or {}
-    if #alts > 0 then
+    if #alts > 0 and not stage.done then
         add({ kind = "line", font = "GameFontNormalSmall", color = GOLD,
               text = string.format("Other recipes for %d-%d", stage.fromDisplay, stage.toDisplay) })
-        local all = (type(view.showAllAlts) == "table" and view.showAllAlts[stage.key]) and true or false
+        local all = (type(view.showAllAlts) == "table" and view.showAllAlts[Views.RowKey(stage)]) and true or false
         for i = 1, all and #alts or math.min(ALTERNATIVES_SHOWN, #alts) do
             add(PathAlternativeRow(stage, alts[i], view, ctx))
         end
@@ -1168,9 +1188,14 @@ local function AddRun(rows, stage, learn, isCurrent, view, ctx)
     end
     local tooltip = CraftTooltip(stage, { spareWord = "spare crafts", unpriced = unpriced })
     tooltip[#tooltip + 1] = { text = "Click to open or close", r = 0.5, g = 0.5, b = 0.5 }
-    local function toggle() ctx.onToggleExpand(stage) end
+    -- Open when the player opened it; the run the player is on is open until
+    -- it is closed. A click asks for the other state.
+    local open = view.expanded and view.expanded[Views.RowKey(stage)]
+    if open == nil then open = isCurrent end
+    open = open and true or false
+    local function toggle() ctx.onToggleExpand(stage, not open) end
     rows[#rows + 1] = {
-        kind = "cols", layout = "path", stage = stage,
+        kind = "cols", layout = "path", stage = stage, open = open,
         text = (isCurrent and "> " or "") .. (recipe.name or "Unknown"),
         color = Views.DifficultyColor(stage.color),
         cols = { Text.StageRange(stage), tostring(stage.quantity), cost },
@@ -1188,10 +1213,6 @@ local function AddRun(rows, stage, learn, isCurrent, view, ctx)
                             color = LEARN_COLOR, alpha = learn.done and 0.5 or 1, tooltip = learnTip, onClick = toggle }
     end
 
-    -- Open when the player opened it; the run the player is on is open until
-    -- it is closed.
-    local open = view.expanded and view.expanded[stage.key]
-    if open == nil then open = isCurrent end
     if open then
         AddOpenedRun(rows, stage, (learn and not learn.done) and learn or nil, view, ctx)
         return
@@ -1239,13 +1260,17 @@ end
 --   sub = true        on "line" rows: a sub-line of the row above it (smaller,
 --                     indented, grey unless `color` is given): "Learn first:
 --                     trainer, 4s" and "or: <recipe>, +14s" with a Use button
--- Rows also carry `stage` (and `alt` on alternatives) for the caller.
+-- Rows also carry `stage` (and `alt` on alternatives) for the caller, and a
+-- run's row `open` (true | false): whether it is shown opened.
 -- The row the player is on is marked with "> " and highlighted.
--- view.expanded[stage.key]: true = open, false = closed, nil = open only for
--- the run the player is on. view.showAllAlts[stage.key]: every alternative of
--- that run is listed.
--- ctx: onToggleExpand(stage), onShowRecipe(recipe, skill),
--- onUseAlternative(stage, alt), onResetPin(stage), onShowAllAlts(stage, on).
+-- State is kept under Views.RowKey(stage), which does not change when the
+-- path is planned again from another skill:
+--   view.expanded[key]      true = open, false = closed, nil = open only for
+--                           the run the player is on
+--   view.showAllAlts[key]   every alternative of that run is listed
+-- ctx: onToggleExpand(stage, open) - `open` is the state the click asks for -
+-- onShowRecipe(recipe, skill), onUseAlternative(stage, alt),
+-- onResetPin(stage), onShowAllAlts(stage, on).
 function Views.Path(view, ctx)
     local path = view.path
     if not path then return {} end
