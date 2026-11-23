@@ -397,7 +397,9 @@ function Stages.Build(path, opts)
     end
     for index, stage in ipairs(stages) do
         stage.index = index
-        -- A key that survives a recalculation (expanded rows, the selected card)
+        -- A key for the stage within this stage list (it contains the start
+        -- skill, so it moves when the skill does; the window keys opened rows
+        -- by the run's recipe instead)
         stage.key = stage.kind .. ":" .. tostring(stage.recipe and stage.recipe.id or stage.cap or "") .. ":"
             .. tostring(stage.fromDisplay)
         if stage.kind == "craft" then

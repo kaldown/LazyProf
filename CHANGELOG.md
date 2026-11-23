@@ -2,6 +2,56 @@
 
 All notable changes to LazyProf will be documented in this file.
 
+## [Unreleased]
+
+Plan, then shop: open a profession, see the cheapest path from your real skill, choose how far to level, get one total of what to buy.
+
+### Added
+
+- A receipt at the top of the window: "You spend" (reagents still to buy plus recipes to buy or learn), "Back from selling" (what the crafted items sell for) and "Net cost" (or "Net gain" when the crafts sell for more). "You spend" is exactly the Shopping tab added up, to the copper. Further lines say what your own stock saves, what making reagents yourself saves or costs, that spare crafts are included, and when a price is missing, still loading or too old.
+- "Level to": a number box and a slider from your skill to the last cap. Dragging shows the number; the path is planned again when you let go, or when you press Enter in the box.
+- Sale value: every total now counts what the crafted items sell for, and the Cheapest strategy counts it when it compares recipes - sold to a vendor by default (money you always get), at auction after the 5% cut (never less than the vendor's price), or not at all ("Count what crafts sell for" in the options, "Selling" under More options). Two recipes that need the same reagents are no longer equal when one sells for more. A recipe with a reagent that has no real price (only an estimate, or none) is ranked as before.
+- Your stock shapes the path: under Cheapest, reagents you own are counted when the path is chosen, against whole runs of a recipe, and only when that really costs you less. The planner works out up to four routes (market prices only; ranked with sale value; with your stock; the plan you already follow) and keeps the one you pay least for, so the path never costs you more than the market-price path would, by the addon's own count.
+- The plan you shopped for stays: under Cheapest the route is remembered per character and profession and carried on from your current skill, so after buying the list the path does not wander to other recipes and ask for more. It gives way when it would cost more than the market-price path, or when another route is clearly cheaper (by more than 5% of what the market-price path costs with nothing owned). Choosing or resetting a recipe yourself plans that range again.
+- Path tab: one list of the path - a row per recipe with its skill range, crafts and what its reagents still cost you. What has to be learned first is a line under its recipe ("Learn first: trainer, 4s"). The closest alternative is offered under a row when it costs you less or at most 10% more ("or: Dark Leather Pants" with the difference, such as "+14s", and a Use button). Click a row to open it in place: its reagents (Need / Have / Buy / Cost), what a craft sells for, how to learn the recipe and, on WoW Forever, the trainers you visited that teach it, the other recipes for that skill range with Use, and a Recipe details button. The row you are on is marked and stays open until you close it.
+- "More options" (remembered) holds the rest: Cheapest / Fastest, "Spare crafts", the "Selling" mode, where the prices come from, the recipe search, "Hide what I have", the "I craft it / I buy it" buttons and, in planning mode, "Plan from skill 1". With it on, an opened row also says where the recipe changes colour, what a craft costs and, when your stock lowers the cost, what the run costs at market prices.
+- Shopping tab: under the table, "Reagents to buy" with the sum of the Cost column, and "Recipes to learn": a row per recipe that costs something, with where it comes from and its price, and their sum. A recipe bought with a currency is listed with the currency amount; it is not part of the gold totals.
+- While the game is still loading the data of crafted items, "Back from selling" shows what is known so far and says "still loading"; the path is planned again by itself when the data arrives.
+- `/lp diag prices` prints which route was kept, what each candidate would cost you, how long planning took and how the sale values stand.
+
+### Changed
+
+- The window has two tabs, Path and Shopping, instead of Guide, Steps and Shopping. What the Guide card showed is now an opened row of the Path list.
+- "Include bank items" and "Include alt characters" are now on by default, also if you had left them off (the old setting was never saved when it matched the default). Both still need the Syndicator addon: without it the two options are greyed out and only your bags are counted. The guild bank stays off. Turn them off in the options, under "Your stock", if you do not want bank or alt stock counted.
+- Shopping list order: what is still to buy first, the dearest on top; reagents you make yourself next; what you already own last, dimmed. The Buy number is no longer red.
+- A reagent the list has you craft now uses what you own of it first, wherever it is; only the rest is crafted. Before, stock outside the bags was ignored and its raw materials were bought.
+- Craft-or-buy no longer counts the same stock twice (once for the path and once for making another reagent), which could make the list dearer with stock than without.
+- Alternatives are compared over the whole run, craft by craft, after what the crafts sell for and with spare crafts on both sides. Before, an alternative that changes colour during the run, or any alternative while "With margin" was on, looked cheaper than it is. An alternative that cannot cover the whole run says how far it gets ("only up to 140") instead of a difference.
+- A recipe you chose with "Use" is held exactly over its skill range; it no longer runs a few points past it.
+- Amounts in the receipt and in the cost columns are shown to the copper, so they add up. The merchant panel's rows add up to its "Buy all" total.
+- The merchant panel works from the shopping list of the whole path (there is no range any more), and also buys what still has to be bought of a reagent you otherwise craft.
+- The arrow tooltip shows the receipt's amounts instead of the old totals.
+- "With margin" is now called "Spare crafts", "Use this" is "Use" (a recipe you chose says "Your choice"), and the "Target" box is "Level to". A number typed into it counts when you press Enter; clicking elsewhere or pressing Escape puts the planned target back.
+
+### Removed
+
+- The coloured path bar, the Range dropdown, the footer with its totals (and the stray "|r" it showed beside the range total), and Prev / Current step / Next. To shop for the next bracket only, set "Level to" to its end.
+
+### Fixed
+
+- The scroll bar and its buttons were drawn when there was nothing to scroll.
+- The selected strategy button (Cheapest / Fastest) could hardly be told from the other.
+- A recipe you chose with "Use" could keep the planner from ever finishing: with "Include green recipes" on, when its range reached the skill where the recipe turns grey, or when the recipe's yellow and grey skill are the same.
+- The "I craft it" button could read "I buy it" when your stock already covered the need.
+- What has to be bought of a reagent that another crafted reagent is made from was missing from the list and the total.
+
+### Known limits
+
+- Sale value and owned stock change which recipes are chosen under Cheapest only. Fastest still plans for the fewest crafts; its totals count both.
+- One crafted item per craft is assumed, so recipes that make several are undervalued when selling is counted.
+- Crafts that a later step of the same path uses as reagents are still counted as sold and bought again.
+- After buying everything, the list can show a craft or two of top-up again while you follow the path: every calculation rounds the crafts still expected.
+
 ## [0.10.1] - 2026-11-22
 
 ### Added

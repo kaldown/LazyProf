@@ -15,5 +15,10 @@ ignore:
   - Makefile
   - "*.md"
   - Libs/Ace3/tests
+  - Libs/CraftLib/Data/Sources
+  - Libs/CraftLib/scripts
+  - Libs/CraftLib/vendor
+  - Libs/CraftLib/docs
+  - Libs/CraftLib/Makefile
 
 enable-nolib-creation: no

@@ -25,22 +25,27 @@ See [CraftLib's profession coverage](https://github.com/kaldown/CraftLib#profess
 
 ## Features
 
-- **Optimal leveling path** - Calculates which recipes to craft based on current AH prices
-- **One window: Guide, Steps, Shopping** - A tabbed window beside the profession window. Guide shows the one step to do now, large, with its reagents and the alternatives; Steps lists the whole path; Shopping says what to collect and what to buy
-- **Path bar** - The whole journey as one coloured strip: orange, yellow and green stretches, gaps in red, a tick at each rank still to train and a marker at your skill. Hover a stretch to see the step, click to open it
-- **Steps a person follows** - Runs of one recipe are shown as one step ("41x Heavy Woolen Gloves, 143 to 165"), with learning a recipe and training the next rank as steps of their own
-- **Target skill and margin** - Plan to any skill, not just the cap; tick "With margin" to plan extra crafts and reagents for bad luck (5 to 30 percent, 15 by default)
-- **Two strategies** - Cheapest (minimize gold) or Fastest (minimize crafts), switched with one click
-- **Alternative recipes & pinning** - Each step shows its best alternatives with how many crafts and how much gold they would change; "Use this" swaps the recipe and replans at once, "Reset" undoes it. Pins are kept between sessions
-- **Need / Have / Buy** - The shopping list is one table per reagent, with what is in your bags, bank, mail, auctions, guild bank and on alts taken off (with Syndicator), and a "vendor" mark on vendor-sold reagents
-- **Craft or buy per reagent** - For reagents you can make yourself, choose "I craft it" or "I buy it" per item; otherwise LazyProf crafts intermediates (e.g., smelt ore into bars) when that is cheaper
+- **Plan, then shop** - Open a profession and see the cheapest path from your real skill, counting what you already own, current prices and what the crafted items sell for. Choose how far to level and get one total of what to buy
+- **One window: Path and Shopping** - A window beside the profession window with two tabs under a shared header. The header answers how far ("Level to") and what it costs (the receipt); Path lists the recipes to craft; Shopping says what to collect and what to buy
+- **Level to** - A number box and a slider from your skill to the last cap. Drag the slider, or type a skill and press Enter: the path, the costs and the shopping list end there. To shop for the next bracket only, set it to that bracket's end
+- **The receipt** - "You spend" (reagents still to buy plus recipes to buy or learn), "Back from selling" (what the crafts sell for) and "Net cost". Amounts are exact to the copper, and "You spend" is the Shopping tab added up. Further lines say what your own stock saves and what making reagents yourself saves or costs
+- **Sale value** - What the crafted items sell for is counted: sold to a vendor by default, at auction after the 5% cut, or not at all. Under Cheapest, two recipes that need the same reagents are no longer equal when one sells for more
+- **Your stock shapes the path** - Under Cheapest, reagents you own are counted when the path is chosen, against whole runs of a recipe. The planner compares up to four routes and keeps the one you pay least for, so the path never costs you more than the market-price path would, by the addon's own count
+- **The plan you shopped for stays** - Under Cheapest the route is remembered per character and profession, so after buying the list the path does not wander to other recipes. It gives way when it would cost more than the market-price path or another route is clearly cheaper; choosing a recipe yourself plans that range again
+- **Path tab** - One row per recipe with its skill range, crafts and cost. What has to be learned first is a line under its recipe, training the next rank is a row of its own, and the closest alternative is offered right under a row with a Use button. Click a row to open it: its reagents, what a craft sells for, how to learn the recipe and the other recipes for that skill range
+- **Alternative recipes** - "Use" swaps the recipe over that skill range and plans again at once; "Reset" gives the choice back to the planner. Your choices are kept between sessions
+- **Two strategies** - Cheapest (minimize gold) or Fastest (minimize crafts)
+- **Spare crafts** - Plan extra crafts and reagents for bad luck with skill-ups (5 to 30 percent, 15 by default)
+- **More options** - One switch in the window shows the rest: Cheapest / Fastest, "Spare crafts", the selling mode, where the prices come from, the recipe search, "Hide what I have" and the craft-or-buy buttons
+- **Need / Have / Buy** - The shopping list is one table per reagent: what is still to buy first, the dearest on top, then what you make yourself, then what you already own. What is in your bags is taken off, and with Syndicator also what is in your bank, mail, auctions and on alts (the guild bank if you turn it on). Vendor-sold reagents carry a "vendor" mark, and the recipes still to buy or learn are listed with their price
+- **Craft or buy per reagent** - LazyProf crafts intermediates (e.g., smelt ore into bars) when that is cheaper; under More options you can choose "I craft it" or "I buy it" per item instead
 - **Buy vendor reagents in one click** - At a merchant that sells reagents on your list, a small panel offers a Buy button per reagent and "Buy all" with the total on the button. Limited-stock items and items not sold for gold are listed but never bought automatically
 - **Skill gaps** - Paths bridge a gap with a green recipe while its skill-up chance is at least 10%, otherwise the gap is shown
 - **Recipe Availability Filtering** - Only suggests recipes you can actually obtain - checks inventory, trainers, vendors, and Auction House listings
 - **Recipe details panel** - View ingredients, difficulty thresholds, sources, and Wowhead links
 - **Planning mode** - The same window, opened from the minimap button or `/lp browse`, plans any profession without opening it - or without having learned it
 - **Every Classic expansion** - One install plans correctly on Classic Era / Vanilla, Season of Discovery, The Burning Crusade, and Wrath of the Lich King (including Inscription, skill cap 450)
-- **WoW Forever** - Runs on WoW Forever 1.60 from the same install, with native frames, tabs and dropdowns and an addon compartment entry instead of a minimap button. On Forever LazyProf also remembers the profession trainers you visit and the fees they charge, and shows them on learn and rank steps. Forever recipe data covers all nine professions: Alchemy, Blacksmithing, Enchanting, Engineering, Leatherworking, Tailoring, Cooking, First Aid and Mining (smelting). Known limits: racial bonuses are not applied, required tools are not used for paths yet, and the skill cap is assumed to be 300 until confirmed
+- **WoW Forever** - Runs on WoW Forever 1.60 from the same install, with native frames, tabs and dropdowns and an addon compartment entry instead of a minimap button. On Forever LazyProf also remembers the profession trainers you visit and the fees they charge, and names them where a recipe is still to learn or the next rank is to train. Forever recipe data covers all nine professions: Alchemy, Blacksmithing, Enchanting, Engineering, Leatherworking, Tailoring, Cooking, First Aid and Mining (smelting). No race has a profession bonus on Forever, so none is applied there. Known limits: required tools are not used for paths yet, and the skill cap is assumed to be 300 until confirmed
 
 ## Pricing
 
@@ -50,16 +55,22 @@ For non-vendor items, market sources are checked in order:
 1. **TSM** - Configurable pricing (Recent, MinBuyout, Market, or Regional)
 2. **Auctionator** - Auctionator scan prices
 
+An Auctionator price from a scan you made this session (since login or /reload) is used before TSM, because it is newer than the TSM data loaded at login. A reagent no source can price is estimated from its vendor sell value.
+
+**What crafts sell for** - Sold to a vendor, a crafted item counts at the vendor's price the game reports for it. Sold at auction, it counts at its TSM or Auctionator price after the 5% cut, never less than the vendor's price. One item per craft is assumed.
+
 **Recommended:** Install [TSM](https://www.curseforge.com/wow/addons/tradeskill-master) + TSM Desktop App for the most accurate pricing.
 
 ## Usage
 
-1. **Open any profession window** - The LazyProf window opens beside it on the Guide tab, and an arrow marks the next recipe in the profession's list
-2. **Follow the card** - Craft what it says; the card moves on by itself as your skill goes up. Steps and Shopping are the other two tabs
-3. **Minimap button** (addon compartment on WoW Forever) - Plan any profession without opening it
+1. **Open any profession window** - The LazyProf window opens beside it, and an arrow marks the next recipe in the profession's list
+2. **Choose how far to level** - Drag the "Level to" slider, or type a skill and press Enter. The receipt under it says what that costs
+3. **Shop** - The Shopping tab lists what to collect first (bank, mail, alts - with Syndicator) and what to buy
+4. **Come back and craft** - The Path tab marks the recipe you are on and moves on by itself as your skill goes up
+5. **Minimap button** (addon compartment on WoW Forever) - Plan any profession without opening it
    - Left-click: Open profession browser
    - Right-click: Open settings
-4. **At a vendor** - If the vendor sells reagents on your list, the LazyProf panel next to the merchant window buys them
+6. **At a vendor** - If the vendor sells reagents on your list, the LazyProf panel next to the merchant window buys them
 
 The merchant panel uses the shopping list of the path you last looked at in this play session, so open the profession (or the LazyProf window) once before shopping.
 
@@ -80,7 +91,7 @@ LazyProf requires CraftLib to function. Install both addons together.
 
 - **[TradeSkillMaster](https://www.curseforge.com/wow/addons/tradeskill-master)** - TSM pricing (recommended)
 - **[Auctionator](https://www.curseforge.com/wow/addons/auctionator)** - Auctionator pricing + shift-click AH search
-- **[Syndicator](https://www.curseforge.com/wow/addons/syndicator)** - Bank, alt, mail, guild bank inventory scanning
+- **[Syndicator](https://www.curseforge.com/wow/addons/syndicator)** - Stock outside your bags: bank, mail, your auctions, alts, guild bank (bank and alts are counted by default once it is installed)
 
 ## Supported Game Versions
 

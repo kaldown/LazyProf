@@ -176,6 +176,19 @@ function SaleValue:LoadingCount(sale)
     return count
 end
 
+-- How many crafted items are being waited for right now, whichever
+-- calculation asked for them (a wait is over when the data arrives, the load
+-- fails or the timeout passes).
+function SaleValue:WaitingCount()
+    local count = 0
+    for itemId in pairs(self.waiting) do
+        if StillWaiting(self, itemId, false) then
+            count = count + 1
+        end
+    end
+    return count
+end
+
 -- Item data arrived (or failed to) for `itemId`. Returns true when a sale
 -- value was waiting for it, so the caller plans again; a failed load stops
 -- the item from counting as loading.
