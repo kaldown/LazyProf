@@ -24,14 +24,6 @@ function Text.StepRecipeText(step)
 end
 Text.StageTitle = Text.StepRecipeText
 
--- Prefix of a total-cost label ("Total: " / "Total (excluding gaps): ").
-function Text.TotalLabel(path, word)
-    if path and path.complete == false then
-        return word .. " (excluding gaps): "
-    end
-    return word .. ": "
-end
-
 -- "143-165" for a craft or gap stage, "150" for a learn or rank step.
 function Text.StageRange(stage)
     if stage.kind == "learn" or stage.kind == "rank" then

@@ -86,7 +86,6 @@ Modules\Pathfinder\Pathfinder.lua
 
 # Modules - Guide
 Modules\Guide\Text.lua
-Modules\Guide\Range.lua
 Modules\Guide\Stages.lua
 Modules\Guide\TrainerMemory.lua
 Modules\Guide\Views.lua
@@ -102,7 +101,6 @@ Modules\UI\Widgets\Tabs.lua
 Modules\UI\Widgets\RowList.lua
 Modules\UI\Arrow\Strategies\ArrowTooltip.lua
 Modules\UI\Arrow\ArrowManager.lua
-Modules\UI\PathBar.lua
 Modules\UI\GuideWindow.lua
 Modules\UI\RecipeDetails.lua
 Modules\UI\MerchantPanel.lua

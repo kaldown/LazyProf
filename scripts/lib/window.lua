@@ -65,7 +65,6 @@ local FILES = {
     "Core/CharStore.lua",
     "Modules/Pathfinder/Pins.lua",
     "Modules/Guide/Text.lua",
-    "Modules/Guide/Range.lua",
     "Modules/Guide/Stages.lua",
     "Modules/Guide/Views.lua",
     "Modules/UI/Widgets/PanelShell.lua",
@@ -75,7 +74,6 @@ local FILES = {
     "Modules/UI/Widgets/Slider.lua",
     "Modules/UI/Widgets/Tabs.lua",
     "Modules/UI/Widgets/RowList.lua",
-    "Modules/UI/PathBar.lua",
     "Modules/UI/GuideWindow.lua",
 }
 

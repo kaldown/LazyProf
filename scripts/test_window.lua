@@ -137,7 +137,8 @@ for _, family in ipairs({ "forever", "classic" }) do
         -- What the window no longer has
         T.check(p .. "no footer", window.footer1 == nil and window.footer2 == nil)
         T.check(p .. "no step navigation", window.nav == nil and window.prevBtn == nil and window.nextBtn == nil)
-        T.check(p .. "no range dropdown", window.rangeDropdown == nil and ui.named.LazyProfGuideRange == nil)
+        T.check(p .. "no range dropdown", window.rangeDropdown == nil and window.rangeLabel == nil
+            and ui.count(function(f) return f.name ~= nil and f.name:find("Range", 1, true) ~= nil end) == 0)
         T.check(p .. "no path bar", window.bar == nil)
         T.check(p .. "no total strip under the shopping list", window.shopStrip == nil and window.shopTotal == nil)
 
