@@ -311,6 +311,73 @@ T.section("stock scoring: against the whole run, not one craft", function()
     T.eq("quantity worked out once for scoring and once for the run", calls, 2)
 end)
 
+T.section("stock scoring: the next recipe unlock is found per skill, and it is the nearest", function()
+    local LazyProf = load()
+    local X, Y = 70, 71
+    local function fixture()
+        return {
+            recipe(1, "A", { yellow = 130, green = 140, gray = 150, reagents = { { itemId = X, count = 1, name = "X" } } }),
+            recipe(2, "B", { yellow = 130, green = 140, gray = 150, reagents = { { itemId = Y, count = 1, name = "Y" } } }),
+            recipe(5, "At 102", { orange = 102, required = 102, yellow = 130, green = 140, gray = 150,
+                reagents = { { itemId = 74, count = 1, name = "W" } } }),
+            recipe(6, "At 104", { orange = 104, required = 104, yellow = 130, green = 140, gray = 150,
+                reagents = { { itemId = 74, count = 1, name = "W" } } }),
+        }
+    end
+    local prices = { [X] = 100, [Y] = 300, [74] = 5000 }
+    local steps = run(LazyProf, "cheapest", 100, 110, fixture(), { [Y] = 1 }, prices)
+    local function costOfB(step)
+        for _, alt in ipairs(step.alternatives) do
+            if alt.recipe.id == 2 then return alt.craftCost end
+        end
+    end
+    T.check("fixture: runs are cut at 102 and at 104", steps[1].skillEnd == 102 and steps[2].skillEnd == 104)
+    T.eq("at 100 the nearest unlock (102) cuts the run to two crafts: one of two bought", costOfB(steps[1]), 300 * 1 / 2)
+    T.eq("at 102 the unlock is looked up again (104): again one of two bought", costOfB(steps[2]), 300 * 1 / 2)
+    T.eq("at 104 no unlock is left: a run of five, four bought", costOfB(steps[3]), 300 * 4 / 5)
+
+    -- Both strategies: a known next unlock gives the same quantity as walking the list.
+    local same = true
+    for _, name in ipairs({ "cheapest", "fastest" }) do
+        local strategy = LazyProf.PathfinderStrategies[name]
+        local list = fixture()
+        for _, r in ipairs(list) do
+            for _, skill in ipairs({ 100, 101.5, 102, 103, 104, 108 }) do
+                local unlock = false
+                for _, other in ipairs(list) do
+                    if other.skillRequired > skill and (not unlock or other.skillRequired < unlock) then unlock = other.skillRequired end
+                end
+                if strategy:CalculateQuantity(r, skill, 120, list, 0) ~= strategy:CalculateQuantity(r, skill, 120, list, 0, unlock) then
+                    same = false
+                end
+            end
+        end
+    end
+    T.check("a known next unlock gives the same quantity as walking the recipe list", same)
+end)
+
+T.section("stock scoring: only a bridge pass is scored as a bridge", function()
+    local LazyProf = load()
+    local X, Y = 70, 71
+    LazyProf.db.profile.includeGreenRecipes = true   -- green recipes are ordinary candidates: no bridge
+    local function greens()
+        return {
+            recipe(1, "G1", { orange = 60, required = 60, yellow = 80, green = 100, gray = 120, reagents = { { itemId = X, count = 1, name = "X" } } }),
+            recipe(2, "G2", { orange = 60, required = 60, yellow = 80, green = 100, gray = 120, reagents = { { itemId = Y, count = 1, name = "Y" } } }),
+        }
+    end
+    local prices = { [X] = 100, [Y] = 300 }
+    local full = LazyProf.PathfinderStrategies.cheapest:CalculateQuantity(greens()[2], 114, 125, greens(), 0)
+    local steps = run(LazyProf, "cheapest", 114, 125, greens(), { [Y] = 20 }, prices)
+    T.check("fixture: not a bridge step", not steps[1].bridge)
+    local shown
+    for _, alt in ipairs(steps[1].alternatives) do
+        if alt.recipe.id == 2 then shown = alt.craftCost end
+    end
+    T.eq("an ordinary pass counts the stock against the full run", shown, 300 * (full - 20) / full)
+    LazyProf.db.profile.includeGreenRecipes = false
+end)
+
 T.section("stock scoring: a green bridge is scored by the crafts it really gets", function()
     local LazyProf = load()
     local X, Y = 70, 71
@@ -735,6 +802,27 @@ T.section("candidates: the plan that was shopped for stays", function()
         T.eq("from " .. at .. ": only up to the end of its range", later[1].skillEnd, 105)
         T.eq("from " .. at .. ": then the other recipe", later[2].recipe.id, 1)
     end
+    -- The plan's own bounds are expected skills, with fractions. Carried on
+    -- from the skill it was planned at they are used as they are; from a
+    -- later (whole) skill they are read as whole skills, so the point from
+    -- 105 to 106 belongs to the recipe that starts at 105.25, not to one more
+    -- craft of the recipe before it.
+    local fractional = { at = 100, { from = 100, to = 105.25, recipeId = 2 }, { from = 105.25, to = 120, recipeId = 1 } }
+    local function craftsOf(list, recipeId)
+        local crafts = 0
+        for _, step in ipairs(list) do
+            if step.recipe.id == recipeId then crafts = crafts + step.quantity end
+        end
+        return crafts
+    end
+    local sameSkill = plan(LazyProf, "cheapest", 100, 120, fixture(), prices, nil, held, where, nil, nil, fractional)
+    T.eq("from the skill it was planned at: the first recipe goes on to its exact end (six crafts)", craftsOf(sameSkill, 2), 6)
+    local laterSkill = plan(LazyProf, "cheapest", 104, 120, fixture(), prices, nil, held, where, nil, nil, fractional)
+    T.eq("from a later skill: one craft to 105, not two", craftsOf(laterSkill, 2), 1)
+    T.check("then the next recipe from 105", laterSkill[2].recipe.id == 1 and laterSkill[2].skillStart == 105)
+    local atBoundary = plan(LazyProf, "cheapest", 105, 120, fixture(), prices, nil, held, where, nil, nil, fractional)
+    T.eq("at 105 itself the next recipe is used", atBoundary[1].recipe.id, 1)
+
     -- A range end that is a hair above where a replayed run lands does not
     -- cost one more craft.
     local hair = { { from = 100, to = 105.0000001, recipeId = 2 }, { from = 105.0000001, to = 120, recipeId = 1 } }
@@ -785,6 +873,47 @@ T.section("candidates: the plan that was shopped for stays", function()
     local _, _, mixedRoute = plan(LazyProf, "cheapest", 100, 120, fixture(), prices, nil, held, where, nil, nil,
         { 7, { from = 100, to = 105, recipeId = 2 }, "x", { from = 105, to = 120, recipeId = 1 } })
     T.eq("the well-formed part of it is still used", mixedRoute.kept, "previous")
+end)
+
+T.section("candidates: the plan in hand is planned like the stock route beyond what it remembers", function()
+    local LazyProf = loadRoutes()
+    local X, Y = 70, 71
+    local function fixture()
+        return {
+            recipe(1, "A", { itemId = 801, yellow = 130, green = 140, gray = 150, reagents = { { itemId = X, count = 1, name = "X" } } }),
+            recipe(2, "B", { itemId = 802, yellow = 130, green = 140, gray = 150, reagents = { { itemId = Y, count = 1, name = "Y" } } }),
+        }
+    end
+    -- Remembered: A up to 105. Beyond that nothing is remembered.
+    local memory = { { from = 100, to = 105, recipeId = 1 } }
+
+    -- With ten Y owned, the part beyond the memory uses them (B costs nothing there).
+    local prices = { [X] = 100, [Y] = 120 }
+    local _, _, route = plan(LazyProf, "cheapest", 100, 110, fixture(), prices, nil,
+        { [Y] = 10 }, { [Y] = { bags = 10 } }, nil, nil, memory)
+    T.eq("beyond the memory the owned stock is used: five X bought, nothing else", candidate(route, "previous").spend, 500)
+
+    -- With sale values, the part beyond the memory is ranked with them: one X
+    -- owned makes A cost 80 a craft there, B costs 100 and sells for 60.
+    local salePrices = { [X] = 100, [Y] = 100 }
+    local values = { [2] = 60 }
+    _, _, route = plan(LazyProf, "cheapest", 100, 110, fixture(), salePrices, { values = values, rank = values },
+        { [X] = 1 }, { [X] = { bags = 1 } }, nil, nil, memory)
+    T.eq("beyond the memory recipes are ranked with sale values: 4 X and 5 Y bought, 300 back",
+        candidate(route, "previous").net, 400 + 500 - 300)
+
+    -- The coverage rule holds for it too.
+    local a = fixture()[1]
+    local fake = { Calculate = function(_, _, _, _, _, _, _, _, ctx)
+        if ctx and ctx.replay then
+            return { { recipe = a, quantity = 1, skillStart = 100, skillEnd = 101, totalCost = 0 } },
+                { complete = false, gaps = { { from = 101, to = 110, reason = "no recipe" } } }
+        end
+        return { { recipe = a, quantity = 10, skillStart = 100, skillEnd = 110, totalCost = 1000 } }, { complete = true, gaps = {} }
+    end }
+    _, _, route = plan(LazyProf, "cheapest", 100, 110, fixture(), prices, nil, { [Y] = 1 }, { [Y] = { bags = 1 } }, fake, nil, memory)
+    T.check("a plan in hand that covers less is not eligible", candidate(route, "previous").eligible == false)
+    T.check("and is not kept, however cheap", route.kept ~= "previous")
 end)
 
 T.section("candidates: the remembered plan never forces a recipe the planner would refuse", function()
