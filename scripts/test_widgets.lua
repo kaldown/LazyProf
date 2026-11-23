@@ -443,7 +443,7 @@ section("toc", function()
     local toc = fh:read("*a")
     fh:close()
     local panelAt = toc:find("Modules\\UI\\GuideWindow.lua", 1, true)
-    for _, name in ipairs({ "RowPool", "Dropdown", "Controls", "Tabs", "RowList" }) do
+    for _, name in ipairs({ "RowPool", "Dropdown", "Controls", "Slider", "Tabs", "RowList" }) do
         local at = toc:find("Modules\\UI\\Widgets\\" .. name .. ".lua", 1, true)
         check("toc: " .. name .. " loads before the window", at and panelAt and at < panelAt)
     end

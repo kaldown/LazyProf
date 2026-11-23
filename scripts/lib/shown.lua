@@ -36,7 +36,9 @@ function M.amounts(Views, view)
         if line.key == "spend" then
             out.spend = copper(line.amount)
             if line.note then
-                local reagents, recipes = line.note:match("^reagents (.+) %+ recipes (.+)$")
+                -- (A path with gaps says so at the end of the note.)
+                local note = line.note:gsub(" %(excluding gaps%)$", "")
+                local reagents, recipes = note:match("^reagents (.+) %+ recipes (.+)$")
                 out.noteReagents, out.noteRecipes = copper(reagents), copper(recipes)
             end
         elseif line.key == "back" then

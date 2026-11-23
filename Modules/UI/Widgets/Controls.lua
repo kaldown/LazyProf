@@ -45,10 +45,13 @@ function Widgets.SetResizeBounds(frame, minW, minH, maxW, maxH)
     end
 end
 
--- The bottom-right resize grip. onDone() runs when the user lets go.
+-- The bottom-right resize grip. onDone() runs when the user lets go. It
+-- takes clicks in a square of RESIZE_GRIP_SIZE around its 16 x 16 icon:
+-- whatever a window puts in that corner has to end above or left of it.
+local RESIZE_GRIP_SIZE = 20
 function Widgets.CreateResizeGrip(frame, onDone)
     local grip = CreateFrame("Button", nil, frame)
-    grip:SetSize(32, 32)
+    grip:SetSize(RESIZE_GRIP_SIZE, RESIZE_GRIP_SIZE)
     grip:SetPoint("BOTTOMRIGHT", 0, 0)
     -- A nearly invisible texture so the whole corner takes the click
     grip:SetNormalTexture("Interface\\Buttons\\WHITE8x8")
@@ -69,8 +72,9 @@ function Widgets.CreateResizeGrip(frame, onDone)
     return grip
 end
 
--- Two or three stock buttons in a row, one of them shown selected (held in
--- its pushed state). Clicking another selects it and calls onSelect(value).
+-- Two or three stock buttons in a row, one of them shown selected: held in
+-- its pushed state with its highlight on and white text, while the others
+-- are dimmed. Clicking another selects it and calls onSelect(value).
 local ButtonGroup = {}
 ButtonGroup.__index = ButtonGroup
 
@@ -81,6 +85,15 @@ ButtonGroup.__index = ButtonGroup
 -- is therefore given the "down" art here, again after each of those.
 local BUTTON_UP = "Interface\\Buttons\\UI-Panel-Button-Up"
 local BUTTON_DOWN = "Interface\\Buttons\\UI-Panel-Button-Down"
+-- The pressed art alone does not tell the two apart at a glance, so the
+-- selected button also gets the white font and the others are dimmed
+-- (generic calls: SetNormalFontObject, WoW Forever Blizzard_APIDocumentationGenerated/
+-- SimpleButtonAPIDocumentation.lua:423; SetAlpha, SimpleRegionAPIDocumentation.lua:123;
+-- font objects GameFontHighlight / GameFontNormal,
+-- Blizzard_Fonts_Shared/Shared/FontStyles.xml:62, 50).
+local SELECTED_FONT = "GameFontHighlight"
+local UNSELECTED_FONT = "GameFontNormal"
+local UNSELECTED_ALPHA = 0.55
 
 local function ApplyButtonArt(button, selected)
     if selected then
@@ -90,6 +103,9 @@ local function ApplyButtonArt(button, selected)
         button:SetButtonState("NORMAL")
         button:UnlockHighlight()
     end
+    local font = selected and SELECTED_FONT or UNSELECTED_FONT
+    button:SetNormalFontObject(_G[font] or font)
+    button:SetAlpha(selected and 1 or UNSELECTED_ALPHA)
     local art = selected and BUTTON_DOWN or BUTTON_UP
     for _, key in ipairs({ "Left", "Middle", "Right" }) do
         local piece = rawget(button, key)
@@ -148,14 +164,21 @@ function Widgets.CreateButtonGroup(parent, options, onSelect)
     return group
 end
 
--- A small number box. onCommit(number) runs on Enter or when the box loses
--- focus with a changed number; what it returns (a corrected value) is shown.
--- Escape puts the last value back.
+-- A small number box. onCommit(number) runs on Enter with a changed number;
+-- what it returns (a corrected value) is shown. Only Enter commits: digits
+-- half typed when the box loses the keyboard (a click elsewhere, the window
+-- hiding) are not a number the player chose, so losing it, like Escape, puts
+-- the value back.
+--   input:SetValue(value)         the value, shown at once
+--   input:SetValue(value, true)   the value; while the player is typing in
+--                                 the box the digits stay and the value is
+--                                 shown when the box is left
 local NumericInput = {}
 NumericInput.__index = NumericInput
 
-function NumericInput:SetValue(value)
+function NumericInput:SetValue(value, keepTyping)
     self.value = value
+    if keepTyping and self.frame:HasFocus() then return end
     self.frame:SetText(value ~= nil and tostring(value) or "")
 end
 
@@ -195,7 +218,7 @@ function Widgets.CreateNumericInput(parent, name, width, maxLetters, onCommit)
         self:ClearFocus()
     end)
     box:SetScript("OnEditFocusLost", function()
-        commit()
+        input:SetValue(input.value)
     end)
     return input
 end

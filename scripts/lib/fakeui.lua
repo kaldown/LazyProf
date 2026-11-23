@@ -9,6 +9,8 @@
 --   ui.named[name]       frames made with a global name
 --   ui.count(pred)       how many frames match
 --   ui.fire(frame, "OnClick", ...)   run a script as the client would
+--   ui.slide(slider, value)          the player moves a slider's handle
+--   ui.release(button)               a mouse button is let go with no frame hearing of it
 --   ui.combat = true     what InCombatLockdown() reports
 --   ui.event("PLAYER_REGEN_DISABLED")   deliver an event to registered frames
 --
@@ -123,6 +125,7 @@ function M.install(opts)
         function f:SetMovable(m) self.movable = m end
         function f:IsMovable() return self.movable end
         function f:SetResizable(r) self.resizable = r end
+        function f:SetResizeBounds(minW, minH, maxW, maxH) self.resizeBounds = { minW, minH, maxW, maxH } end
         function f:EnableMouse(m) self.mouse = m end
         function f:RegisterEvent(e) self.events[e] = true end
         function f:UnregisterEvent(e) self.events[e] = nil end
@@ -139,8 +142,9 @@ function M.install(opts)
             self.regions[#self.regions + 1] = r
             return r
         end
-        function f:CreateTexture()
+        function f:CreateTexture(_, layer)
             local r = newRegion("Texture", self)
+            r.layer = layer
             self.regions[#self.regions + 1] = r
             return r
         end
@@ -158,6 +162,7 @@ function M.install(opts)
         function f:SetButtonState(state, locked) self.buttonState, self.buttonLocked = state, locked end
         function f:LockHighlight() self.highlightLocked = true end
         function f:UnlockHighlight() self.highlightLocked = false end
+        function f:SetNormalFontObject(font) self.normalFont = font end
 
         if ftype == "DropdownButton" then
             function f:SetupMenu(generator) self.generator = generator; self.setupCalls = (self.setupCalls or 0) + 1 end
@@ -185,12 +190,46 @@ function M.install(opts)
             function f:SetScrollChild(c) self.scrollChild = c end
             function f:SetVerticalScroll(v) self.scroll = v end
             function f:GetVerticalScroll() return self.scroll end
-            function f:GetVerticalScrollRange() return self.scrollRange or 0 end
+            -- How far the content scrolls: what of the scroll child does not
+            -- fit in the frame (f.scrollRange overrides it).
+            function f:GetVerticalScrollRange()
+                if self.scrollRange then return self.scrollRange end
+                local child = self.scrollChild
+                return math.max(0, (child and child.height or 0) - (self.height or 0))
+            end
         elseif ftype == "StatusBar" then
             function f:SetMinMaxValues(a, b) self.min, self.max = a, b end
             function f:SetValue(v) self.value = v end
             function f:SetStatusBarTexture(t) self.barTexture = t end
             function f:SetStatusBarColor(cr, cg, cb, ca) self.barColor = { cr, cg, cb, ca } end
+        elseif ftype == "Slider" then
+            -- A value set by code runs OnValueChanged like the client does,
+            -- flagged as not coming from the player; ui.slide is the player.
+            -- Every range given is kept in rangeCalls.
+            f.min, f.max, f.value, f.step, f.rangeCalls = 0, 0, 0, 0, {}
+            function f:SetMinMaxValues(a, b)
+                self.min, self.max = a, b
+                self.rangeCalls[#self.rangeCalls + 1] = { a, b }
+                self:SetValue(self.value)
+            end
+            function f:GetMinMaxValues() return self.min, self.max end
+            function f:SetValue(v)
+                v = math.max(self.min, math.min(self.max, v))
+                if v == self.value then return end
+                self.value = v
+                if self.scripts.OnValueChanged then self.scripts.OnValueChanged(self, v, false) end
+            end
+            function f:GetValue() return self.value end
+            function f:SetValueStep(s) self.step = s end
+            function f:GetValueStep() return self.step end
+            function f:SetObeyStepOnDrag(o) self.obeyStep = o end
+            function f:SetOrientation(o) self.orientation = o end
+            function f:SetThumbTexture(t)
+                self.thumbTexture = self.thumbTexture or newRegion("Texture", self)
+                self.thumbTexture.texture = t
+            end
+            function f:GetThumbTexture() return self.thumbTexture end
+            function f:IsDraggingThumb() return self.draggingThumb or false end
         end
 
         -- A tab made from the Forever template joins its parent's Tabs array
@@ -202,6 +241,17 @@ function M.install(opts)
         end
         if template == "UICheckButtonTemplate" then
             f.Text = newRegion("FontString", f)
+        end
+        -- The stock scroll frame carries its scroll bar under the key
+        -- ScrollBar (ui.noScrollBar: a client whose template does not).
+        if template == "UIPanelScrollFrameTemplate" and not ui.noScrollBar then
+            f.ScrollBar = newFrame("Slider", name and (name .. "ScrollBar") or nil, f, "UIPanelScrollBarTemplate")
+        end
+        -- The stock plain slider: horizontal, 200 x 19, whole steps on a
+        -- drag, its handle under the key Thumb.
+        if template == "MinimalSliderTemplate" then
+            f.width, f.height, f.orientation, f.obeyStep = 200, 19, "HORIZONTAL", true
+            f.Thumb = newRegion("Texture", f)
         end
         return f
     end
@@ -236,10 +286,40 @@ function M.install(opts)
         end
     end
 
+    -- Which mouse buttons are down, as IsMouseButtonDown reports it. Firing a
+    -- frame's OnMouseDown / OnMouseUp presses and lets go of the button (the
+    -- left one when none is named), as the click that runs them would.
+    ui.buttons = {}
     function ui.fire(frame, script, ...)
         local fn = frame.scripts[script]
         assert(fn, "no script " .. script .. " on " .. tostring(frame.name or frame.ftype))
+        if script == "OnMouseDown" then
+            ui.buttons[(...) or "LeftButton"] = true
+        elseif script == "OnMouseUp" then
+            ui.buttons[(...) or "LeftButton"] = nil
+        end
         return fn(frame, ...)
+    end
+
+    -- A mouse button is let go where no frame runs a script for it (every
+    -- button when none is named).
+    function ui.release(button)
+        if button then
+            ui.buttons[button] = nil
+        else
+            ui.buttons = {}
+        end
+    end
+    _G.IsMouseButtonDown = function(button)
+        if button then return ui.buttons[button] == true end
+        return next(ui.buttons) ~= nil
+    end
+
+    -- The player moves a slider's handle to `value`: the frame reports it as
+    -- the player's.
+    function ui.slide(frame, value)
+        frame.value = value
+        if frame.scripts.OnValueChanged then frame.scripts.OnValueChanged(frame, value, true) end
     end
 
     -- Deliver an event to every frame registered for it.
@@ -298,6 +378,23 @@ function M.install(opts)
         ui.tabCalls.setTab[#ui.tabCalls.setTab + 1] = id
     end
     _G.PanelTemplates_TabResize = function() ui.tabCalls.resize = ui.tabCalls.resize + 1 end
+
+    -- The stock scroll frame's handler for a changed scroll range: with
+    -- scrollBarHideable on the frame, the bar is hidden while nothing
+    -- scrolls and shown again when something does. Called without a range it
+    -- reads the frame's own.
+    ui.scrollRangeCalls = 0
+    _G.ScrollFrame_OnScrollRangeChanged = function(frame, _, yrange)
+        ui.scrollRangeCalls = ui.scrollRangeCalls + 1
+        local bar = frame.ScrollBar
+        yrange = math.floor(yrange or frame:GetVerticalScrollRange())
+        bar:SetMinMaxValues(0, yrange)
+        if yrange == 0 then
+            if frame.scrollBarHideable then bar:Hide() end
+        else
+            bar:Show()
+        end
+    end
 
     if opts.family == "forever" then
         _G.NineSliceUtil = { ApplyLayoutByName = function(frame, layout) frame.layout = layout end }

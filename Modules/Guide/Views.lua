@@ -1,29 +1,28 @@
 -- Modules/Guide/Views.lua
 -- What the LazyProf window shows, as plain data. Each function turns the
--- window's state (the path, its stages, the chosen range, what is expanded)
--- into text and row descriptors for Widgets/RowList.lua. Nothing here touches
--- a frame, so the content of every tab is tested headlessly; the frame code
--- only places widgets and passes clicks back through `ctx` callbacks.
+-- window's state (the path, its stages, what is opened) into text and row
+-- descriptors for Widgets/RowList.lua. Nothing here touches a frame, so the
+-- content of every tab is tested headlessly; the frame code only places
+-- widgets and passes clicks back through `ctx` callbacks.
 --
--- `view` is built by the window (GuideWindow:ComputeView):
+-- `view` is built by the window (GuideWindow:BuildView):
 --   path, stages, summary        the path, all its stages, Stages.Totals of them
 --   account                      Pathfinder:Account of the whole path's stages (the
 --                                shopping list, what is spent, what the crafts sell
 --                                for, the net) plus stockSaves, what the owned
 --                                stock takes off the amount spent
+--   missing                      the account's shopping list (account.missing)
 --   sale, saleLoading            the path's sale values (mode, sources) and how
 --                                many crafted items still wait for their data now
 --   advanced                     "More options" is on
---   rangeStages, rangeTotals     the stages of the chosen range and their totals
---   bracket, rangeLabel          the chosen range (nil = full path) and its label
+--   hideOwned                    "Hide what I have" is ticked
 --   skill, cap                   the real skill and the live cap (nil when unknown)
 --   priceSummary, priceLines     PriceManager:PathSummary / SummaryLines of the path
 --   marginPercent                nil when the margin is off
---   expanded                     { [stage.key] = true } rows opened on the Steps tab; the
---                                path list keys it by Views.RowKey(stage), and there
---                                false = closed by the player
---   showAllAlts                  path list: { [Views.RowKey(stage)] = true } runs that
---                                list every alternative (the Guide card: one boolean)
+--   expanded                     { [Views.RowKey(stage)] = true | false } runs the
+--                                player opened or closed
+--   showAllAlts                  { [Views.RowKey(stage)] = true } runs that list
+--                                every alternative
 --   profile, liveCap             the client profile ("VANILLA", ...) and the cap the
 --                                character works under
 --   hiddenRecipeId               the next recipe when the profession window hides it
@@ -55,6 +54,7 @@ local BG_ROW = { 0.15, 0.15, 0.15, 0.3 }
 local BG_ROW_HOVER = { 0.25, 0.25, 0.25, 0.6 }
 local BG_CURRENT = { 0.35, 0.28, 0.05, 0.55 }
 local BG_CURRENT_HOVER = { 0.45, 0.36, 0.1, 0.7 }
+local BG_CURRENT_SUB = { 0.35, 0.28, 0.05, 0.35 }   -- the lines under the current run: the same tint, dimmer
 local BG_GAP = { 0.35, 0.1, 0.1, 0.35 }
 local BG_GAP_HOVER = { 0.45, 0.15, 0.15, 0.6 }
 local BG_SUB = { 0.12, 0.12, 0.12, 0.5 }
@@ -151,6 +151,8 @@ local function SoldAs(view, mode)
     return mode
 end
 
+local GAPS_NOTE = "excluding gaps"
+
 -- What the path costs, as the lines of a receipt. Built from the account of
 -- the whole path (view.account: the shopping list of the stages' quantities,
 -- less what the crafts sell for), so "You spend" is the Shopping tab added up.
@@ -162,8 +164,13 @@ end
 --                note-only line
 --   amountColor  { r, g, b } of the amount (green: money that comes back)
 --   color        { r, g, b } of the note
+--   gaps         on the spend line: true when the path has gaps, which the
+--                amounts leave out (the note says so; for a caller that
+--                shows no notes)
 -- Lines, in order:
---   spend    reagents still to buy plus recipes to buy or learn
+--   spend    reagents still to buy plus recipes to buy or learn; its note
+--            gives the two parts when a recipe costs something, and ends
+--            with "excluding gaps" on a path that has gaps
 --   back     what the crafts sell for (not when sale values are not counted,
 --            or nothing sells and nothing is still loading); its note says
 --            how the runs that sell were counted
@@ -187,13 +194,16 @@ function Views.Receipt(view)
         lines[#lines + 1] = line
     end
 
+    -- The label stays "You spend" (a longer one takes the note column's
+    -- room): that a path with gaps leaves them out is said in the note.
     local spent = Round(account.spend)
     local spend = { key = "spend", label = "You spend", amount = Money(spent), amountColor = WHITE }
-    if path.complete == false then
-        spend.label = spend.label .. " (excluding gaps)"
-    end
     if (account.recipes or 0) > 0 then
         spend.note = "reagents " .. Money(account.reagents) .. " + recipes " .. Money(account.recipes)
+    end
+    if path.complete == false then
+        spend.gaps = true
+        spend.note = spend.note and (spend.note .. " (" .. GAPS_NOTE .. ")") or GAPS_NOTE
     end
     add(spend)
 
@@ -287,44 +297,10 @@ function Views.Target(view)
     }
 end
 
--- Footer ---------------------------------------------------------------------
-
-local function PayText(totals, marginSide)
-    local cost = marginSide and totals.marginCost or totals.cost
-    local pay = marginSide and totals.marginPay or totals.pay
-    local text = Money(pay)
-    if pay < cost then text = Green(text) end
-    return text
-end
-
--- "This range: X   Whole path: Y (you pay Z)", plus a second line with the
--- with-margin figures when the margin is on. Returns line1, line2 (or nil).
-function Views.Footer(view)
-    local path = view.path
-    if not path or not view.summary then return "", nil end
-    local all, range = view.summary, view.rangeTotals
-    local whole = Text.TotalLabel(path, "Whole path") .. Money(all.cost)
-        .. " (you pay " .. PayText(all) .. ")"
-    local line1 = whole
-    if view.bracket and range then
-        line1 = "This range: " .. PayText(range) .. "     " .. whole
-    end
-
-    local line2
-    if all.marginCost then
-        line2 = string.format("With %d%% margin: ", view.marginPercent or 0)
-        if view.bracket and range and range.marginCost then
-            line2 = line2 .. "range " .. PayText(range, true) .. ", "
-        end
-        line2 = line2 .. "whole path " .. Money(all.marginCost) .. " (you pay " .. PayText(all, true) .. ")"
-    end
-    return line1, line2
-end
-
 -- Messages instead of a list ---------------------------------------------------
 
--- Rows to show instead of the tab's content, or nil: nothing is left to plan,
--- or the chosen range holds no step.
+-- Rows to show instead of the tab's content, or nil: nothing is left to plan
+-- (the cap is reached, or the target).
 function Views.Notice(view)
     local path = view.path
     if not path then return nil end
@@ -343,9 +319,6 @@ function Views.Notice(view)
         return message(string.format("Target reached: skill %d, target %d.", skill, path.targetSkill or 0),
             "Raise the target to keep planning.")
     end
-    if view.rangeStages and #view.rangeStages == 0 then
-        return message("No steps in " .. (view.bracket and view.bracket.name or "this range"))
-    end
     return nil
 end
 
@@ -353,13 +326,13 @@ end
 
 local COLUMN_TITLES = { "Need", "Have", "Buy", "Cost" }
 
-function Views.ReagentHeader(indent)
-    return { kind = "cols", header = true, indent = indent, text = "Reagent", cols = COLUMN_TITLES }
+function Views.ReagentHeader()
+    return { kind = "cols", header = true, text = "Reagent", cols = COLUMN_TITLES }
 end
 
 -- One reagent of a craft stage: need / have / buy / cost. A reagent with no
 -- price shows "?" instead of a made-up cost.
-function Views.ReagentRow(mat, indent)
+function Views.ReagentRow(mat)
     local buy = mat.missing > 0 and tostring(mat.missing) or "-"
     local cost
     if mat.missing <= 0 then
@@ -378,7 +351,7 @@ function Views.ReagentRow(mat, indent)
     end
     tooltip[#tooltip + 1] = { text = "Shift-click to link", r = 0.5, g = 0.5, b = 0.5 }
     return {
-        kind = "cols", indent = indent, icon = mat.icon, text = mat.name,
+        kind = "cols", icon = mat.icon, text = mat.name,
         cols = { tostring(mat.need), tostring(mat.have), buy, cost },
         colColors = {
             [2] = mat.have >= mat.need and GREEN or WHITE,
@@ -390,15 +363,13 @@ function Views.ReagentRow(mat, indent)
     }
 end
 
--- Steps tab --------------------------------------------------------------------
+-- Tooltips and wording of the path's rows ------------------------------------------
 
 local BRIDGE_TEXT = "No orange or yellow recipe is available here, so this green recipe keeps you leveling."
 
--- Tooltip of a craft stage. opts (optional): spareWord, how the margin is
--- called ("margin" by default); unpriced = true when a reagent that has to be
--- bought has no price, so no cost is stated.
-local function CraftTooltip(stage, opts)
-    opts = opts or {}
+-- Tooltip of a craft run. unpriced: a reagent that has to be bought has no
+-- price, so no cost is stated.
+local function CraftTooltip(stage, unpriced)
     local lines = {
         { text = Text.StageTitle(stage), r = 1, g = 1, b = 1 },
         { text = string.format("Skill %d to %d", stage.fromDisplay, stage.toDisplay), r = 0.7, g = 0.7, b = 0.7 },
@@ -408,7 +379,7 @@ local function CraftTooltip(stage, opts)
         lines[#lines + 1] = { text = BRIDGE_TEXT, r = 0.25, g = 0.75, b = 0.25 }
     end
     local pay, cost = stage.outOfPocketCost, stage.cost
-    if opts.unpriced then
+    if unpriced then
         lines[#lines + 1] = { text = "A reagent has no price, so the cost is not known.", r = 1, g = 0.5, b = 0 }
     else
         if stage.quantity > 0 then
@@ -426,8 +397,8 @@ local function CraftTooltip(stage, opts)
         end
     end
     if stage.margin and stage.quantity ~= stage.baseQuantity then
-        lines[#lines + 1] = { text = string.format("%d crafts expected, %d with %s", stage.baseQuantity, stage.quantity,
-            opts.spareWord or "margin"), r = 0.7, g = 0.7, b = 0.7 }
+        lines[#lines + 1] = { text = string.format("%d crafts expected, %d with spare crafts", stage.baseQuantity,
+            stage.quantity), r = 0.7, g = 0.7, b = 0.7 }
     end
     return lines
 end
@@ -450,86 +421,6 @@ local LEARN_COLOR = { 1, 0.75, 0.3 }
 -- Colours of a learn step's lines (Text.LearnLines)
 local LEARN_LINE_COLOR = { plain = WHITE, good = GREEN, warn = { 1, 0.3, 0.3 }, cost = GOLD }
 local HIDDEN_TEXT = "The profession window hides unlearned recipes, so the arrow cannot point at this one until you learn it."
-
--- One line for a learn or rank step (lists and "next" rows).
-function Views.StepRow(stage, view, ctx)
-    local row = {
-        kind = "line", stage = stage, lead = Text.StageRange(stage), leadWidth = 74,
-        bg = BG_ROW, hoverBg = BG_ROW_HOVER, alpha = stage.done and 0.5 or 1,
-        onClick = ctx.onOpenStage and function() ctx.onOpenStage(stage) end or nil,
-    }
-    if stage.kind == "learn" then
-        local short = Text.LearnShort(stage, view.profile)
-        row.text = Grey("learn") .. "  " .. (stage.recipe.name or "Unknown") .. (short and (" - " .. short) or "")
-        row.color = LEARN_COLOR
-        row.right = stage.fee > 0 and Money(stage.fee) or ""
-        row.tooltip = { { text = "Learn " .. (stage.recipe.name or "the recipe"), r = 1, g = 1, b = 1 } }
-        for _, line in ipairs(Text.LearnLines(stage, view.profile, view.path and view.path.profession)) do
-            row.tooltip[#row.tooltip + 1] = { text = line.text, r = 0.7, g = 0.7, b = 0.7 }
-        end
-    else
-        row.text = Grey("train") .. "  " .. Text.RankShort(stage)
-        row.color = GOLD
-        row.tooltip = { { text = Text.RankLine(stage, view.liveCap, view.path and view.path.profession,
-            view.path and view.path.hasProfession), r = 1, g = 1, b = 1 } }
-    end
-    return row
-end
-
--- "> 143-165" for the current stage, "143-165" otherwise.
-local function Lead(stage)
-    return (stage.current and "> " or "") .. Text.StageRange(stage)
-end
-
--- One row per stage of the chosen range; a craft row opens its reagents in
--- place. ctx: onToggleExpand(stage), onOpenStage(stage) (optional: adds a
--- button that opens the stage on the Guide tab).
-function Views.Steps(view, ctx)
-    local notice = Views.Notice(view)
-    if notice then return notice end
-    local rows = {}
-    for _, stage in ipairs(view.rangeStages or {}) do
-        local alpha = stage.done and 0.5 or 1
-        local bg = stage.current and BG_CURRENT or BG_ROW
-        local hover = stage.current and BG_CURRENT_HOVER or BG_ROW_HOVER
-        if stage.kind == "craft" then
-            local pay = stage.outOfPocketCost
-            local tooltip = CraftTooltip(stage)
-            tooltip[#tooltip + 1] = { text = "Click to show or hide the reagents", r = 0.5, g = 0.5, b = 0.5 }
-            rows[#rows + 1] = {
-                kind = "line", stage = stage, lead = Lead(stage), leadWidth = 74,
-                text = Grey("craft") .. "  " .. Text.StageTitle(stage),
-                color = Views.DifficultyColor(stage.color),
-                right = stage.done and "done" or Money(pay),
-                rightColor = stage.done and DIM or (pay < stage.cost and GREEN or WHITE),
-                bg = bg, hoverBg = hover, alpha = alpha, tooltip = tooltip,
-                onClick = function() ctx.onToggleExpand(stage) end,
-                button = ctx.onOpenStage and { text = "Guide", width = 46, onClick = function() ctx.onOpenStage(stage) end,
-                    tooltip = { { text = "Open this step on the Guide tab", r = 1, g = 1, b = 1 } } } or nil,
-            }
-            if view.expanded and view.expanded[stage.key] then
-                rows[#rows + 1] = Views.ReagentHeader(14)
-                for _, mat in ipairs(stage.materials) do
-                    rows[#rows + 1] = Views.ReagentRow(mat, 14)
-                end
-            end
-        elseif stage.kind == "gap" then
-            rows[#rows + 1] = {
-                kind = "line", stage = stage, lead = Lead(stage), leadWidth = 74,
-                text = Grey("gap") .. "  " .. Text.GapText(stage), color = GAP_RED,
-                bg = stage.current and BG_CURRENT or BG_GAP, hoverBg = BG_GAP_HOVER, alpha = alpha,
-                tooltip = GapTooltip(stage),
-                onClick = ctx.onOpenStage and function() ctx.onOpenStage(stage) end or nil,
-            }
-        elseif stage.kind == "learn" or stage.kind == "rank" then
-            local row = Views.StepRow(stage, view, ctx)
-            row.lead = Lead(stage)
-            row.bg, row.hoverBg = bg, hover
-            rows[#rows + 1] = row
-        end
-    end
-    return rows
-end
 
 -- Recipe search ----------------------------------------------------------------
 
@@ -570,109 +461,9 @@ function Views.SearchResults(matches, ctx)
     return rows
 end
 
--- Path bar ---------------------------------------------------------------------
-
-local BAR_DONE = { 0.35, 0.35, 0.35 }
-local BAR_GAP = { 0.8, 0.15, 0.15 }
-
-local function StageTooltip(stage)
-    if stage.kind == "gap" then
-        return GapTooltip(stage)
-    end
-    return CraftTooltip(stage)
-end
-
--- The whole journey as one strip. Returns
---   from, to     skills at the bar's ends
---   segments     { { left, width (fractions of the bar), color, alpha, kind =
---                "done" | "craft" | "gap", stage, selected, tooltip }, ... }
---   ticks        { { pos, skill }, ... } one per rank still to train
---   marker       position of the real skill (nil when it is off the bar)
---   markerSkill  the real skill
--- For a profession the character has, the bar starts at 1 and the part already
--- gained is one dim block; otherwise it starts where the path does.
-function Views.PathBar(view)
-    local path = view.path
-    local bar = { segments = {}, ticks = {} }
-    if not path then return bar end
-    local from = path.currentSkill or 1
-    if path.hasProfession ~= false and from > 1 then
-        from = 1
-    end
-    local to = math.max(path.targetSkill or from, path.actualSkill or from, from)
-    bar.from, bar.to = from, to
-    local span = to - from
-    if span <= 0 then return bar end
-
-    local function add(segFrom, segTo, fields)
-        if segTo <= segFrom then return end
-        fields.left = (segFrom - from) / span
-        fields.width = (segTo - segFrom) / span
-        bar.segments[#bar.segments + 1] = fields
-    end
-
-    local start = path.currentSkill or from
-    if start > from then
-        add(from, start, { kind = "done", color = BAR_DONE, alpha = 0.6,
-            tooltip = { { text = string.format("Skill %d to %d: already done", from, start), r = 0.7, g = 0.7, b = 0.7 } } })
-    end
-    for _, stage in ipairs(view.stages or {}) do
-        if stage.kind == "craft" or stage.kind == "gap" then
-            add(stage.from, stage.to, {
-                kind = stage.kind, stage = stage,
-                color = stage.kind == "gap" and BAR_GAP or Views.DifficultyColor(stage.color),
-                alpha = stage.done and 0.4 or 1,
-                selected = (view.selectedStage == stage) or nil,
-                tooltip = StageTooltip(stage),
-            })
-        elseif stage.kind == "rank" then
-            bar.ticks[#bar.ticks + 1] = { pos = (stage.cap - from) / span, skill = stage.cap }
-        end
-    end
-
-    local actual = view.skill or path.actualSkill
-    if actual and actual >= from and actual <= to then
-        bar.marker = (actual - from) / span
-        bar.markerSkill = actual
-    end
-    return bar
-end
-
--- Guide tab --------------------------------------------------------------------
+-- Alternatives and trainers ----------------------------------------------------------
 
 local ALTERNATIVES_SHOWN = 3
-local QUESTION_MARK = "Interface\\Icons\\INV_Misc_QuestionMark"
-
--- The stage the Guide tab shows: the one the player opened (by key, else the
--- craft or gap stage covering the skill it started at, so a stage whose recipe
--- was just replaced stays selected), else the current one, else the last.
-function Views.SelectedStage(stages, summary, selection)
-    if not stages or #stages == 0 then return nil end
-    if selection then
-        for _, stage in ipairs(stages) do
-            if stage.key == selection.key then return stage end
-        end
-        for _, stage in ipairs(stages) do
-            if (stage.kind == "craft" or stage.kind == "gap")
-                    and selection.from >= stage.from and selection.from < stage.to then
-                return stage
-            end
-        end
-    end
-    return stages[summary and summary.currentIndex or #stages] or stages[#stages]
-end
-
-local function Signed(n, unit)
-    if n == 0 then return Grey("same " .. unit) end
-    local text = string.format("%+d %s", n, unit)
-    return n < 0 and Green(text) or ("|cFFFF6666" .. text .. "|r")
-end
-
-local function SignedMoney(copper)
-    if copper == 0 then return Grey("same cost") end
-    local text = (copper < 0 and "-" or "+") .. Utils.FormatMoneyShort(math.abs(copper))
-    return copper < 0 and Green(text) or ("|cFFFF6666" .. text .. "|r")
-end
 
 -- An alternative that cannot bring the skill to the end of the stage
 -- (alt.covers == false): how far it gets, in place of differences that would
@@ -749,51 +540,6 @@ local function UseTooltip(alt)
     return lines
 end
 
-local function AlternativeRow(stage, alt, ctx, profile)
-    local name = alt.recipe.name or "Unknown"
-    if not alt.recipe.learned then
-        name = name .. " |cFFFF8800[!]|r"
-    end
-    local right
-    if alt.covers == false then
-        right = Grey(ReachText(stage, alt))
-    elseif alt.priced then
-        right = Signed(alt.craftsDelta, "crafts") .. "  " .. SignedMoney(alt.costDelta)
-    else
-        right = Grey("no price")
-    end
-    return {
-        kind = "line", alt = alt, indent = 6, text = name, color = Views.DifficultyColor(alt.color),
-        right = right, alpha = alt.unavailable and 0.5 or 1,
-        bg = BG_SUB, hoverBg = BG_ROW_HOVER, tooltip = AlternativeTooltip(alt, stage, profile),
-        onClick = function() ctx.onShowRecipe(alt.recipe, stage.fromDisplay) end,
-        button = { text = "Use this", width = 62, tooltip = UseTooltip(alt), onClick = function() ctx.onUseAlternative(stage, alt) end },
-    }
-end
-
--- One-line row for a stage (the "next" rows under the card, and the list).
-local function CompactRow(stage, ctx, view)
-    if stage.kind == "learn" or stage.kind == "rank" then
-        return Views.StepRow(stage, view, ctx)
-    end
-    local lead = nil
-    local row = {
-        kind = "line", stage = stage, lead = lead or Text.StageRange(stage), leadWidth = 74,
-        bg = BG_ROW, hoverBg = BG_ROW_HOVER, alpha = stage.done and 0.5 or 1,
-        onClick = function() ctx.onOpenStage(stage) end,
-    }
-    if stage.kind == "craft" then
-        row.text = Grey("craft") .. "  " .. Text.StageTitle(stage)
-        row.color = Views.DifficultyColor(stage.color)
-        row.right = Money(stage.outOfPocketCost)
-        row.rightColor = stage.outOfPocketCost < stage.cost and GREEN or WHITE
-    else
-        row.text = Grey("gap") .. "  " .. Text.GapText(stage)
-        row.color = GAP_RED
-    end
-    return row
-end
-
 -- Rows naming the trainers the player has visited for a path's profession
 -- (recipeId: only those that listed that recipe), under `label`. Empty when
 -- none is remembered: nothing is ever named that the game did not show.
@@ -819,157 +565,6 @@ function Views.TrainerRows(path, recipeId, label)
         }
     end
     return rows
-end
-
--- The card of the selected stage, the alternatives and the next two stages.
--- view.selectedStage is the stage; view.showAllAlts expands the alternatives.
--- ctx: onShowRecipe(recipe, skill), onUseAlternative(stage, alt),
--- onResetPin(stage), onShowAllAlts(bool), onOpenStage(stage).
-function Views.GuideCard(view, ctx)
-    local path = view.path
-    if path and path.nothingLeft then
-        return Views.Notice(view)
-    end
-    local stage = view.selectedStage
-    if not stage then
-        return { { kind = "line", height = 26, text = "No steps to show.", color = DIM } }
-    end
-    local stages = view.stages
-    local rows = {}
-    local state = stage.done and " (done)" or (stage.current and " (current step)" or "")
-    rows[#rows + 1] = { kind = "line", font = "GameFontNormalSmall", color = GOLD,
-        text = string.format("Step %d of %d - %s%s", stage.index, #stages,
-            stage.kind == "rank" and "train" or stage.kind, state) }
-
-    if stage.kind == "craft" then
-        local recipe = stage.recipe
-        local icon
-        if recipe.itemId then
-            local _, _, itemIcon = Utils.GetItemInfo(recipe.itemId)
-            icon = itemIcon
-        end
-        rows[#rows + 1] = {
-            kind = "line", height = 26, font = "GameFontNormalLarge", icon = icon or QUESTION_MARK,
-            text = Text.StageTitle(stage), color = Views.DifficultyColor(stage.color),
-            right = string.format("%d to %d", stage.fromDisplay, stage.toDisplay), rightColor = GOLD,
-            hoverBg = BG_ROW_HOVER, tooltip = CraftTooltip(stage),
-            onClick = function() ctx.onShowRecipe(recipe, stage.fromDisplay) end,
-        }
-        rows[#rows + 1] = { kind = "line", height = 16, text = Text.ColorChanges(stage), color = GREY }
-        if stage.bridge then
-            rows[#rows + 1] = { kind = "line", wrap = true, color = DIFFICULTY_COLOR.green, text = BRIDGE_TEXT }
-        end
-        if stage.pinned then
-            rows[#rows + 1] = {
-                kind = "line", text = "Pinned: you chose this recipe for the step.", color = { 0.4, 0.7, 1 },
-                button = { text = "Reset", width = 54, onClick = function() ctx.onResetPin(stage) end,
-                    tooltip = { { text = "Let the planner choose again", r = 1, g = 1, b = 1 } } },
-            }
-        end
-
-        rows[#rows + 1] = Views.ReagentHeader(4)
-        for _, mat in ipairs(stage.materials) do
-            rows[#rows + 1] = Views.ReagentRow(mat, 4)
-        end
-        local pay = stage.outOfPocketCost
-        local costLine = { kind = "line", text = "", right = "Step cost  " .. Money(pay),
-            rightColor = pay < stage.cost and GREEN or WHITE }
-        if pay < stage.cost then
-            costLine.text = Grey("market price " .. Money(stage.cost))
-        end
-        rows[#rows + 1] = costLine
-        if stage.margin and stage.quantity ~= stage.baseQuantity then
-            rows[#rows + 1] = { kind = "line", height = 16, color = GREY,
-                text = string.format("%d crafts expected, %d with margin", stage.baseQuantity, stage.quantity) }
-        end
-
-        local alts = stage.alternatives or {}
-        if #alts > 0 then
-            rows[#rows + 1] = { kind = "sep" }
-            rows[#rows + 1] = { kind = "line", font = "GameFontNormalSmall", color = GOLD, text = "Alternatives" }
-            local shown = view.showAllAlts and #alts or math.min(ALTERNATIVES_SHOWN, #alts)
-            for i = 1, shown do
-                rows[#rows + 1] = AlternativeRow(stage, alts[i], ctx, view.profile)
-            end
-            if #alts > ALTERNATIVES_SHOWN then
-                local expand = not view.showAllAlts
-                rows[#rows + 1] = {
-                    kind = "line", indent = 6, color = { 0.5, 0.6, 0.8 }, hoverBg = BG_ROW_HOVER,
-                    text = expand and ("Show all " .. #alts) or "Show fewer",
-                    onClick = function() ctx.onShowAllAlts(expand) end,
-                }
-            end
-        end
-    elseif stage.kind == "gap" then
-        rows[#rows + 1] = { kind = "line", height = 26, font = "GameFontNormal", color = GAP_RED, wrap = true,
-            text = Text.GapText(stage) }
-        for _, text in ipairs(Views.GAP_TOOLTIP) do
-            rows[#rows + 1] = { kind = "line", wrap = true, color = GREY, text = text }
-        end
-    elseif stage.kind == "learn" then
-        local recipe = stage.recipe
-        local icon
-        if recipe.itemId then
-            local _, _, itemIcon = Utils.GetItemInfo(recipe.itemId)
-            icon = itemIcon
-        end
-        rows[#rows + 1] = {
-            kind = "line", height = 26, font = "GameFontNormalLarge", icon = icon or QUESTION_MARK,
-            text = "Learn " .. (recipe.name or "the recipe"), color = LEARN_COLOR,
-            right = "at " .. tostring(stage.at), rightColor = GOLD, hoverBg = BG_ROW_HOVER,
-            tooltip = { { text = "Click for recipe details", r = 0.5, g = 0.5, b = 0.5 } },
-            onClick = function() ctx.onShowRecipe(recipe, stage.at) end,
-        }
-        for _, line in ipairs(Text.LearnLines(stage, view.profile, path and path.profession)) do
-            rows[#rows + 1] = { kind = "line", wrap = true, text = line.text, color = LEARN_LINE_COLOR[line.color] or WHITE }
-        end
-        -- Trainers the player has visited that listed this recipe (never on
-        -- the VANILLA profile, where "trainer-taught" is not trusted).
-        if stage.sourceInfo and stage.sourceInfo.type == "trainer" and view.profile ~= "VANILLA" then
-            for _, row in ipairs(Views.TrainerRows(path, recipe.id, "Trainers you visited that teach it:")) do
-                rows[#rows + 1] = row
-            end
-        end
-        -- The profession window's filter hides unlearned recipes, so the arrow
-        -- has no row to point at for this one.
-        if view.hiddenRecipeId and view.hiddenRecipeId == recipe.id then
-            rows[#rows + 1] = { kind = "line", wrap = true, color = ORANGE, text = HIDDEN_TEXT }
-        end
-    elseif stage.kind == "rank" then
-        rows[#rows + 1] = { kind = "line", height = 26, font = "GameFontNormalLarge", color = GOLD,
-            text = "Train the next rank", right = "before " .. tostring(stage.cap), rightColor = GOLD }
-        rows[#rows + 1] = { kind = "line", wrap = true, color = WHITE,
-            text = Text.RankLine(stage, view.liveCap, path and path.profession, path and path.hasProfession) }
-        local label = string.format("%s trainers you have visited (not every trainer teaches every rank):",
-            tostring(path and path.profession))
-        for _, row in ipairs(Views.TrainerRows(path, nil, label)) do
-            rows[#rows + 1] = row
-        end
-    end
-
-    -- The next two stages
-    local nextRows = {}
-    for i = stage.index + 1, math.min(stage.index + 2, #stages) do
-        nextRows[#nextRows + 1] = CompactRow(stages[i], ctx, view)
-    end
-    if #nextRows > 0 then
-        rows[#rows + 1] = { kind = "sep" }
-        rows[#rows + 1] = { kind = "line", font = "GameFontNormalSmall", color = GOLD, text = "Next" }
-        for _, row in ipairs(nextRows) do rows[#rows + 1] = row end
-    end
-    return rows
-end
-
--- Which of Prev / Current step / Next can be used for the selected stage.
-function Views.GuideNav(view)
-    local stage, stages = view.selectedStage, view.stages or {}
-    local current = view.summary and view.summary.currentIndex
-    return {
-        prev = stage ~= nil and stage.index > 1,
-        next = stage ~= nil and stage.index < #stages,
-        current = stage ~= nil and current ~= nil and stage.index ~= current,
-        recipe = stage ~= nil and stage.recipe ~= nil,
-    }
 end
 
 -- Path tab ---------------------------------------------------------------------
@@ -1122,9 +717,15 @@ local function AddOpenedRun(rows, stage, learn, view, ctx)
         add({ kind = "line", wrap = true, color = DIFFICULTY_COLOR.green, text = BRIDGE_TEXT })
     end
 
-    add(Views.ReagentHeader())
+    -- (No row of this table carries a mark or a button, so it is drawn
+    -- without the mark column: the reagents' names get that room.)
+    local function addReagent(row)
+        row.layout = "nomark"
+        add(row)
+    end
+    addReagent(Views.ReagentHeader())
     for _, mat in ipairs(stage.materials or {}) do
-        add(Views.ReagentRow(mat))
+        addReagent(Views.ReagentRow(mat))
     end
     if (stage.saleEach or 0) > 0 then
         local sources = view.sale and view.sale.sources
@@ -1186,7 +787,7 @@ local function AddRun(rows, stage, learn, isCurrent, view, ctx)
     elseif stage.outOfPocketCost < stage.cost then
         costColor = GREEN
     end
-    local tooltip = CraftTooltip(stage, { spareWord = "spare crafts", unpriced = unpriced })
+    local tooltip = CraftTooltip(stage, unpriced)
     tooltip[#tooltip + 1] = { text = "Click to open or close", r = 0.5, g = 0.5, b = 0.5 }
     -- Open when the player opened it; the run the player is on is open until
     -- it is closed. A click asks for the other state.
@@ -1194,6 +795,8 @@ local function AddRun(rows, stage, learn, isCurrent, view, ctx)
     if open == nil then open = isCurrent end
     open = open and true or false
     local function toggle() ctx.onToggleExpand(stage, not open) end
+    -- The sub-lines of the run the player is on share its highlight.
+    local subBg = isCurrent and BG_CURRENT_SUB or nil
     rows[#rows + 1] = {
         kind = "cols", layout = "path", stage = stage, open = open,
         text = (isCurrent and "> " or "") .. (recipe.name or "Unknown"),
@@ -1210,7 +813,8 @@ local function AddRun(rows, stage, learn, isCurrent, view, ctx)
             learnTip[#learnTip + 1] = { text = line.text, r = 0.7, g = 0.7, b = 0.7 }
         end
         rows[#rows + 1] = { kind = "line", sub = true, stage = learn, text = Text.LearnFirst(learn, view.profile),
-                            color = LEARN_COLOR, alpha = learn.done and 0.5 or 1, tooltip = learnTip, onClick = toggle }
+                            color = LEARN_COLOR, alpha = learn.done and 0.5 or 1, tooltip = learnTip, onClick = toggle,
+                            bg = subBg }
     end
 
     if open then
@@ -1219,9 +823,12 @@ local function AddRun(rows, stage, learn, isCurrent, view, ctx)
     end
     local alt = CloseAlternative(stage)
     if alt then
+        -- (The difference is the row's right-hand text, so a long recipe
+        -- name is cut short before the amount is.)
         rows[#rows + 1] = {
             kind = "line", sub = true, stage = stage, alt = alt, color = GREY,
-            text = "or: " .. AlternativeName(alt, view.profile) .. ", " .. CostDifference(alt.costDelta, "same cost"),
+            text = "or: " .. AlternativeName(alt, view.profile),
+            right = CostDifference(alt.costDelta, "same cost"), rightColor = GREY, bg = subBg,
             tooltip = AlternativeTooltip(alt, stage, view.profile),
             onClick = function() ctx.onShowRecipe(alt.recipe, stage.fromDisplay) end,
             button = { text = "Use", width = 40, tooltip = UseTooltip(alt), onClick = function() ctx.onUseAlternative(stage, alt) end },
@@ -1257,12 +864,16 @@ end
 --   layout = "path"   on "cols" rows: three columns - skill range, crafts,
 --                     cost - in place of need / have / buy / cost, no mark
 --                     column; the header row carries the titles
+--   layout = "nomark" on the reagent table of an opened run: need / have /
+--                     buy / cost without the mark column
 --   sub = true        on "line" rows: a sub-line of the row above it (smaller,
 --                     indented, grey unless `color` is given): "Learn first:
---                     trainer, 4s" and "or: <recipe>, +14s" with a Use button
+--                     trainer, 4s", and "or: <recipe>" with the difference
+--                     in cost on the right ("+14s") and a Use button
 -- Rows also carry `stage` (and `alt` on alternatives) for the caller, and a
 -- run's row `open` (true | false): whether it is shown opened.
--- The row the player is on is marked with "> " and highlighted.
+-- The row the player is on is marked with "> " and highlighted, and so are
+-- the sub-lines under it (a little dimmer).
 -- State is kept under Views.RowKey(stage), which does not change when the
 -- path is planned again from another skill:
 --   view.expanded[key]      true = open, false = closed, nil = open only for
@@ -1435,8 +1046,8 @@ local function TotalRow(label, copper)
     return { kind = "cols", total = true, text = label, color = GOLD, cols = { "", "", "", Money(copper or 0) } }
 end
 
--- The shopping list. view.missing is Pathfinder:CalculateMissingMaterials of
--- the steps shown. In order:
+-- The shopping list. view.missing is the shopping list of the whole path
+-- (the account's, Pathfinder:CalculateMissingMaterials of every run). In order:
 --   "Collect first": owned stock that is not in the bags
 --   the table (need / have / buy / cost, a "vendor" mark): reagents with
 --     something left to buy, the dearest first and those without a price
@@ -1444,8 +1055,9 @@ end
 --     from beneath it; then the reagents already owned, dimmed, by name
 --   "Reagents to buy": the sum of the Cost column (missing.buyTotal)
 --   "Recipes to learn": a row per recipe that costs something, with where it
---     comes from (never on the VANILLA profile) and its price - for a recipe
---     paid for with a currency, the currency - and the sum of the gold
+--     comes from (never on the VANILLA profile) and its price in gold, and
+--     the sum of the gold; a currency price is named beside the source and
+--     the cost cell of a recipe paid for with a currency alone is empty
 -- The two sums are the two parts of the receipt's "You spend".
 -- With More options (view.advanced) a reagent the character can make has its
 -- craft / buy button, and view.hideOwned hides the owned rows; without it
@@ -1477,8 +1089,7 @@ function Views.Shopping(view, ctx)
 
     local items = missing.rows or {}
     if #items == 0 then
-        rows[#rows + 1] = { kind = "line", height = 26, color = DIM,
-            text = "No reagents needed in " .. (view.bracket and view.bracket.name or "this path") .. "." }
+        rows[#rows + 1] = { kind = "line", height = 26, color = DIM, text = "No reagents needed in this path." }
     else
         local toBuy, crafted, owned = {}, {}, {}
         local toBuyRows = 0
@@ -1542,8 +1153,7 @@ function Views.Shopping(view, ctx)
 
         if toBuyRows == 0 then
             -- (Of reagents: a recipe may still have to be bought.)
-            rows[#rows + 1] = { kind = "line", color = GREEN, text = "No reagents left to buy"
-                .. (view.bracket and (" for " .. view.bracket.name) or "") .. "." }
+            rows[#rows + 1] = { kind = "line", color = GREEN, text = "No reagents left to buy." }
         end
         if #table_ > 0 then
             rows[#rows + 1] = Views.ReagentHeader()
@@ -1558,19 +1168,12 @@ function Views.Shopping(view, ctx)
         rows[#rows + 1] = { kind = "line", font = "GameFontNormalSmall", color = GOLD, text = "Recipes to learn" }
         for _, entry in ipairs(recipeRows) do
             local learn = { recipe = entry.recipe, sourceInfo = entry.sourceInfo }
-            -- A recipe paid for with a currency only has that in the price's
-            -- place (and not a second time beside its source).
-            local price, where = Money(entry.cost), nil
-            local currency = Utils.FormatCurrency(entry.currency)
-            if currency and (entry.cost or 0) <= 0 then
-                price = currency
-                local info = {}
-                for k, v in pairs(entry.sourceInfo or {}) do info[k] = v end
-                info.currency = nil
-                where = Text.LearnShort({ recipe = entry.recipe, sourceInfo = info }, view.profile)
-            else
-                where = Text.LearnShort(learn, view.profile)
-            end
+            -- The cost column is gold only: a currency amount does not fit
+            -- there and is no part of the total under it. It is named with
+            -- where the recipe comes from ("vendor, 12 Merchant's Favor"),
+            -- or alone where the source may not be named.
+            local price = (entry.cost or 0) > 0 and Money(entry.cost) or ""
+            local where = Text.LearnShort(learn, view.profile) or Utils.FormatCurrency(entry.currency)
             local tooltip = { { text = "Learn " .. tostring(entry.name), r = 1, g = 1, b = 1 } }
             for _, line in ipairs(Text.LearnLines(learn, view.profile, path and path.profession)) do
                 tooltip[#tooltip + 1] = { text = line.text, r = 0.7, g = 0.7, b = 0.7 }
@@ -1585,17 +1188,6 @@ function Views.Shopping(view, ctx)
         rows[#rows + 1] = TotalRow("Recipes", missing.recipeCosts)
     end
     return rows
-end
-
--- "To buy: X + Y recipes" under the shopping table.
-function Views.ShoppingTotal(view)
-    local missing = view.missing
-    if not missing then return "" end
-    local text = "To buy: " .. Money(missing.buyTotal or 0)
-    if (missing.recipeCosts or 0) > 0 then
-        text = text .. "  " .. Grey("+ " .. Money(missing.recipeCosts) .. " recipes")
-    end
-    return text
 end
 
 -- Arrow tooltip ------------------------------------------------------------------
@@ -1687,7 +1279,9 @@ function Views.ArrowTooltip(view)
             end
             if amounts then
                 local c = line.amountColor or WHITE
-                addDouble(line.label .. ": ", line.amount, 1, 1, 1, c[1], c[2], c[3])
+                -- (No notes here, so the label says that gaps are left out.)
+                local label = line.label .. (line.gaps and (" (" .. GAPS_NOTE .. ")") or "")
+                addDouble(label .. ": ", line.amount, 1, 1, 1, c[1], c[2], c[3])
             else
                 add(line.note, 0.7, 0.7, 0.7)
             end

@@ -26,14 +26,13 @@ local FILES = {
     "Modules/Pathfinder/Strategies/Fastest.lua",
     "Modules/Pathfinder/Pathfinder.lua",
     "Modules/Guide/Text.lua",
-    "Modules/Guide/Range.lua",
     "Modules/Guide/Stages.lua",
 }
 
 harness.stubWow({ interface = 11508 })
 local LazyProf = harness.loadLazyProf(FILES)
 local Utils = LazyProf.Utils
-local Text, Stages, Range = LazyProf.GuideText, LazyProf.Stages, LazyProf.GuideRange
+local Text, Stages = LazyProf.GuideText, LazyProf.Stages
 
 local failures, total = 0, 0
 local function check(name, cond, detail)
@@ -312,10 +311,6 @@ section("stages", function()
     check(p .. "bridge suffix", bridgeText == "3x A (green: no better recipe)", bridgeText)
     local plainText = Text.StepRecipeText({ quantity = 3, recipe = { name = "A" } })
     check(p .. "no suffix on normal steps", plainText == "3x A", plainText)
-    check(p .. "total label excluding gaps", Text.TotalLabel({ complete = false }, "Total") == "Total (excluding gaps): ",
-        Text.TotalLabel({ complete = false }, "Total"))
-    check(p .. "total label complete", Text.TotalLabel({ complete = true }, "Total") == "Total: ")
-    check(p .. "total label old path", Text.TotalLabel({}, "Total") == "Total: ")
 
     local function st(r, from, to) return { recipe = r, skillStart = from, skillEnd = to, quantity = 1, totalCost = 0, alternatives = {} } end
     local path = { targetSkill = 90, steps = { st(A, 1, 30), st(A, 30, 38), st(B, 50, 70) },
@@ -324,13 +319,7 @@ section("stages", function()
     local order = {}
     for _, stage in ipairs(stages) do order[#order + 1] = stage.kind end
     check(p .. "gaps interleave by skill", table.concat(order, ",") == "craft,gap,craft,gap", table.concat(order, ","))
-
-    local inRange = Range.FilterStages(stages, { min = 75, max = 150 })
-    check(p .. "a range keeps the gap that starts in it", #inRange == 1 and inRange[1].kind == "gap" and inRange[1].from == 78,
-        #inRange)
-    local first = Range.FilterStages(stages, { min = 1, max = 38 })
-    check(p .. "a range without a gap has none", #first == 1 and first[1].kind == "craft", #first)
-    check(p .. "no range keeps every stage", #Range.FilterStages(stages, nil) == 4)
+    check(p .. "the gap after the last run starts where it does", stages[4].kind == "gap" and stages[4].from == 78, stages[4].from)
 end)
 
 

@@ -26,13 +26,12 @@ local FILES = {
     "Modules/Pathfinder/Strategies/Cheapest.lua",
     "Modules/Pathfinder/Strategies/Fastest.lua",
     "Modules/Guide/Text.lua",
-    "Modules/Guide/Range.lua",
     "Modules/Guide/Stages.lua",
 }
 
 harness.stubWow({ interface = 11508 })
 local LazyProf = harness.loadLazyProf(FILES)
-local Stages, Text, Range = LazyProf.Stages, LazyProf.GuideText, LazyProf.GuideRange
+local Stages, Text = LazyProf.Stages, LazyProf.GuideText
 
 local function recipe(id, name, orange, yellow, green, gray, opts)
     opts = opts or {}
@@ -577,23 +576,7 @@ T.section("whole copper", function()
     T.eq("stock: its market cost is unchanged", stages[1].cost, 104)
 end)
 
-T.section("range filter", function()
-    local brackets = LazyProf.Utils.BuildSkillBrackets(MILESTONES)
-    T.eq("current range from the real skill", Range.Effective(nil, brackets, 143).name, "75-150")
-    T.eq("a chosen range", Range.Effective(3, brackets, 143).name, "150-225")
-    T.check("full path has no range", Range.Effective("all", brackets, 143) == nil)
-    T.check("skill past every range: no range", Range.Effective(nil, brackets, 300) == nil)
-    T.eq("label for the current range", Range.Label(nil, brackets, 143), "Current (75-150)")
-    T.eq("label for a chosen range", Range.Label(2, brackets, 143), "75-150")
-    T.eq("label for the full path", Range.Label("all", brackets, 143), "Full path")
-    local options = Range.Options(nil, brackets)
-    T.eq("options: current, each range, full path", #options, 6)
-    T.check("the selected option is checked", options[1].checked and not options[2].checked)
-    T.eq("option values", tostring(options[1].value) .. "," .. tostring(options[3].value) .. "," .. tostring(options[6].value),
-        "current,2,all")
-    T.check("picking current selects nil", Range.FromValue("current") == nil)
-    T.eq("picking a range selects its index", Range.FromValue(2), 2)
-
+T.section("stage order and part totals", function()
     local A = recipe(1, "A", 1, 400, 410, 420)
     local B = recipe(2, "B", 150, 400, 410, 420, { unlearned = true, sourceInfo = { type = "vendor", cost = 5 } })
     local path = { targetSkill = 300, steps = {
@@ -602,14 +585,9 @@ T.section("range filter", function()
     }, gaps = { { from = 230, to = 300, reason = "no recipe" } }, totalCost = 16105 }
     local stages = Stages.Build(path, { prices = PRICES, milestones = MILESTONES, liveCap = 150, includeLearn = true })
     T.eq("all stages", kinds(stages), "craft:A:10x rank:150 craft:A:11x learn:B craft:B:60x rank:225 craft:B:10x gap:230-300")
-    T.eq("a stage belongs to the range its start is in; a rank step to the range it caps",
-        kinds(Range.FilterStages(stages, brackets[2])), "craft:A:10x rank:150 craft:A:11x")
-    T.eq("a learn step follows its craft stage", kinds(Range.FilterStages(stages, brackets[3])),
-        "learn:B craft:B:60x rank:225 craft:B:10x")
-    T.eq("gaps by their start", kinds(Range.FilterStages(stages, brackets[4])), "gap:230-300")
-    T.eq("no range: everything", #Range.FilterStages(stages, nil), #stages)
-    local totals = Stages.Totals(Range.FilterStages(stages, brackets[3]))
-    T.eq("range totals include the range's fees", totals.cost, 14005)
+    -- Totals of a part of the path count the learn steps in it.
+    local totals = Stages.Totals({ stages[4], stages[5], stages[6], stages[7] })
+    T.eq("totals of a part include its fees", totals.cost, 14005)
 end)
 
 -- The real planner's output for one shipped case, folded into stages.

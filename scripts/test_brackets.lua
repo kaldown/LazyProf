@@ -1,8 +1,7 @@
 -- scripts/test_brackets.lua
 --
--- A what-if path may start at skill 1 (planning "from 1"), but the
--- chosen range, what it filters and the arrow follow the player's real skill
--- (path.actualSkill).
+-- A what-if path may start at skill 1 (planning "from 1"), but the arrow
+-- follows the player's real skill (path.actualSkill).
 --
 -- Run from the addon root:  lua5.1 scripts/test_brackets.lua
 
@@ -25,16 +24,11 @@ local FILES = {
     "Modules/Pathfinder/Strategies/Fastest.lua",
     "Modules/Pathfinder/Pathfinder.lua",
     "Modules/Guide/Text.lua",
-    "Modules/Guide/Range.lua",
     "Modules/UI/Arrow/Strategies/ArrowTooltip.lua",
 }
 
 harness.stubWow({ interface = 11508 })
 local LazyProf = harness.loadLazyProf(FILES)
-local Range = LazyProf.GuideRange
-
-local MILESTONES = { 75, 150, 225, 300 }
-LazyProf.GetSkillBrackets = function() return LazyProf.Utils.BuildSkillBrackets(MILESTONES) end
 
 local failures, total = 0, 0
 local function check(name, cond, detail)
@@ -54,26 +48,6 @@ local function path(actual, gaps)
         steps = { step(1, 75), step(75, 150), step(150, 225), step(225, 260), step(260, 300) },
     }
 end
--- Stages as the window filters them: one per step here.
-local function stagesOf(p)
-    local stages = {}
-    for _, s in ipairs(p.steps) do
-        stages[#stages + 1] = { kind = "craft", from = s.skillStart, to = s.skillEnd }
-    end
-    return stages
-end
-
--- Range + what it filters
-local BRACKETS = LazyProf:GetSkillBrackets()
-local p250 = path(250)
-local b = Range.Effective(nil, BRACKETS, p250.actualSkill)
-check("the current range follows real skill 250", b and b.min == 225 and b.max == 300, b and (b.min .. "-" .. b.max))
-local filtered = Range.FilterStages(stagesOf(p250), b)
-check("stages filtered to the real range", #filtered == 2 and filtered[1].from == 225, #filtered)
-check("no real skill: no range (everything shown)", Range.Effective(nil, BRACKETS, nil) == nil)
-check("Full path is unfiltered", Range.Effective("all", BRACKETS, 250) == nil
-    and #Range.FilterStages(stagesOf(p250), nil) == 5)
-
 -- Arrow step
 local P = LazyProf.Pathfinder
 local s = P:GetArrowStep(path(250))
@@ -126,8 +100,6 @@ do
     check("planning from 1: path starts at 1", pp and pp.currentSkill == 1, pp and pp.currentSkill)
     local pp2 = LazyProf.Pathfinder:CalculateForProfession("testprof")
     check("planning: a learned profession starts at the real skill", pp2 and pp2.currentSkill == 250 and pp2.actualSkill == 250)
-    local eb = Range.Effective(nil, BRACKETS, pp.actualSkill)
-    check("planning from 1: the current range still follows the real skill", eb and eb.min == 225, eb and eb.min)
 end
 
 print(string.format("%d/%d passed", total - failures, total))

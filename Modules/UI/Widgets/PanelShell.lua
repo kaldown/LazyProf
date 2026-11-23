@@ -24,7 +24,8 @@
 --   rule below. Such a frame may also name its saved spot with a function
 --   (opts.key), so it can keep one spot docked and another undocked.
 -- Size: SaveSize / ApplySize keep a resizable frame's size in
---   db.profile.panelSizes[key]; "/lp resetpanels" forgets sizes too.
+--   db.profile.panelSizes[key]; "/lp resetpanels" forgets sizes too. A saved
+--   size below the frame's minimum is raised to it when applied.
 -- Combat (rule 7, ruling L4): panels hide when combat starts. A Show asked for
 --   during combat is remembered instead of shown. When combat ends a panel
 --   shows again only if it was shown or asked for, the user did not close it,
@@ -260,12 +261,14 @@ function PanelShell:SaveSize(frame)
     sizes[Key(shell)] = { width = width, height = height }
 end
 
--- Size a frame: the saved size, else the given default.
-function PanelShell:ApplySize(frame, defaultWidth, defaultHeight)
+-- Size a frame: the saved size, else the given default. minWidth / minHeight
+-- (optional): a saved size smaller than that - saved when the frame could be
+-- smaller - is raised to it. What is saved is left as it is.
+function PanelShell:ApplySize(frame, defaultWidth, defaultHeight, minWidth, minHeight)
     local shell, sizes = frame._shell, Sizes()
     local saved = shell and sizes and sizes[Key(shell)]
     if saved and type(saved.width) == "number" and type(saved.height) == "number" then
-        frame:SetSize(saved.width, saved.height)
+        frame:SetSize(math.max(saved.width, minWidth or 0), math.max(saved.height, minHeight or 0))
     else
         frame:SetSize(defaultWidth, defaultHeight)
     end
