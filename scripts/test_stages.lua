@@ -345,6 +345,74 @@ T.section("alternatives and pins", function()
     T.check("without pins it is not", not Stages.Build(path, { prices = PRICES, milestones = MILESTONES })[1].pinned)
 end)
 
+T.section("what crafts sell for", function()
+    local prices = { [101] = 100, [102] = 120, [103] = 300 }
+    local A = recipe(1, "A", 1, 400, 410, 420)   -- 100 a craft
+    local B = recipe(2, "B", 1, 400, 410, 420)   -- 120 a craft: 200 more over ten crafts
+    local C = recipe(3, "C", 1, 400, 410, 420)   -- 300 a craft
+    local alts = {
+        { recipe = A, score = 1, color = "orange", expectedSkillups = 1, craftCost = 100 },
+        { recipe = C, score = 3, color = "orange", expectedSkillups = 1, craftCost = 300 },
+        { recipe = B, score = 2, color = "orange", expectedSkillups = 1, craftCost = 120 },
+    }
+    local function path(extra)
+        local p = { targetSkill = 75, steps = { step(A, 1, 11, 10, 1000, { alternatives = alts }) }, gaps = {}, totalCost = 1000 }
+        for k, v in pairs(extra or {}) do p[k] = v end
+        return p
+    end
+    local sale = { [1] = 45, [2] = 75, [3] = 10 }   -- B sells for 30 more than A
+
+    local stages, summary = Stages.Build(path(), { prices = prices, milestones = MILESTONES, sale = sale })
+    local st = stages[1]
+    T.eq("what one craft sells for", st.saleEach, 45)
+    T.eq("ten crafts", st.sale, 450)
+    T.eq("the expected amount", st.baseSale, 450)
+    T.eq("totals: what comes back", summary.sale, 450)
+    T.eq("totals: net is pay less sale", summary.net, summary.pay - 450)
+    T.eq("totals: the cost column", summary.columnPay, 1000)
+    T.eq("totals: the sale shown", summary.shownSale, 450)
+    T.check("no margin: no margin sale", summary.marginSale == nil and summary.marginNet == nil)
+
+    local b = st.alternatives[1]
+    T.eq("the alternative that nets less comes first", b.recipe.id, 2)
+    T.eq("its sale value", b.saleEach, 75)
+    T.eq("its sale over the run", b.projectedSale, 750)
+    T.eq("its net over the run", b.projectedNet, 1200 - 750)
+    T.eq("200 more in reagents, 300 more back: 100 cheaper for the player", b.costDelta, -100)
+    T.eq("the dear one stays last", st.alternatives[2].recipe.id, 3)
+    T.eq("its difference counts its small sale", st.alternatives[2].costDelta, (3000 - 100) - (1000 - 450))
+
+    -- The margin: more crafts, more sold.
+    stages, summary = Stages.Build(path(), { prices = prices, milestones = MILESTONES, sale = sale, marginPercent = 15 })
+    T.eq("with 15 percent: twelve crafts sold", stages[1].sale, 540)
+    T.eq("the expected amount stays", stages[1].baseSale, 450)
+    T.eq("totals: expected sale", summary.sale, 450)
+    T.eq("totals: sale with the margin", summary.marginSale, 540)
+    T.eq("totals: net with the margin", summary.marginNet, summary.marginPay - 540)
+    T.eq("totals: the sale shown is the margin's", summary.shownSale, 540)
+    T.eq("totals: the cost column is the margin's", summary.columnPay, 1200)
+
+    -- The path's own sale values are the default.
+    stages = Stages.Build(path({ sale = { values = sale } }), { prices = prices, milestones = MILESTONES })
+    T.eq("sale values come with the path", stages[1].sale, 450)
+
+    -- None given: nothing is sold and alternatives compare costs as before.
+    stages, summary = Stages.Build(path(), { prices = prices, milestones = MILESTONES })
+    T.eq("no sale values: nothing sold", stages[1].sale, 0)
+    T.eq("no sale values: totals", summary.sale, 0)
+    T.eq("no sale values: net is what is paid", summary.net, summary.pay)
+    T.eq("no sale values: the cheaper-to-make alternative first", stages[1].alternatives[1].recipe.id, 2)
+    T.eq("no sale values: its difference is the cost difference", stages[1].alternatives[1].costDelta, 200)
+
+    -- A fee kept inside the craft stage is not part of the cost column.
+    local D = recipe(4, "D", 1, 400, 410, 420, { unlearned = true, sourceInfo = { type = "vendor", cost = 700 },
+        reagents = { { itemId = 101, count = 1, name = "Wool" } } })
+    local feePath = { targetSkill = 75, steps = { step(D, 1, 11, 10, 1700) }, gaps = {}, totalCost = 1700 }
+    local _, feeSum = Stages.Build(feePath, { prices = prices, milestones = MILESTONES })
+    T.eq("fee inside the stage: pay includes it", feeSum.pay, 1700)
+    T.eq("fee inside the stage: the cost column does not", feeSum.columnPay, 1000)
+end)
+
 T.section("range filter", function()
     local brackets = LazyProf.Utils.BuildSkillBrackets(MILESTONES)
     T.eq("current range from the real skill", Range.Effective(nil, brackets, 143).name, "75-150")

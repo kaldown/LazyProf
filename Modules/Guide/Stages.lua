@@ -98,8 +98,9 @@ end
 
 -- The other recipes that could cover the stage, from the first fragment's
 -- scored list, with what choosing each would mean for the stage: crafts and
--- cost over the stage's range, against what the stage costs the player.
-local function Alternatives(stage, inventoryBefore, prices, stagePay)
+-- cost over the stage's range, against what the stage costs the player. Both
+-- sides are net of what the crafts sell for (saleValues by recipe id).
+local function Alternatives(stage, inventoryBefore, prices, stagePay, saleValues)
     local out = {}
     local span = stage.to - stage.from
     for _, alt in ipairs(stage.fragments[1].alternatives or {}) do
@@ -117,6 +118,9 @@ local function Alternatives(stage, inventoryBefore, prices, stagePay)
             end
             local fee = Stages.RecipeFee(alt.recipe)
             local projected = reagentCost + fee
+            local saleEach = saleValues[alt.recipe.id] or 0
+            local projectedSale = crafts * saleEach
+            local projectedNet = projected - projectedSale
             out[#out + 1] = {
                 recipe = alt.recipe,
                 score = alt.score,
@@ -127,8 +131,11 @@ local function Alternatives(stage, inventoryBefore, prices, stagePay)
                 priced = priced,
                 projectedCrafts = crafts,
                 projectedCost = projected,
+                saleEach = saleEach,
+                projectedSale = projectedSale,
+                projectedNet = projectedNet,
                 craftsDelta = crafts - stage.baseQuantity,
-                costDelta = projected - stagePay,
+                costDelta = projectedNet - (stagePay - stage.sale),
                 unavailable = alt.recipe._isUnavailable and true or false,
                 reason = alt.recipe._unavailableReason,
             }
@@ -138,7 +145,7 @@ local function Alternatives(stage, inventoryBefore, prices, stagePay)
     table.sort(out, function(a, b)
         if a.unavailable ~= b.unavailable then return not a.unavailable end
         if a.priced ~= b.priced then return a.priced end
-        if a.projectedCost ~= b.projectedCost then return a.projectedCost < b.projectedCost end
+        if a.projectedNet ~= b.projectedNet then return a.projectedNet < b.projectedNet end
         return (a.recipe.name or "") < (b.recipe.name or "")
     end)
     return out
@@ -167,10 +174,16 @@ end
 --   cost / pay              market cost and what the player still pays (owned
 --                           stock taken off), recipe fees included, expected
 --                           quantities
---   marginCost / marginPay  the same with the margin (nil when the margin is off)
+--   sale / net              what the crafts sell for, and pay less that
+--   marginCost / marginPay / marginSale / marginNet
+--                           the same with the margin (nil when the margin is off)
+--   columnPay / shownSale   as the window shows them (the stages' own
+--                           quantities, margin included when on): the craft
+--                           stages' reagent costs without recipe fees, and
+--                           what their crafts sell for
 --   fees, crafts
 function Stages.Totals(stages)
-    local t = { cost = 0, pay = 0, fees = 0, crafts = 0 }
+    local t = { cost = 0, pay = 0, fees = 0, crafts = 0, sale = 0, columnPay = 0, shownSale = 0 }
     local margin = false
     local marginCost, marginPay = 0, 0
     for _, stage in ipairs(stages) do
@@ -180,6 +193,9 @@ function Stages.Totals(stages)
             t.pay = t.pay + stage.basePay + feeInside
             t.fees = t.fees + feeInside
             t.crafts = t.crafts + stage.quantity
+            t.sale = t.sale + (stage.baseSale or 0)
+            t.columnPay = t.columnPay + stage.outOfPocketCost - feeInside
+            t.shownSale = t.shownSale + (stage.sale or 0)
             marginCost = marginCost + stage.cost
             marginPay = marginPay + stage.outOfPocketCost
             if stage.quantity ~= stage.baseQuantity or stage.margin then margin = true end
@@ -191,8 +207,11 @@ function Stages.Totals(stages)
             marginPay = marginPay + stage.fee
         end
     end
+    t.net = t.pay - t.sale
     if margin then
         t.marginCost, t.marginPay = marginCost, marginPay
+        t.marginSale = t.shownSale
+        t.marginNet = marginPay - t.shownSale
     end
     return t
 end
@@ -220,6 +239,8 @@ end
 --   racialBonus    default path.racialBonus
 --   milestones     the profession's caps (default path.milestones)
 --   pins           pin list, to mark pinned stages
+--   sale           { [recipeId] = copper } what one craft sells for (default
+--                  path.sale.values; none: nothing is counted as sold)
 -- Returns stages, summary (Stages.Totals of all stages plus currentIndex).
 function Stages.Build(path, opts)
     opts = opts or {}
@@ -231,6 +252,7 @@ function Stages.Build(path, opts)
     local target = path.targetSkill or 0
     local margin = opts.marginPercent
     if margin and margin <= 0 then margin = nil end
+    local saleValues = opts.sale or (path.sale and path.sale.values) or {}
 
     -- Caps still to train, in order.
     local caps = {}
@@ -332,9 +354,13 @@ function Stages.Build(path, opts)
             stage.materials = rows
             stage.cost = cost + feeInside
             stage.outOfPocketCost = pay + feeInside
+            stage.saleEach = saleValues[stage.recipe.id] or 0
+            stage.baseSale = stage.baseQuantity * stage.saleEach
+            stage.sale = stage.quantity * stage.saleEach
             stage.color, stage.colorChanges = Colors(stage.recipe, stage.from, stage.to, racialBonus)
             stage.pinned = (LazyProf.Pins.Find(opts.pins, stage.from) == stage.recipe.id) or nil
-            stage.alternatives = Alternatives(stage, before, prices, stage.outOfPocketCost + (stage.feeIncluded and 0 or stage.fee))
+            stage.alternatives = Alternatives(stage, before, prices,
+                stage.outOfPocketCost + (stage.feeIncluded and 0 or stage.fee), saleValues)
         end
     end
 
