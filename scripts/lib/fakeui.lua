@@ -186,7 +186,13 @@ function M.install(opts)
             function f:SetScrollChild(c) self.scrollChild = c end
             function f:SetVerticalScroll(v) self.scroll = v end
             function f:GetVerticalScroll() return self.scroll end
-            function f:GetVerticalScrollRange() return self.scrollRange or 0 end
+            -- How far the content scrolls: what of the scroll child does not
+            -- fit in the frame (f.scrollRange overrides it).
+            function f:GetVerticalScrollRange()
+                if self.scrollRange then return self.scrollRange end
+                local child = self.scrollChild
+                return math.max(0, (child and child.height or 0) - (self.height or 0))
+            end
         elseif ftype == "StatusBar" then
             function f:SetMinMaxValues(a, b) self.min, self.max = a, b end
             function f:SetValue(v) self.value = v end
@@ -231,6 +237,11 @@ function M.install(opts)
         end
         if template == "UICheckButtonTemplate" then
             f.Text = newRegion("FontString", f)
+        end
+        -- The stock scroll frame carries its scroll bar under the key
+        -- ScrollBar (ui.noScrollBar: a client whose template does not).
+        if template == "UIPanelScrollFrameTemplate" and not ui.noScrollBar then
+            f.ScrollBar = newFrame("Slider", name and (name .. "ScrollBar") or nil, f, "UIPanelScrollBarTemplate")
         end
         -- The stock plain slider: horizontal, 200 x 19, whole steps on a
         -- drag, its handle under the key Thumb.
@@ -340,6 +351,23 @@ function M.install(opts)
         ui.tabCalls.setTab[#ui.tabCalls.setTab + 1] = id
     end
     _G.PanelTemplates_TabResize = function() ui.tabCalls.resize = ui.tabCalls.resize + 1 end
+
+    -- The stock scroll frame's handler for a changed scroll range: with
+    -- scrollBarHideable on the frame, the bar is hidden while nothing
+    -- scrolls and shown again when something does. Called without a range it
+    -- reads the frame's own.
+    ui.scrollRangeCalls = 0
+    _G.ScrollFrame_OnScrollRangeChanged = function(frame, _, yrange)
+        ui.scrollRangeCalls = ui.scrollRangeCalls + 1
+        local bar = frame.ScrollBar
+        yrange = math.floor(yrange or frame:GetVerticalScrollRange())
+        bar:SetMinMaxValues(0, yrange)
+        if yrange == 0 then
+            if frame.scrollBarHideable then bar:Hide() end
+        else
+            bar:Show()
+        end
+    end
 
     if opts.family == "forever" then
         _G.NineSliceUtil = { ApplyLayoutByName = function(frame, layout) frame.layout = layout end }

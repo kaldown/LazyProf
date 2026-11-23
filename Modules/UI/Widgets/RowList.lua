@@ -24,11 +24,30 @@
 -- "line": lead (text in a fixed column of leadWidth, default 62), text, color
 --   { r, g, b }, font (font object name), right (right-aligned text),
 --   rightColor, wrap (true: the text wraps and the row grows with it),
---   button2 (a second button, left of the first).
--- "cols": text, color, cols = { need, have, buy, cost } strings, colColors =
---   { [i] = { r, g, b } }, mark (short text in the last column, e.g. "vendor"),
---   header = true for the column titles. A button takes the mark's place.
+--   button2 (a second button, left of the first). sub = true makes it a
+--   sub-line of the row above: lower (16), indented (18) and grey, each
+--   unless the descriptor says otherwise.
+-- "cols": text, color, cols = { ... } strings for the right-aligned columns,
+--   colColors = { [i] = { r, g, b } }, header = true for the column titles.
+--   layout picks the columns:
+--     nil        need / have / buy / cost, then a mark column: mark (short
+--                text, e.g. "vendor") or a button in its place
+--     "nomark"   need / have / buy / cost up to the right edge
+--     "path"     skill range / crafts / cost up to the right edge
+--   (the last two have neither mark nor button).
+--   The text ends where the first column that has something in it begins, so
+--   a row that only fills its last column has the room of the empty ones.
 -- "sep": a thin line.
+--
+-- The scroll bar is only there while something scrolls: the stock scroll
+-- frame hides and shows it by itself once the frame carries
+-- scrollBarHideable (WoW Forever: Blizzard UI source 1.60.1,
+-- Interface/AddOns/Blizzard_SharedXML/SecureScrollTemplates.xml:44-53 - the
+-- bar is frame.ScrollBar - and SecureScrollTemplates.lua:64-103, where
+-- ScrollFrame_OnScrollRangeChanged, called without a range, reads the
+-- frame's own (:67-69); set after load as :254-255 does). The room the bar
+-- takes is the caller's to leave free, so rows keep their width when it
+-- comes and goes.
 local ADDON_NAME, LazyProf = ...
 
 LazyProf.Widgets = LazyProf.Widgets or {}
@@ -36,16 +55,25 @@ local Widgets = LazyProf.Widgets
 
 local WHITE = "Interface\\Buttons\\WHITE8x8"
 local DEFAULT_HEIGHT = { line = 20, cols = 18, sep = 8 }
+local SUB_HEIGHT = 16
+local SUB_INDENT = 18
+local SUB_COLOR = { 0.7, 0.7, 0.7 }
 
--- Column geometry of a "cols" row, from the right edge inwards.
+-- Column geometry of a "cols" row: the widths of its right-aligned columns,
+-- left to right, and what is kept free right of the last one (the mark
+-- column, or a little air before the row's edge). The cost column is as
+-- wide as an amount written to the copper ("888g 88s 88c") in the small
+-- font.
 local COL_MARK_WIDTH = 64
-local COL_COST_WIDTH = 60
+local COL_COST_WIDTH = 84
 local COL_NUMBER_WIDTH = 34
-local COLS = {
-    { width = COL_NUMBER_WIDTH },   -- need
-    { width = COL_NUMBER_WIDTH },   -- have
-    { width = COL_NUMBER_WIDTH },   -- buy
-    { width = COL_COST_WIDTH },     -- cost
+local COL_EDGE = 4
+local MAX_COLUMNS = 4
+local REAGENT_WIDTHS = { COL_NUMBER_WIDTH, COL_NUMBER_WIDTH, COL_NUMBER_WIDTH, COL_COST_WIDTH }
+local DEFAULT_LAYOUT = { widths = REAGENT_WIDTHS, trailing = COL_MARK_WIDTH, mark = true }
+local LAYOUTS = {
+    nomark = { widths = REAGENT_WIDTHS, trailing = COL_EDGE },
+    path = { widths = { 62, 46, COL_COST_WIDTH }, trailing = COL_EDGE },   -- skill range, crafts, cost
 }
 Widgets.RowListColumnsWidth = COL_MARK_WIDTH + COL_COST_WIDTH + 3 * COL_NUMBER_WIDTH
 
@@ -217,7 +245,7 @@ KINDS.line = {
         end
         row.text:SetWordWrap(desc.wrap and true or false)
         row.text:SetText(desc.text or "")
-        SetColor(row.text, desc.color, { 1, 1, 1 })
+        SetColor(row.text, desc.color, desc.sub and SUB_COLOR or { 1, 1, 1 })
 
         -- A wrapped line is as tall as its text needs.
         if desc.wrap then
@@ -244,18 +272,13 @@ KINDS.cols = {
         row.mark = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         row.mark:SetJustifyH("LEFT")
         row.mark:SetPoint("LEFT", row, "RIGHT", -COL_MARK_WIDTH + 4, 0)
+        -- Placed per render: a pooled row serves every layout.
         row.cols = {}
-        -- Right edges of the number columns, from the mark column leftwards.
-        local right = COL_MARK_WIDTH
-        for i = #COLS, 1, -1 do
+        for i = 1, MAX_COLUMNS do
             local col = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             col:SetJustifyH("RIGHT")
-            col:SetWidth(COLS[i].width)
-            col:SetPoint("RIGHT", row, "RIGHT", -right, 0)
             row.cols[i] = col
-            right = right + COLS[i].width
         end
-        row.numbersWidth = right
         return row
     end,
     apply = function(row, desc, width, height)
@@ -268,18 +291,40 @@ KINDS.cols = {
             row.icon:Hide()
         end
         local header = desc.header
+        local layout = LAYOUTS[desc.layout] or DEFAULT_LAYOUT
+        local widths = layout.widths
+        -- Columns from the right edge inwards. The text ends where the
+        -- first column with something in it begins.
+        local right = layout.trailing
+        local textEnd = right
+        for i = MAX_COLUMNS, 1, -1 do
+            local col = row.cols[i]
+            if widths[i] then
+                local value = desc.cols and desc.cols[i] or ""
+                col:SetFontObject(Font(header and "GameFontNormalSmall" or "GameFontHighlightSmall"))
+                col:ClearAllPoints()
+                col:SetWidth(widths[i])
+                col:SetPoint("RIGHT", row, "RIGHT", -right, 0)
+                col:SetText(value)
+                SetColor(col, desc.colColors and desc.colColors[i], header and { 1, 0.82, 0 } or { 1, 1, 1 })
+                col:Show()
+                right = right + widths[i]
+                if value ~= "" then textEnd = right end
+            else
+                col:SetText("")
+                col:Hide()
+            end
+        end
         row.text:SetFontObject(Font(header and "GameFontNormalSmall" or "GameFontHighlightSmall"))
         row.text:ClearAllPoints()
         row.text:SetPoint("LEFT", row, "LEFT", x, 0)
-        row.text:SetPoint("RIGHT", row, "RIGHT", -row.numbersWidth - 2, 0)
+        row.text:SetPoint("RIGHT", row, "RIGHT", -textEnd - 2, 0)
         row.text:SetText(desc.text or "")
         SetColor(row.text, desc.color, header and { 1, 0.82, 0 } or { 1, 1, 1 })
-        for i, col in ipairs(row.cols) do
-            col:SetFontObject(Font(header and "GameFontNormalSmall" or "GameFontHighlightSmall"))
-            col:SetText(desc.cols and desc.cols[i] or "")
-            SetColor(col, desc.colColors and desc.colColors[i], header and { 1, 0.82, 0 } or { 1, 1, 1 })
-        end
-        if desc.button then
+        if not layout.mark then
+            ApplyButton(row, "button", nil, 0, height)
+            row.mark:SetText("")
+        elseif desc.button then
             row.mark:SetText("")
             local spec = desc.button
             if not spec.width then
@@ -322,6 +367,15 @@ function Widgets.CreateRowList(parent, name)
     list.content = CreateFrame("Frame", nil, list.frame)
     list.content:SetSize(100, 100)
     list.frame:SetScrollChild(list.content)
+    -- The bar may hide while nothing scrolls (see the header). Both the bar
+    -- and the stock handler are looked up first: without them the bar stays
+    -- as the template made it.
+    local bar = list.frame.ScrollBar
+    if type(bar) == "table" and type(ScrollFrame_OnScrollRangeChanged) == "function" then
+        list.frame.scrollBarHideable = 1
+        bar:Hide()
+        list.barHides = true
+    end
     for kind, def in pairs(KINDS) do
         list.pools[kind] = Widgets.RowPool.New(function()
             return def.build(list.content)
@@ -347,8 +401,9 @@ function RowList:Render(descriptors, toTop)
     for _, desc in ipairs(descriptors) do
         local def = KINDS[desc.kind] or KINDS.line
         local row = self.pools[KINDS[desc.kind] and desc.kind or "line"]:Acquire()
-        local indent = desc.indent or 0
-        local height = desc.height or DEFAULT_HEIGHT[desc.kind] or DEFAULT_HEIGHT.line
+        local sub = desc.sub and def == KINDS.line
+        local indent = desc.indent or (sub and SUB_INDENT or 0)
+        local height = desc.height or (sub and SUB_HEIGHT) or DEFAULT_HEIGHT[desc.kind] or DEFAULT_HEIGHT.line
         row.desc = desc
         row:SetAlpha(desc.alpha or 1)
         if not def.plain then
@@ -369,5 +424,10 @@ function RowList:Render(descriptors, toTop)
     self.content:SetHeight(math.max(y + 8, 1))
     if toTop then
         self.frame:SetVerticalScroll(0)
+    end
+    -- Have the stock handler read the new scroll range: it shows the bar
+    -- when the rows no longer fit and hides it when they do.
+    if self.barHides then
+        ScrollFrame_OnScrollRangeChanged(self.frame)
     end
 end

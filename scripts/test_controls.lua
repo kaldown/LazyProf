@@ -456,4 +456,158 @@ T.section("row list", function()
     T.eq("list: back to the top when asked", list.frame.scroll, 0)
 end)
 
+-- Where a column sits: its width and how far its right edge is from the
+-- row's right edge.
+local function column(row, i)
+    local col = row.cols[i]
+    local point = col.points[#col.points]
+    return tostring(col.width) .. "@" .. tostring(-point[4])
+end
+-- How far the name's right edge is from the row's right edge.
+local function nameEnd(row)
+    local point = row.text.points[#row.text.points]
+    return -point[4]
+end
+
+T.section("column layouts", function()
+    local ui, W = load("forever")
+    local list = W.CreateRowList(CreateFrame("Frame", nil, UIParent), "TestColumns")
+    list:SetWidth(376)
+
+    -- The reagent table: need / have / buy / cost, then the mark column.
+    list:Render({
+        { kind = "cols", header = true, text = "Reagent", cols = { "Need", "Have", "Buy", "Cost" } },
+        { kind = "cols", text = "Wool Cloth", cols = { "123", "40", "83", "888g 88s 88c" }, mark = "vendor" },
+    })
+    local row = list.rows[2]
+    T.eq("reagents: the cost column holds an amount to the copper", column(row, 4), "84@64")
+    T.eq("reagents: buy", column(row, 3), "34@148")
+    T.eq("reagents: have", column(row, 2), "34@182")
+    T.eq("reagents: need", column(row, 1), "34@216")
+    T.eq("reagents: the name ends where the numbers begin", nameEnd(row), 252)
+    T.eq("reagents: the mark", row.mark.text, "vendor")
+    T.eq("the widget says how wide the columns are", W.RowListColumnsWidth, 250)
+
+    -- The path list: skill range, crafts, cost; no mark column.
+    local clicked
+    list:Render({
+        { kind = "cols", layout = "path", header = true, text = "Recipes", cols = { "skill", "crafts", "cost" } },
+        { kind = "cols", layout = "path", text = "> Gloves", color = { 1, 0.5, 0.25 }, cols = { "143-160", "19", "108g 63s 28c" },
+          colColors = { [3] = { 0.4, 1, 0.4 } }, onClick = function() clicked = true end },
+    })
+    local header, run = list.rows[1], list.rows[2]
+    T.eq("path: a cols row", run.desc.layout, "path")
+    T.eq("path: cost at the right edge", column(run, 3), "84@4")
+    T.eq("path: crafts left of it", column(run, 2), "46@88")
+    T.eq("path: skill range left of that", column(run, 1), "62@134")
+    T.eq("path: texts", run.cols[1].text .. "," .. run.cols[2].text .. "," .. run.cols[3].text, "143-160,19,108g 63s 28c")
+    T.check("path: the fourth column is not used", run.cols[4].shown == false)
+    T.eq("path: no mark", run.mark.text, "")
+    T.eq("path: the name ends where the columns begin", nameEnd(run), 198)
+    T.eq("path: name", run.text.text, "> Gloves")
+    T.eq("path: name colour", run.text.color[2], 0.5)
+    T.eq("path: column colour", run.cols[3].color[1], 0.4)
+    T.eq("path header: titles in the same columns", header.cols[1].text .. "," .. header.cols[3].text, "skill,cost")
+    T.eq("path header: at the same places", column(header, 1) .. " " .. column(header, 3), "62@134 84@4")
+    T.eq("path header: gold", header.text.color[2], 0.82)
+    ui.fire(run, "OnClick", "LeftButton")
+    T.check("path: a row is clickable", clicked == true)
+
+    -- A reagent table without the mark column (inside an opened run).
+    list:Render({
+        { kind = "cols", layout = "nomark", header = true, text = "Reagent", cols = { "Need", "Have", "Buy", "Cost" } },
+        { kind = "cols", layout = "nomark", text = "Heavy Scorpid Scale", cols = { "28", "0", "28", "3g 82s" } },
+    })
+    row = list.rows[2]
+    T.eq("no mark column: cost at the right edge", column(row, 4), "84@4")
+    T.eq("no mark column: need", column(row, 1), "34@156")
+    T.eq("no mark column: the name gets the room", nameEnd(row), 192)
+
+    -- A pooled row laid out one way is laid out again for the next.
+    list:Render({ { kind = "cols", text = "Wool Cloth", cols = { "1", "2", "3", "4c" }, mark = "vendor" } })
+    T.check("a reused row is the same frame", list.rows[1] == header)
+    T.eq("a reused row takes the new layout", column(list.rows[1], 4), "84@64")
+    T.check("and shows its fourth column again", list.rows[1].cols[4].shown ~= false)
+
+    -- A row whose first columns are empty lets its text run over them.
+    list:Render({
+        { kind = "cols", text = "Charged Scorpid Bracers - auction house", cols = { "", "", "", "68s 63c" } },
+        { kind = "cols", text = "Wool", cols = { "165", "", "", "" }, mark = "in list" },
+    })
+    T.eq("empty leading columns: the name runs up to the first one used", nameEnd(list.rows[1]), 150)
+    T.eq("a first column in use: the name ends before it", nameEnd(list.rows[2]), 252)
+end)
+
+T.section("sub-lines", function()
+    local ui, W = load("forever")
+    local list = W.CreateRowList(CreateFrame("Frame", nil, UIParent), "TestSubLines")
+    list:SetWidth(376)
+    local used
+    list:Render({
+        { kind = "line", text = "A run" },
+        { kind = "line", sub = true, text = "Learn first: trainer, 4s" },
+        { kind = "line", sub = true, text = "or: Cape, +14s", color = { 1, 0.75, 0.3 },
+          button = { text = "Use", width = 40, onClick = function() used = true end } },
+        { kind = "line", sub = true, indent = 30, height = 22, text = "given" },
+        { kind = "line", text = "The next run" },
+    })
+    local run, learn, alt, given, after = list.rows[1], list.rows[2], list.rows[3], list.rows[4], list.rows[5]
+    T.eq("sub-line: lower than a row", learn.height, 16)
+    T.eq("sub-line: indented", learn.points[1][4], 18)
+    T.eq("sub-line: as wide as what is left", learn.width, 376 - 18)
+    T.eq("sub-line: grey unless coloured", learn.text.color[1], 0.7)
+    T.eq("sub-line: small font", learn.text.font, "GameFontHighlightSmall")
+    T.eq("sub-line: its own colour when given", alt.text.color[2], 0.75)
+    T.eq("sub-line: a button fits its height", alt.button.height, 16)
+    ui.fire(alt.button, "OnClick", "LeftButton")
+    T.check("sub-line: the button works", used == true)
+    T.eq("sub-line: a given indent wins", given.points[1][4], 30)
+    T.eq("sub-line: a given height wins", given.height, 22)
+    T.eq("an ordinary line is unchanged", run.height .. "," .. run.points[1][4] .. "," .. run.text.color[1], "20,0,1")
+    T.eq("rows stack under the sub-lines", after.points[1][5], -(20 + 16 + 16 + 22))
+end)
+
+T.section("scroll bar only when something scrolls", function()
+    local function rows(n)
+        local out = {}
+        for i = 1, n do out[i] = { kind = "line", text = "row " .. i } end
+        return out
+    end
+    local ui, W = load("forever")
+    local list = W.CreateRowList(CreateFrame("Frame", nil, UIParent), "TestScrollBar")
+    list:SetWidth(376)
+    list.frame.height = 400
+    local bar = list.frame.ScrollBar
+    T.check("the stock template is told its bar may hide", list.frame.scrollBarHideable ~= nil)
+    T.check("hidden before anything is drawn", bar.shown == false)
+    list:Render(rows(3))
+    T.check("three rows in a tall list: no bar", bar.shown == false)
+    list:Render(rows(60))
+    T.check("sixty rows: the bar is there", bar.shown == true)
+    list:Render(rows(3))
+    T.check("back to three: hidden again", bar.shown == false)
+    local calls = ui.scrollRangeCalls
+    list:Render(rows(3))
+    T.eq("the range is read once per render", ui.scrollRangeCalls, calls + 1)
+
+    -- A client without the stock range handler keeps the bar as it was.
+    ui, W = load("classic")
+    _G.ScrollFrame_OnScrollRangeChanged = nil
+    list = W.CreateRowList(CreateFrame("Frame", nil, UIParent), "TestScrollBarOld")
+    list:SetWidth(376)
+    list.frame.height = 400
+    T.check("no handler: the frame is not marked", list.frame.scrollBarHideable == nil)
+    list:Render(rows(3))
+    T.check("no handler: the bar stays", list.frame.ScrollBar.shown == true)
+
+    -- So does one whose scroll frame has no bar under the usual key.
+    ui, W = load("classic")
+    ui.noScrollBar = true
+    list = W.CreateRowList(CreateFrame("Frame", nil, UIParent), "TestScrollBarNone")
+    list:SetWidth(376)
+    T.check("no bar key: the frame is not marked", list.frame.scrollBarHideable == nil)
+    list:Render(rows(3))
+    T.eq("no bar key: the handler is left alone", ui.scrollRangeCalls, 0)
+end)
+
 T.finish()
