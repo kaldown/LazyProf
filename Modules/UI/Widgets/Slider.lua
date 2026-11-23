@@ -38,7 +38,11 @@
 --   Slider calls: Blizzard_APIDocumentationGenerated/
 --   SimpleSliderAPIDocumentation.lua (SetMinMaxValues :154, SetValueStep
 --   :217, SetValue :206, SetEnabled :144, IsEnabled :131, IsDraggingThumb
---   :118); IsVisible: SimpleScriptRegionAPIDocumentation.lua:582.
+--   :118); IsVisible: SimpleScriptRegionAPIDocumentation.lua:582; SetAlpha:
+--   SimpleRegionAPIDocumentation.lua:123. The scripts are in the client's
+--   list of frame scripts (Blizzard_SharedXML/UI.xsd:403, 406, 407, 420).
+--   Whether the value-changed script tells a player's change from one made
+--   by code is not relied on: this widget marks its own changes itself.
 -- classic - a plain Slider frame with a track texture of its own and the
 --   stock horizontal thumb; base widget calls only.
 local ADDON_NAME, LazyProf = ...
@@ -71,11 +75,14 @@ end
 
 -- The player has the handle. A hold only counts while the slider can be
 -- seen: hidden mid-drag (combat, the window closing), no mouse-up may follow.
+-- It is over as soon as the mouse-up script runs, whatever the client still
+-- says about the handle then: the owner redraws from inside the release.
 function Slider:IsHeld()
     local frame = self.frame
     if self.held and not frame:IsVisible() then
         self.held = false
     end
+    if self.releasing then return false end
     return self.held or Dragging(frame)
 end
 
@@ -153,7 +160,9 @@ local function Wire(slider)
     frame:SetScript("OnMouseUp", function(_, button)
         if button and button ~= "LeftButton" then return end
         slider.held = false
+        slider.releasing = true
         Commit(slider)
+        slider.releasing = false
     end)
     -- Out of sight mid-drag: the hold is over and the value it reached is
     -- dropped (the next SetRange puts the handle back).
@@ -167,7 +176,7 @@ local function New(frame, opts)
     opts = opts or {}
     local slider = setmetatable({
         frame = frame, onChanging = opts.onChanging, onReleased = opts.onReleased,
-        held = false, silent = false, wanted = true, room = false,
+        held = false, releasing = false, silent = false, wanted = true, room = false,
         min = 0, max = 1, value = 0, committed = 0,
     }, Slider)
     frame:SetValueStep(1)

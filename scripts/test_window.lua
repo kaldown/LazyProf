@@ -326,6 +326,25 @@ T.section("target", function()
     T.eq("left end: the target in force is shown", box.text, "144")
     T.eq("left end: the handle goes there", slider:GetValue(), 144)
     T.eq("left end: planned once", #env.recalcs, recalcs + 1)
+    -- ...also when the client still calls the handle dragged while its
+    -- mouse-up script runs.
+    window:Update(W.path({ targetSkill = 225 }))
+    ui.fire(handle, "OnMouseDown", "LeftButton")
+    handle.draggingThumb = true
+    ui.slide(handle, 143)
+    ui.fire(handle, "OnMouseUp", "LeftButton")
+    handle.draggingThumb = false
+    T.eq("left end, still called dragged inside the release: corrected all the same",
+        box.text .. " " .. slider:GetValue(), "144 144")
+    -- ...and when the box still has the keyboard from an earlier click: the
+    -- slider was used last, so the box shows what it committed.
+    window:Update(W.path({ targetSkill = 225 }))
+    box.focused = true
+    ui.fire(handle, "OnMouseDown", "LeftButton")
+    ui.slide(handle, 143)
+    ui.fire(handle, "OnMouseUp", "LeftButton")
+    T.eq("left end with the box focused: corrected all the same", box.text .. " " .. slider:GetValue(), "144 144")
+    box.focused = false
 
     -- The box is not overwritten while the player types in it.
     window:Update(W.path())

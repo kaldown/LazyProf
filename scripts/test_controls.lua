@@ -143,6 +143,19 @@ for _, family in ipairs({ "forever", "classic" }) do
         ui.fire(frame, "OnMouseUp", "LeftButton")
         T.eq(p .. "and its release commits", calls(), "190 / 190")
 
+        -- The owner redraws from inside the release (a new path arrives):
+        -- that range is taken, even if the client still calls the handle
+        -- dragged while its mouse-up script runs.
+        local redraw = W.CreateSlider(parent, nil, {})
+        redraw.onReleased = function() redraw:SetRange(118, 300, 118) end
+        redraw:SetRange(117, 300, 225)
+        ui.fire(redraw.frame, "OnMouseDown", "LeftButton")
+        redraw.frame.draggingThumb = true
+        ui.slide(redraw.frame, 117)
+        ui.fire(redraw.frame, "OnMouseUp", "LeftButton")
+        redraw.frame.draggingThumb = false
+        T.eq(p .. "a range set from inside the release is applied", redraw.frame.min .. ":" .. redraw:GetValue(), "118:118")
+
         -- Hidden while held (combat, the window closing): the hold is gone,
         -- nothing is committed.
         reset()

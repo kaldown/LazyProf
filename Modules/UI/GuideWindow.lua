@@ -673,6 +673,10 @@ end
 -- amounts, right-aligned, wide enough for an amount to the copper; the notes
 -- in what is left, wrapping under themselves. A line that is only a note
 -- spans the window and wraps. Nothing is cut.
+-- (Text is measured with the font string's own GetStringWidth and, once a
+-- width is set and wrapping is on, GetStringHeight: WoW Forever,
+-- Blizzard_APIDocumentationGenerated/SimpleFontStringAPIDocumentation.lua:339,
+-- 325, SetWordWrap :720. The row list measures its wrapped rows the same way.)
 function GuideWindow:LayoutReceipt(width)
     local lines, receipt = self.receiptLines, self.receipt
     local labelWidth, amountWidth = 0, RECEIPT_AMOUNT_WIDTH
@@ -1133,11 +1137,14 @@ end
 
 -- The slider's handle was let go at a new value. A new path redraws the
 -- header; without one (the value was corrected back to the target in force)
--- the handle and the box are put on the target here.
+-- the handle and the box are put on the target here. The box shows it even
+-- if it still has the keyboard: the slider was used last, and moving it
+-- already replaced whatever was typed.
 function GuideWindow:OnSliderReleased(value)
     local target = self:OnTargetCommit(value)
     if target then
         self:ShowTarget(target)
+        self.targetInput:SetValue(self.slider:GetValue())
     end
 end
 
