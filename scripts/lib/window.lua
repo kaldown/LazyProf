@@ -8,6 +8,8 @@
 --   local env = W.load("forever")     -- env.addon, env.ui, env.window (the GuideWindow module)
 --   env.calls                          -- names of stubbed calls, in order
 --   W.recipe(...), W.step(...), W.path(extra)
+--   W.rowTexts(window), W.findRow(window, text), W.findButton(window, text)
+--   W.receiptTexts(window)
 
 local fakeui = require("scripts.lib.fakeui")
 
@@ -180,6 +182,10 @@ function M.load(family, extraFiles)
             end
         end,
     }
+    addon.Inventory = {
+        ScanAll = function() return env.stock or {}, env.stockSources or {} end,
+        ScanBags = function() return env.stock or {} end,
+    }
     addon.RecipeDetails = {
         Show = function(_, recipe, skill) called("details"); env.details = { recipe = recipe, skill = skill } end,
         Toggle = function(_, recipe, skill) called("details"); env.details = { recipe = recipe, skill = skill } end,
@@ -227,6 +233,35 @@ function M.rowTexts(window)
         out[#out + 1] = table.concat(parts, " | ")
     end
     return out
+end
+
+-- The receipt's lines as shown, one per line: label, amount and note joined
+-- with " | " (a line that is only a note is just the note).
+function M.receiptTexts(window)
+    local out = {}
+    for _, row in ipairs(window.receiptRows or {}) do
+        local parts = {}
+        for _, key in ipairs({ "label", "amount", "note" }) do
+            local region = row[key]
+            if region.shown and region.text and region.text ~= "" then
+                parts[#parts + 1] = region.text
+            end
+        end
+        if #parts > 0 then
+            out[#out + 1] = table.concat(parts, " | ")
+        end
+    end
+    return out
+end
+
+-- The row that carries a button with this text.
+function M.findButton(window, text)
+    for _, row in ipairs(window.list.rows) do
+        local button = row.desc.button
+        if button and button.text == text then
+            return row
+        end
+    end
 end
 
 -- The row whose descriptor text contains `needle` (plain text).

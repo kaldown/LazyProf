@@ -159,6 +159,7 @@ function M.install(opts)
         function f:SetButtonState(state, locked) self.buttonState, self.buttonLocked = state, locked end
         function f:LockHighlight() self.highlightLocked = true end
         function f:UnlockHighlight() self.highlightLocked = false end
+        function f:SetNormalFontObject(font) self.normalFont = font end
 
         if ftype == "DropdownButton" then
             function f:SetupMenu(generator) self.generator = generator; self.setupCalls = (self.setupCalls or 0) + 1 end

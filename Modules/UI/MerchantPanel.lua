@@ -5,7 +5,7 @@
 -- in one line what was bought and what was skipped and why.
 --
 -- The list is the shopping list of the path the LazyProf window showed last
--- (its chosen range), worked out again from the current stock. What to buy
+-- (the whole path's), worked out again from the current stock. What to buy
 -- and the buying itself are pure code (Modules/Shopping/PurchaseQueue.lua);
 -- the merchant is reached only through the client adapter. Merchant visits
 -- also teach LazyProf vendor prices (Modules/Shopping/VendorMemory.lua).

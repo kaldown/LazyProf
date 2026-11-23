@@ -1122,9 +1122,15 @@ local function AddOpenedRun(rows, stage, learn, view, ctx)
         add({ kind = "line", wrap = true, color = DIFFICULTY_COLOR.green, text = BRIDGE_TEXT })
     end
 
-    add(Views.ReagentHeader())
+    -- (No row of this table carries a mark or a button, so it is drawn
+    -- without the mark column: the reagents' names get that room.)
+    local function addReagent(row)
+        row.layout = "nomark"
+        add(row)
+    end
+    addReagent(Views.ReagentHeader())
     for _, mat in ipairs(stage.materials or {}) do
-        add(Views.ReagentRow(mat))
+        addReagent(Views.ReagentRow(mat))
     end
     if (stage.saleEach or 0) > 0 then
         local sources = view.sale and view.sale.sources
@@ -1257,6 +1263,8 @@ end
 --   layout = "path"   on "cols" rows: three columns - skill range, crafts,
 --                     cost - in place of need / have / buy / cost, no mark
 --                     column; the header row carries the titles
+--   layout = "nomark" on the reagent table of an opened run: need / have /
+--                     buy / cost without the mark column
 --   sub = true        on "line" rows: a sub-line of the row above it (smaller,
 --                     indented, grey unless `color` is given): "Learn first:
 --                     trainer, 4s" and "or: <recipe>, +14s" with a Use button

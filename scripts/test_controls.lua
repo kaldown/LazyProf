@@ -267,6 +267,18 @@ T.section("controls", function()
     ui.fire(group.buttons.cheapest, "OnEnter")
     T.check("group: tooltip text", ui.tooltip:Text():find("Least gold", 1, true) ~= nil)
 
+    -- The selected one must be unmistakable: full strength, highlight held,
+    -- white text; the other one dimmed.
+    T.eq("group: the selected button at full strength", group.buttons.fastest.alpha, 1)
+    T.check("group: its highlight is held", group.buttons.fastest.highlightLocked == true)
+    T.eq("group: its text is white", group.buttons.fastest.normalFont, "GameFontHighlight")
+    T.eq("group: the other button is dimmed", group.buttons.cheapest.alpha, 0.55)
+    T.check("group: without a held highlight", group.buttons.cheapest.highlightLocked == false)
+    T.eq("group: and keeps the stock text colour", group.buttons.cheapest.normalFont, "GameFontNormal")
+    group:SetSelected("cheapest")
+    T.eq("group: the look follows the selection", group.buttons.cheapest.alpha .. "," .. group.buttons.fastest.alpha, "1,0.55")
+    group:SetSelected("fastest")
+
     -- The stock button draws "pressed" by swapping its three art pieces, and
     -- puts the "up" art back on release and on show: the selected button is
     -- given the "down" art again after each.

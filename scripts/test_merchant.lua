@@ -48,14 +48,16 @@ local function setup()
     }
     addon.Professions.GetAllReagentIds = function() return { THREAD, DYE, SALT } end
     addon.ScheduleRecalculation = function(_, reason) env.scheduled = reason end
-    -- The shopping list the window works out for its path.
+    -- The shopping list of the whole path, as the window's account of it
+    -- carries it.
     env.rows = {
         { itemId = THREAD, name = "Thread", toBuy = 45, need = 45, have = 0, crafted = false },
         { itemId = DYE, name = "Dye", toBuy = 12, need = 12, have = 0, crafted = false },
         { itemId = SALT, name = "Salt", toBuy = 3, need = 3, have = 0, crafted = false },
         { itemId = 999, name = "Wool", toBuy = 100, need = 100, have = 0, crafted = false },
     }
-    addon.Pathfinder.CalculateMissingMaterials = function() return { rows = env.rows } end
+    env.account = { missing = { rows = env.rows, recipeRows = {}, buyTotal = 0, recipeCosts = 0 },
+        reagents = 0, recipes = 0, spend = 0, sale = 0, net = 0 }
     env.panel = addon.MerchantPanel
     env.panel:Initialize()
     -- The game answers the last purchase: items arrive and the bags change.
@@ -113,7 +115,8 @@ T.section("panel", function()
     T.check("panel shown", frame ~= nil and frame.shown)
     local pt = frame.points[#frame.points]
     T.check("docked to the right of the merchant window", pt[1] == "TOPLEFT" and pt[2] == env.merchantFrame and pt[3] == "TOPRIGHT")
-    T.eq("title names the list", frame.title.text, "LazyProf: on your list - Tailoring 75-150")
+    T.eq("title names the list", frame.title.text, "LazyProf: on your list - Tailoring")
+    T.eq("the list is the whole path's: every craft run", #env.accountCalls[#env.accountCalls].steps, 2)
     local rows = env.rowTexts()
     T.eq("a row per reagent this merchant sells", rows[1], "Thread | 45   45s [Buy]")
     T.eq("second row", rows[2], "Dye | 12   42s [Buy]")
@@ -237,7 +240,7 @@ T.section("diag merchant", function()
     T.check("purchase mode shown", shown:find("onePerClick=false", 1, true) ~= nil)
     T.check("what would be bought", shown:find("buy: 45x Thread (id 201) for 45s", 1, true) ~= nil, shown)
     T.check("what is skipped and why", shown:find("skip: Salt (id 203): limited stock", 1, true) ~= nil, shown)
-    T.check("the list is named", shown:find("shopping list: Tailoring 75-150", 1, true) ~= nil, shown)
+    T.check("the list is named", shown:find("shopping list: Tailoring, rows=4", 1, true) ~= nil, shown)
 
     env.closeMerchant()
     addon:SlashCommand("diag merchant")

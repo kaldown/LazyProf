@@ -69,8 +69,9 @@ function Widgets.CreateResizeGrip(frame, onDone)
     return grip
 end
 
--- Two or three stock buttons in a row, one of them shown selected (held in
--- its pushed state). Clicking another selects it and calls onSelect(value).
+-- Two or three stock buttons in a row, one of them shown selected: held in
+-- its pushed state with its highlight on and white text, while the others
+-- are dimmed. Clicking another selects it and calls onSelect(value).
 local ButtonGroup = {}
 ButtonGroup.__index = ButtonGroup
 
@@ -81,6 +82,15 @@ ButtonGroup.__index = ButtonGroup
 -- is therefore given the "down" art here, again after each of those.
 local BUTTON_UP = "Interface\\Buttons\\UI-Panel-Button-Up"
 local BUTTON_DOWN = "Interface\\Buttons\\UI-Panel-Button-Down"
+-- The pressed art alone does not tell the two apart at a glance, so the
+-- selected button also gets the white font and the others are dimmed
+-- (generic calls: SetNormalFontObject, WoW Forever Blizzard_APIDocumentationGenerated/
+-- SimpleButtonAPIDocumentation.lua:423; SetAlpha, SimpleRegionAPIDocumentation.lua:123;
+-- font objects GameFontHighlight / GameFontNormal,
+-- Blizzard_Fonts_Shared/Shared/FontStyles.xml:62, 50).
+local SELECTED_FONT = "GameFontHighlight"
+local UNSELECTED_FONT = "GameFontNormal"
+local UNSELECTED_ALPHA = 0.55
 
 local function ApplyButtonArt(button, selected)
     if selected then
@@ -90,6 +100,9 @@ local function ApplyButtonArt(button, selected)
         button:SetButtonState("NORMAL")
         button:UnlockHighlight()
     end
+    local font = selected and SELECTED_FONT or UNSELECTED_FONT
+    button:SetNormalFontObject(_G[font] or font)
+    button:SetAlpha(selected and 1 or UNSELECTED_ALPHA)
     local art = selected and BUTTON_DOWN or BUTTON_UP
     for _, key in ipairs({ "Left", "Middle", "Right" }) do
         local piece = rawget(button, key)
