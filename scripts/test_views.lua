@@ -222,6 +222,24 @@ T.section("receipt", function()
     r = receipt(shopView(priced({ complete = true, sale = sold("auction", { [1] = 30 }) })))
     T.eq("auction: note", r.back.note, "crafts sold at auction, after the 5% cut")
 
+    -- The note follows where the values of the runs that sell came from, not
+    -- the setting: in auction mode a craft without an auction price is
+    -- counted at the vendor's price.
+    local function soldAs(mode, sources, values)
+        local sale = sold(mode, values or { [1] = 30, [2] = 40 })
+        sale.sources = sources
+        return receipt(shopView(priced({ complete = true, sale = sale }))).back.note
+    end
+    T.eq("auction mode, every value from a vendor", soldAs("auction", { [1] = "vendor", [2] = "vendor" }), "crafts sold to a vendor")
+    T.eq("auction mode, every value from the auction house", soldAs("auction", { [1] = "auction", [2] = "auction" }),
+        "crafts sold at auction, after the 5% cut")
+    T.eq("auction mode, some of each", soldAs("auction", { [1] = "auction", [2] = "vendor" }),
+        "crafts sold at auction (after the 5% cut) or to a vendor, whichever pays more")
+    T.eq("only the runs that sell count", soldAs("auction", { [1] = "auction", [2] = "vendor" }, { [1] = 30 }),
+        "crafts sold at auction, after the 5% cut")
+    T.eq("a recipe that is not on the path does not count", soldAs("auction", { [1] = "vendor", [2] = "vendor", [77] = "auction" }),
+        "crafts sold to a vendor")
+
     -- Sale values still loading: the amount known so far, and a note.
     r, keys = receipt(shopView(priced({ complete = true, sale = sold("vendor", { [1] = 30 }) }), { saleLoading = 2 }))
     T.eq("loading: note", r.back.note, "crafts sold to a vendor, still loading")
@@ -230,6 +248,9 @@ T.section("receipt", function()
     T.eq("loading, nothing known yet: the lines are there", keys, "spend,back,net")
     T.eq("loading, nothing known yet: zero without a minus", r.back.amount, "0c")
     T.eq("loading, nothing known yet: net is the spend", r.net.amount, "59s")
+    T.eq("loading, nothing known yet: the note goes by the setting", r.back.note, "crafts sold to a vendor, still loading")
+    r = receipt(shopView(priced({ complete = true, sale = sold("auction", {}) }), { saleLoading = 1 }))
+    T.eq("loading, nothing known yet, auction mode", r.back.note, "crafts sold at auction, after the 5% cut, still loading")
     -- The count frozen on the path is not what is read.
     local frozen = sold("vendor", {})
     frozen.loading = 3
@@ -907,6 +928,7 @@ T.section("learn and rank text", function()
     T.eq("sells for: source unknown", Text.SellsFor(45, nil), "Sells for 45c each")
     T.eq("sold note: vendor", Text.SoldNote("vendor"), "crafts sold to a vendor")
     T.eq("sold note: auction", Text.SoldNote("auction"), "crafts sold at auction, after the 5% cut")
+    T.eq("sold note: both", Text.SoldNote("both"), "crafts sold at auction (after the 5% cut) or to a vendor, whichever pays more")
 
     local rank = { kind = "rank", cap = 150, at = 150 }
     T.eq("rank: the character's own cap", Text.RankLine(rank, 150, "Tailoring", true),
@@ -1125,6 +1147,23 @@ T.section("path list", function()
     learnAlt.steps[3].recipe.reagents[1].count = 3          -- Shoulders: 45s
     rows = Views.Path(shopView(learnAlt, { liveCap = 150, expanded = closed() }), ctx)
     T.eq("an alternative to learn names the fee", texts(rows)[5], "  or: Fine Pants (learn 30s), |cFF66FF66-14s 85c|r [Use]")
+    -- On the VANILLA profile the recipe data's sources are not trusted: an
+    -- alternative to learn names neither a fee nor where it comes from.
+    rows = Views.Path(shopView(learnAlt, { liveCap = 150, expanded = closed(), profile = "VANILLA" }), ctx)
+    T.eq("VANILLA: no fee in an alternative's name", texts(rows)[5], "  or: Fine Pants (to learn), |cFF66FF66-14s 85c|r [Use]")
+    local vanillaTip = {}
+    for _, line in ipairs(rows[5].tooltip) do vanillaTip[#vanillaTip + 1] = line.text end
+    vanillaTip = table.concat(vanillaTip, " / ")
+    T.check("VANILLA: its tooltip says unlearned, and no more", vanillaTip:find(" / [!] Unlearned / ", 1, true) ~= nil, vanillaTip)
+    T.check("VANILLA: no source in the tooltip", vanillaTip:find("Vendor", 1, true) == nil, vanillaTip)
+    T.check("VANILLA: no fee in the tooltip", vanillaTip:find("to learn the recipe", 1, true) == nil, vanillaTip)
+    rows = Views.Path(shopView(learnAlt, { liveCap = 150, expanded = closed() }), ctx)
+    local otherTip = {}
+    for _, line in ipairs(rows[5].tooltip) do otherTip[#otherTip + 1] = line.text end
+    otherTip = table.concat(otherTip, " / ")
+    T.check("elsewhere the tooltip names the source", otherTip:find("[!] Unlearned: Vendor", 1, true) ~= nil, otherTip)
+    T.check("and the fee", otherTip:find("Includes 30s to learn the recipe", 1, true) ~= nil, otherTip)
+
     -- A pinned run: the player already chose.
     local pins = {}
     LazyProf.Pins.Add(pins, 125, 140, 32)
@@ -1466,6 +1505,29 @@ T.section("shopping list", function()
     T.eq("VANILLA: the tooltip names no source", rows[14].tooltip[2].text,
         "Learn the recipe. The recipe details show what is known about it.")
 
+    -- A recipe paid for with a currency costs something too: it has a row,
+    -- with the currency where the price would be; the gold total is unchanged.
+    local cape = recipe(44, "Cape", 130, 150, 160, 170, { unlearned = true,
+        sourceInfo = { type = "vendor", cost = 0, currency = { name = "Merchant's Favor", amount = 5 } },
+        reagents = { { itemId = THREAD, count = 1, name = "Thread" } } })
+    local gown = recipe(45, "Gown", 140, 150, 160, 170, { unlearned = true,
+        sourceInfo = { type = "vendor", cost = 1200, currency = { name = "Merchant's Favor", amount = 2 } },
+        reagents = { { itemId = THREAD, count = 1, name = "Thread" } } })
+    local favor = shopPath()
+    favor.steps[#favor.steps + 1] = step(cape, 130, 140, 10, 0)
+    favor.steps[#favor.steps + 1] = step(gown, 140, 150, 10, 0)
+    local favorView = shopView(favor, { inventory = stock })
+    rows = Views.Shopping(favorView, ctx)
+    t = texts(rows)
+    T.eq("currency recipe: a row, the currency in the price's place", t[#t - 3], "Cape - vendor | ,,,5 Merchant's Favor")
+    T.eq("gold and currency: the gold in the price's place, the currency with the source",
+        t[#t - 2], "Gown - vendor, 2 Merchant's Favor | ,,,12s")
+    T.eq("the gold total counts gold only", t[#t], "Recipes | ,,,1g 1s")
+    T.eq("which is still the account's recipes amount", favorView.account.recipes, 8500 + 400 + 1200)
+    rows = Views.Shopping(shopView(favor, { inventory = stock, profile = "VANILLA" }), ctx)
+    t = texts(rows)
+    T.eq("VANILLA: the currency row names no source", t[#t - 3], "Cape | ,,,5 Merchant's Favor")
+
     -- No recipe costs anything: no recipe section.
     local known = shopPath()
     known.steps = { step(shirt, 100, 110, 10, 0) }
@@ -1476,7 +1538,7 @@ T.section("shopping list", function()
     -- Everything owned.
     rows = shopping({ inventory = { [BOLT] = 20, [THREAD] = 10, [LEATHER] = 20, [DUST] = 10, [DYE] = 10, [SILK] = 30 } })
     t = texts(rows)
-    T.eq("nothing to buy says so", t[1], "Nothing left to buy.")
+    T.eq("no reagent left to buy says so - of reagents only, a recipe still costs", t[1], "No reagents left to buy.")
     T.eq("the owned rows follow, by name", t[3] .. " / " .. t[4], "Bolt | 20,20,-,- / Dust | 10,10,-,-")
     T.eq("a zero total", t[9], "Reagents to buy | ,,,0c")
     T.eq("the recipes still cost", t[#t], "Recipes | ,,,89s")
@@ -1489,6 +1551,15 @@ T.section("shopping list", function()
     T.eq("collect first block", t[1], "Collect first")
     T.eq("from the bank", t[2], "30x Silk")
     T.eq("a rule before the table", t[3] .. " " .. t[4], "--- Reagent | Need,Have,Buy,Cost")
+
+    -- Without callbacks the list is still drawn; its rows just do nothing.
+    local bare = Views.Shopping(shopView(shopPath(), { inventory = stock, advanced = true }), nil)
+    T.eq("no callbacks: the same rows", #bare, #Views.Shopping(shopView(shopPath(), { inventory = stock, advanced = true }), ctx))
+    local clickable = 0
+    for _, r in ipairs(bare) do
+        if r.onClick or r.button then clickable = clickable + 1 end
+    end
+    T.eq("no callbacks: nothing to click", clickable, 0)
 
     -- No reagents at all, nothing left.
     T.eq("no reagents needed", texts(Views.Shopping({ path = makePath(), missing = { rows = {} } }, ctx))[1],
@@ -1592,7 +1663,9 @@ T.section("arrow tooltip", function()
     t = lines(view)
     T.eq("stock: the current step costs nothing", t[3], "Now: 19x Gloves | 0c")
     T.eq("stock: what is spent", t[9], "You spend: | 40s")
-    T.eq("stock: one amount", #t, 9)
+    -- With no net line to say it on, the receipt's stock line follows.
+    T.eq("stock: what it saves, under the amount", t[10], "Your own stock saves 19s")
+    T.eq("stock: nothing after it", #t, 10)
 
     -- Spare crafts: the amount covers them, and says so.
     view = shopView(makePath({ complete = true }), { margin = 15 })
@@ -1600,6 +1673,17 @@ T.section("arrow tooltip", function()
     T.eq("margin: the larger count", t[3], "Now: 22x Gloves | 22s")
     T.eq("margin: the amount covers the spare crafts", t[9], "You spend: | 68s")
     T.eq("margin: and says so", t[10], "Includes 15% spare crafts")
+
+    -- The list makes a reagent: the step costs more than is spent, and the
+    -- tooltip says why (ten Shirts need 20 Bolt at 5s, made from 60 Cloth at 1s).
+    local shirt = recipe(20, "Shirt", 100, 150, 160, 170, { reagents = { { itemId = BOLT, count = 2, name = "Bolt" } } })
+    view = shopView(makePath({ complete = true, gaps = {}, currentSkill = 100, actualSkill = 100,
+        prices = { [BOLT] = 500, [CLOTH] = 100 }, steps = { step(shirt, 100, 110, 10, 0) } }))
+    t = lines(view)
+    T.eq("made reagent: the step at buy prices", t[3], "Now: 10x Shirt | 1g")
+    T.eq("made reagent: what is spent", t[6], "You spend: | 60s")
+    T.eq("made reagent: the difference is explained", t[7], "Making 20 Bolt yourself saves 40s")
+    T.check("made reagent: in grey", Views.ArrowTooltip(view)[7].r == 0.7)
 
     -- Learn and rank steps as the current step
     local boots = recipe(8, "Boots", 143, 200, 210, 220, { unlearned = true, sourceInfo = { type = "vendor", cost = 1500 } })
@@ -1613,6 +1697,18 @@ T.section("arrow tooltip", function()
     T.eq("then the rank step", t[8], "Then: Train the next rank before 150")
     T.eq("one more step, on the Path tab", t[9], "... and 1 more step (see the Path tab)")
     T.eq("what is spent includes the fee", t[11], "You spend: | 32s")
+    -- On the VANILLA profile a learn step shows no fee (it comes from recipe
+    -- data that types every recipe as trainer-taught).
+    view = shopView(path, { liveCap = 150, profile = "VANILLA" })
+    t = lines(view)
+    T.eq("VANILLA: the learn step without its fee", t[3], "Now: Learn Boots")
+    T.eq("VANILLA: the total still counts it", t[#t], "You spend: | 32s")
+    local rankFirst = makePath({ complete = true, gaps = {}, prices = { [108] = 100 }, actualSkill = 143,
+        steps = { step(A, 143, 150, 7, 0), step(boots, 150, 160, 10, 0) } })
+    t = lines(shopView(rankFirst, { liveCap = 150, profile = "VANILLA" }))
+    T.eq("VANILLA: nor on a later step", t[6], "Then: Learn Boots")
+    t = lines(shopView(rankFirst, { liveCap = 150 }))
+    T.eq("elsewhere a later learn step has its fee", t[6], "Then: Learn Boots | 15s")
 
     -- Nothing left, and no path
     local done = makePath({ steps = {}, gaps = {}, totalCost = 0, nothingLeft = true, actualSkill = 300, currentSkill = 300 })

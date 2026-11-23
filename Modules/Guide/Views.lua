@@ -131,6 +131,25 @@ local function Round(copper)
     return math.floor((copper or 0) + 0.5)
 end
 
+-- How the runs that sell were counted: "vendor", "auction" or "both". It goes
+-- by where each value came from (view.sale.sources), not by the setting: in
+-- auction mode a craft without an auction price is counted at the vendor's
+-- price. With nothing sold yet (values still loading) it is the setting.
+local function SoldAs(view, mode)
+    local sources = view.sale and view.sale.sources or {}
+    local vendor, auction = false, false
+    for _, stage in ipairs(view.stages or {}) do
+        if stage.kind == "craft" and (stage.sale or 0) > 0 then
+            local source = sources[stage.recipe.id] or mode
+            if source == SALE_MODE.AUCTION then auction = true else vendor = true end
+        end
+    end
+    if vendor and auction then return "both" end
+    if vendor then return SALE_MODE.VENDOR end
+    if auction then return SALE_MODE.AUCTION end
+    return mode
+end
+
 -- What the path costs, as the lines of a receipt. Built from the account of
 -- the whole path (view.account: the shopping list of the stages' quantities,
 -- less what the crafts sell for), so "You spend" is the Shopping tab added up.
@@ -145,7 +164,8 @@ end
 -- Lines, in order:
 --   spend    reagents still to buy plus recipes to buy or learn
 --   back     what the crafts sell for (not when sale values are not counted,
---            or nothing sells and nothing is still loading)
+--            or nothing sells and nothing is still loading); its note says
+--            how the runs that sell were counted
 --   net      spend less back, a gain when the crafts sell for more (only with back)
 --   stock    what the owned stock saves, when there is no net line to say it on
 --   making   the list makes reagents instead of buying them, so the path's
@@ -183,7 +203,7 @@ function Views.Receipt(view)
     local back = Round(account.sale)
     if mode ~= SALE_MODE.NONE and (back > 0 or loading) then
         add({ key = "back", label = "Back from selling", amount = back > 0 and ("-" .. Money(back)) or Money(0),
-              amountColor = GREEN, note = Text.SoldNote(mode) .. (loading and ", still loading" or "") })
+              amountColor = GREEN, note = Text.SoldNote(SoldAs(view, mode)) .. (loading and ", still loading" or "") })
         local net = spent - back
         add({ key = "net", label = net < 0 and "Net gain" or "Net cost", amount = Money(math.abs(net)),
               amountColor = net < 0 and GREEN or WHITE, note = saved and ("your own stock saves " .. saved) or nil })
@@ -664,13 +684,17 @@ local function ReachText(stage, alt)
 end
 
 -- Tooltip of an alternative of `stage`: what it is, why it may be blocked,
--- what it costs over the run and what its crafts sell for.
-local function AlternativeTooltip(alt, stage)
+-- what it costs over the run and what its crafts sell for. On the VANILLA
+-- profile, whose recipe data types every recipe as trainer-taught, an
+-- unlearned recipe's source and fee are not named.
+local function AlternativeTooltip(alt, stage, profile)
     local recipe = alt.recipe
+    local sourceKnown = profile ~= "VANILLA"
     local c = Views.DifficultyColor(alt.color)
     local lines = { { text = recipe.name or "Unknown", r = c[1], g = c[2], b = c[3] } }
     if not recipe.learned then
-        lines[#lines + 1] = { text = "[!] Unlearned: " .. Utils.GetSourceDescription(recipe.source), r = 1, g = 0.53, b = 0 }
+        lines[#lines + 1] = { text = sourceKnown and ("[!] Unlearned: " .. Utils.GetSourceDescription(recipe.source))
+            or "[!] Unlearned", r = 1, g = 0.53, b = 0 }
         if alt.unavailable and not alt.reason then
             lines[#lines + 1] = { text = "Not currently obtainable", r = 1, g = 0.3, b = 0.3 }
         end
@@ -700,7 +724,7 @@ local function AlternativeTooltip(alt, stage)
             local net = cost - sale
             lines[#lines + 1] = { text = (net < 0 and "Net gain: " or "Net cost: ") .. Money(math.abs(net)), r = 1, g = 1, b = 1 }
         end
-        if alt.fee > 0 then
+        if alt.fee > 0 and sourceKnown then
             lines[#lines + 1] = { text = "Includes " .. Money(alt.fee) .. " to learn the recipe", r = 0.7, g = 0.7, b = 0.7 }
         end
     else
@@ -724,7 +748,7 @@ local function UseTooltip(alt)
     return lines
 end
 
-local function AlternativeRow(stage, alt, ctx)
+local function AlternativeRow(stage, alt, ctx, profile)
     local name = alt.recipe.name or "Unknown"
     if not alt.recipe.learned then
         name = name .. " |cFFFF8800[!]|r"
@@ -740,7 +764,7 @@ local function AlternativeRow(stage, alt, ctx)
     return {
         kind = "line", alt = alt, indent = 6, text = name, color = Views.DifficultyColor(alt.color),
         right = right, alpha = alt.unavailable and 0.5 or 1,
-        bg = BG_SUB, hoverBg = BG_ROW_HOVER, tooltip = AlternativeTooltip(alt, stage),
+        bg = BG_SUB, hoverBg = BG_ROW_HOVER, tooltip = AlternativeTooltip(alt, stage, profile),
         onClick = function() ctx.onShowRecipe(alt.recipe, stage.fromDisplay) end,
         button = { text = "Use this", width = 62, tooltip = UseTooltip(alt), onClick = function() ctx.onUseAlternative(stage, alt) end },
     }
@@ -864,7 +888,7 @@ function Views.GuideCard(view, ctx)
             rows[#rows + 1] = { kind = "line", font = "GameFontNormalSmall", color = GOLD, text = "Alternatives" }
             local shown = view.showAllAlts and #alts or math.min(ALTERNATIVES_SHOWN, #alts)
             for i = 1, shown do
-                rows[#rows + 1] = AlternativeRow(stage, alts[i], ctx)
+                rows[#rows + 1] = AlternativeRow(stage, alts[i], ctx, view.profile)
             end
             if #alts > ALTERNATIVES_SHOWN then
                 local expand = not view.showAllAlts
@@ -1035,7 +1059,7 @@ local function PathAlternativeRow(stage, alt, view, ctx)
     return {
         kind = "line", alt = alt, indent = 6, text = AlternativeName(alt, view.profile),
         color = Views.DifficultyColor(alt.color), right = right, alpha = alt.unavailable and 0.5 or 1,
-        bg = BG_SUB, hoverBg = BG_ROW_HOVER, tooltip = AlternativeTooltip(alt, stage),
+        bg = BG_SUB, hoverBg = BG_ROW_HOVER, tooltip = AlternativeTooltip(alt, stage, view.profile),
         onClick = function() ctx.onShowRecipe(alt.recipe, stage.fromDisplay) end,
         button = { text = "Use", width = 40, tooltip = UseTooltip(alt), onClick = function() ctx.onUseAlternative(stage, alt) end },
     }
@@ -1177,7 +1201,7 @@ local function AddRun(rows, stage, learn, isCurrent, view, ctx)
         rows[#rows + 1] = {
             kind = "line", sub = true, stage = stage, alt = alt, color = GREY,
             text = "or: " .. AlternativeName(alt, view.profile) .. ", " .. CostDifference(alt.costDelta, "same cost"),
-            tooltip = AlternativeTooltip(alt, stage),
+            tooltip = AlternativeTooltip(alt, stage, view.profile),
             onClick = function() ctx.onShowRecipe(alt.recipe, stage.fromDisplay) end,
             button = { text = "Use", width = 40, tooltip = UseTooltip(alt), onClick = function() ctx.onUseAlternative(stage, alt) end },
         }
@@ -1395,15 +1419,18 @@ end
 --     from beneath it; then the reagents already owned, dimmed, by name
 --   "Reagents to buy": the sum of the Cost column (missing.buyTotal)
 --   "Recipes to learn": a row per recipe that costs something, with where it
---     comes from (never on the VANILLA profile) and its price, and their sum
+--     comes from (never on the VANILLA profile) and its price - for a recipe
+--     paid for with a currency, the currency - and the sum of the gold
 -- The two sums are the two parts of the receipt's "You spend".
 -- With More options (view.advanced) a reagent the character can make has its
 -- craft / buy button, and view.hideOwned hides the owned rows; without it
 -- neither acts, because the checkbox that would undo the filter is hidden.
 -- Row fields beyond the list widget's: `item` (the shopping row), `recipe`
 -- (on recipe rows), `total = true` (on the two sum rows).
--- ctx: onCraftChoice(row, "craft" | "buy" | nil); onShowRecipe(recipe) (optional).
+-- ctx (optional; without it the rows have nothing to click):
+-- onCraftChoice(row, "craft" | "buy" | nil), onShowRecipe(recipe).
 function Views.Shopping(view, ctx)
+    ctx = ctx or {}
     local path = view.path
     if path and path.nothingLeft then
         return Views.Notice(view)
@@ -1470,7 +1497,7 @@ function Views.Shopping(view, ctx)
                 bg = BG_SUB, hoverBg = BG_ROW_HOVER, alpha = alpha,
                 itemId = row.itemId, link = row.link, tooltip = ShoppingTooltip(row),
             }
-            if row.craftable and view.advanced then
+            if row.craftable and view.advanced and ctx.onCraftChoice then
                 desc.button = ChoiceButton(row, ctx)
             end
             table_[#table_ + 1] = desc
@@ -1489,7 +1516,8 @@ function Views.Shopping(view, ctx)
         for _, row in ipairs(owned) do addItem(row, 0.55) end
 
         if toBuyRows == 0 then
-            rows[#rows + 1] = { kind = "line", color = GREEN, text = "Nothing left to buy"
+            -- (Of reagents: a recipe may still have to be bought.)
+            rows[#rows + 1] = { kind = "line", color = GREEN, text = "No reagents left to buy"
                 .. (view.bracket and (" for " .. view.bracket.name) or "") .. "." }
         end
         if #table_ > 0 then
@@ -1505,14 +1533,26 @@ function Views.Shopping(view, ctx)
         rows[#rows + 1] = { kind = "line", font = "GameFontNormalSmall", color = GOLD, text = "Recipes to learn" }
         for _, entry in ipairs(recipeRows) do
             local learn = { recipe = entry.recipe, sourceInfo = entry.sourceInfo }
-            local where = Text.LearnShort(learn, view.profile)
+            -- A recipe paid for with a currency only has that in the price's
+            -- place (and not a second time beside its source).
+            local price, where = Money(entry.cost), nil
+            local currency = Utils.FormatCurrency(entry.currency)
+            if currency and (entry.cost or 0) <= 0 then
+                price = currency
+                local info = {}
+                for k, v in pairs(entry.sourceInfo or {}) do info[k] = v end
+                info.currency = nil
+                where = Text.LearnShort({ recipe = entry.recipe, sourceInfo = info }, view.profile)
+            else
+                where = Text.LearnShort(learn, view.profile)
+            end
             local tooltip = { { text = "Learn " .. tostring(entry.name), r = 1, g = 1, b = 1 } }
             for _, line in ipairs(Text.LearnLines(learn, view.profile, path and path.profession)) do
                 tooltip[#tooltip + 1] = { text = line.text, r = 0.7, g = 0.7, b = 0.7 }
             end
             rows[#rows + 1] = {
                 kind = "cols", recipe = entry.recipe, text = tostring(entry.name) .. (where and (" - " .. where) or ""),
-                cols = { "", "", "", Money(entry.cost) },
+                cols = { "", "", "", price },
                 bg = BG_SUB, hoverBg = BG_ROW_HOVER, tooltip = tooltip,
                 onClick = ctx.onShowRecipe and function() ctx.onShowRecipe(entry.recipe) end or nil,
             }
@@ -1537,7 +1577,8 @@ end
 
 -- What the arrow's tooltip says: the current step, the next two, the
 -- receipt's amounts (what is spent, what comes back from selling, the net)
--- and where the prices came from. (The whole path is on the Path tab.)
+-- with its notes, and where the prices came from. (The whole path is on the
+-- Path tab.)
 -- Returns { { text, right, r, g, b, rr, rg, rb, wrap }, ... }; a line with
 -- `right` is a two-column line.
 function Views.ArrowTooltip(view)
@@ -1564,7 +1605,10 @@ function Views.ArrowTooltip(view)
         if stage.kind == "craft" then
             return Text.StageTitle(stage), Money(stage.outOfPocketCost)
         elseif stage.kind == "learn" then
-            return "Learn " .. (stage.recipe.name or "the recipe"), stage.fee > 0 and Money(stage.fee) or nil
+            -- (No fee on the VANILLA profile: it comes from recipe data that
+            -- types every recipe as trainer-taught.)
+            local fee = (stage.fee > 0 and profile ~= "VANILLA") and Money(stage.fee) or nil
+            return "Learn " .. (stage.recipe.name or "the recipe"), fee
         elseif stage.kind == "rank" then
             return Text.RankShort(stage), nil
         end
@@ -1603,12 +1647,15 @@ function Views.ArrowTooltip(view)
     end
 
     -- The receipt's amounts, label left and amount right (with gaps they
-    -- cover only the path's steps, and the label says so), and its note that
-    -- the amounts include spare crafts.
+    -- cover only the path's steps, and the label says so), then its notes in
+    -- grey: what the owned stock saves when no net line says it, what making
+    -- reagents saves (the steps above are priced at buy prices, so without
+    -- it they would not add up to what is spent), and that the amounts
+    -- include spare crafts.
     local blank = false
     for _, line in ipairs(Views.Receipt(view)) do
         local amounts = (line.key == "spend" or line.key == "back" or line.key == "net")
-        if amounts or line.key == "margin" then
+        if amounts or line.key == "stock" or line.key == "making" or line.key == "margin" then
             if not blank then
                 add(" ")
                 blank = true

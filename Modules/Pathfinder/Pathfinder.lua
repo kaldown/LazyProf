@@ -617,8 +617,9 @@ end
 --               what other crafted reagents take of it is bought (resolution is
 --               one level deep) and shows as the row's toBuy and cost.
 -- buyTotal, the sum of the rows' (whole-copper) costs, and recipeRows = { { recipe, name,
--- cost, sourceInfo }, ... }: one per unlearned recipe that costs something,
--- by name; recipeCosts is their sum.
+-- cost, sourceInfo, currency }, ... }: one per unlearned recipe that costs
+-- something, by name - gold (cost), a currency (the source's currency table;
+-- cost is 0 when it is the only price) or both; recipeCosts is the gold.
 function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown, prices)
     local needed = {}
 
@@ -1013,9 +1014,13 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
         if not seenRecipes[recipe.id] then
             seenRecipes[recipe.id] = true
             local cost = RecipeCost(recipe)
-            if cost > 0 then
+            -- A recipe paid for with a currency costs something too.
+            local info = (not recipe.learned) and recipe._sourceInfo or nil
+            local currency = (info and Utils.FormatCurrency(info.currency)) and info.currency or nil
+            if cost > 0 or currency then
                 recipeRows[#recipeRows + 1] = {
                     recipe = recipe, name = recipe.name or "Unknown", cost = cost, sourceInfo = recipe._sourceInfo,
+                    currency = currency,
                 }
                 recipeCosts = recipeCosts + cost
             end

@@ -521,7 +521,7 @@ T.section("shopping tab", function()
     missing = { fromBank = {}, fromMail = {}, fromAuctions = {}, fromGuildBank = {}, fromAlts = {}, toCraft = {}, fromAH = {},
         recipeCosts = 0, rows = { row(104, "Dye", 12, 12, 0) }, buyTotal = 0 }
     window:Render()
-    T.eq("nothing to buy says so", W.rowTexts(window)[1], "Nothing left to buy.")
+    T.eq("no reagent left to buy says so", W.rowTexts(window)[1], "No reagents left to buy.")
     T.eq("zero total", window.shopTotal.text, "To buy: 0c")
     missing.rows = {}
     window:Render()

@@ -69,9 +69,13 @@ local function CutPercent()
     return math.floor(LazyProf.Constants.AUCTION_CUT * 100 + 0.5)
 end
 
--- How the crafts are counted as sold (the sale mode), for the receipt's note.
-function Text.SoldNote(mode)
-    if mode == LazyProf.Constants.SALE_MODE.AUCTION then
+-- How the crafts that sell were counted, for the receipt's note: "vendor",
+-- "auction", or "both" when some values are auction prices and others fell
+-- back to the vendor's price.
+function Text.SoldNote(how)
+    if how == "both" then
+        return string.format("crafts sold at auction (after the %d%% cut) or to a vendor, whichever pays more", CutPercent())
+    elseif how == LazyProf.Constants.SALE_MODE.AUCTION then
         return string.format("crafts sold at auction, after the %d%% cut", CutPercent())
     end
     return "crafts sold to a vendor"
