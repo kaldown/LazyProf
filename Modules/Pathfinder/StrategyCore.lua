@@ -17,6 +17,38 @@ local Utils = LazyProf.Utils
 
 local GAP_NO_RECIPE = "no recipe"
 
+-- What one craft of `recipe` costs in reagents at `skill`, counting owned
+-- stock against the whole run the recipe would get, not against one craft:
+-- owning enough for a single craft must not make a run of fifty look free.
+-- For a reagent the character owns, the run's quantity is worked out first
+-- (strategy:CalculateQuantity) and the reagent costs
+--   price x max(0, count x quantity - owned) / quantity
+-- per craft. A reagent with nothing owned costs price x count, exactly as it
+-- always did, so with an empty inventory the result is unchanged to the bit.
+-- Returns cost, priced. priced is false when a reagent has no price (or one
+-- not above zero); such a reagent adds nothing to the cost.
+local function ReagentCostPerCraft(strategy, recipe, skill, targetSkill, inventory, prices, racialBonus, recipes)
+    local cost, priced = 0, true
+    local quantity
+    for _, reagent in ipairs(recipe.reagents) do
+        local price = prices[reagent.itemId]
+        if not price or price <= 0 then
+            priced = false
+            price = 0
+        end
+        local owned = inventory[reagent.itemId] or 0
+        if owned <= 0 then
+            cost = cost + (price * reagent.count)
+        else
+            if not quantity then
+                quantity = math.max(1, strategy:CalculateQuantity(recipe, skill, targetSkill, recipes, racialBonus))
+            end
+            cost = cost + price * math.max(0, reagent.count * quantity - owned) / quantity
+        end
+    end
+    return cost, priced
+end
+
 -- Score every candidate and return the alternatives list, best (lowest score) first.
 -- ScoreRecipe is called with the superset
 -- (recipe, skill, targetSkill, inventory, prices, racialBonus, purchasedRecipes, scoreCtx);
@@ -34,14 +66,9 @@ local function ScoreCandidates(strategy, candidates, skill, targetSkill, invento
         local color = Utils.GetSkillColor(effectiveSkill, recipe.skillRange)
         local expectedSkillups = strategy:GetExpectedSkillups(recipe, skill, racialBonus)
 
-        -- Calculate per-craft cost for display
-        local craftCost = 0
-        for _, reagent in ipairs(recipe.reagents) do
-            local price = prices[reagent.itemId] or 0
-            local owned = inventory[reagent.itemId] or 0
-            local toBuy = math.max(0, reagent.count - owned)
-            craftCost = craftCost + (price * toBuy)
-        end
+        -- Per-craft cost for display, by the same rule the scoring uses
+        local craftCost = ReagentCostPerCraft(strategy, recipe, skill, targetSkill, inventory, prices,
+            racialBonus, scoreCtx and scoreCtx.recipes)
 
         table.insert(alternatives, {
             recipe = recipe,
@@ -106,6 +133,8 @@ local function AddGap(gaps, from, to, reason)
 end
 
 LazyProf.StrategyCore = {
+    ReagentCostPerCraft = ReagentCostPerCraft,
+
     -- pins: optional pin list (Modules/Pathfinder/Pins.lua); with none the
     -- loop's output is what the optimizer picks.
     -- ctx: optional { rankSale = { [recipeId] = copper }, sale = { [recipeId] = copper } }

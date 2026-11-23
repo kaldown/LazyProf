@@ -72,7 +72,7 @@ LazyProf.PathfinderStrategies.cheapest = {
 
     -- Score recipe: lower = better
     -- Score based on cost-per-skillup at CURRENT skill level, with bonuses for flexibility
-    -- IMPORTANT: Uses actualCost (materials to buy) not theoreticalCost (full market value)
+    -- IMPORTANT: Uses the cost of the materials to buy, not their full market value
     -- racialBonus: extends color ranges (e.g., Gnome +15 Engineering)
     -- purchasedRecipes: table of recipe IDs already "bought" in this simulation
     -- ctx: optional run context (StrategyCore.Run); ctx.rankSale[recipeId] is
@@ -87,25 +87,13 @@ LazyProf.PathfinderStrategies.cheapest = {
             return math.huge
         end
 
-        -- Calculate actual cost per craft (only count materials we need to BUY)
-        local theoreticalCost = 0
-        local actualCost = 0
-
-        for _, reagent in ipairs(recipe.reagents) do
-            local price = prices[reagent.itemId]
-
-            -- Preserve existing nil/zero price rejection
-            -- If any reagent has no price, we can't calculate cost
-            if not price or price <= 0 then
-                return math.huge
-            end
-
-            local needed = reagent.count
-            local owned = inventory[reagent.itemId] or 0
-            local toBuy = math.max(0, needed - owned)
-
-            theoreticalCost = theoreticalCost + (price * needed)
-            actualCost = actualCost + (price * toBuy)
+        -- Cost per craft: only what has to be BOUGHT, with owned stock counted
+        -- against the whole run (StrategyCore.ReagentCostPerCraft). A reagent
+        -- without a price makes the cost unknown: the recipe is not ranked.
+        local actualCost, priced = LazyProf.StrategyCore.ReagentCostPerCraft(self, recipe, currentSkill, targetSkill,
+            inventory, prices, racialBonus, ctx and ctx.recipes)
+        if not priced then
+            return math.huge
         end
 
         -- Add recipe acquisition cost for unlearned recipes (amortized over expected uses)

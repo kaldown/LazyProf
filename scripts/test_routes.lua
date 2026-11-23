@@ -155,6 +155,104 @@ T.section("no sale values: the planner's output is unchanged", function()
     T.check("empty sale tables: the snapshot", text({ rankSale = {}, sale = {} }) == snapshot)
 end)
 
+-- Owned stock in the scoring ------------------------------------------------------
+
+T.section("stock scoring: nothing owned is the old score, to the last bit", function()
+    local LazyProf = load()
+    local cheapest = LazyProf.PathfinderStrategies.cheapest
+    local Utils = LazyProf.Utils
+    local prices = { [61] = 33.3, [62] = 0.7, [63] = 1234.5 }
+    local recipes = {
+        recipe(1, "One", { reagents = { { itemId = 61, count = 3 }, { itemId = 62, count = 7 } } }),
+        recipe(2, "Two", { yellow = 104, green = 112, gray = 121, reagents = { { itemId = 63, count = 1 }, { itemId = 61, count = 2 } } }),
+        recipe(3, "Three", { orange = 90, yellow = 95, green = 108, gray = 131, required = 90,
+            reagents = { { itemId = 62, count = 11 } } }),
+    }
+    -- The score as it was computed before stock was scored against the run.
+    local function old(r, skill, target)
+        local actualCost = 0
+        for _, reagent in ipairs(r.reagents) do
+            local price = prices[reagent.itemId]
+            local toBuy = math.max(0, reagent.count - 0)
+            actualCost = actualCost + (price * toBuy)
+        end
+        local expected = Utils.GetSkillUpChance(skill, r.skillRange)
+        local costPerSkillup = actualCost / expected
+        local rangeBonus = 0
+        if r.skillRange.gray > skill then
+            rangeBonus = -(math.min(r.skillRange.gray, target) - skill) * 0.001
+        end
+        return costPerSkillup + rangeBonus + (-expected / 100)
+    end
+    local same = true
+    local detail = ""
+    for _, r in ipairs(recipes) do
+        for _, skill in ipairs({ 100, 103.25, 107.5 }) do
+            for _, inventory in ipairs({ {}, { [61] = 0, [62] = 0, [63] = 0 } }) do
+                local got = cheapest:ScoreRecipe(r, skill, 150, inventory, prices, 0, {}, { recipes = recipes })
+                local want = old(r, skill, 150)
+                if got ~= want then
+                    same = false
+                    detail = string.format("%s at %s: %.17g vs %.17g", r.name, tostring(skill), got, want)
+                end
+            end
+        end
+    end
+    T.check("every score equals the old formula exactly", same, detail)
+end)
+
+T.section("stock scoring: against the whole run, not one craft", function()
+    local LazyProf = load()
+    local X, Y = 70, 71
+    local function fixture()
+        return {
+            recipe(1, "A", { yellow = 130, green = 140, gray = 150, reagents = { { itemId = X, count = 1, name = "X" } } }),
+            recipe(2, "B", { yellow = 130, green = 140, gray = 150, reagents = { { itemId = Y, count = 1, name = "Y" } } }),
+        }
+    end
+    local prices = { [X] = 100, [Y] = 300 }
+
+    -- Stock for a single craft of the dear recipe does not make a run of five look free.
+    local steps = run(LazyProf, "cheapest", 100, 110, fixture(), { [Y] = 1 }, prices)
+    T.eq("one Y owned: the route does not move", onlyRecipe(steps), 1)
+    T.eq("fixture: a run is five crafts", steps[1].quantity, 5)
+    local altB
+    for _, alt in ipairs(steps[1].alternatives) do
+        if alt.recipe.id == 2 then altB = alt end
+    end
+    T.eq("the other recipe's shown cost per craft counts the run: 4 of 5 bought", altB.craftCost, 300 * 4 / 5)
+    for _, alt in ipairs(steps[1].alternatives) do
+        if alt.recipe.id == 1 then T.eq("nothing owned of X: its cost per craft is its price", alt.craftCost, 100) end
+    end
+
+    -- Three owned: two of five bought is 120 a craft, still dearer than 100.
+    steps = run(LazyProf, "cheapest", 100, 110, fixture(), { [Y] = 3 }, prices)
+    T.eq("three Y owned: still the cheap recipe", onlyRecipe(steps), 1)
+
+    -- Four owned: one of five bought is 60 a craft: the stock is worth using.
+    steps = run(LazyProf, "cheapest", 100, 110, fixture(), { [Y] = 4 }, prices)
+    T.eq("four Y owned: the first run uses them", steps[1].recipe.id, 2)
+    T.eq("and what it pays is the one missing", steps[1].totalCost, 300)
+    T.eq("the next run is back on the cheap recipe", steps[2].recipe.id, 1)
+
+    -- Ten owned cover two runs; the third has nothing left.
+    steps = run(LazyProf, "cheapest", 100, 115, fixture(), { [Y] = 10 }, prices)
+    T.eq("ten Y owned: first run", steps[1].recipe.id, 2)
+    T.eq("ten Y owned: second run", steps[2].recipe.id, 2)
+    T.eq("ten Y owned: the third run has no stock left", steps[3].recipe.id, 1)
+    T.eq("the stocked runs cost nothing", steps[1].totalCost + steps[2].totalCost, 0)
+
+    -- The shared helper: an unpriced reagent counts as zero and is flagged.
+    local cheapest = LazyProf.PathfinderStrategies.cheapest
+    local odd = recipe(3, "Odd", { reagents = { { itemId = X, count = 2 }, { itemId = 999, count = 1 } } })
+    local cost, priced = LazyProf.StrategyCore.ReagentCostPerCraft(cheapest, odd, 100, 110, {}, prices, 0, { odd })
+    T.eq("unpriced reagent: the priced part", cost, 200)
+    T.check("unpriced reagent: flagged", priced == false)
+    T.eq("and the score stays out of reach", cheapest:ScoreRecipe(odd, 100, 110, {}, prices, 0, {}, { recipes = { odd } }), math.huge)
+    cost, priced = LazyProf.StrategyCore.ReagentCostPerCraft(cheapest, fixture()[1], 100, 110, {}, prices, 0, fixture())
+    T.check("all priced", priced == true and cost == 100)
+end)
+
 -- Candidate routes ---------------------------------------------------------------
 
 local ROUTE_FILES = {}
