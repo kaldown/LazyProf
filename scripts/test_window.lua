@@ -112,7 +112,7 @@ for _, family in ipairs({ "forever", "classic" }) do
         T.eq(p .. "slider: at the target", slider.value, 300)
         T.eq(p .. "slider: end labels", window.sliderMin.text .. " " .. window.sliderMax.text, "143 300")
         local receipt = W.receiptTexts(window)
-        T.eq(p .. "receipt: what is spent", receipt[1], "You spend (excluding gaps) | 0c")
+        T.eq(p .. "receipt: what is spent", receipt[1], "You spend | 0c | excluding gaps")
         T.eq(p .. "receipt: nothing else", #receipt, 1)
         T.eq(p .. "the header's blocks", stacked(window), "targetRow,receipt")
 
@@ -900,7 +900,7 @@ T.section("shopping tab", function()
 
     -- The receipt above it is the list added up.
     local receipt = W.receiptTexts(window)
-    T.eq("receipt: the two totals of the list", receipt[1], "You spend (excluding gaps) | 2g 52s 50c | reagents 2g 49s + recipes 3s 50c")
+    T.eq("receipt: the two totals of the list", receipt[1], "You spend | 2g 52s 50c | reagents 2g 49s + recipes 3s 50c (excluding gaps)")
     T.eq("receipt: a reagent without a price is said", receipt[2], "1 reagent on the list has no price - the amounts leave it out.")
 
     -- The craft / buy buttons and the hide-owned filter are advanced controls:
@@ -960,7 +960,7 @@ T.section("shopping tab", function()
     account()
     window:Render()
     T.eq("no reagent left to buy says so", W.rowTexts(window)[1], "No reagents left to buy.")
-    T.eq("and the receipt is at nothing", W.receiptTexts(window)[1], "You spend (excluding gaps) | 0c")
+    T.eq("and the receipt is at nothing", W.receiptTexts(window)[1], "You spend | 0c | excluding gaps")
     missing.rows = {}
     window:Render()
     T.eq("no reagents at all", W.rowTexts(window)[1], "No reagents needed in this path.")

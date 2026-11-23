@@ -180,11 +180,16 @@ T.section("receipt", function()
     -- Gloves 19 x 1s + Shirt 20 x 2s.
     local r, keys = receipt(shopView(priced()))
     T.eq("no sale value, no stock: one line", keys, "spend")
-    T.eq("spend: label, with the gaps flagged", r.spend.label, "You spend (excluding gaps)")
+    -- The label is the same with and without gaps (a longer one would take
+    -- the note's room): the note says the gaps are left out.
+    T.eq("spend: label", r.spend.label, "You spend")
     T.eq("spend: the amount", r.spend.amount, "59s")
-    T.check("spend: no note when no recipe costs anything", r.spend.note == nil, r.spend.note)
+    T.eq("spend: a path with gaps says so in the note", r.spend.note, "excluding gaps")
+    T.check("spend: and is marked for whoever shows no notes", r.spend.gaps == true)
     r = receipt(shopView(priced({ complete = true })))
     T.eq("spend: label of a path without gaps", r.spend.label, "You spend")
+    T.check("spend: no note when no recipe costs anything and nothing is left out", r.spend.note == nil, r.spend.note)
+    T.check("spend: not marked", r.spend.gaps == nil)
     -- A reagent to buy without a price: left out of the amount, and said.
     r, keys = receipt(shopView(makePath()))
     T.eq("a reagent without a price adds nothing", r.spend.amount, "59s")
@@ -198,6 +203,13 @@ T.section("receipt", function()
     r, keys = receipt(shopView(learnPath))
     T.eq("recipes: amount is reagents plus recipes", r.spend.amount, "37s")
     T.eq("recipes: the note says both parts", r.spend.note, "reagents 17s + recipes 20s")
+    local gapped = makePath({ gaps = { { from = 160, to = 300, reason = "no recipe" } }, prices = { [104] = 100 },
+        steps = { step(boots, 143, 150, 7, 2700), step(boots, 150, 160, 10, 1000) } })
+    r = receipt(shopView(gapped))
+    T.eq("recipes and gaps: both parts, then the gaps", r.spend.note, "reagents 17s + recipes 20s (excluding gaps)")
+    T.eq("recipes and gaps: the label stays short", r.spend.label, "You spend")
+    local shownGapped = shown(shopView(gapped))
+    T.eq("recipes and gaps: the two parts still read back", shownGapped.noteReagents .. "+" .. shownGapped.noteRecipes, "1700+2000")
     T.eq("recipes: still one line", keys, "spend")
 
     -- Sold to a vendor: three lines.
@@ -499,7 +511,7 @@ T.section("amounts add up as shown", function()
     altPath.steps[1].alternatives = { { recipe = big, score = 1, color = "orange", expectedSkillups = 1 },
         { recipe = pants, score = 2, color = "orange", expectedSkillups = 1 } }
     rows = Views.Path(shopView(altPath, { expanded = { ["craft:50"] = false, ["craft:51"] = false }, advanced = true }), {})
-    T.eq("an alternative's difference stays short", rows[3].text, "or: Pants, +2g 96s")
+    T.eq("an alternative's difference stays short", rows[3].text .. " | " .. rows[3].right, "or: Pants | +2g 96s")
     rows = Views.Path(shopView(altPath, { expanded = { ["craft:50"] = true }, advanced = true }), {})
     T.check("the per-craft figure stays short", rows[3].text:find("; 3g 70s per craft", 1, true) ~= nil, rows[3].text)
 end)
@@ -761,7 +773,27 @@ T.section("path list", function()
     T.eq("the current run is marked", t[2], "> Dark Boots | 117-125,10,10s")
     T.eq("its recipe is still to learn: a sub-line, not a row", t[3], "  Learn first: trainer, 4s")
     T.eq("a run with a close alternative", t[4], "Shoulders | 125-140,15,15s")
-    T.eq("the alternative as a sub-line with a Use button", t[5], "  or: Dark Pants, +1s 50c [Use]")
+    T.eq("the alternative as a sub-line with a Use button", t[5], "  or: Dark Pants | +1s 50c [Use]")
+    -- The difference is the row's right-hand text, left of the button: a
+    -- long recipe name is cut before the amount is.
+    T.eq("the name alone is the text", rows[5].text, "or: Dark Pants")
+    T.eq("the difference is on the right", rows[5].right, "+1s 50c")
+    T.eq("in the sub-line's grey", rows[5].rightColor[1], 0.7)
+    -- The lines under the run the player is on share its highlight, a little
+    -- dimmer; under any other run they have none.
+    local function tintedLike(sub, run)
+        return sub.bg ~= nil and sub.bg[1] == run.bg[1] and sub.bg[2] == run.bg[2] and sub.bg[3] == run.bg[3]
+            and sub.bg[4] < run.bg[4]
+    end
+    T.check("the current run's learn line is tinted like its row, dimmer", tintedLike(rows[3], rows[2]))
+    T.check("another run's sub-line is not tinted", rows[5].bg == nil)
+    local later = list({ skill = 130 }, { expanded = { [SHOULDERS_KEY] = false } })
+    local offered, at = find(later, "or: Dark Pants")
+    T.check("fixture: the alternative is offered under the run the player is now on",
+        offered ~= nil and later[at - 1].text == "> Shoulders")
+    T.check("the alternative under the current run is tinted too", offered ~= nil and tintedLike(offered, later[at - 1]))
+    T.check("and the learn line of the run that is done no longer is", find(later, "Learn first") == nil
+        or find(later, "Learn first").bg == nil)
     T.eq("a plain run", t[6], "Armor Kit | 140-150,12,9s 60c")
     T.eq("the rank step is a thin row of its own", t[7], "Train the next rank before 150")
     T.eq("the run after it", t[8], "Barbaric Gloves | 150-170,24,25s 20c")
@@ -851,16 +883,17 @@ T.section("path list", function()
     T.check("exactly a tenth dearer: shown", find(list({ pantsPrice = 110 }), "or: Dark Pants") ~= nil)
     T.check("a copper more than that: not shown", find(list({ pantsPrice = 111 }), "or:") == nil)
     rows = list({ pantsPrice = 60 })
-    T.eq("cheaper: always shown, in green", texts(rows)[5], "  or: Dark Pants, |cFF66FF66-6s|r [Use]")
+    T.eq("cheaper: always shown, in green", texts(rows)[5], "  or: Dark Pants | |cFF66FF66-6s|r [Use]")
     rows = list({ pantsPrice = 100 })
-    T.eq("the same cost", texts(rows)[5], "  or: Dark Pants, same cost [Use]")
+    T.eq("the same cost", texts(rows)[5], "  or: Dark Pants | same cost [Use]")
     -- "What the run costs the player" is its net cost: after what its crafts
     -- sell for. Shoulders: 15s of reagents, 9s back, 6s net. Dark Pants sell
     -- for the same and cost 1s 50c more: inside a tenth of the 15s, outside a
     -- tenth of the 6s.
     local sale = { mode = "vendor", values = { [32] = 60, [35] = 60 }, sources = { [32] = "vendor", [35] = "vendor" } }
     T.check("measured against the net cost, not the gross", find(list({ sale = sale, pantsPrice = 110 }), "or:") == nil)
-    T.check("inside a tenth of the net cost: shown", find(list({ sale = sale, pantsPrice = 104 }), "or: Dark Pants, +60c") ~= nil)
+    local within = find(list({ sale = sale, pantsPrice = 104 }), "or: Dark Pants")
+    T.eq("inside a tenth of the net cost: shown", within and within.right, "+60c")
     T.check("a copper over: not shown", find(list({ sale = sale, pantsPrice = 105 }), "or:") == nil)
     -- A recipe that has to be learned first: its fee is part of what the run
     -- costs. Dark Boots: 10s of reagents and 4s at the trainer; an alternative
@@ -873,7 +906,7 @@ T.section("path list", function()
         { recipe = recipe(43, "Sandals", 110, 150, 160, 170), score = 2, color = "orange", expectedSkillups = 1 },
     }
     rows = Views.Path(shopView(feeRun, { liveCap = 150, expanded = closed() }), ctx)
-    T.eq("the learn fee counts in what the run costs", texts(rows)[4], "  or: Sandals, +1s 20c [Use]")
+    T.eq("the learn fee counts in what the run costs", texts(rows)[4], "  or: Sandals | +1s 20c [Use]")
     feeRun.prices[143] = 193
     T.check("over a tenth of reagents and fee: not shown",
         find(Views.Path(shopView(feeRun, { liveCap = 150, expanded = closed() }), ctx), "or: Sandals") == nil)
@@ -919,11 +952,11 @@ T.section("path list", function()
     learnAlt.prices[137] = 1                                -- Fine Pants: 15c of reagents and 30s to learn
     learnAlt.steps[3].recipe.reagents[1].count = 3          -- Shoulders: 45s
     rows = Views.Path(shopView(learnAlt, { liveCap = 150, expanded = closed() }), ctx)
-    T.eq("an alternative to learn names the fee", texts(rows)[5], "  or: Fine Pants (learn 30s), |cFF66FF66-14s 85c|r [Use]")
+    T.eq("an alternative to learn names the fee", texts(rows)[5], "  or: Fine Pants (learn 30s) | |cFF66FF66-14s 85c|r [Use]")
     -- On the VANILLA profile the recipe data's sources are not trusted: an
     -- alternative to learn names neither a fee nor where it comes from.
     rows = Views.Path(shopView(learnAlt, { liveCap = 150, expanded = closed(), profile = "VANILLA" }), ctx)
-    T.eq("VANILLA: no fee in an alternative's name", texts(rows)[5], "  or: Fine Pants (to learn), |cFF66FF66-14s 85c|r [Use]")
+    T.eq("VANILLA: no fee in an alternative's name", texts(rows)[5], "  or: Fine Pants (to learn) | |cFF66FF66-14s 85c|r [Use]")
     local vanillaTip = {}
     for _, line in ipairs(rows[5].tooltip) do vanillaTip[#vanillaTip + 1] = line.text end
     vanillaTip = table.concat(vanillaTip, " / ")
@@ -946,7 +979,7 @@ T.section("path list", function()
     -- what its crafts sell for, and the net.
     sale = { mode = "vendor", values = { [32] = 50, [35] = 120 }, sources = { [32] = "vendor", [35] = "vendor" } }
     rows = list({ sale = sale })
-    T.eq("fixture: the alternative nets less than the run", texts(rows)[5], "  or: Dark Pants, |cFF66FF66-9s|r [Use]")
+    T.eq("fixture: the alternative nets less than the run", texts(rows)[5], "  or: Dark Pants | |cFF66FF66-9s|r [Use]")
     local tip = {}
     for _, line in ipairs(rows[5].tooltip) do tip[#tip + 1] = line.text end
     tip = table.concat(tip, " / ")
@@ -1315,8 +1348,10 @@ T.section("shopping list", function()
     T.eq("VANILLA: the tooltip names no source", rows[14].tooltip[2].text,
         "Learn the recipe. The recipe details show what is known about it.")
 
-    -- A recipe paid for with a currency costs something too: it has a row,
-    -- with the currency where the price would be; the gold total is unchanged.
+    -- A recipe paid for with a currency costs something too: it has a row.
+    -- The currency is named with where the recipe comes from, never in the
+    -- cost column (it does not fit there, and the column is gold that adds
+    -- up); the gold total is unchanged.
     local cape = recipe(44, "Cape", 130, 150, 160, 170, { unlearned = true,
         sourceInfo = { type = "vendor", cost = 0, currency = { name = "Merchant's Favor", amount = 5 } },
         reagents = { { itemId = THREAD, count = 1, name = "Thread" } } })
@@ -1329,14 +1364,19 @@ T.section("shopping list", function()
     local favorView = shopView(favor, { inventory = stock })
     rows = Views.Shopping(favorView, ctx)
     t = texts(rows)
-    T.eq("currency recipe: a row, the currency in the price's place", t[#t - 3], "Cape - vendor | ,,,5 Merchant's Favor")
+    T.eq("currency recipe: a row, the currency with the source, no cost", t[#t - 3], "Cape - vendor, 5 Merchant's Favor | ,,,")
     T.eq("gold and currency: the gold in the price's place, the currency with the source",
         t[#t - 2], "Gown - vendor, 2 Merchant's Favor | ,,,12s")
+    for _, row in ipairs(rows) do
+        if row.recipe then
+            T.check("no currency in the cost column: " .. row.text, row.cols[4] == "" or copper(row.cols[4]) ~= nil, row.cols[4])
+        end
+    end
     T.eq("the gold total counts gold only", t[#t], "Recipes | ,,,1g 1s")
     T.eq("which is still the account's recipes amount", favorView.account.recipes, 8500 + 400 + 1200)
     rows = Views.Shopping(shopView(favor, { inventory = stock, profile = "VANILLA" }), ctx)
     t = texts(rows)
-    T.eq("VANILLA: the currency row names no source", t[#t - 3], "Cape | ,,,5 Merchant's Favor")
+    T.eq("VANILLA: the currency row names no source, only what it costs", t[#t - 3], "Cape - 5 Merchant's Favor | ,,,")
 
     -- No recipe costs anything: no recipe section.
     local known = shopPath()

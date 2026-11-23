@@ -150,6 +150,50 @@ T.section("settings", function()
     T.check("the old option is gone", LazyProf.options.args.display.args.calculateFromCurrentSkill == nil)
 end)
 
+-- The options name parts of the window. None may name one that is gone: the
+-- "With margin" box (now "Spare crafts"), the Guide and Steps tabs, the path
+-- bar, the range dropdown.
+T.section("options text", function()
+    local texts = {}
+    local function collect(value)
+        if type(value) == "string" then
+            texts[#texts + 1] = value
+        elseif type(value) == "table" then
+            for _, v in pairs(value) do collect(v) end
+        end
+    end
+    local function walk(option)
+        collect(option.name)
+        collect(option.desc)
+        collect(option.values)
+        for _, child in pairs(option.args or {}) do
+            if type(child) == "table" then walk(child) end
+        end
+    end
+    walk(LazyProf.options)
+    T.check("the options were read", #texts > 40, #texts)
+    local gone = {
+        { "the With margin box", function(t) return t:lower():find("with margin", 1, true) end },
+        { "the Guide tab", function(t) return t:find("%f[%a]Guide%f[%A]") end },
+        { "the Steps tab", function(t) return t:find("%f[%a]Steps%f[%A]") end },
+        { "the path bar", function(t) return t:lower():find("path bar", 1, true) end },
+        { "the range dropdown", function(t) return t:find("%f[%a]Range%f[%A]") or t:lower():find("range filter", 1, true)
+            or t:lower():find("range dropdown", 1, true) or t:lower():find("current range", 1, true) end },
+    }
+    for _, entry in ipairs(gone) do
+        local found
+        for _, text in ipairs(texts) do
+            if entry[2](text) then found = text end
+        end
+        T.check("no options text names " .. entry[1], found == nil, found)
+    end
+    local margin = LazyProf.options.args.general.args.marginPercent.desc
+    T.check("the margin option names the box as the window does", margin:find('"Spare crafts"', 1, true) ~= nil
+        and margin:find("More options", 1, true) ~= nil, margin)
+    local open = LazyProf.options.args.display.args.openWithProfession.desc
+    T.check("the window option names today's tabs", open:find("Path and Shopping", 1, true) ~= nil, open)
+end)
+
 T.section("settings migration", function()
     local migrate = LazyProf.MigrateSettings
     -- The raw saved table holds only what differed from the old defaults (both toggles on).

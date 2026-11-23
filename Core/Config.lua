@@ -11,7 +11,7 @@ LazyProf.defaults = {
         suggestUnlearnedRecipes = true,
         includeGreenRecipes = false,
         includeCurrencyRecipes = false,
-        -- "With margin": extra crafts for bad luck, as a percentage of each step
+        -- "Spare crafts": extra crafts for bad luck, as a percentage of each step
         useMargin = false,
         marginPercent = 15,
         -- What crafted items are counted as selling for (Constants.SALE_MODE)
@@ -213,9 +213,9 @@ LazyProf.options = {
                 marginPercent = {
                     name = "Margin (percent)",
                     desc = "Skill-ups are a matter of chance, so the planned number of crafts " ..
-                           "is an average. With the \"With margin\" box of the LazyProf window " ..
-                           "ticked, every step plans this many percent more crafts and " ..
-                           "reagents, rounded up once per step.\n\n" ..
+                           "is an average. With \"Spare crafts\" ticked in the LazyProf window " ..
+                           "(under More options), every step plans this many percent more " ..
+                           "crafts and reagents, rounded up once per step.\n\n" ..
                            "The margin never changes which recipes are chosen.",
                     type = "range",
                     order = 5,
@@ -288,7 +288,7 @@ LazyProf.options = {
                 },
                 openWithProfession = {
                     name = "Open with the profession window",
-                    desc = "Show the LazyProf window (Guide, Steps and Shopping) beside the " ..
+                    desc = "Show the LazyProf window (Path and Shopping) beside the " ..
                            "profession window whenever you open a profession.\n\n" ..
                            "When off, the arrow still points at the next recipe, and the " ..
                            "window can be opened from the minimap button or /lp browse.",

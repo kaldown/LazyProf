@@ -507,7 +507,7 @@ end
 -- Calculate the path for any profession, without its window (planning).
 -- A profession the character has is planned from the real skill; one not
 -- learned yet from 1. opts.planFromOne plans a learned profession from 1 as a
--- what-if (the path bar then shows what is already done).
+-- what-if (the window then lists the runs already done too, dimmed).
 -- opts: { planFromOne = bool, reason = string }
 function Pathfinder:CalculateForProfession(profKey, opts)
     opts = opts or {}

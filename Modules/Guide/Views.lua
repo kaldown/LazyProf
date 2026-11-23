@@ -54,6 +54,7 @@ local BG_ROW = { 0.15, 0.15, 0.15, 0.3 }
 local BG_ROW_HOVER = { 0.25, 0.25, 0.25, 0.6 }
 local BG_CURRENT = { 0.35, 0.28, 0.05, 0.55 }
 local BG_CURRENT_HOVER = { 0.45, 0.36, 0.1, 0.7 }
+local BG_CURRENT_SUB = { 0.35, 0.28, 0.05, 0.35 }   -- the lines under the current run: the same tint, dimmer
 local BG_GAP = { 0.35, 0.1, 0.1, 0.35 }
 local BG_GAP_HOVER = { 0.45, 0.15, 0.15, 0.6 }
 local BG_SUB = { 0.12, 0.12, 0.12, 0.5 }
@@ -150,6 +151,8 @@ local function SoldAs(view, mode)
     return mode
 end
 
+local GAPS_NOTE = "excluding gaps"
+
 -- What the path costs, as the lines of a receipt. Built from the account of
 -- the whole path (view.account: the shopping list of the stages' quantities,
 -- less what the crafts sell for), so "You spend" is the Shopping tab added up.
@@ -161,8 +164,13 @@ end
 --                note-only line
 --   amountColor  { r, g, b } of the amount (green: money that comes back)
 --   color        { r, g, b } of the note
+--   gaps         on the spend line: true when the path has gaps, which the
+--                amounts leave out (the note says so; for a caller that
+--                shows no notes)
 -- Lines, in order:
---   spend    reagents still to buy plus recipes to buy or learn
+--   spend    reagents still to buy plus recipes to buy or learn; its note
+--            gives the two parts when a recipe costs something, and ends
+--            with "excluding gaps" on a path that has gaps
 --   back     what the crafts sell for (not when sale values are not counted,
 --            or nothing sells and nothing is still loading); its note says
 --            how the runs that sell were counted
@@ -186,13 +194,16 @@ function Views.Receipt(view)
         lines[#lines + 1] = line
     end
 
+    -- The label stays "You spend" (a longer one takes the note column's
+    -- room): that a path with gaps leaves them out is said in the note.
     local spent = Round(account.spend)
     local spend = { key = "spend", label = "You spend", amount = Money(spent), amountColor = WHITE }
-    if path.complete == false then
-        spend.label = spend.label .. " (excluding gaps)"
-    end
     if (account.recipes or 0) > 0 then
         spend.note = "reagents " .. Money(account.reagents) .. " + recipes " .. Money(account.recipes)
+    end
+    if path.complete == false then
+        spend.gaps = true
+        spend.note = spend.note and (spend.note .. " (" .. GAPS_NOTE .. ")") or GAPS_NOTE
     end
     add(spend)
 
@@ -784,6 +795,8 @@ local function AddRun(rows, stage, learn, isCurrent, view, ctx)
     if open == nil then open = isCurrent end
     open = open and true or false
     local function toggle() ctx.onToggleExpand(stage, not open) end
+    -- The sub-lines of the run the player is on share its highlight.
+    local subBg = isCurrent and BG_CURRENT_SUB or nil
     rows[#rows + 1] = {
         kind = "cols", layout = "path", stage = stage, open = open,
         text = (isCurrent and "> " or "") .. (recipe.name or "Unknown"),
@@ -800,7 +813,8 @@ local function AddRun(rows, stage, learn, isCurrent, view, ctx)
             learnTip[#learnTip + 1] = { text = line.text, r = 0.7, g = 0.7, b = 0.7 }
         end
         rows[#rows + 1] = { kind = "line", sub = true, stage = learn, text = Text.LearnFirst(learn, view.profile),
-                            color = LEARN_COLOR, alpha = learn.done and 0.5 or 1, tooltip = learnTip, onClick = toggle }
+                            color = LEARN_COLOR, alpha = learn.done and 0.5 or 1, tooltip = learnTip, onClick = toggle,
+                            bg = subBg }
     end
 
     if open then
@@ -809,9 +823,12 @@ local function AddRun(rows, stage, learn, isCurrent, view, ctx)
     end
     local alt = CloseAlternative(stage)
     if alt then
+        -- (The difference is the row's right-hand text, so a long recipe
+        -- name is cut short before the amount is.)
         rows[#rows + 1] = {
             kind = "line", sub = true, stage = stage, alt = alt, color = GREY,
-            text = "or: " .. AlternativeName(alt, view.profile) .. ", " .. CostDifference(alt.costDelta, "same cost"),
+            text = "or: " .. AlternativeName(alt, view.profile),
+            right = CostDifference(alt.costDelta, "same cost"), rightColor = GREY, bg = subBg,
             tooltip = AlternativeTooltip(alt, stage, view.profile),
             onClick = function() ctx.onShowRecipe(alt.recipe, stage.fromDisplay) end,
             button = { text = "Use", width = 40, tooltip = UseTooltip(alt), onClick = function() ctx.onUseAlternative(stage, alt) end },
@@ -851,10 +868,12 @@ end
 --                     buy / cost without the mark column
 --   sub = true        on "line" rows: a sub-line of the row above it (smaller,
 --                     indented, grey unless `color` is given): "Learn first:
---                     trainer, 4s" and "or: <recipe>, +14s" with a Use button
+--                     trainer, 4s", and "or: <recipe>" with the difference
+--                     in cost on the right ("+14s") and a Use button
 -- Rows also carry `stage` (and `alt` on alternatives) for the caller, and a
 -- run's row `open` (true | false): whether it is shown opened.
--- The row the player is on is marked with "> " and highlighted.
+-- The row the player is on is marked with "> " and highlighted, and so are
+-- the sub-lines under it (a little dimmer).
 -- State is kept under Views.RowKey(stage), which does not change when the
 -- path is planned again from another skill:
 --   view.expanded[key]      true = open, false = closed, nil = open only for
@@ -1036,8 +1055,9 @@ end
 --     from beneath it; then the reagents already owned, dimmed, by name
 --   "Reagents to buy": the sum of the Cost column (missing.buyTotal)
 --   "Recipes to learn": a row per recipe that costs something, with where it
---     comes from (never on the VANILLA profile) and its price - for a recipe
---     paid for with a currency, the currency - and the sum of the gold
+--     comes from (never on the VANILLA profile) and its price in gold, and
+--     the sum of the gold; a currency price is named beside the source and
+--     the cost cell of a recipe paid for with a currency alone is empty
 -- The two sums are the two parts of the receipt's "You spend".
 -- With More options (view.advanced) a reagent the character can make has its
 -- craft / buy button, and view.hideOwned hides the owned rows; without it
@@ -1148,19 +1168,12 @@ function Views.Shopping(view, ctx)
         rows[#rows + 1] = { kind = "line", font = "GameFontNormalSmall", color = GOLD, text = "Recipes to learn" }
         for _, entry in ipairs(recipeRows) do
             local learn = { recipe = entry.recipe, sourceInfo = entry.sourceInfo }
-            -- A recipe paid for with a currency only has that in the price's
-            -- place (and not a second time beside its source).
-            local price, where = Money(entry.cost), nil
-            local currency = Utils.FormatCurrency(entry.currency)
-            if currency and (entry.cost or 0) <= 0 then
-                price = currency
-                local info = {}
-                for k, v in pairs(entry.sourceInfo or {}) do info[k] = v end
-                info.currency = nil
-                where = Text.LearnShort({ recipe = entry.recipe, sourceInfo = info }, view.profile)
-            else
-                where = Text.LearnShort(learn, view.profile)
-            end
+            -- The cost column is gold only: a currency amount does not fit
+            -- there and is no part of the total under it. It is named with
+            -- where the recipe comes from ("vendor, 12 Merchant's Favor"),
+            -- or alone where the source may not be named.
+            local price = (entry.cost or 0) > 0 and Money(entry.cost) or ""
+            local where = Text.LearnShort(learn, view.profile) or Utils.FormatCurrency(entry.currency)
             local tooltip = { { text = "Learn " .. tostring(entry.name), r = 1, g = 1, b = 1 } }
             for _, line in ipairs(Text.LearnLines(learn, view.profile, path and path.profession)) do
                 tooltip[#tooltip + 1] = { text = line.text, r = 0.7, g = 0.7, b = 0.7 }
@@ -1266,7 +1279,9 @@ function Views.ArrowTooltip(view)
             end
             if amounts then
                 local c = line.amountColor or WHITE
-                addDouble(line.label .. ": ", line.amount, 1, 1, 1, c[1], c[2], c[3])
+                -- (No notes here, so the label says that gaps are left out.)
+                local label = line.label .. (line.gaps and (" (" .. GAPS_NOTE .. ")") or "")
+                addDouble(label .. ": ", line.amount, 1, 1, 1, c[1], c[2], c[3])
             else
                 add(line.note, 0.7, 0.7, 0.7)
             end

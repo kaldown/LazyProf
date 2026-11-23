@@ -133,7 +133,7 @@ function ForeverDropdown:SetOptions(getOptions, onSelect)
 end
 
 function ForeverDropdown:SetText(text)
-    -- The text is always ours (e.g. "Current (1-75)"), never a radio's label.
+    -- The text is always ours (the caller's own wording), never a radio's label.
     self.button:OverrideText(text)
 end
 

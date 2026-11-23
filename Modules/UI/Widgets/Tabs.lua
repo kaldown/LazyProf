@@ -2,7 +2,7 @@
 -- Bottom tabs for a window, one implementation per client family, chosen once
 -- at load (like the dropdown widget).
 --
---   local tabs = LazyProf.Widgets.CreateTabs(frame, { "Guide", "Steps" }, onSelect)
+--   local tabs = LazyProf.Widgets.CreateTabs(frame, { "Path", "Shopping" }, onSelect)
 --   tabs:Select(index)       show a tab as selected (does not call onSelect)
 --   tabs:GetSelected()
 --   tabs.buttons[index]
