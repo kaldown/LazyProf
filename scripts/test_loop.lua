@@ -2,12 +2,15 @@
 --
 -- The whole loop the addon is for, on real recipe data: plan with some stock
 -- owned, buy the plan's shopping list, then craft point by point while the
--- planner is asked again at every skill (as it is in game) with what is left
--- in the bags. With average luck a player who follows what the planner shows
--- must not have to buy more than one who simply follows the plan that was
--- shopped for - and far less than without the remembered route, where the
+-- path is calculated again at every skill (as it is in game) from what is
+-- left in the bags. With average luck a player who follows what the planner
+-- shows must not have to buy more than one who simply follows the plan that
+-- was shopped for - and far less than without the remembered route, where the
 -- planner wanders between routes that are all nearly free once the reagents
 -- are in the bags.
+--
+-- The calculations go through Pathfinder:BuildPath, so the remembered route
+-- is kept, carried on and replaced exactly as in the addon.
 --
 -- Run from the addon root:  lua5.1 scripts/test_loop.lua
 
@@ -36,7 +39,8 @@ local FILES = {
 local CASES = {
     { name = "tbc_leatherworking_300_375", interface = 20505, prof = "leatherworking", from = 300, to = 375,
       withoutMemory = true },
-    { name = "forever_leatherworking_117_300", interface = 16001, camelot = true, prof = "leatherworking", from = 117, to = 300 },
+    { name = "forever_leatherworking_117_200", interface = 16001, camelot = true, prof = "leatherworking", from = 117, to = 200 },
+    { name = "vanilla_engineering_100_200", interface = 11508, prof = "engineering", from = 100, to = 200 },
 }
 
 local function bagsOf(inventory)
@@ -52,7 +56,6 @@ for _, case in ipairs(CASES) do
         LazyProf.Client = LazyProf.Client or {}
         LazyProf.Client.PlayerSkill = function() return 0 end
         LazyProf.Client.GetItemInfo = function() return nil end
-        LazyProf.PriceManager = { PeekPriceInfo = function() return { price = 1, source = "TSM" } end }
         local PF, Utils = LazyProf.Pathfinder, LazyProf.Utils
         local prof = CraftLib:GetProfession(case.prof)
         local byId = {}
@@ -65,6 +68,18 @@ for _, case in ipairs(CASES) do
             return recipes
         end
         local prices = harness.priceTable(known())
+        LazyProf.PriceManager = {
+            PeekPriceInfo = function() return { price = 1, source = "TSM" } end,
+            GetPrices = function(_, ids)
+                local out = {}
+                for _, id in ipairs(ids) do out[id] = prices[id] end
+                return out
+            end,
+        }
+        LazyProf.db.profile.strategy = "cheapest"
+        LazyProf.db.profile.saleValueMode = "none"
+        local milestones = { case.to }
+        local store = LazyProf.CharStore:Profession(case.prof)
 
         -- Twenty of every fourth reagent are owned before any planning.
         local ids = {}
@@ -75,18 +90,13 @@ for _, case in ipairs(CASES) do
             if i % 4 == 0 then inventory[itemId] = 20 end
         end
 
-        local function plan(from, stock, previous)
-            LazyProf.db.profile.strategy = "cheapest"
-            LazyProf.RecipeAvailability:BeginRecalc()
-            LazyProf.SelfFound:BeginRecalc({})
-            local steps, _, route = PF:PlanRoutes({
-                strategy = LazyProf.PathfinderStrategies.cheapest, strategyName = "cheapest",
-                startSkill = from, targetSkill = case.to, recipes = known(), prices = prices, racialBonus = 0, pins = {},
-                inventory = stock, sourceBreakdown = bagsOf(stock), previous = previous,
+        -- One calculation of the addon at `skill` with `stock` in the bags.
+        local function calculate(skill, stock)
+            LazyProf.Inventory.ScanAll = function() return stock, bagsOf(stock) end
+            return PF:BuildPath({
+                profKey = case.prof, profData = { name = case.prof, milestones = milestones },
+                recipes = known(), startSkill = skill, actualSkill = skill, hasProfession = true,
             })
-            LazyProf.SelfFound:EndRecalc()
-            LazyProf.RecipeAvailability:EndRecalc()
-            return steps, route
         end
         local function keptOf(route)
             for _, candidate in ipairs(route.candidates) do
@@ -95,26 +105,43 @@ for _, case in ipairs(CASES) do
         end
 
         -- The first plan, and its whole list bought.
-        local first, firstRoute = plan(case.from, inventory, nil)
-        local ranges = PF:RouteRanges(first)
-        local list = keptOf(firstRoute).spend
+        store.route = nil
+        local first = calculate(case.from, inventory)
+        local ranges = PF:RouteRanges(first.steps, case.from)
+        local list = keptOf(first.route).spend
         local held = {}
         for itemId, count in pairs(inventory) do held[itemId] = count end
-        for _, row in ipairs(PF:Account(first, inventory, bagsOf(inventory), prices, {}).missing.rows) do
+        for _, row in ipairs(PF:Account(first.steps, inventory, bagsOf(inventory), prices, {}).missing.rows) do
             if row.toBuy > 0 then held[row.itemId] = (held[row.itemId] or 0) + row.toBuy end
         end
-        T.check("fixture: the first plan uses the owned stock", firstRoute.kept == "stock", firstRoute.kept)
+        T.check("fixture: the first plan uses the owned stock", first.route.kept == "stock", first.route.kept)
         T.check("fixture: there is a list to buy", list > 0)
+
+        -- Holding the list, the same calculation again (the window reopened,
+        -- item data arrived): the same plan, nothing to buy, however often.
+        local function shape(steps)
+            local out = {}
+            for _, step in ipairs(steps) do
+                out[#out + 1] = string.format("%.4f-%.4f %s x%d", step.skillStart, step.skillEnd, tostring(step.recipe.id), step.quantity)
+            end
+            return table.concat(out, "\n")
+        end
+        local planned = shape(first.steps)
+        for round = 1, 3 do
+            local again = calculate(case.from, held)
+            T.check("after shopping, calculation " .. round .. ": the same steps", shape(again.steps) == planned)
+            T.eq("after shopping, calculation " .. round .. ": nothing to buy", keptOf(again.route).spend, 0)
+        end
 
         -- Craft from `from` to the target one skill point at a time with
         -- average luck (1 / chance crafts per point, fractions carried), buying
         -- whatever a craft lacks. mode: "plan" follows the route that was
-        -- shopped for; "memory" follows the planner with the remembered route
-        -- handed on as the addon does; "scratch" follows the planner without it.
+        -- shopped for; "memory" follows the addon's calculations as they are;
+        -- "scratch" follows them with the remembered route wiped before each.
         local function simulate(mode)
             local have = {}
             for itemId, count in pairs(held) do have[itemId] = count end
-            local memory = ranges
+            store.route = ranges
             local bought, carried, switches = 0, 0, 0
             for skill = case.from, case.to - 1 do
                 local recipe
@@ -123,16 +150,11 @@ for _, case in ipairs(CASES) do
                         if skill >= math.floor(range.from) and skill < range.to then recipe = byId[range.recipeId] end
                     end
                 else
-                    local steps, route = plan(skill, have, mode == "memory" and memory or nil)
-                    if mode == "memory" then
-                        if route.kept == "previous" then
-                            memory = PF:ExtendRanges(memory, steps, skill)
-                        else
-                            memory = (#steps > 0) and PF:RouteRanges(steps) or nil
-                            switches = switches + 1
-                        end
-                    end
-                    if steps[1] and steps[1].skillStart <= skill then recipe = byId[steps[1].recipe.id] end
+                    if mode == "scratch" then store.route = nil end
+                    local path = calculate(skill, have)
+                    if mode == "memory" and path.route.kept ~= "previous" then switches = switches + 1 end
+                    local step = path.steps[1]
+                    if step and step.skillStart <= skill then recipe = byId[step.recipe.id] end
                 end
                 if recipe then
                     local chance = Utils.GetSkillUpChance(skill, recipe.skillRange)
@@ -170,6 +192,7 @@ for _, case in ipairs(CASES) do
             T.check("fixture: without the remembered route more is bought later", fromScratch > byMemory + 0.01 * list,
                 string.format("%d vs %d", fromScratch, byMemory))
         end
+        store.route = nil
     end)
 end
 

@@ -457,7 +457,7 @@ section("diagnostic", function()
     -- Which candidate route was kept, each candidate's amounts, the time it
     -- took, and how the sale values stand.
     local routed = pathWith(2589, 2592)
-    routed.route = { kept = "stock", ms = 12.4, candidates = {
+    routed.route = { kept = "stock", ms = 12.4, keepMargin = 6500, candidates = {
         { key = "market", net = 123456, spend = 130000, sale = 6544, gapLength = 0, eligible = true },
         { key = "sale", net = 150000, spend = 160000, sale = 10000, gapLength = 6, eligible = false },
         { key = "stock", net = -250, spend = 9750, sale = 10000, gapLength = 0, eligible = true },
@@ -472,6 +472,7 @@ section("diagnostic", function()
     check(p .. "route: no Lua error", ok, err)
     check(p .. "route: which candidate was kept and how long planning took",
         text:find("route: kept=stock candidates=3 planned in 12 ms", 1, true) ~= nil, text)
+    check(p .. "route: the margin the plan in hand is given", text:find("keep margin=65s", 1, true) ~= nil, text)
     check(p .. "route: a candidate's amounts",
         text:find("candidate market: net=12g 34s 56c spend=13g sale=65s 44c", 1, true) ~= nil, text)
     check(p .. "route: a candidate that covers less says so",

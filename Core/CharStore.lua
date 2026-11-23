@@ -10,7 +10,8 @@
 --
 --   CharStore:Get()               this character's table
 --   CharStore:Profession(key)     { target = number|nil, pins = { {from, to, recipeId}, ... },
---                                   route = the route kept last, same shape as pins, or nil }
+--                                   route = the route kept last (ranges like pins, plus `at`,
+--                                   the skill it was planned from), or nil }
 --
 -- Before the GUID or the database exists (very early in loading) both return
 -- a working table that is simply not saved.

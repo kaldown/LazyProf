@@ -433,7 +433,8 @@ function PriceManager:RunDiagnostic(lines)
             return Utils.FormatMoney(math.floor((copper or 0) + 0.5))
         end
         add("route: kept=" .. tostring(route.kept) .. " candidates=" .. tostring(#route.candidates)
-            .. (route.ms and string.format(" planned in %.0f ms", route.ms) or ""))
+            .. (route.ms and string.format(" planned in %.0f ms", route.ms) or "")
+            .. (route.keepMargin and (" keep margin=" .. money(route.keepMargin)) or ""))
         local first = route.candidates[1]
         for _, candidate in ipairs(route.candidates) do
             local net = candidate.net < 0 and ("gain " .. money(-candidate.net)) or money(candidate.net)

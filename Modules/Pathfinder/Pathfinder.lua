@@ -161,7 +161,7 @@ function Pathfinder:BuildPath(run)
             -- in), and what was planned beyond them is added.
             store.route = self:ExtendRanges(store.route, steps, startSkill)
         else
-            store.route = self:RouteRanges(steps)
+            store.route = self:RouteRanges(steps, startSkill)
         end
     end
 
@@ -250,10 +250,13 @@ end
 
 -- A route as it is remembered between calculations: one { from, to, recipeId }
 -- per run of a recipe (consecutive steps of one recipe joined), in skill
--- order, and `at`, the skill it was planned from.
-function Pathfinder:RouteRanges(steps)
+-- order, and `at`, the skill it was planned from (startSkill; the first
+-- step's start when not given).
+function Pathfinder:RouteRanges(steps, startSkill)
     local ranges = {}
-    if steps and steps[1] then
+    if type(startSkill) == "number" then
+        ranges.at = startSkill
+    elseif steps and steps[1] then
         ranges.at = steps[1].skillStart
     end
     local last
@@ -272,24 +275,42 @@ function Pathfinder:RouteRanges(steps)
 end
 
 -- A remembered route carried on: its ranges that reach past `startSkill`,
--- unchanged, plus what `steps` plan beyond its end (a raised target).
+-- unchanged, plus every part of what `steps` plan that no remembered range
+-- covers (beyond its end after a raised target; a hole left by a pin that was
+-- reset). It keeps the skill it was planned from.
 function Pathfinder:ExtendRanges(remembered, steps, startSkill)
-    local ranges = {}
-    local last = -math.huge
+    local kept = {}
     for _, range in ipairs(remembered or {}) do
         if type(range) == "table" and type(range.to) == "number" and type(range.from) == "number"
-                and range.to > startSkill then
-            ranges[#ranges + 1] = range
-            if range.to > last then last = range.to end
+                and range.recipeId ~= nil and range.to > range.from and range.to > startSkill then
+            kept[#kept + 1] = range
         end
     end
-    if #ranges == 0 then
-        return self:RouteRanges(steps)
+    if #kept == 0 then
+        return self:RouteRanges(steps, startSkill)
     end
-    for _, range in ipairs(self:RouteRanges(steps)) do
-        if range.to > last then
-            ranges[#ranges + 1] = { from = math.max(range.from, last), to = range.to, recipeId = range.recipeId }
+    table.sort(kept, function(a, b) return a.from < b.from end)
+
+    local ranges = {}
+    for _, range in ipairs(kept) do ranges[#ranges + 1] = range end
+    for _, planned in ipairs(self:RouteRanges(steps)) do
+        -- Walk the remembered ranges and keep the pieces of `planned` between them.
+        local from = planned.from
+        for _, range in ipairs(kept) do
+            if range.to > from and range.from < planned.to then
+                if range.from > from then
+                    ranges[#ranges + 1] = { from = from, to = range.from, recipeId = planned.recipeId }
+                end
+                from = math.max(from, range.to)
+            end
         end
+        if from < planned.to then
+            ranges[#ranges + 1] = { from = from, to = planned.to, recipeId = planned.recipeId }
+        end
+    end
+    table.sort(ranges, function(a, b) return a.from < b.from end)
+    if type(remembered.at) == "number" then
+        ranges.at = remembered.at
     end
     return ranges
 end
@@ -330,6 +351,9 @@ local function ClipRanges(ranges, from, to)
         end
     end
     if #kept == 0 then return nil end
+    if type(ranges) == "table" and type(ranges.at) == "number" then
+        kept.at = ranges.at
+    end
     return kept
 end
 

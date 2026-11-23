@@ -875,6 +875,163 @@ T.section("candidates: the plan that was shopped for stays", function()
     T.eq("the well-formed part of it is still used", mixedRoute.kept, "previous")
 end)
 
+T.section("the planner always finishes", function()
+    local LazyProf = load()
+    local cheapest = LazyProf.PathfinderStrategies.cheapest
+    local X, Y = 70, 71
+    local prices = { [X] = 100, [Y] = 300 }
+    -- A step limit turns an endless loop into a failed check instead of a hung suite.
+    local function bounded(from, to, recipes, inventory, pins, ctx)
+        local steps = 0
+        local original = cheapest.CalculateTotalCostAndSkillups
+        cheapest.CalculateTotalCostAndSkillups = function(...)
+            steps = steps + 1
+            if steps > 5000 then error("the planner does not finish") end
+            return original(...)
+        end
+        LazyProf.db.profile.strategy = "cheapest"
+        LazyProf.RecipeAvailability:BeginRecalc()
+        LazyProf.SelfFound:BeginRecalc({})
+        local ok, result, meta = pcall(cheapest.Calculate, cheapest, from, to, recipes, inventory or {}, prices, 0, pins or {}, ctx)
+        LazyProf.SelfFound:EndRecalc()
+        LazyProf.RecipeAvailability:EndRecalc()
+        cheapest.CalculateTotalCostAndSkillups = original
+        return ok, result, meta
+    end
+
+    -- A remembered range that ends where its recipe goes grey, with green
+    -- recipes allowed: close to grey a craft gains next to nothing.
+    LazyProf.db.profile.includeGreenRecipes = true
+    local function fading()
+        return {
+            recipe(1, "Fading", { orange = 60, required = 60, yellow = 80, green = 100, gray = 125,
+                reagents = { { itemId = X, count = 1, name = "X" } } }),
+            recipe(2, "Other", { orange = 60, required = 60, yellow = 150, green = 160, gray = 170,
+                reagents = { { itemId = Y, count = 1, name = "Y" } } }),
+        }
+    end
+    for label, memory in pairs({
+        ["exact bounds"] = { at = 100, { from = 100, to = 125.00000000000001, recipeId = 1 }, { from = 125.00000000000001, to = 140, recipeId = 2 } },
+        ["whole bounds"] = { at = 90, { from = 100, to = 125.00000000000001, recipeId = 1 }, { from = 125.00000000000001, to = 140, recipeId = 2 } },
+        ["no end in sight"] = { at = 100, { from = 100, to = 200, recipeId = 1 } },
+    }) do
+        local ok, steps = bounded(100, 140, fading(), { [X] = 5 }, nil, { replay = memory })
+        T.check("a remembered range ending at the grey point (" .. label .. "): finishes", ok, steps)
+        if ok then
+            T.check("and reaches the target (" .. label .. ")", steps[#steps].skillEnd == 140, steps[#steps].skillEnd)
+        end
+    end
+    -- The same for a pin of the player.
+    local pins = {}
+    LazyProf.Pins.Add(pins, 100, 125, 1)
+    local ok, steps = bounded(100, 140, fading(), {}, pins)
+    T.check("a pin ending at the grey point: finishes", ok, steps)
+    pins = {}
+    LazyProf.Pins.Add(pins, 100, 140, 1)
+    ok, steps = bounded(100, 140, fading(), {}, pins)
+    T.check("a pin reaching past the grey point: finishes", ok, steps)
+    LazyProf.db.profile.includeGreenRecipes = false
+
+    -- A pinned recipe that can never give a point (yellow and grey at the
+    -- same skill): the range is a gap, not an endless run.
+    local function dead()
+        return {
+            recipe(1, "Dead", { orange = 100, yellow = 105, green = 105, gray = 105, reagents = { { itemId = X, count = 1, name = "X" } } }),
+            recipe(2, "Fine", { orange = 100, yellow = 150, green = 160, gray = 170, reagents = { { itemId = Y, count = 1, name = "Y" } } }),
+        }
+    end
+    pins = {}
+    LazyProf.Pins.Add(pins, 100, 110, 1)
+    local meta
+    ok, steps, meta = bounded(100, 120, dead(), {}, pins)
+    T.check("a pinned recipe that gives no points: finishes", ok, steps)
+    if ok then
+        T.check("no step is made of crafts that gain nothing", (function()
+            for _, step in ipairs(steps) do
+                if step.skillEnd <= step.skillStart then return false end
+            end
+            return true
+        end)())
+        T.check("the path still reaches the target or says where it could not", steps[#steps].skillEnd == 120 or #meta.gaps > 0)
+    end
+end)
+
+T.section("carrying on through a green bridge", function()
+    local LazyProf = load()
+    local X, Y = 70, 71
+    LazyProf.db.profile.includeGreenRecipes = false
+    -- Both recipes are green from 100 and grey at 120; at 114 only a bridge can use them.
+    local function greens()
+        return {
+            recipe(1, "G1", { orange = 60, required = 60, yellow = 80, green = 100, gray = 120, reagents = { { itemId = X, count = 1, name = "X" } } }),
+            recipe(2, "G2", { orange = 60, required = 60, yellow = 80, green = 100, gray = 120, reagents = { { itemId = Y, count = 1, name = "Y" } } }),
+        }
+    end
+    local prices = { [X] = 100, [Y] = 300 }
+    local free = run(LazyProf, "cheapest", 114, 125, greens(), {}, prices)
+    T.check("fixture: left alone, the cheap recipe bridges", free[1].bridge == true and free[1].recipe.id == 1)
+
+    -- The remembered route used the dear one: the bridge carries on with it.
+    local memory = { at = 114, { from = 114, to = 125, recipeId = 2 } }
+    local steps = run(LazyProf, "cheapest", 114, 125, greens(), {}, prices, { replay = memory })
+    T.check("the remembered recipe is used for the bridge", steps[1].bridge == true and steps[1].recipe.id == 2,
+        tostring(steps[1].recipe.id))
+    T.eq("for as many crafts as a bridge gets", steps[1].quantity, free[1].quantity)
+
+    -- Past the point where its chance is under the bridge's floor it is not
+    -- carried on with: a memory does not force crafts the planner would not make.
+    local meta
+    steps, meta = run(LazyProf, "cheapest", 117, 125, greens(), {}, prices, { replay = memory })
+    T.eq("under the chance floor: no step", #steps, 0)
+    T.check("but a gap, as without the memory", #meta.gaps == 1 and meta.gaps[1].from == 117)
+end)
+
+T.section("ranges are held exactly: no cracks, no overruns", function()
+    local LazyProf = loadRoutes()
+    local X, Y = 70, 71
+    local function fixture()
+        return {
+            recipe(1, "A", { yellow = 130, green = 140, gray = 150, reagents = { { itemId = X, count = 1, name = "X" } } }),
+            recipe(2, "B", { yellow = 130, green = 140, gray = 150, reagents = { { itemId = Y, count = 1, name = "Y" } } }),
+        }
+    end
+    local prices = { [X] = 100, [Y] = 300 }
+    local stock, where = { [Y] = 50, [X] = 50 }, { [Y] = { bags = 50 }, [X] = { bags = 50 } }
+    local function craftsOf(list, recipeId, below)
+        local crafts = 0
+        for _, step in ipairs(list) do
+            if step.recipe.id == recipeId and (not below or step.skillStart < below) then crafts = crafts + step.quantity end
+        end
+        return crafts
+    end
+
+    -- Carried on from the skill it was planned at: a range end a hair above
+    -- where the run lands costs no extra craft, and the next range starts there.
+    local hair = { at = 100, { from = 100, to = 103.0000001, recipeId = 2 }, { from = 103.0000001, to = 120, recipeId = 1 } }
+    local steps = plan(LazyProf, "cheapest", 100, 120, fixture(), prices, nil, stock, where, nil, nil, hair)
+    T.eq("a range end a hair above the landing skill: three crafts, not four", craftsOf(steps, 2), 3)
+    T.eq("and the next range's recipe takes over at once", craftsOf(steps, 1), 17)
+
+    -- Carried on from a later skill: the bounds are whole skills, at the
+    -- start of a range and at its end (103.6 reads as 103).
+    local fractional = { at = 100, { from = 100, to = 103.6, recipeId = 2 }, { from = 103.6, to = 120, recipeId = 1 } }
+    steps = plan(LazyProf, "cheapest", 101, 120, fixture(), prices, nil, stock, where, nil, nil, fractional)
+    T.eq("from a later skill the run ends at the whole skill: two crafts to 103", craftsOf(steps, 2), 2)
+    T.eq("then the next recipe for the rest", craftsOf(steps, 1), 17)
+
+    -- A run the planner chooses freely stops where a pin or a remembered
+    -- range begins, instead of carrying on into it.
+    local later = { at = 100, { from = 103, to = 120, recipeId = 2 } }
+    steps = plan(LazyProf, "cheapest", 100, 120, fixture(), prices, nil, stock, where, nil, nil, later)
+    T.eq("a free run stops where the remembered range begins: three crafts of the free choice", craftsOf(steps, 1), 3)
+    T.eq("and the remembered recipe has its whole range", craftsOf(steps, 2), 17)
+    local pins = {}
+    LazyProf.Pins.Add(pins, 103, 106, 2)
+    steps = plan(LazyProf, "cheapest", 100, 120, fixture(), prices, nil, {}, {}, nil, pins)
+    T.eq("a free run stops where a pin begins", craftsOf(steps, 1, 104), 3)
+    T.eq("the pinned recipe has exactly its range", craftsOf(steps, 2), 3)
+end)
+
 T.section("candidates: the plan in hand is planned like the stock route beyond what it remembers", function()
     local LazyProf = loadRoutes()
     local X, Y = 70, 71
@@ -914,6 +1071,48 @@ T.section("candidates: the plan in hand is planned like the stock route beyond w
     _, _, route = plan(LazyProf, "cheapest", 100, 110, fixture(), prices, nil, { [Y] = 1 }, { [Y] = { bags = 1 } }, fake, nil, memory)
     T.check("a plan in hand that covers less is not eligible", candidate(route, "previous").eligible == false)
     T.check("and is not kept, however cheap", route.kept ~= "previous")
+end)
+
+T.section("the remembered route: what is kept of it and what is added", function()
+    local LazyProf = loadRoutes()
+    local PF = LazyProf.Pathfinder
+    local a = recipe(1, "A", {})
+    local b = recipe(2, "B", {})
+    local function step(r, from, to) return { recipe = r, quantity = 1, skillStart = from, skillEnd = to } end
+
+    -- The skill a route was planned from is the start skill, also when the
+    -- path begins with a gap.
+    local ranges = PF:RouteRanges({ step(a, 105, 110) }, 100)
+    T.eq("planned-at is the start skill, not the first step's", ranges.at, 100)
+    T.eq("without a start skill it is the first step's", PF:RouteRanges({ step(a, 105, 110) }).at, 105)
+
+    -- Carrying on keeps the remembered ranges and where they were planned from.
+    local remembered = { at = 100, { from = 100, to = 110, recipeId = 1 }, { from = 110, to = 120, recipeId = 2 } }
+    local extended = PF:ExtendRanges(remembered, { step(a, 104, 110), step(b, 110, 120), step(a, 120, 130) }, 104)
+    T.eq("planned-at survives", extended.at, 100)
+    T.eq("what lies beyond the remembered end is added", #extended, 3)
+    T.check("the remembered ranges are unchanged", extended[1].from == 100 and extended[1].to == 110 and extended[2].to == 120)
+    T.check("the addition starts where the memory ended", extended[3].from == 120 and extended[3].to == 130 and extended[3].recipeId == 1)
+
+    -- A hole in the middle (a pin was reset there) is filled from what was planned.
+    local holed = { at = 100, { from = 100, to = 105, recipeId = 1 }, { from = 115, to = 120, recipeId = 2 } }
+    local filled = PF:ExtendRanges(holed, { step(a, 100, 105), step(b, 105, 112), step(a, 112, 116), step(b, 116, 120) }, 100)
+    local text = {}
+    for _, range in ipairs(filled) do text[#text + 1] = string.format("%g-%g:%s", range.from, range.to, tostring(range.recipeId)) end
+    T.eq("a hole is filled, remembered ranges win where they exist", table.concat(text, " "),
+        "100-105:1 105-112:2 112-115:1 115-120:2")
+    T.eq("planned-at survives the filling", filled.at, 100)
+
+    -- Ranges the skill has passed are dropped.
+    local pruned = PF:ExtendRanges(remembered, { step(b, 112, 120) }, 112)
+    T.check("ranges below the current skill are dropped", #pruned == 1 and pruned[1].from == 110)
+
+    -- Clipping for a pin keeps planned-at too.
+    LazyProf.CharStore:Profession("alchemy").route = { at = 100, { from = 100, to = 120, recipeId = 1 } }
+    PF:ForgetRoute("alchemy", 105, 110)
+    local clipped = LazyProf.CharStore:Profession("alchemy").route
+    T.check("clipped around the pin", #clipped == 2 and clipped[1].to == 105 and clipped[2].from == 110)
+    T.eq("planned-at survives the clipping", clipped.at, 100)
 end)
 
 T.section("candidates: the remembered plan never forces a recipe the planner would refuse", function()
@@ -974,6 +1173,15 @@ T.section("candidates: the plan in hand is kept unless another route is clearly 
             return { { recipe = a, quantity = cost / 100, skillStart = 100, skillEnd = 110, totalCost = cost } },
                 { complete = true, gaps = {} }
         end }
+    end
+    -- The margin's yardstick is the market route with NOTHING owned: here the
+    -- market route takes ten X, four of which are owned.
+    do
+        local _, _, owned = plan(LazyProf, "cheapest", 100, 110, fixture(), { [X] = 100, [Y] = 100 }, nil,
+            { [X] = 4, [Y] = 1 }, { [X] = { bags = 4 }, [Y] = { bags = 1 } }, canned(600, 600), nil,
+            { { from = 100, to = 110, recipeId = 1 } })
+        T.eq("fixture: with the stock the market route costs 600", owned.candidates[1].spend, 600)
+        T.eq("the margin is 5% of its cost with nothing owned (1000)", owned.keepMargin, 50)
     end
     local prices = { [X] = 100, [Y] = 100 }
     local memory = { { from = 100, to = 110, recipeId = 1 } }
@@ -1081,15 +1289,28 @@ T.section("the whole calculation", function()
     T.check("and the memory keeps its two ranges as they were", #store.route == 2 and store.route[1].from == 100
         and store.route[1].to == 110 and store.route[2].from == 110 and store.route[2].to == 120)
     -- A raised target: what lies beyond the remembered plan is added to it.
+    -- (Sale values off and plenty of leather owned, so every route costs the
+    -- same nothing and the plan in hand stays.)
+    LazyProf.db.profile.saleValueMode = "none"
+    LazyProf.Inventory.ScanAll = function() return { [LEATHER] = 400 }, { [LEATHER] = { bags = 400 } } end
+    store.route = { at = 100, { from = 100, to = 110, recipeId = 1 }, { from = 110, to = 120, recipeId = 1 } }
     PF:SetTargetSkill("leatherworking", 130, 100, milestones)
     path = build()
-    if path.route.kept == "previous" then
-        T.check("a raised target extends the memory", store.route[#store.route].to >= 125, store.route[#store.route].to)
-        T.check("and keeps its remembered part", store.route[1].to == 110)
-    else
-        T.check("a raised target: the newly kept route is remembered whole", store.route[#store.route].to >= 125)
-    end
+    T.eq("a raised target: the plan in hand is still kept", path.route.kept, "previous")
+    T.check("its remembered part stays", store.route[1].from == 100 and store.route[1].to == 110 and store.route[2].to == 120)
+    T.check("what lies beyond it is added", store.route[#store.route].to == 130, store.route[#store.route].to)
+    T.eq("and it still knows where it was planned from", store.route.at, 100)
     PF:SetTargetSkill("leatherworking", 120, 100, milestones)
+    LazyProf.db.profile.saleValueMode = "vendor"
+
+    -- When another route is kept, that route is what is remembered from then on.
+    store.route = { at = 100, { from = 100, to = 120, recipeId = 1 } }   -- gauntlets: clearly dearer by net than shoes
+    LazyProf.Inventory.ScanAll = function() return { [LEATHER] = 1 }, { [LEATHER] = { bags = 1 } } end
+    path = build()
+    T.check("fixture: the plan in hand was a candidate and lost", path.route.kept ~= "previous"
+        and path.route.candidates[#path.route.candidates].key == "previous", path.route.kept)
+    T.eq("the newly kept route replaces the memory", store.route[1].recipeId, 2)
+    T.eq("with the skill it was planned at", store.route.at, 100)
     LazyProf.Inventory.ScanAll = function() return {}, {} end
 
     -- Choosing a recipe for a range forgets what was remembered there, and

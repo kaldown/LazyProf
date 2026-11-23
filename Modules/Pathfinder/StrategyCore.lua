@@ -182,9 +182,12 @@ local function PickBest(alternatives, pinnedId, accept)
     return best, bestScore
 end
 
--- A run that follows a pin or a remembered range stops this far short of the
--- range's end, so a run that lands a hair under a fractional end does not get
--- one more craft.
+-- Skill ranges (pins, remembered routes) are read this far below their
+-- written bounds: a range covers [from - tolerance, to - tolerance). A run
+-- that lands a hair under a fractional end then does not get one more craft,
+-- the next range takes over exactly where the run stops, and the sliver just
+-- under a recipe's grey point - where a craft gains next to nothing - belongs
+-- to no range.
 local RANGE_END_TOLERANCE = 1e-6
 
 -- The range (a pin, or a remembered route's range) covering `skill`, nil when
@@ -195,11 +198,27 @@ local function FindRange(ranges, skill, whole)
         if whole then
             from, to = math.floor(from), math.floor(to)
         end
-        if skill >= from and skill < to then
+        if skill >= from - RANGE_END_TOLERANCE and skill < to - RANGE_END_TOLERANCE then
             return range
         end
     end
     return nil
+end
+
+-- Where the next range above `skill` begins whose recipe can be crafted for
+-- skill-ups at that point (canBegin(recipeId, skill)); nil when there is none.
+-- A range whose recipe cannot be used there (not learnable yet, grey, gone)
+-- changes nothing, so no run is cut for it.
+local function NextRangeStart(ranges, skill, whole, canBegin)
+    local nextStart
+    for _, range in ipairs(ranges) do
+        local from = whole and math.floor(range.from) or range.from
+        if from - RANGE_END_TOLERANCE > skill and (not nextStart or from < nextStart)
+                and canBegin(range.recipeId, from) then
+            nextStart = from
+        end
+    end
+    return nextStart
 end
 
 -- The scored entry of a remembered recipe, when the planner could choose it
@@ -257,6 +276,21 @@ LazyProf.StrategyCore = {
         local scoreCtx = { rankSale = ctx and ctx.rankSale or nil, sale = ctx and ctx.sale or nil, recipes = recipes }
         local replay = ctx and ctx.replay or nil
         local wholeBounds = replay ~= nil and replay.at ~= currentSkill
+
+        -- Can the recipe be crafted for skill-ups at `skill`? (For cutting a
+        -- run where a pin or a remembered range begins.)
+        local recipeById
+        local function canBegin(recipeId, skill)
+            if not recipeById then
+                recipeById = {}
+                for _, recipe in ipairs(recipes) do
+                    recipeById[recipe.id] = recipe
+                end
+            end
+            local recipe = recipeById[recipeId]
+            return recipe ~= nil and skill >= recipe.skillRequired
+                and (skill - racialBonus) < recipe.skillRange.gray
+        end
         local path = {}
         local gaps = {}
         local simulatedSkill = currentSkill
@@ -289,18 +323,19 @@ LazyProf.StrategyCore = {
 
             -- (1) Bridge: nothing to choose while green recipes are excluded by the
             -- setting - allow green ones whose chance is still >= BRIDGE_MIN_CHANCE.
+            local worthIt = nil
             if not best and not LazyProf.db.profile.includeGreenRecipes then
                 local minChance = LazyProf.Constants.BRIDGE_MIN_CHANCE
                 local effectiveSkill = simulatedSkill - racialBonus
                 local wideCandidates = self:GetCandidates(recipes, simulatedSkill, racialBonus, true)
                 local wideAlternatives = ScoreCandidates(self, wideCandidates, simulatedSkill, targetSkill,
                     simulatedInventory, prices, racialBonus, purchasedRecipes, " [bridge: green allowed]", scoreCtx, true)
-                local function worthIt(recipe)
+                local function overFloor(recipe)
                     return Utils.GetSkillUpChance(effectiveSkill, recipe.skillRange) >= minChance
                 end
-                best, bestScore = PickBest(wideAlternatives, pinnedId, worthIt)
+                best, bestScore = PickBest(wideAlternatives, pinnedId, overFloor)
                 if range then
-                    local alt = Replayable(wideAlternatives, range.recipeId, worthIt)
+                    local alt = Replayable(wideAlternatives, range.recipeId, overFloor)
                     if alt then
                         best, bestScore, followed = alt.recipe, alt.score, range
                     end
@@ -308,10 +343,19 @@ LazyProf.StrategyCore = {
                 if best then
                     alternatives = wideAlternatives
                     bridge = true
+                    worthIt = overFloor
                 end
             end
 
-            if best then
+            -- Make the step. A recipe held by a pin or a remembered range that
+            -- cannot move the skill (at its grey point a craft gains nothing)
+            -- gives way once to the planner's own choice; a choice that cannot
+            -- move the skill either is no recipe at all.
+            local made = false
+            local pinned = (pin ~= nil and best ~= nil and best.id == pinnedId)
+            for attempt = 1, 2 do
+                if not best then break end
+
                 if self.logScoring and not pinnedId and LazyProf:IsDebugEnabled("scoring") then
                     LazyProf:Debug("scoring", ">>> WINNER: " .. best.name .. " with score " .. string.format("%.2f", bestScore)
                         .. (bridge and " (bridge)" or ""))
@@ -319,13 +363,25 @@ LazyProf.StrategyCore = {
 
                 -- Calculate how many to craft (pass recipes for breakpoint detection).
                 -- A run that follows a pin or a remembered range ends with it:
-                -- the recipe was chosen for that skill range, not beyond.
+                -- the recipe was chosen for that skill range, not beyond. And
+                -- no run carries on into a pin or a remembered range that
+                -- begins further on.
                 local runEnd = targetSkill
                 if followed then
                     local rangeEnd = wholeBounds and math.floor(followed.to) or followed.to
-                    runEnd = math.min(targetSkill, rangeEnd - RANGE_END_TOLERANCE)
-                elseif pin and best.id == pinnedId then
-                    runEnd = math.min(targetSkill, pin.to - RANGE_END_TOLERANCE)
+                    runEnd = math.min(runEnd, rangeEnd - RANGE_END_TOLERANCE)
+                elseif pinned then
+                    runEnd = math.min(runEnd, pin.to - RANGE_END_TOLERANCE)
+                end
+                local nextPin = (pins and #pins > 0) and NextRangeStart(pins, simulatedSkill, false, canBegin) or nil
+                if nextPin then
+                    runEnd = math.min(runEnd, nextPin - RANGE_END_TOLERANCE)
+                end
+                if replay and not pinned then
+                    local nextRange = NextRangeStart(replay, simulatedSkill, wholeBounds, canBegin)
+                    if nextRange then
+                        runEnd = math.min(runEnd, nextRange - RANGE_END_TOLERANCE)
+                    end
                 end
                 local quantity = self:CalculateQuantity(best, simulatedSkill, runEnd, recipes, racialBonus)
 
@@ -336,31 +392,45 @@ LazyProf.StrategyCore = {
                 end
 
                 local totalSkillups, totalCost = self:CalculateTotalCostAndSkillups(best, simulatedSkill, quantity, simulatedInventory, prices, racialBonus, purchasedRecipes)
+                local skillEnd = math.min(simulatedSkill + totalSkillups, targetSkill)
 
-                -- Add step to path (with alternatives for UI). What its
-                -- crafts sell for rides along when sale values were given.
-                local saleEach = scoreCtx.sale and scoreCtx.sale[best.id] or nil
-                table.insert(path, {
-                    recipe = best,
-                    quantity = quantity,
-                    skillStart = simulatedSkill,
-                    skillEnd = math.min(simulatedSkill + totalSkillups, targetSkill),
-                    totalCost = totalCost,
-                    alternatives = alternatives,
-                    bridge = bridge or nil,
-                    saleEach = saleEach,
-                    sale = saleEach and (saleEach * quantity) or nil,
-                })
+                if skillEnd > simulatedSkill then
+                    -- Add step to path (with alternatives for UI). What its
+                    -- crafts sell for rides along when sale values were given.
+                    local saleEach = scoreCtx.sale and scoreCtx.sale[best.id] or nil
+                    table.insert(path, {
+                        recipe = best,
+                        quantity = quantity,
+                        skillStart = simulatedSkill,
+                        skillEnd = skillEnd,
+                        totalCost = totalCost,
+                        alternatives = alternatives,
+                        bridge = bridge or nil,
+                        saleEach = saleEach,
+                        sale = saleEach and (saleEach * quantity) or nil,
+                    })
 
-                -- Mark recipe as purchased in simulation (so future evaluations don't re-add cost)
-                if not best.learned and best._sourceInfo then
-                    purchasedRecipes[best.id] = true
+                    -- Mark recipe as purchased in simulation (so future evaluations don't re-add cost)
+                    if not best.learned and best._sourceInfo then
+                        purchasedRecipes[best.id] = true
+                    end
+
+                    -- Update simulation
+                    simulatedSkill = skillEnd
+                    simulatedInventory = self:ConsumeReagents(simulatedInventory, best, quantity)
+                    made = true
+                    break
                 end
 
-                -- Update simulation
-                simulatedSkill = path[#path].skillEnd
-                simulatedInventory = self:ConsumeReagents(simulatedInventory, best, quantity)
-            else
+                if attempt == 1 and (pinned or followed) then
+                    best, bestScore = PickBest(alternatives, nil, worthIt)
+                    pinned, followed = false, nil
+                else
+                    break
+                end
+            end
+
+            if not made then
                 -- (2) Gap up to the next skill where a recipe becomes learnable,
                 -- (3) or up to the target when there is none.
                 local nextSkill = self:FindNextRecipeSkill(recipes, simulatedSkill, targetSkill, racialBonus)
