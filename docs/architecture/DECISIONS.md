@@ -211,7 +211,7 @@ score = (reagent_cost + amortized_cost) / expected_skillup
 
 **Date**: 2026-02-09
 
-**Status**: Accepted (implemented in v0.4.2)
+**Status**: Superseded by ADR-017 (implemented in v0.4.2)
 
 **Context**: The "Use owned materials as free" setting caused the greedy pathfinder to produce worse paths. Free materials lured the algorithm into committing to low-value recipes, shifting skill level breakpoints and causing more expensive downstream choices. Testing confirmed that enabling the setting produced paths costing MORE gold than without it.
 
@@ -458,6 +458,50 @@ The path was shown as 60-100 five-craft rows spread over a milestone panel, a sh
 - New window content is a change to a pure function with a headless test, not to frame code.
 - Client calls for merchants, trainers and the map exist only in the client adapters; the boundary test enforces it.
 - The Classic clients run the same code but are not tested in game; where a client call could not be confirmed (merchant calls, the skill line's cap, trainer lists) the feature checks first and stays inactive otherwise.
+
+---
+
+## ADR-017: Candidate Routes: Sale Value and Owned Stock, Never Dearer Than the Market Route
+
+**Date:** 2026-11-23
+
+**Status:** Accepted (supersedes ADR-008)
+
+### Context
+
+The addon is for one loop: open a profession, see the cheapest path from the real skill counting the materials already owned, auction prices and what the crafted items sell for, choose how far to level, get one total of what to buy. Two parts of that were not true in the planner. Owned stock was only subtracted from the shopping list afterwards: ADR-008 had removed it from scoring because free materials lured the greedy planner into dearer paths. And what a crafted item sells for was counted nowhere, so two recipes with the same reagents ranked the same even when one sells for far more.
+
+ADR-008's trap had a concrete cause: stock was compared with the reagents of one craft, so owning enough for a single craft scored a run of up to fifty crafts as free.
+
+### Decision
+
+- One accounting. What the player pays is defined once: the shopping computation over a set of craft steps (owned stock taken off across the enabled sources, craft-or-buy applied, recipe costs added), minus what the crafts sell for (`Pathfinder:Account`). Totals and route comparisons use it.
+- Sale value. One craft of a recipe sells for the vendor price of its crafted item by default; the auction price after the cut, or nothing, are settings. The Cheapest strategy takes it off a recipe's cost per craft when ranking, floored at zero (with a negative cost the cost per skill-up would improve as the skill-up chance falls), and only for recipes whose every reagent has a real price.
+- Stock scoring against the run. A reagent the character owns costs, per craft, what the whole run still has to buy divided by its crafts. With nothing owned every score is what it was.
+- Candidate routes. Under Cheapest the planner builds up to three routes and keeps the one the player pays least for by the one accounting: the market-price route as before (always), a route ranked with sale values (when any may be used), and a route that also gets the owned stock (when the character owns a usable reagent). A tie keeps the earlier one; a candidate that leaves more of the skill range uncovered cannot win.
+
+Because the market-price route is always a candidate, the kept route never costs the player more than the route before this decision, by the addon's own accounting.
+
+### Alternatives Considered
+
+- Scoring with stock and no guard: rejected, it is the behaviour ADR-008 removed.
+- Opportunity-cost pricing of owned stock (what it would sell for) inside the scoring: deferred, it needs sale prices for raw materials the addon does not trust yet.
+- A dynamic-programming planner that allocates stock globally: not built; the guard gives the "never dearer" property without it.
+- Auction resale as the default sale value: rejected, a listing may never sell and the total would show uncertain money as certain.
+
+### Trade-offs Accepted
+
+- Up to three planner runs per calculation instead of one (measured headless: 4-10 ms per run on the bundled recipe data). Bag changes still do not plan again.
+- The planner is still greedy: the kept route is the best of the candidates, not the optimum.
+- Crafts that later steps of the same path use as reagents are still counted as sold, and the shopping list still has the player get them again; the shown net is an upper bound for a player who keeps them.
+- One item per craft is assumed (the recipe data has no yield), so multi-yield recipes are understated.
+- Among recipes that pay for themselves the zero floor makes the ranking blind to how much they pay; the comparison of whole routes catches the cases where that would cost the player.
+
+### Consequences
+
+- Routes can change with what the player owns and with what crafts sell for; `/lp diag prices` prints which candidate was kept and each candidate's amounts.
+- After shopping, the player holds the reagents of the plan, so that plan stays the cheap one even if auction prices move.
+- New planner ideas can be added as further candidates without risk to the "never dearer" property.
 
 ---
 

@@ -21,8 +21,10 @@ LazyProf.defaults = {
         displayMode = Constants.DISPLAY_MODE.ARROW_TOOLTIP,
         -- Open the LazyProf window beside the profession window
         openWithProfession = true,
-        includeBankItems = false,
-        includeAltCharacters = false,
+        -- Which owned stock counts (for the route, every total and the
+        -- shopping list). The guild bank is shared, so it stays off.
+        includeBankItems = true,
+        includeAltCharacters = true,
         includeGuildBank = false,
         -- Side-panel positions the user dragged to: [key] = { point, relPoint, x, y }
         panelPositions = {},
@@ -309,14 +311,15 @@ LazyProf.options = {
                     end,
                 },
                 shoppingListHeader = {
-                    name = "Shopping List",
+                    name = "Your stock",
                     type = "header",
                     order = 5,
                 },
                 includeBankItems = {
                     name = "Include bank items",
-                    desc = "When enabled, items in your bank are subtracted from the " ..
-                           "shopping list so you only see what you still need to buy.\n\n" ..
+                    desc = "When enabled, items in your bank count as owned: the path is " ..
+                           "planned around them when that is cheaper for you, and the " ..
+                           "shopping list shows only what you still need to buy.\n\n" ..
                            (Syndicator and "" or "Requires: Syndicator addon installed.\n\n") ..
                            "Example: You need 20 Thorium Bars but have 8 in your bank. " ..
                            "The shopping list shows 12 to buy from the AH.",
@@ -333,8 +336,9 @@ LazyProf.options = {
                 includeAltCharacters = {
                     name = "Include alt characters",
                     desc = "When enabled, materials on ALL your characters (bags, " ..
-                           "banks, mail, and AH listings) are subtracted from the " ..
-                           "shopping list.\n\n" ..
+                           "banks, mail, and AH listings) count as owned: the path is " ..
+                           "planned around them when that is cheaper for you, and they " ..
+                           "are subtracted from the shopping list.\n\n" ..
                            "Requires: Syndicator addon installed.\n\n" ..
                            "Example: Your alt has 200 Silk Cloth. The shopping list " ..
                            "will show 200 fewer Silk Cloth to buy from the AH.\n\n" ..

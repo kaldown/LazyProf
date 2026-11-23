@@ -378,7 +378,8 @@ local function ProviderValue(name, itemId)
 end
 
 -- /lp diag prices: a read-only dump of every reagent price in the current path,
--- where it came from, and what each price source says about the item
+-- where it came from, what each price source says about the item, and which
+-- candidate route the planner kept
 -- (documented in docs/development/TROUBLESHOOTING.md).
 function PriceManager:RunDiagnostic(lines)
     local function add(text) lines[#lines + 1] = text end
@@ -421,6 +422,41 @@ function PriceManager:RunDiagnostic(lines)
             .. " estimate=" .. tostring(s.estimate) .. " loading=" .. tostring(s.loading)
             .. " noPrice=" .. tostring(s.unpriced) .. " stale=" .. tostring(s.stale)
             .. " oldestAuctionatorDays=" .. tostring(s.oldestAuctionatorDays))
+    end)
+
+    -- Which candidate route the planner kept, what each would cost the
+    -- player, and how the sale values of the crafts stand.
+    section("route", function()
+        local route = path.route
+        if not route then return end
+        local function money(copper)
+            return Utils.FormatMoney(math.floor((copper or 0) + 0.5))
+        end
+        add("route: kept=" .. tostring(route.kept) .. " candidates=" .. tostring(#route.candidates)
+            .. (route.ms and string.format(" planned in %.0f ms", route.ms) or ""))
+        local first = route.candidates[1]
+        for _, candidate in ipairs(route.candidates) do
+            local net = candidate.net < 0 and ("gain " .. money(-candidate.net)) or money(candidate.net)
+            local line = "candidate " .. tostring(candidate.key) .. ": net=" .. net
+                .. " spend=" .. money(candidate.spend) .. " sale=" .. money(candidate.sale)
+            if not candidate.eligible then
+                line = line .. string.format(" (not eligible: leaves %.0f more skill points uncovered)",
+                    (candidate.gapLength or 0) - (first.gapLength or 0))
+            end
+            add(line)
+        end
+        local sale = path.sale
+        if sale then
+            local counted, ranked = 0, 0
+            for _ in pairs(sale.values or {}) do counted = counted + 1 end
+            for _ in pairs(sale.rank or {}) do ranked = ranked + 1 end
+            local loading = sale.loading or 0
+            if LazyProf.SaleValue and LazyProf.SaleValue.LoadingCount then
+                loading = LazyProf.SaleValue:LoadingCount(sale)
+            end
+            add("sale values: mode=" .. tostring(sale.mode) .. " counted=" .. tostring(counted)
+                .. " ranked=" .. tostring(ranked) .. " loading=" .. tostring(loading))
+        end
     end)
 
     local ids = self:PathReagentIds(path)
