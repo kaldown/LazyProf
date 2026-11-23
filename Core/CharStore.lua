@@ -20,7 +20,7 @@ LazyProf.CharStore = CharStore
 
 local function NewCharacter()
     return {
-        professions = {},     -- [profKey] = { target, pins }
+        professions = {},     -- [profKey] = { target, pins, route (the route kept last, Pathfinder:RouteRanges) }
         craftChoices = {},    -- [itemId] = "craft" | "buy" (absent: automatic)
     }
 end

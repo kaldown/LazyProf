@@ -137,14 +137,25 @@ function Pathfinder:BuildPath(run)
     -- pass (IsRecipeAvailable is called per unlearned candidate per step).
     LazyProf.RecipeAvailability:BeginRecalc()
     LazyProf.SelfFound:BeginRecalc(inventory)
+    -- The route the last calculation kept for this profession is planned as
+    -- a candidate too (Cheapest only; a what-if from skill 1 is not the plan
+    -- the player follows, so it neither uses nor replaces it).
+    local store = LazyProf.CharStore:Profession(profKey)
+    local remembers = (strategyName == Constants.STRATEGY.CHEAPEST) and not run.planFromOne
     local steps, meta, route = self:PlanRoutes({
         strategy = strategy, strategyName = strategyName,
         startSkill = startSkill, targetSkill = targetSkill, recipes = run.recipes,
         prices = prices, racialBonus = racialBonus, pins = pins,
         inventory = inventory, sourceBreakdown = sourceBreakdown, sale = sale,
+        previous = remembers and store.route or nil,
     })
     LazyProf.SelfFound:EndRecalc()
     LazyProf.RecipeAvailability:EndRecalc()
+    if remembers then
+        store.route = (#steps > 0) and self:RouteRanges(steps) or nil
+    elseif not run.planFromOne then
+        store.route = nil
+    end
 
     -- Build result (totals cover the steps the path has; gaps add nothing)
     local path = {
@@ -219,11 +230,49 @@ local function OwnsUsableReagent(recipes, inventory, startSkill, targetSkill, ra
     return false
 end
 
+-- A route as it is remembered between calculations: one { from, to, recipeId }
+-- per run of a recipe (consecutive steps of one recipe joined), in skill order.
+function Pathfinder:RouteRanges(steps)
+    local ranges = {}
+    local last
+    for _, step in ipairs(steps or {}) do
+        local id = step.recipe and step.recipe.id
+        if id and step.skillStart and step.skillEnd then
+            if last and last.recipeId == id and last.to == step.skillStart then
+                last.to = step.skillEnd
+            else
+                last = { from = step.skillStart, to = step.skillEnd, recipeId = id }
+                ranges[#ranges + 1] = last
+            end
+        end
+    end
+    return ranges
+end
+
+-- The pin list that replays a remembered route from `startSkill`: its ranges
+-- that reach past the start, with the player's own pins laid over them (a pin
+-- replaces what it overlaps). nil when nothing of the route is left to replay.
+local function ReplayPins(previous, pins, startSkill)
+    if type(previous) ~= "table" then return nil end
+    local replay = {}
+    for _, range in ipairs(previous) do
+        if range.to and range.to > startSkill then
+            LazyProf.Pins.Add(replay, range.from, range.to, range.recipeId)
+        end
+    end
+    if #replay == 0 then return nil end
+    for _, pin in ipairs(pins or {}) do
+        LazyProf.Pins.Add(replay, pin.from, pin.to, pin.recipeId)
+    end
+    return replay
+end
+
 -- Plan the candidate routes of one calculation and keep the one the player
 -- pays least for.
 -- args: strategy, strategyName, startSkill, targetSkill, recipes, prices,
 --       racialBonus, pins, inventory, sourceBreakdown (the real stock),
---       sale (SaleValue:Build; may be nil)
+--       sale (SaleValue:Build; may be nil), previous (the route the last
+--       calculation kept, as RouteRanges gives it; may be nil)
 -- Cheapest builds, in this order:
 --   market  market prices, nothing owned, sale values not used for ranking -
 --           the route as it was before sale values and stock counted. Always.
@@ -232,12 +281,23 @@ end
 --   stock   as "sale" (with whatever sale values may rank), and the owned
 --           stock is given to the strategy, which scores it against whole
 --           runs. Only when the character owns a reagent a usable recipe takes.
+--   previous  the route kept by the last calculation (args.previous, see
+--           RouteRanges), replayed from the current skill: its recipes are
+--           held over their skill ranges, under the player's own pins, and
+--           whatever lies beyond it is planned like "stock". Only when such
+--           a route is remembered and reaches past the start. Without it a
+--           player who bought the whole list of a route could find a
+--           different route on the next calculation that needs more bought:
+--           once every reagent is in the bags several recipes cost nothing
+--           and the planner has no reason left to prefer the one it chose.
 -- Every candidate is costed the same way - Account over its steps with the
 -- real stock: what is left to buy, plus recipes, minus what the crafts sell
 -- for - and the lowest amount is kept; a tie keeps the earlier candidate.
 -- Because the market route is always a candidate, the kept route never costs
--- the player more than it by this accounting. A candidate that leaves more of
--- the range uncovered than the market route cannot win by doing less.
+-- the player more than it by this accounting; because the previous route is
+-- one too, it never costs more than carrying on with the plan shown before.
+-- A candidate that leaves more of the range uncovered than the market route
+-- cannot win by doing less.
 -- Any other strategy is one run, costed the same way.
 -- Returns steps, meta, route = { kept = key, candidates = { { key, net,
 -- spend, sale, gapLength, eligible }, ... }, ms = milliseconds or nil }.
@@ -247,9 +307,9 @@ function Pathfinder:PlanRoutes(args)
     local saleValues = sale.values or {}
     local startedAt = debugprofilestop and debugprofilestop() or nil
 
-    local function build(key, inventory, rankSale)
+    local function build(key, inventory, rankSale, pins)
         local steps, meta = strategy:Calculate(args.startSkill, args.targetSkill, args.recipes, inventory,
-            args.prices, args.racialBonus, args.pins, { rankSale = rankSale, sale = saleValues })
+            args.prices, args.racialBonus, pins or args.pins, { rankSale = rankSale, sale = saleValues })
         local account = self:Account(steps, args.inventory, args.sourceBreakdown, args.prices, saleValues)
         return {
             key = key, steps = steps, meta = meta,
@@ -264,8 +324,14 @@ function Pathfinder:PlanRoutes(args)
         if sale.rank and next(sale.rank) ~= nil then
             built[#built + 1] = build("sale", {}, sale.rank)
         end
-        if OwnsUsableReagent(args.recipes, args.inventory, args.startSkill, args.targetSkill, args.racialBonus or 0) then
+        local ownsUsable = OwnsUsableReagent(args.recipes, args.inventory, args.startSkill, args.targetSkill,
+            args.racialBonus or 0)
+        if ownsUsable then
             built[#built + 1] = build("stock", args.inventory, sale.rank)
+        end
+        local replay = ReplayPins(args.previous, args.pins, args.startSkill)
+        if replay then
+            built[#built + 1] = build("previous", ownsUsable and args.inventory or {}, sale.rank, replay)
         end
     else
         built[1] = build(args.strategyName or "route", {}, nil)
@@ -914,6 +980,14 @@ end
 
 -- Pins (see Modules/Pathfinder/Pins.lua): saved per character and profession.
 
+-- Choosing or resetting a recipe is the player planning again: the route
+-- remembered from the last calculation (see PlanRoutes, "previous") is
+-- dropped, so the planner's own choice comes back where a pin was removed.
+function Pathfinder:ForgetRoute(profKey)
+    if not profKey then return end
+    LazyProf.CharStore:Profession(profKey).route = nil
+end
+
 -- The profession's pin list (the saved table itself).
 function Pathfinder:GetPins(profKey)
     if not profKey then return {} end
@@ -929,12 +1003,14 @@ end
 -- caller recalculates.
 function Pathfinder:PinRange(profKey, from, to, recipeId)
     LazyProf.Pins.Add(self:GetPins(profKey), from, to, recipeId)
+    self:ForgetRoute(profKey)
     LazyProf:Debug("pathfinder", string.format("Pinned recipe %s for %s %.2f-%.2f",
         tostring(recipeId), tostring(profKey), from, to))
 end
 
 -- Remove the pin covering a skill.
 function Pathfinder:UnpinAt(profKey, skill)
+    self:ForgetRoute(profKey)
     if LazyProf.Pins.RemoveAt(self:GetPins(profKey), skill) then
         LazyProf:Debug("pathfinder", string.format("Unpinned %s at %.2f", tostring(profKey), skill))
     end
@@ -942,6 +1018,7 @@ end
 
 -- Remove every pin of a profession.
 function Pathfinder:ClearPins(profKey)
+    self:ForgetRoute(profKey)
     local pins = self:GetPins(profKey)
     for i = #pins, 1, -1 do
         pins[i] = nil
