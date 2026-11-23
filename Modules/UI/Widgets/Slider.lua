@@ -48,9 +48,10 @@
 --   list of frame scripts (Blizzard_SharedXML/UI.xsd:403, 406, 407, 420).
 --   IsMouseButtonDown() without a button asks for any button
 --   (Blizzard_APIDocumentationGenerated/InputDocumentation.lua:185-198);
---   Blizzard polls it to end a press whose release it did not hear
---   (Blizzard_SharedXML/HybridScrollFrame.lua:76,
---   Blizzard_Console/Blizzard_Console.lua:308).
+--   Blizzard polls it to end a drag whose release it did not hear
+--   (Blizzard_Console/Blizzard_Console.lua:308,
+--   Blizzard_SharedXML/Mainline/ModelControlButtonMixin.lua:167, and with a
+--   button named in its older scroll buttons).
 --   Whether the value-changed script tells a player's change from one made
 --   by code is not relied on: this widget marks its own changes itself.
 -- classic - a plain Slider frame with a track of its own (light grey, a thin
