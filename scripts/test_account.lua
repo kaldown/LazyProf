@@ -2,8 +2,8 @@
 --
 -- The one accounting of what the player pays: the shopping computation over a
 -- set of craft steps (stock taken off, craft-or-buy applied, recipe costs
--- added), minus what the crafts sell for. Every total the window shows and
--- the planner's choice between candidate routes come from it.
+-- added), minus what the crafts sell for. The planner's choice between
+-- candidate routes comes from it.
 --
 -- Run from the addon root:  lua5.1 scripts/test_account.lua
 

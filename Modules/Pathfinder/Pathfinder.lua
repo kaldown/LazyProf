@@ -127,6 +127,10 @@ function Pathfinder:BuildPath(run)
         mode = LazyProf.db.profile.saleValueMode,
         from = startSkill, to = targetSkill, racialBonus = racialBonus,
     })
+    -- Crafted items still without data: redraw once when the wait is over.
+    if sale.loading > 0 and LazyProf.ScheduleSaleLoadingRefresh then
+        LazyProf:ScheduleSaleLoadingRefresh()
+    end
 
     -- Plan the candidate routes and keep the one the player pays least for.
     -- Memoize recipe availability for the duration of this synchronous scoring
@@ -376,10 +380,13 @@ end
 -- Calculate the shopping list of a set of steps (path steps, or the craft
 -- stages' { recipe, quantity, skillStart } entries). This is the addon's one
 -- accounting of what the player pays for reagents and recipes (see Account).
--- It is a function of its arguments: `inventory` is what the character owns
--- across the enabled sources and `sourceBreakdown` says where (bags, bank,
--- mail, auctions, guildBank, alts); nothing is scanned here, so it can be
--- asked "what if nothing were owned" with two empty tables.
+-- The stock comes only from its arguments: `inventory` is what the character
+-- owns across the enabled sources and `sourceBreakdown` says where (bags,
+-- bank, mail, auctions, guildBank, alts). Nothing is scanned here, so it can
+-- be asked "what if nothing were owned" with two empty tables. (It also
+-- reads the settings that decide craft-or-buy - the strategy, the material
+-- resolution mode, the per-item choices - and the price manager's record of
+-- where each price came from.)
 -- Returns the per-source lists { fromBank, fromMail, fromAuctions,
 -- fromGuildBank, fromAlts, toCraft, fromAH, recipeCosts } and, for the
 -- Shopping tab, one row per item in `rows`:
@@ -824,8 +831,9 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
 end
 
 -- What a set of craft steps costs the player: the shopping list of the steps
--- (CalculateMissingMaterials), minus what the crafts sell for. Every total the
--- window shows and the choice between candidate routes use this.
+-- (CalculateMissingMaterials), minus what the crafts sell for. The choice
+-- between candidate routes uses this, and totals shown to the player are to
+-- be built from it and from nothing else.
 --   saleValues  { [recipeId] = copper per craft } or nil
 -- Returns { missing, reagents, recipes, spend, sale, net }:
 --   reagents = the shopping rows' costs, recipes = the recipes still to learn,

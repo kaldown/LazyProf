@@ -108,6 +108,22 @@ T.section("the table of one calculation", function()
     T.check("nothing yet for an item still loading", sale.values[4] == nil)
     T.eq("one item is loading", sale.loading, 1)
 
+    -- Two recipes make the same item: it is one item loading, not two.
+    local twins = { recipe(5, 505), recipe(6, 505), recipe(7, 506) }
+    local twinSale = SV:Build(twins, { mode = "vendor", from = 1, to = 300, deps = deps({}),
+        isRealPrice = function() return true end })
+    T.eq("a shared crafted item is counted as loading once", twinSale.loading, 2)
+
+    -- Each reagent is asked about once per calculation, however many recipes use it.
+    local askedReal = {}
+    local many = {}
+    for i = 1, 5 do many[i] = recipe(20 + i, 520 + i) end
+    local sell = {}
+    for i = 1, 5 do sell[520 + i] = 10 end
+    SV:Build(many, { mode = "vendor", from = 1, to = 300, deps = deps(sell),
+        isRealPrice = function(itemId) askedReal[#askedReal + 1] = itemId; return true end })
+    T.eq("a reagent's price is checked once per calculation", #askedReal, 1)
+
     sale = SV:Build(recipes, { mode = "none", from = 1, to = 300, deps = deps({ [501] = 45 }) })
     T.check("do not count: empty", next(sale.values) == nil and next(sale.rank) == nil and sale.loading == 0)
     T.eq("do not count: mode", sale.mode, "none")
@@ -137,22 +153,31 @@ T.section("waiting for item data", function()
         if not info[itemId] then return nil end
         return "Item", nil, 1, 1, 1, "", "", 1, "", "icon", info[itemId]
     end
+    -- Reagent 900 has an auction price, reagent 901 only the sell estimate.
     LazyProf.PriceManager = { MarketPrice = function() return nil end,
-        PeekPriceInfo = function() return { source = "TSM" } end,
+        PeekPriceInfo = function(_, itemId) return { source = (itemId == 901) and "VendorSell" or "TSM" } end,
         IsRealSource = function(i) return i.source == "TSM" end }
-    local recipes = { recipe(1, 701), recipe(2, 702) }
+    local recipes = { recipe(1, 701), recipe(2, 702),
+        recipe(3, 703, { reagents = { { itemId = 900, count = 1 }, { itemId = 901, count = 1 } } }) }
     local opts = { mode = "vendor", from = 1, to = 300 }
     info[702] = 60
+    info[703] = 70
 
     clock = 100
     local sale = SV:Build(recipes, opts)
     T.eq("vendor value through the adapter (11th item-info return)", sale.values[2], 60)
     T.eq("real prices rank", sale.rank[2], 60)
+    T.eq("a recipe with an estimated reagent price sells", sale.values[3], 70)
+    T.check("but is not offered for ranking (the price manager's record decides)", sale.rank[3] == nil)
     T.eq("the missing item counts as loading", sale.loading, 1)
+    T.eq("and still does when asked later", SV:LoadingCount(sale), 1)
     clock = 119
     T.eq("still loading within twenty seconds", SV:Build(recipes, opts).loading, 1)
+    T.eq("the earlier table agrees", SV:LoadingCount(sale), 1)
     clock = 121
     T.eq("no longer counted as loading after that", SV:Build(recipes, opts).loading, 0)
+    T.eq("the earlier table says so too, without being rebuilt", SV:LoadingCount(sale), 0)
+    T.eq("no table: nothing loading", SV:LoadingCount(nil), 0)
 
     -- The data arrives after all: it was still being waited for.
     info[701] = 30
@@ -162,10 +187,12 @@ T.section("waiting for item data", function()
     T.check("an unrelated item is not reported", SV:OnItemInfo(999, true) == false)
 
     -- A failed load ends the waiting for the session.
-    local more = { recipe(3, 703) }
+    local more = { recipe(4, 704) }
     clock = 200
-    T.eq("a new missing item is loading", SV:Build(more, opts).loading, 1)
-    T.check("its failed load is reported", SV:OnItemInfo(703, false) == true)
+    local waitingSale = SV:Build(more, opts)
+    T.eq("a new missing item is loading", waitingSale.loading, 1)
+    T.check("its failed load is reported", SV:OnItemInfo(704, false) == true)
+    T.eq("a table built before the failure stops counting it", SV:LoadingCount(waitingSale), 0)
     T.eq("and it stops counting as loading", SV:Build(more, opts).loading, 0)
     clock = 500
     T.eq("for good", SV:Build(more, opts).loading, 0)

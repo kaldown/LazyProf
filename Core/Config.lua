@@ -150,8 +150,9 @@ LazyProf.options = {
                 },
                 saleValueMode = {
                     name = "Count what crafts sell for",
-                    desc = "The crafted items are worth something when you sell them. The path " ..
-                           "and every total take that off.\n\n" ..
+                    desc = "The crafted items are worth something when you sell them. The " ..
+                           "Cheapest strategy counts that when it compares recipes whose " ..
+                           "reagents all have a real price.\n\n" ..
                            "Sold to a vendor: the vendor's price, which you always get.\n" ..
                            "Sold at auction: the auction price after the 5% cut (never less " ..
                            "than the vendor's price). An auction may not sell.\n" ..

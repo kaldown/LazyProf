@@ -126,13 +126,25 @@ section("market price", function()
     local addon = loadPricing()
     local pm = addon.PriceManager
     check(p .. "the first market source in the configured order", pm:MarketPrice(2589) == 120, pm:MarketPrice(2589))
-    check(p .. "never the vendor buy price (TSM knows 2320 as a vendor item at 10)", pm:MarketPrice(2320) == 15,
-        pm:MarketPrice(2320))
+    check(p .. "an item a vendor sells has no market price here (2320: vendor 10, auction 15)",
+        pm:MarketPrice(2320) == nil, pm:MarketPrice(2320))
     check(p .. "no market data: nil, not the sell estimate", pm:MarketPrice(2996) == nil, pm:MarketPrice(2996))
     check(p .. "unknown item: nil, not the floor", pm:MarketPrice(424242) == nil)
     check(p .. "nothing is cached by it", pm.cache[2589] == nil and pm.cache[2996] == nil)
 
-    -- A fresh Auctionator price (seen today, auction house visited) wins.
+    -- Kept for as long as the reagent prices are: the sources are not asked
+    -- again for every calculation.
+    tsmValues.DBRecent["i:2589"] = 777
+    check(p .. "a second lookup does not ask the sources again", pm:MarketPrice(2589) == 120, pm:MarketPrice(2589))
+    check(p .. "an item without a market price is remembered as such", pm:MarketPrice(2996) == nil)
+    now = now + 301
+    check(p .. "after the cache time it is read again", pm:MarketPrice(2589) == 777, pm:MarketPrice(2589))
+    now = 1000
+    resetTsm()
+
+    -- A fresh Auctionator price (seen today, auction house visited) wins,
+    -- and leaving the auction house expires what was kept.
+    check(p .. "before the visit: the configured order", pm:MarketPrice(2770) == 50, pm:MarketPrice(2770))
     pm:OnAuctionHouseVisited()
     check(p .. "a fresh scan wins over the configured order", pm:MarketPrice(2770) == 45, pm:MarketPrice(2770))
 

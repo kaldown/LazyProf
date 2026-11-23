@@ -276,6 +276,22 @@ function LazyProf:ScheduleItemInfoRecalc()
     end)
 end
 
+-- A crafted item whose data never arrives stops counting as "still loading"
+-- after Constants.SALE_LOADING_TIMEOUT seconds. Nothing else happens at that
+-- moment, so one redraw is scheduled for it (pending flag, as above): the
+-- note goes away by itself. A redraw only, never a recalculation.
+local saleLoadingPending = false
+function LazyProf:ScheduleSaleLoadingRefresh()
+    if saleLoadingPending then return end
+    saleLoadingPending = true
+    C_Timer.After(self.Constants.SALE_LOADING_TIMEOUT + 1, function()
+        saleLoadingPending = false
+        if LazyProf.GuideWindow then
+            LazyProf.GuideWindow:Refresh()
+        end
+    end)
+end
+
 -- PERFORMANCE FIX (GitHub Issue #3): Debounced lightweight shopping list refresh.
 -- This is separate from full recalculation and only updates material quantities.
 -- Same pending flag as ScheduleRecalculation (C_Timer.After returns nothing).
