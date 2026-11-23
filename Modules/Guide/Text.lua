@@ -70,6 +70,18 @@ function Text.SoldNote(mode)
     return "crafts sold to a vendor"
 end
 
+-- One craft's sale value: "Sells for 45s each (vendor)". `source` is where
+-- the value comes from ("vendor" | "auction"); unknown: no bracket.
+function Text.SellsFor(saleEach, source)
+    local text = "Sells for " .. LazyProf.Utils.FormatMoneyShort(saleEach) .. " each"
+    if source == "auction" then
+        return text .. string.format(" (auction, after the %d%% cut)", CutPercent())
+    elseif source == "vendor" then
+        return text .. " (vendor)"
+    end
+    return text
+end
+
 -- Learn and rank steps -----------------------------------------------------------
 
 -- On the VANILLA profile the recipe data types every recipe as trainer-taught,
@@ -101,6 +113,22 @@ function Text.LearnShort(stage, profile)
     end
     if info.type == "ah" then return "auction house" end
     return nil
+end
+
+-- The line under a recipe run whose recipe is still to learn: "Learn first:
+-- trainer, 4s" - where it comes from and the fee when it is known. Where
+-- nothing may be said about the source (the VANILLA profile, or a source kind
+-- there are no words for) it says only to learn it, without a fee.
+function Text.LearnFirst(stage, profile)
+    local short = Text.LearnShort(stage, profile)
+    if not short then
+        return "Learn the recipe first"
+    end
+    local text = "Learn first: " .. short
+    if (stage.fee or 0) > 0 then
+        text = text .. ", " .. LazyProf.Utils.FormatMoneyShort(stage.fee)
+    end
+    return text
 end
 
 -- The body of a learn step's card: { { text, color = "plain" | "good" | "warn" | "cost" }, ... }.

@@ -719,6 +719,33 @@ T.section("learn and rank text", function()
     T.eq("short: currency vendor", Text.LearnShort(learn({ type = "vendor", currency = { name = "Favor", amount = 3 } }), "FOREVER"), "vendor, 3 Favor")
     T.eq("short: none", Text.LearnShort(learn(nil), "FOREVER"), "not currently obtainable")
 
+    -- The sub-line under a recipe still to learn: where it comes from and
+    -- the fee, in a few words.
+    local function first(info, fee, profile)
+        local stage = learn(info)
+        stage.fee = fee or 0
+        return Text.LearnFirst(stage, profile or "FOREVER")
+    end
+    T.eq("learn first: trainer with its fee", first({ type = "trainer", cost = 400 }, 400), "Learn first: trainer, 4s")
+    T.eq("learn first: trainer, fee unknown", first({ type = "trainer" }), "Learn first: trainer")
+    T.eq("learn first: vendor", first({ type = "vendor", cost = 2000 }, 2000), "Learn first: vendor, 20s")
+    T.eq("learn first: vendor, no price known", first({ type = "vendor" }), "Learn first: vendor")
+    T.eq("learn first: currency vendor", first({ type = "vendor", currency = { name = "Favor", amount = 3 } }),
+        "Learn first: vendor, 3 Favor")
+    T.eq("learn first: auction house with its price", first({ type = "ah", price = 4000 }, 4000), "Learn first: auction house, 40s")
+    T.eq("learn first: in the bags", first({ type = "inventory", location = { type = "bags" } }), "Learn first: in your bags")
+    T.eq("learn first: no source", first(nil), "Learn first: not currently obtainable")
+    T.eq("learn first: VANILLA names no source and no fee", first({ type = "trainer", cost = 400 }, 400, "VANILLA"),
+        "Learn the recipe first")
+    T.eq("learn first: a source kind it has no words for", first({ type = "quest" }, 0), "Learn the recipe first")
+
+    -- What one craft sells for, by where the value comes from.
+    T.eq("sells for: vendor", Text.SellsFor(4500, "vendor"), "Sells for 45s each (vendor)")
+    T.eq("sells for: auction", Text.SellsFor(12345, "auction"), "Sells for 1g 23s each (auction, after the 5% cut)")
+    T.eq("sells for: source unknown", Text.SellsFor(45, nil), "Sells for 45c each")
+    T.eq("sold note: vendor", Text.SoldNote("vendor"), "crafts sold to a vendor")
+    T.eq("sold note: auction", Text.SoldNote("auction"), "crafts sold at auction, after the 5% cut")
+
     local rank = { kind = "rank", cap = 150, at = 150 }
     T.eq("rank: the character's own cap", Text.RankLine(rank, 150, "Tailoring", true),
         "Your cap is 150. Train the next rank at a Tailoring trainer before you reach 150.")
@@ -733,6 +760,351 @@ T.section("learn and rank text", function()
     T.eq("VANILLA learn row", row.text, "|cFF888888learn|r  Boots")
     row = Views.StepRow(learn({ type = "trainer", cost = 500 }), { profile = "FOREVER", path = { profession = "Tailoring" } }, {})
     T.eq("learn row elsewhere", row.text, "|cFF888888learn|r  Boots - trainer")
+end)
+
+-- The Path tab: one row per recipe run, learn steps and the closest
+-- alternative folded in as sub-lines, a run opened in place.
+T.section("path list", function()
+    -- Leatherworking at 117 with the cap at 150: Dark Boots (to learn at a
+    -- trainer) 117-125, Shoulders 125-140 (with other recipes that could do
+    -- that range), Armor Kit 140-150, the next rank, Barbaric Gloves (pattern
+    -- on the auction house) 150-170, then nothing for 170-190.
+    local function listPath(opts)
+        opts = opts or {}
+        local boots = recipe(31, "Dark Boots", 117, 150, 160, 170, { unlearned = true,
+            sourceInfo = { type = "trainer", cost = 400, npcName = "Any Leatherworking Trainer" } })
+        local shoulders = recipe(32, "Shoulders", 125, 150, 160, 170)
+        local kit = recipe(33, "Armor Kit", 140, 165, 175, 185)
+        local gloves = recipe(34, "Barbaric Gloves", 150, 170, 180, 190, { unlearned = true,
+            sourceInfo = { type = "ah", price = 8500, source = "TSM" } })
+        local pants = recipe(35, "Dark Pants", 120, 150, 160, 170)
+        local vest = recipe(36, "Vest", 120, 150, 160, 170)
+        local fine = recipe(37, "Fine Pants", 120, 150, 160, 170, { unlearned = true, sourceInfo = { type = "vendor", cost = 3000 } })
+        fine.source = { type = "vendor" }
+        local belt = recipe(38, "Belt", 120, 150, 160, 170)
+        local hat = recipe(39, "Hat", 120, 150, 160, 170)
+        hat._isUnavailable, hat._unavailableReason = true, "Needs Alchemy"
+        local alts = {
+            { recipe = shoulders, score = 1, color = "orange", expectedSkillups = 1 },
+            { recipe = pants, score = 2, color = "orange", expectedSkillups = 1 },
+            { recipe = vest, score = 3, color = "yellow", expectedSkillups = 0.75 },
+            { recipe = fine, score = 4, color = "orange", expectedSkillups = 1 },
+            { recipe = belt, score = 5, color = "orange", expectedSkillups = 1 },
+            { recipe = hat, score = math.huge, color = "orange", expectedSkillups = 1 },
+        }
+        return {
+            profession = "Leatherworking", professionKey = "leatherworking", hasProfession = true,
+            currentSkill = 117, actualSkill = opts.skill or 117, targetSkill = 190, capSkill = 300, racialBonus = 0,
+            milestones = MILESTONES, complete = false, sale = opts.sale,
+            prices = { [131] = 100, [132] = 100, [133] = 80, [134] = 105, [135] = opts.pantsPrice or 110,
+                       [136] = 150, [137] = 120, [138] = 200, [139] = 50 },
+            steps = {
+                step(boots, 117, 121, 5, 0), step(boots, 121, 125, 5, 0),
+                step(shoulders, 125, 140, 15, 0, { alternatives = alts }),
+                step(kit, 140, 150, 12, 0),
+                step(gloves, 150, 170, 24, 0),
+            },
+            gaps = { { from = 170, to = 190, reason = "no recipe" } },
+        }
+    end
+    local BOOTS_KEY, SHOULDERS_KEY, KIT_KEY = "craft:31:117", "craft:32:125", "craft:33:140"
+    local calls = {}
+    local ctx = {
+        onToggleExpand = function(stage) calls[#calls + 1] = "toggle:" .. stage.key end,
+        onShowRecipe = function(r, skill) calls[#calls + 1] = "recipe:" .. r.name .. ":" .. tostring(skill) end,
+        onUseAlternative = function(stage, alt) calls[#calls + 1] = "use:" .. alt.recipe.name .. ":" .. stage.from .. "-" .. stage.to end,
+        onResetPin = function(stage) calls[#calls + 1] = "reset:" .. stage.key end,
+        onShowAllAlts = function(stage, on) calls[#calls + 1] = "all:" .. stage.key .. ":" .. tostring(on) end,
+    }
+    -- One line per row: sub-lines indented, columns, right text, button.
+    local function texts(rows)
+        local out = {}
+        for _, r in ipairs(rows) do
+            out[#out + 1] = (r.sub and "  " or "") .. (r.text or "")
+                .. (r.cols and (" | " .. table.concat(r.cols, ",")) or "")
+                .. ((r.right and r.right ~= "") and (" | " .. r.right) or "")
+                .. (r.button and (" [" .. r.button.text .. "]") or "")
+        end
+        return out
+    end
+    local function find(rows, needle)
+        for i, r in ipairs(rows) do
+            if r.text and r.text:find(needle, 1, true) then return r, i end
+        end
+    end
+    local function closed(extra)
+        local expanded = { [BOOTS_KEY] = false }
+        for k, v in pairs(extra or {}) do expanded[k] = v end
+        return expanded
+    end
+    local function list(pathOpts, viewOpts)
+        viewOpts = viewOpts or {}
+        viewOpts.liveCap = viewOpts.liveCap or 150
+        viewOpts.expanded = viewOpts.expanded or closed()
+        local view = shopView(listPath(pathOpts), viewOpts)
+        return Views.Path(view, ctx), view
+    end
+
+    T.eq("the closest alternative counts as close within a tenth of the run's cost", Views.CLOSE_ALTERNATIVE, 0.10)
+
+    -- Every row closed.
+    local rows, view = list()
+    local t = texts(rows)
+    T.eq("header row", t[1], "Recipes | skill,crafts,cost")
+    T.check("header: path columns", rows[1].kind == "cols" and rows[1].layout == "path" and rows[1].header == true)
+    T.eq("the current run is marked", t[2], "> Dark Boots | 117-125,10,10s")
+    T.eq("its recipe is still to learn: a sub-line, not a row", t[3], "  Learn first: trainer, 4s")
+    T.eq("a run with a close alternative", t[4], "Shoulders | 125-140,15,15s")
+    T.eq("the alternative as a sub-line with a Use button", t[5], "  or: Dark Pants, +1s 50c [Use]")
+    T.eq("a plain run", t[6], "Armor Kit | 140-150,12,9s 60c")
+    T.eq("the rank step is a thin row of its own", t[7], "Train the next rank before 150")
+    T.eq("the run after it", t[8], "Barbaric Gloves | 150-170,24,25s 20c")
+    T.eq("with its pattern on the auction house", t[9], "  Learn first: auction house, 85s")
+    T.eq("the gap", t[10], "No recipe for 170-190: train elsewhere or missing data")
+    T.eq("nothing else", #t, 10)
+
+    local boots, shoulders, rank, gap = rows[2], rows[4], rows[7], rows[10]
+    T.check("craft row: path columns", boots.kind == "cols" and boots.layout == "path" and #boots.cols == 3)
+    T.eq("craft row: its stage", boots.stage, view.stages[2])
+    T.eq("craft row: difficulty colour at the start (orange)", boots.color[2], 0.5)
+    T.check("the current run is highlighted", boots.bg[1] > 0.3 and shoulders.bg[1] < 0.3)
+    T.eq("other runs carry no mark", shoulders.text, "Shoulders")
+    T.check("sub-lines are marked for the list", rows[3].kind == "line" and rows[3].sub == true and rows[5].sub == true)
+    T.check("the learn sub-line has the learn step's tooltip",
+        rows[3].tooltip[1].text == "Learn Dark Boots" and rows[3].tooltip[2].text == "Learn from: any Leatherworking trainer")
+    T.eq("rank row: gold", rank.color[2], 0.82)
+    T.eq("rank row: tooltip is the rank sentence", rank.tooltip[1].text,
+        "Your cap is 150. Train the next rank at a Leatherworking trainer before you reach 150.")
+    T.check("gap row: red", gap.color[1] == 1 and gap.color[2] < 0.6)
+    T.eq("gap row: today's tooltip", gap.tooltip[2].text, "No available recipe gives skill-ups in this range.")
+    T.eq("craft tooltip: title", boots.tooltip[1].text, "10x Dark Boots")
+    T.eq("craft tooltip: how to open", boots.tooltip[#boots.tooltip].text, "Click to open or close")
+
+    boots.onClick()
+    T.eq("a click on a run asks to open or close it", calls[#calls], "toggle:" .. BOOTS_KEY)
+    rows[3].onClick()
+    T.eq("so does a click on its learn sub-line", calls[#calls], "toggle:" .. BOOTS_KEY)
+    rows[5].button.onClick()
+    T.eq("Use pins the alternative over the run's exact range", calls[#calls], "use:Dark Pants:125-140")
+    rows[5].onClick()
+    T.eq("a click on the alternative opens its recipe", calls[#calls], "recipe:Dark Pants:125")
+
+    -- Learn sub-line on the VANILLA profile: no source, no fee.
+    rows = list(nil, { profile = "VANILLA" })
+    T.eq("VANILLA: the learn sub-line names no source", texts(rows)[3], "  Learn the recipe first")
+
+    -- Owned stock lowers a run's cost: green.
+    rows = list(nil, { inventory = { [132] = 5 } })
+    T.eq("stock: the run costs what is left to buy", rows[4].cols[3], "10s")
+    T.check("stock: in green", rows[4].colColors[3][1] < 1 and rows[4].colColors[3][2] == 1)
+    T.check("no stock: not green", shoulders.colColors == nil or shoulders.colColors[3] == nil or shoulders.colColors[3][1] == 1)
+
+    -- A reagent to buy without a price: no made-up cost.
+    local unpricedPath = listPath()
+    unpricedPath.prices[133] = nil
+    rows = Views.Path(shopView(unpricedPath, { liveCap = 150, expanded = closed() }), ctx)
+    T.eq("a run with an unpriced reagent shows a question mark", rows[6].cols[3], "?")
+    T.check("in orange", rows[6].colColors[3][1] == 1 and rows[6].colColors[3][2] == 0.5)
+
+    -- Finished runs: dimmed, "done", their learn step gone, no alternative.
+    rows = list({ skill = 141, pantsPrice = 60 })
+    t = texts(rows)
+    T.eq("done: says so in the cost column", t[2], "Dark Boots | 117-125,10,done")
+    T.eq("done: dimmed", rows[2].alpha, 0.5)
+    T.eq("done: no learn sub-line, no alternative; the next run follows", t[3], "Shoulders | 125-140,15,done")
+    T.eq("the run the skill is in is the current one", t[4], "> Armor Kit | 140-150,12,9s 60c")
+    -- The skill is inside the gap: the gap is where the player is.
+    rows = list({ skill = 175 })
+    T.eq("in a gap: the gap row is marked", texts(rows)[#rows], "> No recipe for 170-190: train elsewhere or missing data")
+    -- A rank step, then a gap: the gap is still where the player is.
+    local capGap = makePath({ complete = false, currentSkill = 143, actualSkill = 150, prices = PRICES,
+        steps = { step(A, 143, 150, 7, 0), step(B, 170, 180, 10, 0) },
+        gaps = { { from = 150, to = 170, reason = "no recipe" } } })
+    t = texts(Views.Path(shopView(capGap, { liveCap = 150 }), ctx))
+    T.eq("rank step before a gap: the rank row", t[3], "Train the next rank before 150")
+    T.eq("rank step before a gap: the gap is marked", t[4], "> No recipe for 150-170: train elsewhere or missing data")
+    -- The rank step is next: the run after it is still the one to craft.
+    rows = list({ skill = 150 })
+    t = texts(rows)
+    T.eq("rank step next: it is not marked", t[5], "Train the next rank before 150")
+    T.eq("rank step next: the run after it is the current one", t[6], "> Barbaric Gloves | 150-170,24,25s 20c")
+
+    -- The closest alternative: shown within a tenth of what the run costs
+    -- the player, and always when it is cheaper.
+    T.check("exactly a tenth dearer: shown", find(list({ pantsPrice = 110 }), "or: Dark Pants") ~= nil)
+    T.check("a copper more than that: not shown", find(list({ pantsPrice = 111 }), "or:") == nil)
+    rows = list({ pantsPrice = 60 })
+    T.eq("cheaper: always shown, in green", texts(rows)[5], "  or: Dark Pants, |cFF66FF66-6s|r [Use]")
+    rows = list({ pantsPrice = 100 })
+    T.eq("the same cost", texts(rows)[5], "  or: Dark Pants, same cost [Use]")
+    -- A run that pays for itself: only a cheaper alternative.
+    local sale = { mode = "vendor", values = { [32] = 100 }, sources = { [32] = "vendor" } }
+    T.check("run with no net cost: a dearer alternative is not shown", find(list({ sale = sale }), "or:") == nil)
+    sale = { mode = "vendor", values = { [32] = 100, [35] = 120 }, sources = { [32] = "vendor", [35] = "vendor" } }
+    rows = list({ sale = sale })
+    T.eq("run with no net cost: a cheaper one is", texts(rows)[5], "  or: Dark Pants, |cFF66FF66-1s 50c|r [Use]")
+    local gain = { mode = "vendor", values = { [32] = 150 }, sources = { [32] = "vendor" } }
+    T.check("run that gains money: a dearer alternative is not shown either", find(list({ sale = gain, pantsPrice = 60 }), "or:") == nil)
+    -- An alternative whose recipe has to be learned says so.
+    local learnAlt = listPath()
+    for _, itemId in ipairs({ 135, 136, 138 }) do learnAlt.prices[itemId] = 500 end
+    learnAlt.prices[137] = 1                                -- Fine Pants: 15c of reagents and 30s to learn
+    learnAlt.steps[3].recipe.reagents[1].count = 3          -- Shoulders: 45s
+    rows = Views.Path(shopView(learnAlt, { liveCap = 150, expanded = closed() }), ctx)
+    T.eq("an alternative to learn names the fee", texts(rows)[5], "  or: Fine Pants (learn 30s), |cFF66FF66-14s 85c|r [Use]")
+    -- A pinned run: the player already chose.
+    local pins = {}
+    LazyProf.Pins.Add(pins, 125, 140, 32)
+    T.check("pinned run: no inline alternative", find(list({ pantsPrice = 60 }, { pins = pins }), "or:") == nil)
+
+    -- The alternative's tooltip says what the row says: cost over the run,
+    -- what its crafts sell for, and the net.
+    rows = list({ sale = sale })
+    local tip = {}
+    for _, line in ipairs(rows[5].tooltip) do tip[#tip + 1] = line.text end
+    tip = table.concat(tip, " / ")
+    T.check("alternative tooltip: cost and sale over the run",
+        tip:find("About 15 crafts for this run: 16s 50c, sells for 18s", 1, true) ~= nil, tip)
+    T.check("alternative tooltip: the net", tip:find("Net gain: 1s 50c", 1, true) ~= nil, tip)
+    rows = list()
+    tip = {}
+    for _, line in ipairs(rows[5].tooltip) do tip[#tip + 1] = line.text end
+    tip = table.concat(tip, " / ")
+    T.check("alternative tooltip, nothing sells: the cost alone",
+        tip:find("About 15 crafts for this run: 16s 50c / ", 1, true) ~= nil and tip:find("Net", 1, true) == nil, tip)
+
+    -- Opened in place. The current run is open until the player closes it.
+    rows, view = list(nil, { expanded = {} })
+    t = texts(rows)
+    T.eq("open by default: the current run's reagent table", t[4], "Reagent | Need,Have,Buy,Cost")
+    T.eq("its reagent", t[5], "MatDark Boots | 10,0,10,10s")
+    T.check("the Buy number is white, not red", rows[5].colColors[3][1] == 1 and rows[5].colColors[3][2] == 1)
+    T.eq("still to learn: where", t[6], "Learn from: any Leatherworking trainer")
+    T.eq("and the fee", t[7], "Cost: 4s")
+    T.eq("and the skill", t[8], "Requires skill 117")
+    T.eq("the last line of an opened run", t[9], " [Recipe details]")
+    T.eq("then the next run", t[10], "Shoulders | 125-140,15,15s")
+    T.check("opened rows are indented", (rows[4].indent or 0) > 0 and (rows[6].indent or 0) > 0)
+    rows[9].button.onClick()
+    T.eq("Recipe details opens the run's recipe", calls[#calls], "recipe:Dark Boots:117")
+    T.eq("closed by the player: nothing under it but the learn line",
+        texts(list(nil, { expanded = { [BOOTS_KEY] = false } }))[4], "Shoulders | 125-140,15,15s")
+
+    -- Another run opened: its alternatives.
+    rows, view = list(nil, { expanded = closed({ [SHOULDERS_KEY] = true }) })
+    t = texts(rows)
+    T.eq("opened run: no inline alternative (they are listed below)", t[5], "Reagent | Need,Have,Buy,Cost")
+    T.eq("opened run: alternatives header names the range", t[7], "Other recipes for 125-140")
+    T.eq("first alternative: cost and crafts difference", t[8], "Dark Pants | +1s 50c  |cFF888888same crafts|r [Use]")
+    T.eq("second (same cost for the player: by name)", t[9], "Belt | +15s  |cFF888888same crafts|r [Use]")
+    T.eq("third", t[10], "Vest | +15s  +5 crafts [Use]")
+    T.eq("the rest behind Show all, with the details button", t[11], "Show all 5 [Recipe details]")
+    T.eq("then the next run", t[12], "Armor Kit | 140-150,12,9s 60c")
+    rows[8].button.onClick()
+    T.eq("Use on a listed alternative", calls[#calls], "use:Dark Pants:125-140")
+    rows[8].onClick()
+    T.eq("a click on a listed alternative opens its recipe", calls[#calls], "recipe:Dark Pants:125")
+    rows[11].onClick()
+    T.eq("Show all asks for that run", calls[#calls], "all:" .. SHOULDERS_KEY .. ":true")
+    rows[11].button.onClick()
+    T.eq("Recipe details of that run", calls[#calls], "recipe:Shoulders:125")
+
+    rows = list(nil, { expanded = closed({ [SHOULDERS_KEY] = true }), showAllAlts = { [SHOULDERS_KEY] = true } })
+    t = texts(rows)
+    T.eq("show all: an alternative to learn", t[11], "Fine Pants (learn 30s) | +33s  |cFF888888same crafts|r [Use]")
+    T.eq("show all: the unobtainable one last", t[12], "Hat | |cFF66FF66-7s 50c|r  |cFF888888same crafts|r [Use]")
+    T.eq("and dimmed", rows[12].alpha, 0.5)
+    T.eq("with its reason in the tooltip", rows[12].tooltip[2].text, "Needs Alchemy")
+    T.eq("Show fewer closes it", t[13], "Show fewer [Recipe details]")
+    rows[13].onClick()
+    T.eq("Show fewer asks for that run", calls[#calls], "all:" .. SHOULDERS_KEY .. ":false")
+    -- Shown for one run only.
+    rows = list(nil, { expanded = closed({ [SHOULDERS_KEY] = true }), showAllAlts = { [KIT_KEY] = true } })
+    T.check("show all is per run", find(rows, "Show all 5") ~= nil)
+    -- Fewer crafts, one craft.
+    local fewer = listPath()
+    fewer.steps[3].alternatives[3].expectedSkillups = 15 / 14
+    rows = Views.Path(shopView(fewer, { liveCap = 150, expanded = closed({ [SHOULDERS_KEY] = true }) }), ctx)
+    T.eq("one craft fewer", texts(rows)[9], "Vest | +6s  |cFF66FF66-1 craft|r [Use]")
+
+    -- A pinned run says so and offers Reset.
+    rows = list(nil, { expanded = closed({ [SHOULDERS_KEY] = true }), pins = pins })
+    t = texts(rows)
+    T.eq("pinned: your choice, with Reset", t[5], "Your choice [Reset]")
+    rows[5].button.onClick()
+    T.eq("Reset asks to unpin the run", calls[#calls], "reset:" .. SHOULDERS_KEY)
+
+    -- More options: the colour line, the cost per craft and the market price.
+    rows = list(nil, { expanded = {}, advanced = true })
+    T.eq("more options: colour changes and cost per craft", texts(rows)[4], "orange all the way; 1s per craft")
+    rows = list(nil, { expanded = {}, advanced = true, inventory = { [131] = 4 } })
+    T.eq("more options, with stock: the market price too", texts(rows)[4],
+        "orange all the way; 60c per craft; market price 10s")
+    rows = list(nil, { expanded = {}, inventory = { [131] = 4 } })
+    T.eq("without more options: straight to the reagents", texts(rows)[4], "Reagent | Need,Have,Buy,Cost")
+    T.eq("stock in the reagent table", texts(rows)[5], "MatDark Boots | 10,4,6,6s")
+
+    -- What a craft sells for.
+    sale = { mode = "vendor", values = { [31] = 45 }, sources = { [31] = "vendor" } }
+    rows = list({ sale = sale }, { expanded = {} })
+    T.eq("sells for, vendor", texts(rows)[6], "Sells for 45c each (vendor)")
+    sale = { mode = "auction", values = { [31] = 45 }, sources = { [31] = "auction" } }
+    rows = list({ sale = sale }, { expanded = {} })
+    T.eq("sells for, auction", texts(rows)[6], "Sells for 45c each (auction, after the 5% cut)")
+    sale = { mode = "auction", values = { [31] = 45 }, sources = { [31] = "vendor" } }
+    rows = list({ sale = sale }, { expanded = {} })
+    T.eq("sells for, auction mode but only a vendor value", texts(rows)[6], "Sells for 45c each (vendor)")
+
+    -- Spare crafts.
+    rows = list(nil, { expanded = {}, margin = 15 })
+    t = texts(rows)
+    T.eq("margin: the row shows the larger count", t[2], "> Dark Boots | 117-125,12,12s")
+    T.check("margin: both counts when opened", find(rows, "10 crafts expected, 12 with spare crafts") ~= nil)
+
+    -- The profession window hides the unlearned recipe: said where it is learned.
+    rows, view = list(nil, { expanded = {} })
+    view.hiddenRecipeId = 31
+    rows = Views.Path(view, ctx)
+    T.check("hidden by the profession window's filter: the hint", find(rows, "The profession window hides unlearned recipes") ~= nil)
+    view.hiddenRecipeId = 34
+    T.check("not on another recipe's run", find(Views.Path(view, ctx), "The profession window hides unlearned recipes") == nil)
+
+    -- Trainers the player visited: under the learn lines and in the rank tooltip.
+    LazyProf.TrainerMemory = { Trainers = function(_, profKey, recipeId)
+        if profKey ~= "leatherworking" then return {} end
+        return { { name = recipeId and "Bob" or "Ann", zone = "Stormwind", x = 0.53, y = 0.81 } }
+    end }
+    rows = list(nil, { expanded = {} })
+    local _, at = find(rows, "Trainers you visited that teach it:")
+    T.check("visited trainers are named", at ~= nil and rows[at + 1].text == "Bob - Stormwind (53, 81)")
+    local rankRow = find(rows, "Train the next rank")
+    T.eq("rank tooltip: visited trainers", rankRow.tooltip[#rankRow.tooltip].text, "  Ann - Stormwind (53, 81)")
+    rows = list(nil, { expanded = {}, profile = "VANILLA" })
+    T.check("VANILLA: no trainer is named for a recipe", find(rows, "Trainers you visited that teach it:") == nil)
+    T.eq("VANILLA: the opened run says only to learn it", texts(rows)[6], "Learn the recipe. The recipe details show what is known about it.")
+    LazyProf.TrainerMemory = nil
+
+    -- A green recipe bridging a gap says why it is there.
+    local bridge = makePath({ complete = true })
+    rows = Views.Path(shopView(bridge, { expanded = { ["craft:1:143"] = false, ["craft:2:160"] = true } }), ctx)
+    T.check("bridge: the sentence", find(rows, "No orange or yellow recipe is available here") ~= nil)
+    T.eq("colour changes of a run that crosses a threshold", LazyProf.GuideText.ColorChanges(Stages.Build(bridge)[1]),
+        "orange until 150, then yellow")
+
+    -- Nothing left, no path, no stages.
+    local done = makePath({ steps = {}, gaps = {}, totalCost = 0, nothingLeft = true, actualSkill = 300, currentSkill = 300 })
+    T.eq("nothing left: the notice replaces the list", Views.Path(shopView(done), ctx)[1].text,
+        "Nothing left: Tailoring is at its cap of 300.")
+    T.eq("no path: no rows", #Views.Path({}, ctx), 0)
+
+    for _, r in ipairs(Views.Path(shopView(listPath(), { liveCap = 150, expanded = { [SHOULDERS_KEY] = true }, advanced = true }), ctx)) do
+        for _, text in ipairs({ r.text or "", r.right or "" }) do
+            if text:find("[\128-\255]") then T.check("path text is plain ASCII", false, text) end
+            if text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):find("|", 1, true) then
+                T.check("path text: pipes only in colour codes", false, text)
+            end
+        end
+    end
 end)
 
 T.section("shopping rows", function()
