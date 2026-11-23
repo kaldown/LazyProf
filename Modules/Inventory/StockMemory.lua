@@ -35,6 +35,7 @@ local StockMemory = {}
 LazyProf.StockMemory = StockMemory
 
 local SCHEMA = 1
+local HOUR = 3600
 local DAY = 86400
 StockMemory.KEEP_DAYS = 180
 
@@ -276,15 +277,21 @@ function StockMemory:Summary()
     return summary
 end
 
--- How long ago `at` was, seen from `now`, in whole UTC days of the server
--- clock: "today", "1 day ago", "N days ago". nil without both times.
+-- How long ago `at` was, seen from `now` (both server time in seconds), as
+-- elapsed time: "less than an hour ago", "1 hour ago" / "N hours ago" up to
+-- 23, then "1 day ago" / "N days ago" in whole 24-hour periods. Never
+-- calendar days: twenty minutes that span a midnight are not "1 day". A time
+-- ahead of the clock reads as less than an hour ago. nil without both times.
 function StockMemory.AgeText(now, at)
     if type(now) ~= "number" or type(at) ~= "number" then return nil end
-    local days = math.floor(now / DAY) - math.floor(at / DAY)
-    if days <= 0 then
-        return "today"
-    elseif days == 1 then
-        return "1 day ago"
+    local elapsed = now - at
+    if elapsed < HOUR then
+        return "less than an hour ago"
     end
-    return tostring(days) .. " days ago"
+    if elapsed < DAY then
+        local hours = math.floor(elapsed / HOUR)
+        return hours == 1 and "1 hour ago" or (tostring(hours) .. " hours ago")
+    end
+    local days = math.floor(elapsed / DAY)
+    return days == 1 and "1 day ago" or (tostring(days) .. " days ago")
 end

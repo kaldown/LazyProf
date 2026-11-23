@@ -783,7 +783,7 @@ T.section("diagnostic lines", function()
     T.check("who the character is", text:find("identity: guid=Player-1-MAIN name=Main Character world=eu-pvp faction=Alliance", 1, true) ~= nil, text)
     T.check("how much is remembered", text:find("memory: format=1 characters=3 accountBanks=1", 1, true) ~= nil, text)
     T.check("this character, with ages",
-        text:find("character: Main Character [this character] world=eu-pvp faction=Alliance bags=2 items (today) bank=1 items (2 days ago)", 1, true) ~= nil, text)
+        text:find("character: Main Character [this character] world=eu-pvp faction=Alliance bags=2 items (less than an hour ago) bank=1 items (2 days ago)", 1, true) ~= nil, text)
     T.check("an alt that counts",
         text:find("character: Bank Alt [alt] world=eu-pvp faction=Alliance bags=1 items (1 day ago) bank=never seen", 1, true) ~= nil, text)
     T.check("a character that does not count", text:find("character: Other Side [not counted] world=eu-pvp faction=Horde", 1, true) ~= nil, text)

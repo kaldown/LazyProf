@@ -212,8 +212,8 @@ the dump says so.
 | `account bank: world=.. items=N (<age>)` | The account-wide bank remembered for a world. It counts as bank stock for every character of that world. |
 
 Reading it: an alt with `not counted` cannot supply stock (check `world` and `faction`). An
-age that never becomes `today` on the character you play means its bags or bank are not
-being saved: look at `backpackSlots`, `identity` and, at the bank, the `canView` /
+age that never becomes `less than an hour ago` on the character you play means its bags
+or bank are not being saved: look at `backpackSlots`, `identity` and, at the bank, the `canView` /
 `lockedReason` / `tabs` values. A character you deleted stays listed until it has not been
 seen for 180 days, or until "Forget remembered characters" (Settings, Display, "Your
 stock") is used.
@@ -514,9 +514,10 @@ read from it; check in Syndicator / Baganator that it knows the character.
 How old the remembered stock is shows in the tooltips under "Collect first" on the
 Shopping tab: a "From bank" row says "Bank as seen 2 days ago" (and "Account bank as seen
 ..." when an account-wide bank is remembered), a "From alts" row names each character with
-the age of the bags or the bank its items are in. Ages are whole days of the server clock;
-"today" is the current UTC day. `/lp diag stock` lists every remembered character, whether
-it counts for the character you are on, and how old its bags and bank are.
+the age of the bags or the bank its items are in. Ages are elapsed time on the server
+clock: "less than an hour ago", then whole hours up to 23, then whole days of 24 hours.
+`/lp diag stock` lists every remembered character, whether it counts for the character you
+are on, and how old its bags and bank are.
 
 ### Stock of a Character That Is Gone Is Still Counted
 

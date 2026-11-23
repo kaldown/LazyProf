@@ -137,8 +137,8 @@ After making changes, run `/reload` and verify:
 3. Close the bank and `/reload`: the "From bank" row is still there
 4. Withdraw them: the row goes and the Have column still counts them (now in the bags)
 5. Log in an alt of the same world and faction that carries materials, log back: a "From alts" row names it
-   (hover it: "<name>: N - bags as seen today"; hover the "From bank" row: "Bank as seen today")
-6. `/lp diag stock` lists both characters with `today` as the age of their bags
+   (hover it: "<name>: N - bags as seen less than an hour ago"; hover the "From bank" row: "Bank as seen less than an hour ago")
+6. `/lp diag stock` lists both characters with `less than an hour ago` as the age of their bags
 7. Tick Self-Found mode: the "From alts" row goes, "From bank" stays
 8. "Forget remembered characters": the "From alts" row goes until the alt is played again
 

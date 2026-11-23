@@ -1489,18 +1489,29 @@ T.section("collect first: how old remembered stock is", function()
         has(t["From alts Wool"], "  Zed Alt: 20 - bags as seen 1 day ago, bank as seen 40 days ago"), joined(t["From alts Wool"]))
     T.check("alt row: the transfer note stays", has(t["From alts Wool"], "Transfer to this character before crafting"))
 
-    -- Seen today.
+    -- Seen a moment ago, and some hours ago: elapsed time, not calendar days.
     meta.bankSeenAt = NOW - 60
-    meta.alts["Zed Alt"].bags = NOW
+    meta.alts["Zed Alt"].bags = NOW - 5 * 3600
     t = tips(view(meta, NOW))
-    T.check("bank seen today", has(t["From bank Silk"], "Bank as seen today"), joined(t["From bank Silk"]))
-    T.check("an alt played today", has(t["From alts Silk"], "  Zed Alt: 10 - bags as seen today"), joined(t["From alts Silk"]))
+    T.check("bank seen a minute ago", has(t["From bank Silk"], "Bank as seen less than an hour ago"), joined(t["From bank Silk"]))
+    T.check("an alt played five hours ago", has(t["From alts Silk"], "  Zed Alt: 10 - bags as seen 5 hours ago"), joined(t["From alts Silk"]))
+    -- Twenty minutes that span a UTC midnight are not "1 day".
+    local midnight = 20000 * DAY
+    meta.bankSeenAt = midnight - 600
+    t = tips(view(meta, midnight + 600))
+    T.check("twenty minutes across midnight", has(t["From bank Silk"], "Bank as seen less than an hour ago"), joined(t["From bank Silk"]))
+    meta.bankSeenAt = NOW - 60
+    -- A part without a time has no age line.
+    meta.alts["Zed Alt"].bags = nil
+    t = tips(view(meta, NOW))
+    T.check("an alt's part without a time gets no age", has(t["From alts Silk"], "  Zed Alt: 10"), joined(t["From alts Silk"]))
+    meta.alts["Zed Alt"].bags = NOW - 5 * 3600
 
     -- The account-wide bank is bank stock too and has an age of its own.
     meta.accountSeenAt = NOW - 5 * DAY
     t = tips(view(meta, NOW))
     T.eq("with an account bank: both ages", joined(t["From bank Silk"]),
-        "In bank: 12 | Grab: 12 / Bank as seen today / Account bank as seen 5 days ago / Shift-click to link")
+        "In bank: 12 | Grab: 12 / Bank as seen less than an hour ago / Account bank as seen 5 days ago / Shift-click to link")
     meta.bankSeenAt = nil
     t = tips(view(meta, NOW))
     T.eq("only the account bank remembered", joined(t["From bank Silk"]),

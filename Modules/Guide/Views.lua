@@ -930,16 +930,17 @@ local COLLECT = {
     { list = "fromAlts", label = "From alts", color = { 0.8, 0.6, 1 } },
 }
 
--- How long ago a remembered part of the stock was seen ("today", "2 days
--- ago"), counted from the view's clock; nil when there is nothing to say.
+-- How long ago a remembered part of the stock was seen ("less than an hour
+-- ago", "5 hours ago", "2 days ago"), counted from the view's clock; nil
+-- when there is nothing to say.
 local function SeenAgo(view, at)
     local memory = LazyProf.StockMemory
     if not (memory and view.now and at) then return nil end
     return memory.AgeText(view.now, at)
 end
 
--- How old what a remembered alt holds of an item is: "bags as seen today",
--- "bank as seen 3 days ago", or both when the item is in both. The path's
+-- How old what a remembered alt holds of an item is: "bags as seen 2 hours
+-- ago", "bank as seen 3 days ago", or both when the item is in both. The path's
 -- source breakdown says where the alt has it. nil for stock that is not
 -- remembered (an inventory addon's) or an alt without a known age.
 local function AltAge(view, itemId, name)

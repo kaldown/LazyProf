@@ -260,18 +260,29 @@ T.section("another format is left alone", function()
 end)
 
 T.section("age text", function()
-    local midnight = 20000 * DAY
-    T.eq("the same moment", Memory.AgeText(NOW, NOW), "today")
-    T.eq("earlier the same UTC day", Memory.AgeText(midnight + 23 * 3600, midnight + 60), "today")
+    local HOUR = 3600
+    -- Ages are elapsed time, never calendar days: something seen twenty
+    -- minutes ago must not read "1 day ago" because midnight lay in between.
+    T.eq("the same moment", Memory.AgeText(NOW, NOW), "less than an hour ago")
+    T.eq("twenty minutes", Memory.AgeText(NOW, NOW - 20 * 60), "less than an hour ago")
+    T.eq("one second short of an hour", Memory.AgeText(NOW, NOW - HOUR + 1), "less than an hour ago")
+    T.eq("one hour", Memory.AgeText(NOW, NOW - HOUR), "1 hour ago")
+    T.eq("an hour and fifty-nine minutes", Memory.AgeText(NOW, NOW - 2 * HOUR + 60), "1 hour ago")
+    T.eq("two hours", Memory.AgeText(NOW, NOW - 2 * HOUR), "2 hours ago")
+    T.eq("twenty-three hours", Memory.AgeText(NOW, NOW - 23 * HOUR), "23 hours ago")
+    T.eq("one second short of a day", Memory.AgeText(NOW, NOW - DAY + 1), "23 hours ago")
     T.eq("one day", Memory.AgeText(NOW, NOW - DAY), "1 day ago")
+    T.eq("forty-seven hours are still one day", Memory.AgeText(NOW, NOW - 47 * HOUR), "1 day ago")
     T.eq("two days", Memory.AgeText(NOW, NOW - 2 * DAY), "2 days ago")
     T.eq("forty days", Memory.AgeText(NOW, NOW - 40 * DAY), "40 days ago")
-    -- Days are UTC days of the server clock, not 24-hour spans.
-    T.eq("twenty seconds across a UTC midnight", Memory.AgeText(midnight + 10, midnight - 10), "1 day ago")
-    T.eq("47 hours that span two midnights", Memory.AgeText(midnight + DAY + 3600, midnight - 22 * 3600), "2 days ago")
-    T.eq("a time ahead of the clock", Memory.AgeText(NOW, NOW + 3 * DAY), "today")
-    T.check("nothing to say without a time", Memory.AgeText(NOW, nil) == nil and Memory.AgeText(nil, NOW) == nil)
-    T.check("plain ASCII", not Memory.AgeText(NOW, NOW - 5 * DAY):find("[\128-\255]"))
+    local midnight = 20000 * DAY
+    T.eq("twenty minutes across a UTC midnight", Memory.AgeText(midnight + 600, midnight - 600), "less than an hour ago")
+    T.eq("a time ahead of the clock (a clock that went back)", Memory.AgeText(NOW, NOW + 3 * DAY), "less than an hour ago")
+    T.check("nothing to say without a time", Memory.AgeText(NOW, nil) == nil and Memory.AgeText(nil, NOW) == nil
+        and Memory.AgeText(NOW, "yesterday") == nil)
+    for _, at in ipairs({ NOW, NOW - 5 * HOUR, NOW - 5 * DAY }) do
+        T.check("plain ASCII: " .. Memory.AgeText(NOW, at), not Memory.AgeText(NOW, at):find("[\128-\255]"))
+    end
 end)
 
 T.section("summary", function()
