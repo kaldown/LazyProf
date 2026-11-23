@@ -438,7 +438,22 @@ T.section("the bags are remembered a moment after they change", function()
     client.backpackSlots = 16
     Inventory:OnBagUpdate(0)
     advance(2.1)
-    T.eq("readable but empty bags are a real state and are saved", Memory:Summary().characters[1].bagItems, 0)
+    T.eq("bags that read as empty after a bag update are a real state and are saved",
+        Memory:Summary().characters[1].bagItems, 0)
+
+    -- At login no bag update says the bags are there yet: an empty read then
+    -- (slots, but no items) is not saved over what is remembered.
+    fresh()
+    Memory:SaveBags(MAIN, { [2589] = 8 }, {}, NOW - DAY)
+    client.bags = {}
+    Inventory:Initialize()
+    advance(2.1)
+    T.eq("start: an empty read does not replace the snapshot", Memory:Summary().characters[1].bagItems, 1)
+    T.eq("start: nor its time", Memory:Summary().characters[1].bagsAt, NOW - DAY)
+    client.bags = { [2589] = 3, [765] = 1 }
+    Inventory:Initialize()
+    advance(2.1)
+    T.eq("start: a read with items is saved", Memory:Summary().characters[1].bagItems, 2)
 
     -- Without a GUID nothing is saved.
     fresh()
@@ -476,6 +491,16 @@ T.section("logout writes a pending bag save once", function()
     Inventory:OnBagUpdate(0)
     client.started.onLogout()
     T.eq("logout with unreadable bags keeps the snapshot", Memory:Summary().characters[1].bagsAt, NOW + 30)
+    -- Slots but no items at logout: the client may already have let go of
+    -- the bags, so that is not taken for empty bags.
+    advance(5)
+    client.backpackSlots = 16
+    client.now = NOW + 120
+    Inventory:OnBagUpdate(0)
+    client.started.onLogout()
+    T.check("logout with bags that read as empty keeps the snapshot",
+        Memory:Summary().characters[1].bagsAt == NOW + 30 and Memory:Summary().characters[1].bagItems == 1,
+        Memory:Summary().characters[1].bagsAt)
 end)
 
 -- ===========================================================================
@@ -540,7 +565,9 @@ T.section("the bank is remembered only while its window is open", function()
     T.check("only the account bank readable: it is saved, the character bank kept",
         (Memory:AccountBank("eu-pvp"))[4306] == 1 and (bankOf())[2589] == 55)
 
-    -- An empty bank that can be read is a real state.
+    -- An empty bank that can be read is a real state (the window has been
+    -- open for a while: see "an early read" below).
+    advance(1)
     client.bank.character = { items = {} }
     Inventory:OnBagUpdate(6)
     nextFrame()
@@ -576,6 +603,99 @@ T.section("the bank is remembered only while its window is open", function()
     client.bank.account = { items = { [2589] = 2 } }
     client.started.onBankOpened()
     T.check("no guid and no world: nothing saved", #Memory:Summary().characters == 0 and #Memory:Summary().account == 0)
+end)
+
+-- ===========================================================================
+-- Whether a bank's items are there the moment its window opens is not known.
+-- A read that finds slots but no items right after opening is therefore not
+-- taken for an empty bank: it is looked at again half a second later.
+T.section("an early read does not empty the remembered bank", function()
+    local function bankOf() return Memory:OwnBank(MAIN.guid) end
+    local function start()
+        fresh()
+        Inventory:Initialize()
+        advance(2.1)
+        Memory:SaveBank(MAIN, { [2589] = 40 }, {}, NOW - DAY)
+        Memory:SaveAccountBank("eu-pvp", { [4306] = 9 }, NOW - DAY)
+        client.bankOpen = true
+        client.bank.character = { items = {} }
+        client.bank.account = { items = {} }
+    end
+
+    -- Opened and closed again before anything arrived.
+    start()
+    client.started.onBankOpened()
+    local items, at = bankOf()
+    T.check("empty at opening: the remembered bank is kept", items[2589] == 40 and at == NOW - DAY)
+    T.check("empty at opening: the account bank is kept", (Memory:AccountBank("eu-pvp"))[4306] == 9)
+    nextFrame()
+    Inventory:OnBagUpdate(0)          -- an unrelated bag update while still nothing is there
+    nextFrame()
+    T.check("still empty a moment later: kept", (bankOf())[2589] == 40)
+    client.bankOpen = false
+    client.started.onBankClosed()
+    client.reads.character = 0
+    advance(2)
+    T.check("closed before the items came: kept, and nothing read after the close",
+        (bankOf())[2589] == 40 and client.reads.character == 0, client.reads.character)
+
+    -- The items arrive a moment after the window.
+    start()
+    client.started.onBankOpened()
+    nextFrame()
+    client.bank.character = { items = { [2589] = 70 } }
+    Inventory:OnBagUpdate(6)
+    nextFrame()
+    T.eq("items that arrive are saved at once", (bankOf())[2589], 70)
+
+    -- No update follows: the bank is looked at again by itself.
+    start()
+    client.started.onBankOpened()
+    client.bank.character = { items = { [2589] = 71 } }
+    advance(0.4)
+    T.eq("not yet looked at again", (bankOf())[2589], 40)
+    advance(0.2)
+    T.eq("looked at again half a second after opening", (bankOf())[2589], 71)
+
+    -- The bank really is empty: saved as empty once the half second is over.
+    start()
+    client.now = NOW + 5
+    client.started.onBankOpened()
+    advance(0.6)
+    items, at = bankOf()
+    T.check("a bank that stays empty is saved as empty", items ~= nil and next(items) == nil and at == NOW + 5)
+    local account = Memory:AccountBank("eu-pvp")
+    T.check("and so is the account bank", account ~= nil and next(account) == nil)
+    local waiting = #timers
+    advance(5)
+    T.eq("no further reads are scheduled once it is settled", #timers, 0)
+    T.check("(one was waiting at most)", waiting <= 1, waiting)
+
+    -- One bank has its items at once, the other not yet: each is judged alone.
+    start()
+    client.bank.character = { items = { [2589] = 72 } }
+    client.started.onBankOpened()
+    T.check("the bank that has items is saved, the empty one waits",
+        (bankOf())[2589] == 72 and (Memory:AccountBank("eu-pvp"))[4306] == 9)
+
+    -- A scan in that first moment counts what is remembered.
+    start()
+    client.started.onBankOpened()
+    local combined = scan()
+    T.eq("a scan right after opening counts the remembered bank", combined[2589], 5 + 40)
+
+    -- Opened again later: the half second starts anew.
+    start()
+    client.bank.character = { items = { [2589] = 73 } }
+    client.started.onBankOpened()
+    advance(3)
+    client.bankOpen = false
+    client.started.onBankClosed()
+    advance(3)
+    client.bankOpen = true
+    client.bank.character = { items = {} }
+    client.started.onBankOpened()
+    T.eq("a second visit: an empty first read is not trusted either", (bankOf())[2589], 73)
 end)
 
 -- ===========================================================================

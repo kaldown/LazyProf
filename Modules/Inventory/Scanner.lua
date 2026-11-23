@@ -361,40 +361,62 @@ end
 --
 -- Bags: saved BAG_SAVE_DELAY seconds after a bag update (one save for a burst
 -- of updates) and, when a save is still waiting, at logout. Bags that report
--- no backpack slots could not be read and are not saved.
+-- no backpack slots could not be read and are not saved. Bags that read as
+-- completely empty are saved only when a bag update came before the read: at
+-- login and at logout nothing says the client has the bags' contents, and
+-- slots without items would otherwise replace the snapshot with nothing.
 -- Bank: read while the bank window is open only - when it opens, and on the
 -- frame after anything changes while it is open. The adapter returns nothing
--- for a bank it cannot read, and then what is remembered stays. Nothing is
--- read when the window closes: whether the bank can still be read at that
--- moment is not known, and a read that found slots without items would
--- replace the memory with an empty bank.
+-- for a bank it cannot read, and then what is remembered stays. For
+-- BANK_SETTLE seconds after the window opened a read that finds no item at
+-- all is not taken for an empty bank either (whether the items are there the
+-- moment the window opens is not known): it is looked at again when that
+-- time is over. Nothing is read when the window closes: whether the bank can
+-- still be read at that moment is not known, and a read that found slots
+-- without items would replace the memory with an empty bank.
 -- ============================================================================
 
 local BAG_SAVE_DELAY = 2
 local BANK_READ_DELAY = 0   -- the next frame
+local BANK_SETTLE = 0.5
 
 -- First-wins debounces on a pending flag (C_Timer.After returns nothing).
 local bagSavePending = false
+local bagUpdateSeen = false     -- a bag update asked for the waiting save
 local bankReadPending = false
+local bankLookAgainPending = false
+local bankOpenedAt = nil        -- GetTime() when the bank window opened
 
--- Remember what the character carries. Returns whether it was saved.
-function Inventory:SaveBags()
+-- Remember what the character carries. trustEmpty: a bag update came before
+-- this read, so bags without a single item are really empty. Returns whether
+-- it was saved.
+function Inventory:SaveBags(trustEmpty)
     if self:UsesSyndicator() then return false end
     local Client = LazyProf.Client
     local items, bound, backpackSlots = Client:BagContents()
     if not backpackSlots or backpackSlots <= 0 then
         return false   -- the bags could not be read just now
     end
+    if not trustEmpty and next(items) == nil then
+        return false   -- slots but no items, and nothing says they are loaded
+    end
     return LazyProf.StockMemory:SaveBags(Client:CharacterIdentity(), items, bound, Client:Now())
 end
 
-function Inventory:RequestBagSave()
-    if bagSavePending or self:UsesSyndicator() then return end
+-- fromUpdate: asked for by a bag update (see SaveBags).
+function Inventory:RequestBagSave(fromUpdate)
+    if self:UsesSyndicator() then return end
+    if fromUpdate then
+        bagUpdateSeen = true
+    end
+    if bagSavePending then return end
     bagSavePending = true
     C_Timer.After(BAG_SAVE_DELAY, function()
         if not bagSavePending then return end   -- written at logout meanwhile
         bagSavePending = false
-        Inventory:SaveBags()
+        local trustEmpty = bagUpdateSeen
+        bagUpdateSeen = false
+        Inventory:SaveBags(trustEmpty)
     end)
 end
 
@@ -406,17 +428,37 @@ function Inventory:ReadBank()
     if not Client:IsBankOpen() then return false end
     local identity = Client:CharacterIdentity() or {}
     local now = Client:Now()
+    -- Just opened: no items at all may only mean they are not there yet.
+    local settleLeft = bankOpenedAt and (bankOpenedAt + BANK_SETTLE - GetTime()) or 0
+    local lookAgain = false
+    local function Usable(items)
+        if not items then return false end
+        if settleLeft > 0 and next(items) == nil then
+            lookAgain = true
+            return false
+        end
+        return true
+    end
+
     local saved = false
     local items, bound = Client:BankContents("character")
-    if items then
+    if Usable(items) then
         saved = Memory:SaveBank(identity, items, bound, now) or saved
     end
     items = Client:BankContents("account")
-    if items then
+    if Usable(items) then
         saved = Memory:SaveAccountBank(identity.world, items, now) or saved
     end
     if saved then
         self:InvalidateCache()
+    end
+    if lookAgain and not bankLookAgainPending then
+        -- A flag of its own: a change meanwhile is still read on the next frame.
+        bankLookAgainPending = true
+        C_Timer.After(settleLeft, function()
+            bankLookAgainPending = false
+            Inventory:OnBankSeen()
+        end)
     end
     return saved
 end
@@ -437,6 +479,11 @@ function Inventory:RequestBankRead()
     end)
 end
 
+function Inventory:OnBankOpened()
+    bankOpenedAt = GetTime()
+    self:OnBankSeen()
+end
+
 -- A bag update (Core/Init.lua passes every BAG_UPDATE on with its container
 -- id). While the bank is open an item may have gone into it or come out of
 -- it whatever container the update names, so the bank is read again; an
@@ -448,7 +495,7 @@ function Inventory:OnBagUpdate(bagId)
         self:RequestBankRead()
     end
     if not Client:BankKindOfBag(bagId) then
-        self:RequestBagSave()
+        self:RequestBagSave(true)
     end
 end
 
@@ -458,7 +505,8 @@ end
 function Inventory:OnLogout()
     if not bagSavePending then return end
     bagSavePending = false
-    self:SaveBags()
+    bagUpdateSeen = false
+    self:SaveBags(false)
 end
 
 -- Start listening (called once the addon is enabled). Characters not seen
@@ -466,7 +514,7 @@ end
 -- character is remembered shortly after login even if its bags never change.
 function Inventory:Initialize()
     LazyProf.Client:StartStock({
-        onBankOpened = function() Inventory:OnBankSeen() end,
+        onBankOpened = function() Inventory:OnBankOpened() end,
         onBankChanged = function() Inventory:RequestBankRead() end,
         onBankClosed = function() end,
         onLogout = function() Inventory:OnLogout() end,
@@ -508,7 +556,7 @@ function Inventory:RunDiagnostic(lines)
     local now = Client:Now()
     add("identity: guid=" .. tostring(identity.guid) .. " name=" .. tostring(identity.name)
         .. " world=" .. tostring(identity.world) .. " faction=" .. tostring(identity.faction))
-    add("waiting: bagSave=" .. tostring(bagSavePending) .. " bankRead=" .. tostring(bankReadPending)
+    add("waiting: bagSave=" .. tostring(bagSavePending) .. " bankRead=" .. tostring(bankReadPending or bankLookAgainPending)
         .. " bankOpen=" .. tostring(Client:IsBankOpen()))
 
     local summary = Memory:Summary()
