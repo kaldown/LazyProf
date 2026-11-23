@@ -202,6 +202,23 @@ end
 -- market-price route and still be kept (a bridge can stop at a fractional skill).
 local GAP_TOLERANCE = 1
 
+-- Does the character own a reagent of a recipe that can be on the path?
+local function OwnsUsableReagent(recipes, inventory, startSkill, targetSkill, racialBonus)
+    if not inventory or next(inventory) == nil then return false end
+    for _, recipe in ipairs(recipes) do
+        local range = recipe.skillRange
+        if (recipe.skillRequired or 0) <= targetSkill
+                and (not range or (range.gray or math.huge) + racialBonus > startSkill) then
+            for _, reagent in ipairs(recipe.reagents or {}) do
+                if (inventory[reagent.itemId] or 0) > 0 then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
 -- Plan the candidate routes of one calculation and keep the one the player
 -- pays least for.
 -- args: strategy, strategyName, startSkill, targetSkill, recipes, prices,
@@ -212,6 +229,9 @@ local GAP_TOLERANCE = 1
 --           the route as it was before sale values and stock counted. Always.
 --   sale    the same, ranking by cost after what the craft sells for. Only
 --           when some recipe has a sale value that may be used for ranking.
+--   stock   as "sale" (with whatever sale values may rank), and the owned
+--           stock is given to the strategy, which scores it against whole
+--           runs. Only when the character owns a reagent a usable recipe takes.
 -- Every candidate is costed the same way - Account over its steps with the
 -- real stock: what is left to buy, plus recipes, minus what the crafts sell
 -- for - and the lowest amount is kept; a tie keeps the earlier candidate.
@@ -243,6 +263,9 @@ function Pathfinder:PlanRoutes(args)
         built[1] = build("market", {}, nil)
         if sale.rank and next(sale.rank) ~= nil then
             built[#built + 1] = build("sale", {}, sale.rank)
+        end
+        if OwnsUsableReagent(args.recipes, args.inventory, args.startSkill, args.targetSkill, args.racialBonus or 0) then
+            built[#built + 1] = build("stock", args.inventory, sale.rank)
         end
     else
         built[1] = build(args.strategyName or "route", {}, nil)

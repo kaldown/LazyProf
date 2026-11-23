@@ -436,6 +436,68 @@ T.section("candidates: a route that covers less cannot win", function()
     T.eq("a tie keeps the earlier candidate", route.kept, "market")
 end)
 
+T.section("candidates: owned stock can shape the route", function()
+    local LazyProf = loadRoutes()
+    local X, Y = 70, 71
+    local function fixture(extra)
+        local recipes = {
+            recipe(1, "A", { itemId = 801, yellow = 130, green = 140, gray = 150, reagents = { { itemId = X, count = 1, name = "X" } } }),
+            recipe(2, "B", { itemId = 802, yellow = 130, green = 140, gray = 150, reagents = { { itemId = Y, count = 1, name = "Y" } } }),
+        }
+        for _, r in ipairs(extra or {}) do recipes[#recipes + 1] = r end
+        return recipes
+    end
+
+    -- Ten Y in the bank: making B costs nothing, although Y is dearer than X.
+    local prices = { [X] = 100, [Y] = 120 }
+    local steps, _, route = plan(LazyProf, "cheapest", 100, 110, fixture(), prices, nil,
+        { [Y] = 10 }, { [Y] = { bank = 10 } })
+    T.eq("two candidates: market and stock", #route.candidates, 2)
+    T.eq("the second is the stock route", route.candidates[2].key, "stock")
+    T.eq("market route: ten X to buy", candidate(route, "market").net, 1000)
+    T.eq("stock route: nothing to buy", candidate(route, "stock").net, 0)
+    T.eq("the stock route is kept", route.kept, "stock")
+    T.eq("and returned", onlyRecipe(steps), 2)
+
+    -- The old trap: one Y owned, Y far dearer. The stock route does not move,
+    -- and a tie keeps the market route.
+    prices = { [X] = 100, [Y] = 300 }
+    steps, _, route = plan(LazyProf, "cheapest", 100, 110, fixture(), prices, nil, { [Y] = 1 }, { [Y] = { bags = 1 } })
+    T.eq("one Y owned: a stock route is still planned", route.candidates[2].key, "stock")
+    T.eq("it costs what the market route costs", candidate(route, "stock").net, candidate(route, "market").net)
+    T.eq("the market route is kept", route.kept, "market")
+    T.eq("all on the cheap recipe", onlyRecipe(steps), 1)
+
+    -- Stock no recipe on the path can use: no third route is planned.
+    steps, _, route = plan(LazyProf, "cheapest", 100, 110, fixture(), prices, nil, { [555] = 40 }, { [555] = { bags = 40 } })
+    T.eq("irrelevant stock: one candidate", #route.candidates, 1)
+    -- Nor for a reagent of a recipe that is grey before the start.
+    local old = recipe(3, "Old", { orange = 50, yellow = 60, green = 70, gray = 80, required = 50,
+        reagents = { { itemId = 72, count = 1, name = "Z" } } })
+    steps, _, route = plan(LazyProf, "cheapest", 100, 110, fixture({ old }), prices, nil, { [72] = 40 }, { [72] = { bags = 40 } })
+    T.eq("stock for a recipe out of range: one candidate", #route.candidates, 1)
+    -- Nor when nothing is owned at all.
+    steps, _, route = plan(LazyProf, "cheapest", 100, 110, fixture(), prices, nil, {}, {})
+    T.eq("nothing owned: one candidate", #route.candidates, 1)
+
+    -- With sale values too: market, sale, stock, in that order; the stock
+    -- route ranks with sale values as well.
+    local values = { [1] = 10, [2] = 20 }
+    prices = { [X] = 100, [Y] = 120 }
+    steps, _, route = plan(LazyProf, "cheapest", 100, 110, fixture(), prices, { values = values, rank = values },
+        { [Y] = 10 }, { [Y] = { bags = 10 } })
+    T.eq("three candidates", #route.candidates, 3)
+    T.check("in the order market, sale, stock", route.candidates[1].key == "market"
+        and route.candidates[2].key == "sale" and route.candidates[3].key == "stock")
+    T.eq("market: ten X bought, ten A sold", candidate(route, "market").net, 1000 - 100)
+    T.eq("stock: nothing bought, ten B sold", candidate(route, "stock").net, -200)
+    T.eq("the stock route is kept", route.kept, "stock")
+
+    -- Fastest never plans a stock route.
+    steps, _, route = plan(LazyProf, "fastest", 100, 110, fixture(), prices, nil, { [Y] = 10 }, { [Y] = { bags = 10 } })
+    T.eq("fastest: one candidate even with stock", #route.candidates, 1)
+end)
+
 T.section("candidates: fastest keeps its single run", function()
     local LazyProf = loadRoutes()
     local recipes, prices, values = example()
@@ -513,6 +575,79 @@ T.section("the whole calculation", function()
     T.eq("with the learned recipe", onlyRecipe(path.steps), 1)
     T.check("and nothing counted as sold", next(path.sale.values) == nil)
     LazyProf.db.profile.saleValueMode = "vendor"
+end)
+
+-- Property: on real recipe data the kept route never costs the player more than
+-- the market-price route, whatever is owned and whatever the crafts sell for;
+-- and with neither, the route is the snapshot's.
+local CASES = {
+    { name = "tbc_leatherworking_300_375", interface = 20505, prof = "leatherworking", from = 300, to = 375 },
+    { name = "vanilla_enchanting_1_300", interface = 11508, prof = "enchanting", from = 1, to = 300 },
+    { name = "tbc_engineering_1_375", interface = 20505, prof = "engineering", from = 1, to = 375 },
+    { name = "wotlk_alchemy_1_450", interface = 30403, prof = "alchemy", from = 1, to = 450 },
+    { name = "sod_tailoring_1_300", interface = 11508, sod = true, prof = "tailoring", from = 1, to = 300 },
+    { name = "forever_tailoring_1_300", interface = 16001, camelot = true, prof = "tailoring", from = 1, to = 300 },
+    { name = "forever_alchemy_1_300", interface = 16001, camelot = true, prof = "alchemy", from = 1, to = 300 },
+    { name = "forever_tailoring_1_225", interface = 16001, camelot = true, prof = "tailoring", from = 1, to = 225 },
+}
+
+T.section("property: never dearer than the market route", function()
+    local kept = {}
+    for _, case in ipairs(CASES) do
+        local CraftLib = harness.loadCraftLib(case.interface, { sod = case.sod, camelot = case.camelot })
+        local LazyProf = harness.loadLazyProf(ROUTE_FILES)
+        LazyProf.Client = LazyProf.Client or {}
+        LazyProf.Client.PlayerSkill = function() return 0 end
+        LazyProf.Client.GetItemInfo = function() return nil end
+        LazyProf.PriceManager = { PeekPriceInfo = function() return { price = 1, source = "TSM" } end }
+        local prof = CraftLib:GetProfession(case.prof)
+        local function fresh()
+            local recipes = LazyProf.Utils.DeepCopy(prof.recipes)
+            for _, r in ipairs(recipes) do r.learned = false end
+            return recipes
+        end
+        local prices = harness.priceTable(fresh())
+
+        -- Synthetic sale values on every third recipe, synthetic stock of
+        -- every fourth reagent.
+        local values, n = {}, 0
+        for _, r in ipairs(fresh()) do
+            n = n + 1
+            if n % 3 == 0 then values[r.id] = (r.id * 13) % 400 end
+        end
+        local ids = {}
+        for itemId in pairs(prices) do ids[#ids + 1] = itemId end
+        table.sort(ids)
+        local inventory, breakdown = {}, {}
+        for i, itemId in ipairs(ids) do
+            if i % 4 == 0 then
+                inventory[itemId] = 20
+                breakdown[itemId] = { bags = 20 }
+            end
+        end
+
+        for _, variant in ipairs({
+            { label = "sale", sale = { values = values, rank = values } },
+            { label = "stock", inventory = inventory, breakdown = breakdown },
+            { label = "sale and stock", sale = { values = values, rank = values }, inventory = inventory, breakdown = breakdown },
+        }) do
+            local steps, meta, route = plan(LazyProf, "cheapest", case.from, case.to, fresh(), prices, variant.sale,
+                variant.inventory, variant.breakdown)
+            local market, keptCandidate = candidate(route, "market"), candidate(route, route.kept)
+            T.check(case.name .. " (" .. variant.label .. "): the kept route is not dearer than the market route",
+                keptCandidate.net <= market.net, tostring(keptCandidate.net) .. " vs " .. tostring(market.net))
+            T.check(case.name .. " (" .. variant.label .. "): more than one route was planned", #route.candidates > 1)
+            kept[#kept + 1] = string.format("%s (%s): kept %s of %d", case.name, variant.label, route.kept, #route.candidates)
+        end
+
+        local steps, meta, route = plan(LazyProf, "cheapest", case.from, case.to, fresh(), prices, nil, {}, {})
+        local f = assert(io.open("scripts/snapshots/" .. case.name .. "_cheapest.txt", "r"))
+        local snapshot = f:read("*a")
+        f:close()
+        T.check(case.name .. ": no sale values, no stock: the snapshot's route",
+            harness.formatSteps(steps, meta) == snapshot and #route.candidates == 1)
+    end
+    for _, line in ipairs(kept) do print("INFO: " .. line) end
 end)
 
 T.finish()
