@@ -459,6 +459,17 @@ The path was shown as 60-100 five-craft rows spread over a milestone panel, a sh
 - Client calls for merchants, trainers and the map exist only in the client adapters; the boundary test enforces it.
 - The Classic clients run the same code but are not tested in game; where a client call could not be confirmed (merchant calls, the skill line's cap, trainer lists) the feature checks first and stays inactive otherwise.
 
+### Amended 2026-11-23
+
+The window was rearranged around two questions - how far, and what does it cost - without changing how it is built:
+
+- Two tabs, Path and Shopping, replace Guide / Steps / Shopping. The Path tab is one list with a row per recipe run; what the Guide card showed is the content of an opened row, and the learn step and the closest alternative are sub-lines under their run's row. Stages still carry learn steps as stages (the arrow tooltip uses them); only the list folds them.
+- The target is a number box and a slider ("Level to") from the real skill to the last cap, in the shared header. Moving the handle only rewrites the number; the path is planned again once, when the handle is let go. It replaces the range filter: to see and shop for one bracket, the target is set to its end. The path bar and the Prev / Current step / Next buttons are gone.
+- A receipt in the header replaces the footer: "You spend", "Back from selling" and "Net cost", built from the one accounting of ADR-017, with amounts exact to the copper so that they add up to the Shopping tab.
+- "More options" (a remembered setting, off by default) holds what the default view does not need: the strategy, spare crafts (the margin), the selling mode, the price line, the recipe search, "Hide what I have", the craft-or-buy buttons and "Plan from skill 1".
+
+The decision stands: frames are thin and content is built as data. The receipt, the slider's model and both tabs are pure functions in `Modules/Guide/Views.lua` with headless tests; `Modules/UI/GuideWindow.lua` places widgets and passes clicks on. `Modules/Guide/Range.lua` and `Modules/UI/PathBar.lua` were removed. The trade-off that the steps and the shopping list cannot be seen side by side still holds.
+
 ---
 
 ## ADR-017: Candidate Routes: Sale Value and Owned Stock, Never Dearer Than the Market Route

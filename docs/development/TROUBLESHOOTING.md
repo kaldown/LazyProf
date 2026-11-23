@@ -15,7 +15,7 @@ Run these in-game to check addon health:
 /lp diag               -- List available diagnostics
 /lp diag learned       -- Dump learned-recipe detection state (copyable window; Classic-family clients)
 /lp diag forever       -- Dump WoW Forever client facts and adapter results (copyable window)
-/lp diag prices        -- List every reagent price of the path and where it came from (copyable window)
+/lp diag prices        -- List every reagent price of the path, where it came from and which route was kept (copyable window)
 /lp diag merchant      -- At a merchant: what it sells as LazyProf reads it, and what would be bought (copyable window)
 /lp diag trainer       -- At a profession trainer: what it lists as LazyProf reads it, and what is remembered (copyable window)
 /lp resetpanels        -- Move the LazyProf window and its panels back to their default place and size
@@ -40,8 +40,9 @@ bug report or dev chat.
 
 ### `/lp diag learned` - learned-recipe detection
 
-**When to use:** recipes you have already learned are shown as "[!] Unlearned" in
-the LazyProf window / alternatives / arrow tooltip, or the wrong recipes are
+**When to use:** recipes you have already learned are treated as still to learn (a
+"Learn first" line under a row of the Path tab, "(to learn)" or "[!] Unlearned" on
+an alternative, a learn step in the arrow tooltip), or the wrong recipes are
 treated as known. Open the profession window first, then run it.
 
 **What each line means:**
@@ -110,8 +111,9 @@ are what the data needs fixing for.
 ### `/lp diag prices` - where the prices come from
 
 **When to use:** the path's cost looks wrong, a reagent seems too cheap or too expensive,
-or you are not sure whether your auction data is current. Run it with a path calculated
-(open a profession window first). Works on every client.
+the path chose other recipes than you expected, or you are not sure whether your auction
+data is current. Run it with a path calculated (open a profession window first). Works on
+every client.
 
 **Which price wins:** a vendor price first; then an Auctionator price `seen today`, once you
 have been at the auction house since login or /reload (a scan made this session is newer
@@ -134,8 +136,9 @@ own fallback values); then the vendor sell estimate. Closing the auction house e
 
 What to do: `loading` items fill in by themselves as the client loads item data (`/reload`
 if they stay); `noPrice`, `stale` or `DISAGREE` items need a fresh auction scan (Auctionator)
-or a desktop-app sync (TSM). The arrow tooltip shows the same summary and warnings, and the
-shopping list tooltip shows each item's price and source.
+or a desktop-app sync (TSM). The arrow tooltip shows the same summary and warnings, so does
+the price line of the window (under More options; hover it), the receipt shows the first
+warning in orange, and the tooltip of a reagent row shows that item's price and source.
 
 ### `/lp diag merchant` - what a merchant sells, and what would be bought
 
@@ -153,18 +156,20 @@ client family.
 | `adapter items=N` / `item[i] id=.. price=.. bundle=.. stock=.. maxStack=.. extendedCost=.. purchasable=..` | The same items as LazyProf uses them. |
 | `remembered vendor prices: N` | How many vendor prices LazyProf has seen at merchants so far (account-wide). Only reagents sold for gold without a stock limit are remembered. |
 | `purchases: onePerClick=.. running=..` | `onePerClick=true` means a purchase made after the click never arrived, so this session buys one stack per click ("click again to continue"). |
-| `shopping list: <profession range>, rows=N toBuyHere=N skipped=N total=..` | The list the panel works from (the path last shown in the LazyProf window this session) and what this merchant covers. `none yet this session` = open a profession or the LazyProf window first. |
+| `shopping list: <profession>, rows=N toBuyHere=N skipped=N total=..` | The list the panel works from (the whole shopping list of the path last shown in the LazyProf window this session) and what this merchant covers. `none yet this session` = open a profession or the LazyProf window first. |
 | `buy: Nx <name> (id ..) for ..` | One reagent "Buy all" would buy. |
 | `skip: <name> (id ..): <reason>` | A reagent this merchant sells that is not bought automatically: `limited stock`, `sold out`, `not sold for gold`, `not available to you`. |
 
 Reading it: an expected reagent with no `buy:` or `skip:` line is either not sold here (no
 `raw` line with its id), already owned (the Shopping tab shows Buy "-"), crafted instead of
-bought ("I craft it"), or outside the range chosen in the window. A wrong amount is the
-Shopping tab's Buy figure rounded up to whole bundles.
+bought (its row on the Shopping tab shows nothing to buy), or needed only beyond the "Level
+to" target (the list ends where the path ends). A wrong amount is the Shopping tab's Buy
+figure rounded up to whole bundles.
 
 ### `/lp diag trainer` - what a trainer lists, and what is remembered
 
-**When to use:** learn or rank steps do not list a trainer you have visited, or a recipe's
+**When to use:** an opened row of the Path tab (for a recipe still to learn) or the tooltip
+of a "Train the next rank" row does not list a trainer you have visited, or a recipe's
 fee is missing or wrong. Run it **with the trainer's window open**. Trainers are recorded on
 WoW Forever only; on other clients the dump says so.
 
@@ -177,7 +182,7 @@ WoW Forever only; on other clients the dump says so.
 | `adapter info: name=.. npcId=.. zone=.. subZone=.. mapId=.. x=.. y=.. faction=..` | The trainer as LazyProf would remember it. `x` / `y` are **your** position on the map (0-1), not the NPC's. |
 | `remembered: professions=N trainers=N fees=N` | What is remembered for this client so far. |
 | `this trainer: profession=.. services=N` | The profession LazyProf matched this trainer to: the one most of whose recipe names appear in its list. `nil` means no listed service is a recipe LazyProf knows (a class trainer, a filter hiding everything, or a client language whose recipe names differ from the recipe data). |
-| `known <profession> trainer: Name - Zone (x, y) mapId=.. faction=.. recipesListed=N` | Each remembered trainer of that profession. A learn step names a trainer only when the trainer listed that recipe; a rank step names every remembered trainer of the profession. Only trainers visited by a character of your faction are shown. |
+| `known <profession> trainer: Name - Zone (x, y) mapId=.. faction=.. recipesListed=N` | Each remembered trainer of that profession. A recipe still to learn names a trainer only when the trainer listed that recipe; a "Train the next rank" row names every remembered trainer of the profession. Only trainers visited by a character of your faction are shown. |
 
 ### Adding a new diagnostic
 
@@ -200,8 +205,8 @@ WoW Forever): `/lp diag learned` gets its lines from `LazyProf.Client:RunDiagnos
 ### Step-by-Step
 
 1. **Enable debug mode:**
-   - Open `/lp` settings
-   - Check "Enable Debug Mode"
+   - Open `/lp` settings, Debug page
+   - Check "Enable debug messages"
    - Enable specific categories you want to capture
 
 2. **Reproduce the issue** - do whatever triggers the problem
@@ -302,6 +307,10 @@ Verify CraftLib is loaded and has profession data:
    - LazyProf requires CraftLib to have data for the profession
    - Check CraftLib version matches LazyProf requirements
 
+4. Is the next recipe still to learn?
+   - When the profession window hides unlearned recipes, the arrow has no row to point at
+     until you learn it; the recipe's opened row on the Path tab says so.
+
 ### LazyProf Window Not Showing
 
 **Symptoms:** Open a profession window but no LazyProf window appears beside it
@@ -353,34 +362,140 @@ Verify CraftLib is loaded and has profession data:
    - Check if recipe acquisition cost is a factor
 
 4. Verify pricing:
-   - Check which price provider is active in settings
-   - Items with no AH data use vendor prices (may be 0)
+   - `/lp diag prices` lists every reagent price of the path and where it came from
+   - A reagent with no auction price is estimated from its vendor sell value (the
+     "Estimate from vendor sell value when no AH price" option, on by default)
+
+5. Under Cheapest the recipe is not chosen by reagent cost alone: what the craft sells
+   for and what you own count too. See "My Path Changed Although Nothing Looks Different".
+
+### My Path Changed Although Nothing Looks Different
+
+**Symptoms:** The Path tab lists other recipes than before, with the same skill and target
+
+Under the Cheapest strategy four things decide the route besides the reagent prices:
+
+1. **What the crafts sell for.** Recipes whose reagents all have a real price (a vendor's
+   or an auction addon's) are ranked by what a craft costs after what it sells for. The
+   "Selling" mode (More options; "Count what crafts sell for" in the settings), a changed
+   auction price of a crafted item, or sale values that arrived after the first calculation
+   can move the route.
+2. **Your stock.** Reagents you own count when the route is chosen, against whole runs of
+   a recipe: your bags, and with Syndicator your bank, mail, auctions and alts (the guild
+   bank if it is turned on). A bag change alone never plans again; the route is planned
+   again when the profession window opens, your skill changes, you change the target, the
+   strategy, a recipe or a setting, item data arrives, or you close the auction house.
+3. **The candidate routes.** Each calculation plans up to four routes and keeps the one you
+   pay least for: `market` (market prices, nothing owned), `sale` (ranked with sale value),
+   `stock` (as `sale`, with your stock) and `previous` (the plan you already follow).
+4. **The remembered route.** The route kept last is remembered per character and
+   profession and carried on from your current skill, so a plan you bought the reagents
+   for does not change over small differences. It is given up when it costs more than the
+   `market` route, or when another route is cheaper by more than 5% of what the `market`
+   route costs with nothing owned. It is only planned while you own a reagent that some
+   usable recipe takes. "Use" and "Reset" on a recipe forget what was remembered for that
+   skill range. Fastest and "Plan from skill 1" neither use nor change it.
+
+**Check:** run `/lp diag prices` with the profession window open. The `route: kept=...`
+line names the route that was kept, and each `candidate ...` line says what that route would
+cost you (`spend`, `sale`, `net`). `sale values:` says how many recipes have a sale value
+and how many are still waiting for item data. Paste the whole output into a bug report if
+the kept route is not the one with the lowest `net` (within the `keep margin` for
+`previous`; a candidate marked `not eligible` cannot be kept).
+
+### "Back from selling" Says "still loading"
+
+**Symptoms:** The receipt's "Back from selling" line ends with "still loading", or shows
+`0c` at first
+
+What a crafted item sells for to a vendor comes from the game's item data. Until the client
+has delivered it for every crafted item the path could use, the line shows the amount known
+so far and its note ends with "still loading". Nothing needs to be done:
+
+1. When the data arrives, the path is planned again by itself and the note goes.
+2. An item whose data does not arrive stops counting as loading 20 seconds after it was
+   first asked for, and counts as selling for nothing unless its data arrives after all;
+   the window is redrawn once for that.
+3. `/lp diag prices` shows the count in `sale values: ... loading=N`.
+
+With "Selling" set to "Do not count" the line is not shown at all.
+
+### Where Did the Path Bar, Range, Prev / Next and the Guide and Steps Tabs Go
+
+**Symptoms:** After an update the window has two tabs and no coloured bar
+
+| Before | Now |
+|--------|-----|
+| Guide and Steps tabs | The **Path** tab: one row per recipe. Click a row to open it in place; the opened row shows what the Guide card showed (reagents, how to learn the recipe, the other recipes with "Use"). The row you are on is marked with `>`, highlighted and open until you close it. |
+| The coloured path bar | No bar. The Path list shows every run with its skill range in skill order, a "Train the next rank before N" row at each rank still to train, and gaps as red rows. |
+| Range dropdown | **"Level to"**: set the target to the end of a bracket and the path, the receipt and the shopping list cover only that part. |
+| The footer with its totals | The **receipt** above the tabs: "You spend", "Back from selling", "Net cost". |
+| Prev / Current step / Next | Click any row of the Path list to open it. |
+| "Target" box | "Level to", with a slider under the number box. A typed number counts on Enter. |
+| "With margin" | "Spare crafts", under More options. |
+| Cheapest / Fastest, the price line, the recipe search, "Hide what I have", "I craft it / I buy it", "Plan from skill 1" | Under **More options** (the button on the right of the status line; it stays as you left it). |
+| "Use this" / "Pinned" | "Use" / "Your choice" (with "Reset") in the opened row. |
+
+A window that was last on the Guide or Steps tab opens on Path.
+
+### The Amounts Show Copper Now
+
+**Symptoms:** Costs read "1g 2s 3c" where they used to read "1g 2s"
+
+Every amount that is part of a sum is written to the copper, so that what the window shows
+adds up: the receipt, the cost columns of both tabs, "Learn first" fees, the recipe rows and
+the totals, and the merchant panel. "You spend" equals "Reagents to buy" plus "Recipes" on
+the Shopping tab, and the merchant panel's rows add up to "Buy all". The cost columns and
+the merchant panel's rows used to show only the two largest units, and then they did not.
+Only comparisons stay short: the difference shown for an alternative ("+14s") and the cost
+per craft in an opened row (More options).
+
+### Bank or Alt Stock Is Not Counted
+
+**Symptoms:** Reagents in your bank or on an alt are still on the list to buy
+
+Stock outside your bags (bank, mail, your auctions, alts, guild bank) is read from the
+Syndicator addon. "Include bank items" and "Include alt characters" are on by default
+(Settings, Display, "Your stock"); without Syndicator they are greyed out and only your
+bags count. "Include guild bank" is off by default. Stock that is counted but not in your
+bags is listed under "Collect first" on the Shopping tab.
 
 ### Nothing Left / Target Reached
 
 **Symptoms:** The window says "Nothing left" or "Target reached" instead of a path
 
-The path runs to the number in the **Target** box. "Target reached" means your skill is at
-or past it: type a higher target. "Nothing left" means the skill is at the profession's last
-cap.
+The path runs to the **"Level to"** target. "Target reached" means your skill is at or past
+it: drag the slider to the right, or type a higher number and press Enter. "Nothing left"
+means the skill is at the profession's last cap.
 
 ### Alternatives Not Showing
 
-**Symptoms:** The step's card on the Guide tab has no "Alternatives" section
+**Symptoms:** A row of the Path tab has no "or: ..." line under it, or an opened row has no
+"Other recipes" section
 
 **Check:**
-1. Does the step have multiple candidates?
+1. The "or:" line is only an offer of the closest alternative. It appears when that
+   alternative costs you less than the run, or at most 10% more. It is not shown on an
+   opened row (the same recipe is listed inside), on a recipe you chose yourself, on a
+   finished run, on a run with a reagent that has no price, or on a run that pays for
+   itself.
+
+2. Does the run have other candidates at all? Open the row: "Other recipes for N-M" lists
+   the best three and "Show all N" the rest.
    - Enable "Pathfinder Scoring" debug category
    - Look for `=== Scoring candidates at skill X ===`
    - If only 1 recipe scored, no alternatives exist at that skill level
 
-2. Are all other recipes gray?
+3. Are all other recipes gray?
    - Gray recipes are filtered from candidates
 
-### "Use this" Did Not Change the Step
+4. An alternative that says "only up to N" or "no skill-ups here" cannot cover the whole
+   run, so no difference is shown for it.
 
-**Symptoms:** Click "Use this" on an alternative but the step keeps its recipe, or the
-"Pinned" line is missing
+### "Use" Did Not Change the Recipe
+
+**Symptoms:** Click "Use" on an alternative but the row keeps its recipe, or the opened
+row has no "Your choice" line
 
 **Check:**
 1. Is the chosen recipe still usable in that skill range?
@@ -390,10 +505,10 @@ cap.
 2. Check pathfinder debug:
    - Enable "Pathfinder Scoring" category
    - Look for `>>> PINNED:` messages after the click
-   - If missing, the pin did not match any candidate at that skill
+   - If missing, the chosen recipe did not match any candidate at that skill
 
-3. Pins cover a skill range and are saved per character and profession. A pin is dropped
-   by itself once your skill has passed its range; "Reset" on the pinned step removes it at
+3. A choice covers a skill range and is saved per character and profession. It is dropped
+   by itself once your skill has passed its range; "Reset" in the opened row removes it at
    once.
 
 ### Merchant Panel Not Showing
@@ -404,8 +519,9 @@ cap.
 1. Was a path shown this play session? The panel works from the shopping list of the path
    the LazyProf window showed last; after a login or /reload, open the profession (or the
    LazyProf window) once.
-2. Is the reagent in the chosen range and still to buy? The Shopping tab must show a Buy
-   number for it; reagents you chose to craft are not bought.
+2. Is the reagent still to buy? The Shopping tab must show a Buy number for it. The list
+   covers the whole path up to the "Level to" target; reagents you craft yourself are not
+   bought.
 3. Run `/lp diag merchant` with the merchant open (see above): it shows what the merchant
    sells as LazyProf reads it and why a reagent is skipped.
 
@@ -418,14 +534,15 @@ slot` (special-purpose bags are not counted), or `The game allows one purchase p
 here` (click again for each stack). `the purchase did not go through` means nothing arrived
 for the first purchase; `/lp diag merchant` shows the stock, price and stack values involved.
 
-### Trainers Not Listed on a Learn or Rank Step
+### Trainers Not Listed for a Recipe or a Rank
 
-**Symptoms:** A learn or rank step names no trainer
+**Symptoms:** The opened row of a recipe still to learn names no trainer, or the tooltip of
+a "Train the next rank" row lists none
 
-No trainer or vendor names are shipped: steps list only trainers **you have visited** with
-LazyProf installed, on WoW Forever. A learn step lists a trainer only if that trainer's list
-contained the recipe (the trainer window's filter must show it). Run `/lp diag trainer` at
-the trainer to see what was matched.
+No trainer or vendor names are shipped: the window lists only trainers **you have visited**
+with LazyProf installed, on WoW Forever. A recipe lists a trainer only if that trainer's
+list contained the recipe (the trainer window's filter must show it). Run `/lp diag trainer`
+at the trainer to see what was matched.
 
 ### Settings Not Saving
 
@@ -498,8 +615,9 @@ WoW Client: <Retail/Classic/TBC/Anniversary>
 
 ## Settings (if relevant)
 - Strategy: Cheapest/Fastest
-- Calculate from current skill: yes/no
-- Include bank/alts/guild bank: yes/no
+- Level to: <target>, Spare crafts: yes/no
+- Selling: Vendor/Auction house/Do not count
+- Include bank/alts/guild bank: yes/no, Syndicator installed: yes/no
 - Price source: TSM/Auctionator/Vendor
 ```
 

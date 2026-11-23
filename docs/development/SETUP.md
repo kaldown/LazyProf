@@ -52,7 +52,7 @@ Replace `<version>` with `_classic_`, `_anniversary_`, etc. as appropriate.
 3. Confirm both "CraftLib" and "LazyProf" appear and are enabled
 4. Log into game
 5. Open any profession window
-6. The LazyProf window should appear beside the profession window (Guide, Steps and Shopping tabs)
+6. The LazyProf window should appear beside the profession window (Path and Shopping tabs)
 
 ## Recommended Addons for Development
 
