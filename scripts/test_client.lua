@@ -508,6 +508,7 @@ section("stock", function()
     Client:StartStock({
         onBankOpened = function() seen[#seen + 1] = "opened" end,
         onBankChanged = function() seen[#seen + 1] = "changed" end,
+        onBankClosing = function() seen[#seen + 1] = "closing" end,
         onBankClosed = function() seen[#seen + 1] = "closed" end,
         onLogout = function() seen[#seen + 1] = "logout" end,
     })

@@ -480,9 +480,10 @@ function Client:Now()
     return time()
 end
 
--- callbacks: onBankOpened(), onBankChanged(kind), onBankClosed(), onLogout().
--- Only logout is reported here (see the bank note above). BAG_UPDATE belongs
--- to Core/Init.lua, which passes bag updates on.
+-- callbacks: onBankOpened(), onBankChanged(kind), onBankClosing(),
+-- onBankClosed(), onLogout(). Only logout is reported here (see the bank
+-- note above). BAG_UPDATE belongs to Core/Init.lua, which passes bag updates
+-- on.
 function Client:StartStock(callbacks)
     LazyProf:RegisterEvent("PLAYER_LOGOUT", function()
         callbacks.onLogout()

@@ -698,10 +698,12 @@ function Client:IsBankOpen()
     return bankOpen
 end
 
--- What a bank holds right now: items and the soulbound part of them. kind is
--- "character" or "account". nil when it cannot be read now - the window is
--- closed, the bank may not be viewed, it is locked, it has no tabs or none of
--- them reports a slot - so that "could not read" is never taken for "empty".
+-- What a bank holds right now: items, the soulbound part of them, and how
+-- many slots its tabs have together (a caller can tell by it whether two
+-- reads saw the same bank). kind is "character" or "account". nil when it
+-- cannot be read now - the window is closed, the bank may not be viewed, it
+-- is locked, it has no tabs or none of them reports a slot - so that "could
+-- not read" is never taken for "empty".
 -- The gates and the reading are the bank window's own: C_Bank.CanViewBank
 -- (Blizzard_UIPanels_Game/Mainline/BankFrameTemplates.lua:70), a non-nil
 -- C_Bank.FetchBankLockedReason is locked (same file :872-874),
@@ -723,7 +725,7 @@ function Client:BankContents(kind)
         slots = slots + ReadContainer(tab.ID, items, bound)
     end
     if slots == 0 then return nil end
-    return items, bound
+    return items, bound, slots
 end
 
 -- Which bank a container id belongs to ("character" | "account"), nil for
@@ -796,12 +798,20 @@ function Client:Now()
 end
 
 -- Bank window and logout reports.
--- callbacks: onBankOpened(), onBankChanged(kind), onBankClosed(), onLogout().
+-- callbacks: onBankOpened(), onBankChanged(kind), onBankClosing(),
+-- onBankClosed(), onLogout().
 -- BANK_TABS_CHANGED carries the bank type (BankDocumentation.lua:379-388; the
 -- bank window rebuilds itself on it, Blizzard_UIPanels_Game/Mainline/
 -- BankFrameTemplates.lua:778-782); PLAYER_LOGOUT has no payload
--- (SystemDocumentation.lua:157-161). The bank counts as closed before
--- onBankClosed runs, so nothing is read from a bank that is going away.
+-- (SystemDocumentation.lua:157-161).
+-- A close is reported in two steps. onBankClosing runs while the bank still
+-- counts as open, so a read that is still owed for a change of this very
+-- frame can be taken; whether the client still holds the bank's contents
+-- when BANKFRAME_CLOSED arrives could not be settled from source, so the
+-- caller must not take such a read for more than it is (the scanner only
+-- keeps one that looks like the reads before it). Then the bank counts as
+-- closed and onBankClosed runs: from there on nothing is read.
+-- Verify in game (/lp diag stock after a visit): "bank updates while closed".
 -- BAG_UPDATE is not registered here: the addon object has one handler per
 -- event and Core/Init.lua owns that one; it passes bag updates on.
 function Client:StartStock(callbacks)
@@ -819,6 +829,7 @@ function Client:StartStock(callbacks)
     end)
     LazyProf:RegisterEvent("BANKFRAME_CLOSED", function()
         if not bankOpen then return end   -- the event can fire twice per close
+        callbacks.onBankClosing()
         bankOpen = false
         callbacks.onBankClosed()
     end)
