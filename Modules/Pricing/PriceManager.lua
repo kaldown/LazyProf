@@ -124,6 +124,31 @@ function PriceManager:GetPriceInfo(itemId)
     return { price = nil, source = "none", timestamp = time() }
 end
 
+-- What the auction addons say an item goes for, or nil: market sources only
+-- (a fresh price first, else the first in the configured order). Never a
+-- vendor buy price, the sell-value estimate or the floor. Used for what a
+-- crafted item sells for; not cached with the reagent prices.
+function PriceManager:MarketPrice(itemId)
+    local first
+    for _, provider in ipairs(self.providers) do
+        local price, _, ageDays = provider:GetPrice(itemId)
+        if price and price > 0 then
+            if self:IsFreshAge(ageDays) then
+                return price
+            end
+            first = first or price
+        end
+    end
+    return first
+end
+
+-- A price somebody really charges: a vendor's or an auction addon's. The
+-- sell-value estimate and the floor are stand-ins, not prices.
+function PriceManager.IsRealSource(info)
+    local source = info and info.source
+    return source == "Vendor" or source == "TSM" or source == "Auctionator"
+end
+
 -- The price info the last calculation used: the cached entry whatever its
 -- age, so reports match the path's totals; looked up only when not cached.
 function PriceManager:PeekPriceInfo(itemId)
