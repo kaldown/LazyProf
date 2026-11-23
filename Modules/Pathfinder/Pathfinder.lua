@@ -138,8 +138,9 @@ function Pathfinder:BuildPath(run)
     LazyProf.RecipeAvailability:BeginRecalc()
     LazyProf.SelfFound:BeginRecalc(inventory)
     -- The route the last calculation kept for this profession is planned as
-    -- a candidate too (Cheapest only; a what-if from skill 1 is not the plan
-    -- the player follows, so it neither uses nor replaces it).
+    -- a candidate too (Cheapest only; Fastest has one route, and a what-if
+    -- from skill 1 is not the plan the player follows: neither uses or
+    -- replaces what is remembered).
     local store = LazyProf.CharStore:Profession(profKey)
     local remembers = (strategyName == Constants.STRATEGY.CHEAPEST) and not run.planFromOne
     local steps, meta, route = self:PlanRoutes({
@@ -152,9 +153,16 @@ function Pathfinder:BuildPath(run)
     LazyProf.SelfFound:EndRecalc()
     LazyProf.RecipeAvailability:EndRecalc()
     if remembers then
-        store.route = (#steps > 0) and self:RouteRanges(steps) or nil
-    elseif not run.planFromOne then
-        store.route = nil
+        if #steps == 0 then
+            store.route = nil
+        elseif route.kept == "previous" then
+            -- The plan in hand goes on: its remembered ranges stay as they
+            -- are (rewriting them from each replay would let rounding creep
+            -- in), and what was planned beyond them is added.
+            store.route = self:ExtendRanges(store.route, steps, startSkill)
+        else
+            store.route = self:RouteRanges(steps)
+        end
     end
 
     -- Build result (totals cover the steps the path has; gaps add nothing)
@@ -241,9 +249,13 @@ local function UsableStock(recipes, inventory, startSkill, targetSkill, racialBo
 end
 
 -- A route as it is remembered between calculations: one { from, to, recipeId }
--- per run of a recipe (consecutive steps of one recipe joined), in skill order.
+-- per run of a recipe (consecutive steps of one recipe joined), in skill
+-- order, and `at`, the skill it was planned from.
 function Pathfinder:RouteRanges(steps)
     local ranges = {}
+    if steps and steps[1] then
+        ranges.at = steps[1].skillStart
+    end
     local last
     for _, step in ipairs(steps or {}) do
         local id = step.recipe and step.recipe.id
@@ -259,23 +271,73 @@ function Pathfinder:RouteRanges(steps)
     return ranges
 end
 
--- The pin list that replays a remembered route from `startSkill`: its ranges
--- that reach past the start, with the player's own pins laid over them (a pin
--- replaces what it overlaps). nil when nothing of the route is left to replay.
-local function ReplayPins(previous, pins, startSkill)
-    if type(previous) ~= "table" then return nil end
-    local replay = {}
-    for _, range in ipairs(previous) do
-        if range.to and range.to > startSkill then
-            LazyProf.Pins.Add(replay, range.from, range.to, range.recipeId)
+-- A remembered route carried on: its ranges that reach past `startSkill`,
+-- unchanged, plus what `steps` plan beyond its end (a raised target).
+function Pathfinder:ExtendRanges(remembered, steps, startSkill)
+    local ranges = {}
+    local last = -math.huge
+    for _, range in ipairs(remembered or {}) do
+        if type(range) == "table" and type(range.to) == "number" and type(range.from) == "number"
+                and range.to > startSkill then
+            ranges[#ranges + 1] = range
+            if range.to > last then last = range.to end
         end
     end
-    if #replay == 0 then return nil end
-    for _, pin in ipairs(pins or {}) do
-        LazyProf.Pins.Add(replay, pin.from, pin.to, pin.recipeId)
+    if #ranges == 0 then
+        return self:RouteRanges(steps)
     end
-    return replay
+    for _, range in ipairs(self:RouteRanges(steps)) do
+        if range.to > last then
+            ranges[#ranges + 1] = { from = math.max(range.from, last), to = range.to, recipeId = range.recipeId }
+        end
+    end
+    return ranges
 end
+
+-- The well-formed ranges of a remembered route that reach past `startSkill`
+-- (saved data may be anything), with the skill it was planned at (`at`) when
+-- that is known. nil when nothing is left to carry on with.
+local function ValidRanges(previous, startSkill)
+    if type(previous) ~= "table" then return nil end
+    local ranges
+    for _, range in ipairs(previous) do
+        if type(range) == "table" and type(range.from) == "number" and type(range.to) == "number"
+                and range.recipeId ~= nil and range.to > range.from and range.to > startSkill then
+            ranges = ranges or {}
+            ranges[#ranges + 1] = range
+        end
+    end
+    if ranges and type(previous.at) == "number" then
+        ranges.at = previous.at
+    end
+    return ranges
+end
+
+-- Remove [from, to) from a list of remembered ranges, keeping what lies on
+-- either side of it. Returns the new list (nil when nothing is left).
+local function ClipRanges(ranges, from, to)
+    local kept = {}
+    for _, range in ipairs(ValidRanges(ranges, -math.huge) or {}) do
+        if range.to <= from or range.from >= to then
+            kept[#kept + 1] = range
+        else
+            if range.from < from then
+                kept[#kept + 1] = { from = range.from, to = from, recipeId = range.recipeId }
+            end
+            if range.to > to then
+                kept[#kept + 1] = { from = to, to = range.to, recipeId = range.recipeId }
+            end
+        end
+    end
+    if #kept == 0 then return nil end
+    return kept
+end
+
+-- The plan in hand is kept unless another route saves more than this share
+-- of what the market route costs with nothing owned. Each replanning rounds
+-- crafts a little differently, so two routes that really cost the same differ
+-- by a craft or two; switching on that would strand what was bought.
+local KEEP_MARGIN = 0.05
 
 -- Plan the candidate routes of one calculation and keep the one the player
 -- pays least for.
@@ -292,34 +354,38 @@ end
 --           stock is given to the strategy, which scores it against whole
 --           runs. Only when the character owns a reagent a usable recipe takes.
 --   previous  the route kept by the last calculation (args.previous, see
---           RouteRanges), replayed from the current skill: its recipes are
---           held over their skill ranges, under the player's own pins, and
---           whatever lies beyond it is planned like "stock". Only when such
---           a route is remembered and reaches past the start. Without it a
---           player who bought the whole list of a route could find a
---           different route on the next calculation that needs more bought:
---           once every reagent is in the bags several recipes cost nothing
---           and the planner has no reason left to prefer the one it chose.
+--           RouteRanges), carried on from the current skill: where the
+--           player pinned nothing, each remembered recipe is used to the end
+--           of its skill range (when the planner could still choose it), and
+--           whatever lies beyond the remembered route is planned like
+--           "stock". Only when such a route reaches past the start and the
+--           character owns a usable reagent (nothing was bought for a route
+--           while nothing is owned, so nothing can be stranded).
 -- Every candidate is costed the same way - Account over its steps with the
 -- real stock: what is left to buy, plus recipes, minus what the crafts sell
--- for - and the lowest amount is kept; a tie keeps the earlier candidate.
--- Because the market route is always a candidate, the kept route never costs
--- the player more than it by this accounting; because the previous route is
--- one too, it never costs more than carrying on with the plan shown before.
--- A candidate that leaves more of the range uncovered than the market route
--- cannot win by doing less.
+-- for. Of market, sale and stock the lowest amount wins; a tie keeps the
+-- earlier one. The previous route - the plan in hand - is kept instead when
+-- it costs no more than the market route and no more than that winner plus a
+-- small margin (KEEP_MARGIN): once the player holds the reagents of a plan,
+-- many routes cost next to nothing, and without this the planner would wander
+-- between them and strand what was bought.
+-- Because the market route is always a candidate and the plan in hand is
+-- never kept above it, the kept route never costs the player more than the
+-- market route by this accounting. A candidate that leaves more of the range
+-- uncovered than the market route cannot win by doing less.
 -- Any other strategy is one run, costed the same way.
 -- Returns steps, meta, route = { kept = key, candidates = { { key, net,
--- spend, sale, gapLength, eligible }, ... }, ms = milliseconds or nil }.
+-- spend, sale, gapLength, eligible }, ... }, keepMargin = copper or nil,
+-- ms = milliseconds or nil }.
 function Pathfinder:PlanRoutes(args)
     local strategy = args.strategy
     local sale = args.sale or {}
     local saleValues = sale.values or {}
     local startedAt = debugprofilestop and debugprofilestop() or nil
 
-    local function build(key, inventory, rankSale, pins)
+    local function build(key, inventory, rankSale, replay)
         local steps, meta = strategy:Calculate(args.startSkill, args.targetSkill, args.recipes, inventory,
-            args.prices, args.racialBonus, pins or args.pins, { rankSale = rankSale, sale = saleValues })
+            args.prices, args.racialBonus, args.pins, { rankSale = rankSale, sale = saleValues, replay = replay })
         local account = self:Account(steps, args.inventory, args.sourceBreakdown, args.prices, saleValues)
         return {
             key = key, steps = steps, meta = meta,
@@ -329,6 +395,7 @@ function Pathfinder:PlanRoutes(args)
     end
 
     local built = {}
+    local previous
     if args.strategyName == Constants.STRATEGY.CHEAPEST then
         built[1] = build("market", {}, nil)
         if sale.rank and next(sale.rank) ~= nil then
@@ -338,25 +405,38 @@ function Pathfinder:PlanRoutes(args)
             args.racialBonus or 0)
         if stock then
             built[#built + 1] = build("stock", stock, sale.rank)
-        end
-        local replay = ReplayPins(args.previous, args.pins, args.startSkill)
-        if replay then
-            built[#built + 1] = build("previous", stock or {}, sale.rank, replay)
+            local replay = ValidRanges(args.previous, args.startSkill)
+            if replay then
+                previous = build("previous", stock, sale.rank, replay)
+            end
         end
     else
         built[1] = build(args.strategyName or "route", {}, nil)
     end
 
-    local kept = built[1]
+    local market = built[1]
+    local kept = market
     for i = 2, #built do
         local candidate = built[i]
-        candidate.eligible = candidate.gapLength <= built[1].gapLength + GAP_TOLERANCE
+        candidate.eligible = candidate.gapLength <= market.gapLength + GAP_TOLERANCE
         if candidate.eligible and candidate.net < kept.net then
             kept = candidate
         end
     end
 
-    local route = { kept = kept.key, candidates = {} }
+    -- The plan in hand stays unless it is dearer than the market route or
+    -- another route is clearly cheaper.
+    local keepMargin
+    if previous then
+        built[#built + 1] = previous
+        previous.eligible = previous.gapLength <= market.gapLength + GAP_TOLERANCE
+        keepMargin = KEEP_MARGIN * self:Account(market.steps, {}, {}, args.prices).spend
+        if previous.eligible and previous.net <= market.net and previous.net <= kept.net + keepMargin then
+            kept = previous
+        end
+    end
+
+    local route = { kept = kept.key, candidates = {}, keepMargin = keepMargin }
     for i, candidate in ipairs(built) do
         route.candidates[i] = {
             key = candidate.key, net = candidate.net, spend = candidate.spend, sale = candidate.sale,
@@ -990,12 +1070,19 @@ end
 
 -- Pins (see Modules/Pathfinder/Pins.lua): saved per character and profession.
 
--- Choosing or resetting a recipe is the player planning again: the route
--- remembered from the last calculation (see PlanRoutes, "previous") is
--- dropped, so the planner's own choice comes back where a pin was removed.
-function Pathfinder:ForgetRoute(profKey)
+-- Choosing or resetting a recipe over a skill range is the player planning
+-- that range again: what the last calculation remembered there (see
+-- PlanRoutes, "previous") is dropped, so the planner's own choice comes back
+-- where a pin was removed. The rest of the remembered route stays. Without a
+-- range everything remembered is dropped.
+function Pathfinder:ForgetRoute(profKey, from, to)
     if not profKey then return end
-    LazyProf.CharStore:Profession(profKey).route = nil
+    local store = LazyProf.CharStore:Profession(profKey)
+    if from and to then
+        store.route = ClipRanges(store.route, from, to)
+    else
+        store.route = nil
+    end
 end
 
 -- The profession's pin list (the saved table itself).
@@ -1013,14 +1100,19 @@ end
 -- caller recalculates.
 function Pathfinder:PinRange(profKey, from, to, recipeId)
     LazyProf.Pins.Add(self:GetPins(profKey), from, to, recipeId)
-    self:ForgetRoute(profKey)
+    self:ForgetRoute(profKey, from, to)
     LazyProf:Debug("pathfinder", string.format("Pinned recipe %s for %s %.2f-%.2f",
         tostring(recipeId), tostring(profKey), from, to))
 end
 
 -- Remove the pin covering a skill.
 function Pathfinder:UnpinAt(profKey, skill)
-    self:ForgetRoute(profKey)
+    for _, pin in ipairs(self:GetPins(profKey)) do
+        if skill >= pin.from and skill < pin.to then
+            self:ForgetRoute(profKey, pin.from, pin.to)
+            break
+        end
+    end
     if LazyProf.Pins.RemoveAt(self:GetPins(profKey), skill) then
         LazyProf:Debug("pathfinder", string.format("Unpinned %s at %.2f", tostring(profKey), skill))
     end

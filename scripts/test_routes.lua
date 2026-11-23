@@ -705,9 +705,9 @@ T.section("candidates: the plan that was shopped for stays", function()
     T.check("first range", ranges[1].recipeId == 2 and ranges[1].from == 100 and ranges[1].to == 105)
     T.check("second range", ranges[2].recipeId == 1 and ranges[2].from == 105 and ranges[2].to == 120)
 
-    -- The player buys the list and comes back. Without the remembered plan
-    -- the planner drifts: every recipe is free at first, the long-lived one
-    -- is used up first and the Y is left to go grey.
+    -- The player buys the list and comes back. Planned from scratch the
+    -- planner drifts: every recipe is free at first, the long-lived one is
+    -- used up first and the Y is left to go grey.
     local held, where = afterShopping(LazyProf, steps, inventory, breakdown, prices)
     local drift, _, driftRoute = plan(LazyProf, "cheapest", 100, 120, fixture(), prices, nil, held, where)
     T.check("fixture: planned from scratch, more has to be bought", candidate(driftRoute, driftRoute.kept).spend > 0,
@@ -718,26 +718,152 @@ T.section("candidates: the plan that was shopped for stays", function()
     T.eq("holding its list, it needs nothing bought", candidate(againRoute, "previous").spend, 0)
     T.eq("and it is kept", againRoute.kept, "previous")
     T.eq("the Y is still used first", again[1].recipe.id, 2)
-    T.eq("its candidates come in the order market, stock, previous", againRoute.candidates[#againRoute.candidates].key, "previous")
+    local function shape(list)
+        local out = {}
+        for _, step in ipairs(list) do
+            out[#out + 1] = string.format("%.2f-%.2f %s x%d", step.skillStart, step.skillEnd, tostring(step.recipe.id), step.quantity)
+        end
+        return table.concat(out, " | ")
+    end
+    T.eq("the same runs as the plan that was shopped for", shape(again), shape(steps))
 
-    -- A pin of the player wins over the remembered plan in every candidate.
+    -- Carrying on from a later skill, mid-run: the remembered recipe is held
+    -- to the end of its range and no further.
+    for _, at in ipairs({ 101, 102, 103, 104 }) do
+        local later = plan(LazyProf, "cheapest", at, 120, fixture(), prices, nil, held, where, nil, nil, ranges)
+        T.eq("from " .. at .. ": still the Y recipe first", later[1].recipe.id, 2)
+        T.eq("from " .. at .. ": only up to the end of its range", later[1].skillEnd, 105)
+        T.eq("from " .. at .. ": then the other recipe", later[2].recipe.id, 1)
+    end
+    -- A range end that is a hair above where a replayed run lands does not
+    -- cost one more craft.
+    local hair = { { from = 100, to = 105.0000001, recipeId = 2 }, { from = 105.0000001, to = 120, recipeId = 1 } }
+    local hairSteps = plan(LazyProf, "cheapest", 100, 120, fixture(), prices, nil, held, where, nil, nil, hair)
+    T.eq("a range end a hair above the landing skill: no extra craft", hairSteps[1].quantity, 5)
+
+    -- A pin of the player wins where it applies; the rest of the remembered
+    -- plan stays.
     local pins = {}
-    LazyProf.Pins.Add(pins, 100, 105, 1)
+    LazyProf.Pins.Add(pins, 100, 102, 1)
     local pinned = plan(LazyProf, "cheapest", 100, 120, fixture(), prices, nil, held, where, nil, pins, ranges)
     T.eq("a pin wins over the remembered plan", pinned[1].recipe.id, 1)
+    local back
+    for _, step in ipairs(pinned) do
+        if step.skillStart >= 102 and step.skillStart < 105 then back = step.recipe.id end
+    end
+    T.eq("past the pin, the remembered recipe is back for the rest of its range", back, 2)
 
     -- A remembered plan that ended below the start is not replayed.
     local _, _, late = plan(LazyProf, "cheapest", 121, 125, fixture(), prices, nil, held, where, nil, nil, ranges)
     T.check("a plan the skill has passed is not a candidate", candidate(late, "previous") == nil)
-    -- Nor is one built for Fastest.
+    -- Nor is one built for Fastest, or when nothing usable is owned (nothing
+    -- was bought for it, so nothing can be stranded).
     local _, _, fast = plan(LazyProf, "fastest", 100, 120, fixture(), prices, nil, held, where, nil, nil, ranges)
     T.eq("fastest: one candidate", #fast.candidates, 1)
+    local _, _, bare = plan(LazyProf, "cheapest", 100, 120, fixture(), prices, nil, {}, {}, nil, nil, ranges)
+    T.check("nothing owned: the remembered plan is not replayed", candidate(bare, "previous") == nil)
 
-    -- A remembered plan that would now cost more is simply not kept.
+    -- A remembered plan that would cost more than the market route is not kept.
     local dear = { { from = 100, to = 120, recipeId = 2 } }
-    local _, _, dearRoute = plan(LazyProf, "cheapest", 100, 120, fixture(), prices, nil, {}, {}, nil, nil, dear)
+    local _, _, dearRoute = plan(LazyProf, "cheapest", 100, 120, fixture(), prices, nil, { [X] = 1 }, { [X] = { bags = 1 } },
+        nil, nil, dear)
     T.check("a remembered plan that is dearer is a candidate", candidate(dearRoute, "previous") ~= nil)
     T.check("but is not kept", dearRoute.kept ~= "previous")
+
+    -- Saved data that is not what it should be is ignored, never an error.
+    for label, bad in pairs({
+        number = 5, string = "route", empty = {}, numbers = { 1, 2, 3 }, booleans = { true },
+        ["string bounds"] = { { from = "a", to = "b", recipeId = 2 } },
+        ["table bound"] = { { from = {}, to = 120, recipeId = 2 } },
+        ["no recipe"] = { { from = 100, to = 120 } },
+        inverted = { { from = 120, to = 100, recipeId = 2 } },
+        mixed = { 7, { from = 100, to = 105, recipeId = 2 }, "x", { from = 105, to = 120, recipeId = 1 } },
+    }) do
+        local ok, err = pcall(plan, LazyProf, "cheapest", 100, 120, fixture(), prices, nil, held, where, nil, nil, bad)
+        T.check("malformed memory (" .. label .. "): no error", ok, err)
+    end
+    local _, _, mixedRoute = plan(LazyProf, "cheapest", 100, 120, fixture(), prices, nil, held, where, nil, nil,
+        { 7, { from = 100, to = 105, recipeId = 2 }, "x", { from = 105, to = 120, recipeId = 1 } })
+    T.eq("the well-formed part of it is still used", mixedRoute.kept, "previous")
+end)
+
+T.section("candidates: the remembered plan never forces a recipe the planner would refuse", function()
+    local LazyProf = loadRoutes()
+    local X, Y = 70, 71
+    -- B is unlearned: its pattern is on the auction house for 5s.
+    local function fixture(source)
+        local b = recipe(2, "B", { yellow = 130, green = 140, gray = 150, reagents = { { itemId = Y, count = 1, name = "Y" } },
+            source = source })
+        b.learned = false   -- not known whether or not a source resolves
+        return {
+            recipe(1, "A", { yellow = 130, green = 140, gray = 150, reagents = { { itemId = X, count = 1, name = "X" } } }),
+            b,
+        }
+    end
+    local prices = { [X] = 100, [Y] = 10 }
+    local listed = { type = "ah", price = 500, source = "TSM" }
+    local stock, where = { [X] = 1 }, { [X] = { bags = 1 } }
+    local memory = { { from = 100, to = 120, recipeId = 2 } }
+
+    local steps, _, route = plan(LazyProf, "cheapest", 100, 120, fixture(listed), prices, nil, stock, where, nil, nil, memory)
+    T.eq("fixture: while the pattern is listed the remembered plan is followed", onlyRecipe(steps), 2)
+
+    -- The listing is gone: B cannot be obtained, so it is not replayed.
+    steps, _, route = plan(LazyProf, "cheapest", 100, 120, fixture(nil), prices, nil, stock, where, nil, nil, memory)
+    T.eq("pattern no longer obtainable: the planner's own choice", onlyRecipe(steps), 1)
+    for _, c in ipairs(route.candidates) do
+        T.check("no candidate is costed as if the pattern were free (" .. c.key .. ")", c.spend >= 1900, c.spend)
+    end
+
+    -- A reagent that lost its price: the recipe cannot be costed, so it is not replayed.
+    steps = plan(LazyProf, "cheapest", 100, 120, fixture(listed), { [X] = 100 }, nil, stock, where, nil, nil, memory)
+    T.eq("reagent without a price: the planner's own choice", onlyRecipe(steps), 1)
+
+    -- The player's own pin still may: that is a choice, not a memory.
+    local pins = {}
+    LazyProf.Pins.Add(pins, 100, 120, 2)
+    steps = plan(LazyProf, "cheapest", 100, 120, fixture(nil), prices, nil, stock, where, nil, pins, nil)
+    T.eq("a pin on an unobtainable recipe is still obeyed", onlyRecipe(steps), 2)
+end)
+
+T.section("candidates: the plan in hand is kept unless another route is clearly cheaper", function()
+    local LazyProf = loadRoutes()
+    local X, Y = 70, 71
+    local function fixture()
+        return {
+            recipe(1, "A", { yellow = 130, green = 140, gray = 150, reagents = { { itemId = X, count = 1, name = "X" } } }),
+            recipe(2, "B", { yellow = 130, green = 140, gray = 150, reagents = { { itemId = Y, count = 1, name = "Y" } } }),
+        }
+    end
+    local a = fixture()[1]
+    -- Canned routes: market 1000, a challenger, and the remembered plan.
+    local function canned(challengerCost, previousCost, marketCost)
+        local calls = 0
+        return { Calculate = function(_, _, _, _, _, _, _, _, ctx)
+            calls = calls + 1
+            local cost = (ctx and ctx.replay) and previousCost or ((calls == 1) and (marketCost or 1000) or challengerCost)
+            return { { recipe = a, quantity = cost / 100, skillStart = 100, skillEnd = 110, totalCost = cost } },
+                { complete = true, gaps = {} }
+        end }
+    end
+    local prices = { [X] = 100, [Y] = 100 }
+    local memory = { { from = 100, to = 110, recipeId = 1 } }
+    -- Y is owned (so the stock route and the remembered plan are planned)
+    -- but the canned routes only use X: each costs what it says.
+    local stock, where = { [Y] = 1 }, { [Y] = { bags = 1 } }
+    local function kept(challengerCost, previousCost, marketCost)
+        local _, _, route = plan(LazyProf, "cheapest", 100, 110, fixture(), prices, nil, stock, where,
+            canned(challengerCost, previousCost, marketCost), nil, memory)
+        return route.kept, route
+    end
+    local name, route = kept(800, 800)
+    T.eq("fixture: market, stock, previous", #route.candidates, 3)
+    T.eq("a tie with the best other route: the plan in hand stays", name, "previous")
+    T.eq("slightly dearer than the best other route (within 5% of the market route's full cost): stays", kept(800, 840), "previous")
+    T.eq("clearly dearer than the best other route: replaced", kept(800, 900), "stock")
+    T.eq("dearer than the market route, however little: replaced", kept(1000, 1010), "market")
+    T.eq("cheaper than everything: stays", kept(900, 500), "previous")
+    T.eq("the margin is measured on the market route with nothing owned", route.keepMargin, 50)
 end)
 
 T.section("candidates: fastest keeps its single run", function()
@@ -812,47 +938,80 @@ T.section("the whole calculation", function()
     _G.UnitRace = function() return "Human", "Human" end
 
     -- The kept route is remembered per character and profession.
-    local remembered = LazyProf.CharStore:Profession("leatherworking").route
+    local store = LazyProf.CharStore:Profession("leatherworking")
+    local remembered = store.route
     T.check("the kept route is remembered", type(remembered) == "table" and #remembered == 1 and remembered[1].recipeId == 2)
     T.check("with its range", remembered[1].from == 100 and remembered[1].to == 120)
-    -- Planning again hands it to the planner as a candidate.
+
+    -- With reagents in hand the next calculation plans it as a candidate, and
+    -- while it is kept the memory is left as it was (not rewritten from the replay).
+    LazyProf.Inventory.ScanAll = function() return { [LEATHER] = 80 }, { [LEATHER] = { bags = 80 } } end
+    store.route = { { from = 100, to = 110, recipeId = 2 }, { from = 110, to = 120, recipeId = 2 } }
     path = build()
-    local hasPrevious = false
-    for _, c in ipairs(path.route.candidates) do
-        if c.key == "previous" then hasPrevious = true end
+    T.eq("with reagents in hand the remembered plan is kept", path.route.kept, "previous")
+    T.check("and the memory keeps its two ranges as they were", #store.route == 2 and store.route[1].from == 100
+        and store.route[1].to == 110 and store.route[2].from == 110 and store.route[2].to == 120)
+    -- A raised target: what lies beyond the remembered plan is added to it.
+    PF:SetTargetSkill("leatherworking", 130, 100, milestones)
+    path = build()
+    if path.route.kept == "previous" then
+        T.check("a raised target extends the memory", store.route[#store.route].to >= 125, store.route[#store.route].to)
+        T.check("and keeps its remembered part", store.route[1].to == 110)
+    else
+        T.check("a raised target: the newly kept route is remembered whole", store.route[#store.route].to >= 125)
     end
-    T.check("the next calculation plans it as a candidate", hasPrevious)
-    -- Choosing or resetting a recipe is the player re-planning: the memory goes.
+    PF:SetTargetSkill("leatherworking", 120, 100, milestones)
+    LazyProf.Inventory.ScanAll = function() return {}, {} end
+
+    -- Choosing a recipe for a range forgets what was remembered there, and
+    -- only there; resetting it does the same, so the planner chooses again.
+    store.route = { { from = 100, to = 110, recipeId = 2 }, { from = 110, to = 120, recipeId = 2 } }
+    PF:PinRange("leatherworking", 104, 112, 1)
+    T.eq("pinning clips the remembered ranges around the pin", #store.route, 2)
+    T.check("the part before the pin stays", store.route[1].from == 100 and store.route[1].to == 104)
+    T.check("the part after the pin stays", store.route[2].from == 112 and store.route[2].to == 120)
+    store.route = { { from = 100, to = 120, recipeId = 1 } }
+    PF:UnpinAt("leatherworking", 105)
+    T.eq("unpinning forgets the pin's range", #store.route, 2)
+    T.check("and keeps the rest", store.route[1].to == 104 and store.route[2].from == 112)
+    PF:UnpinAt("leatherworking", 105)
+    T.eq("unpinning where no pin is changes nothing", #store.route, 2)
     PF:PinRange("leatherworking", 100, 120, 1)
-    T.check("pinning forgets the remembered route", LazyProf.CharStore:Profession("leatherworking").route == nil)
-    build()
-    T.check("fixture: remembered again", LazyProf.CharStore:Profession("leatherworking").route ~= nil)
-    PF:UnpinAt("leatherworking", 100)
-    T.check("unpinning forgets it", LazyProf.CharStore:Profession("leatherworking").route == nil)
-    build()
+    T.check("a pin over everything leaves nothing remembered", store.route == nil or #store.route == 0)
+    store.route = { { from = 100, to = 120, recipeId = 2 } }
     PF:ClearPins("leatherworking")
-    T.check("clearing the pins forgets it", LazyProf.CharStore:Profession("leatherworking").route == nil)
+    T.check("clearing the pins forgets the route", store.route == nil)
+
     -- A what-if from skill 1 neither uses nor replaces the memory.
     build()
-    local before = LazyProf.CharStore:Profession("leatherworking").route
-    local recipes = example()
+    local before = store.route
+    T.check("fixture: remembered again", before ~= nil)
     local whatIf = PF:BuildPath({
         profKey = "leatherworking", profData = { name = "Leatherworking", milestones = milestones },
-        recipes = recipes, startSkill = 100, actualSkill = 100, hasProfession = true, planFromOne = true, planning = true,
+        recipes = example(), startSkill = 100, actualSkill = 100, hasProfession = true, planFromOne = true, planning = true,
     })
-    T.check("a what-if does not replace the remembered route", LazyProf.CharStore:Profession("leatherworking").route == before)
+    T.check("a what-if does not replace the remembered route", store.route == before)
     for _, c in ipairs(whatIf.route.candidates) do
         T.check("a what-if does not replay it (" .. c.key .. ")", c.key ~= "previous")
     end
-    -- Fastest has one route and remembers none.
+    -- Fastest has one route; a look at it leaves the memory alone.
     LazyProf.db.profile.strategy = "fastest"
     local fastPath = PF:BuildPath({
         profKey = "leatherworking", profData = { name = "Leatherworking", milestones = milestones },
         recipes = example(), startSkill = 100, actualSkill = 100, hasProfession = true,
     })
     T.eq("fastest: its own route", fastPath.route.kept, "fastest")
-    T.check("fastest: nothing is remembered", LazyProf.CharStore:Profession("leatherworking").route == nil)
+    T.check("fastest: the remembered route is still there", store.route == before)
     LazyProf.db.profile.strategy = "cheapest"
+    -- Nothing left to plan: nothing to remember.
+    PF:SetTargetSkill("leatherworking", 101, 100, milestones)
+    local done = PF:BuildPath({
+        profKey = "leatherworking", profData = { name = "Leatherworking", milestones = milestones },
+        recipes = example(), startSkill = 101, actualSkill = 101, hasProfession = true,
+    })
+    T.check("fixture: nothing left", #done.steps == 0)
+    T.check("an empty path forgets the route", store.route == nil)
+    PF:SetTargetSkill("leatherworking", 120, 100, milestones)
 
     -- The stock the scan reports reaches the planner.
     LazyProf.Inventory.ScanAll = function() return { [LEATHER] = 80 }, { [LEATHER] = { bank = 80 } } end
@@ -866,7 +1025,7 @@ T.section("the whole calculation", function()
     T.eq("scanned stock: the market route is costed with it too", path.route.candidates[1].spend, 0)
     T.check("scanned stock: the path carries it", path.inventory[LEATHER] == 80)
     LazyProf.Inventory.ScanAll = function() return {}, {} end
-    LazyProf.CharStore:Profession("leatherworking").route = nil
+    store.route = nil
 
     LazyProf.db.profile.saleValueMode = "none"
     path = build()

@@ -478,12 +478,12 @@ ADR-008's trap had a concrete cause: stock was compared with the reagents of one
 - One accounting. What the player pays is defined once: the shopping computation over a set of craft steps (owned stock taken off across the enabled sources, craft-or-buy applied, recipe costs added), minus what the crafts sell for (`Pathfinder:Account`). Totals and route comparisons use it.
 - Sale value. One craft of a recipe sells for the vendor price of its crafted item by default; the auction price after the cut, or nothing, are settings. The Cheapest strategy takes it off a recipe's cost per craft when ranking, floored at zero (with a negative cost the cost per skill-up would improve as the skill-up chance falls), and only for recipes whose every reagent has a real price.
 - Stock scoring against the run. A reagent the character owns costs, per craft, what the whole run still has to buy divided by its crafts. With nothing owned every score is what it was.
-- Candidate routes. Under Cheapest the planner builds up to four routes and keeps the one the player pays least for by the one accounting: the market-price route as before (always), a route ranked with sale values (when any may be used), a route that also gets the owned stock (when the character owns a usable reagent), and the route kept by the last calculation, replayed from the current skill (when one is remembered). A tie keeps the earlier one; a candidate that leaves more of the skill range uncovered cannot win.
-- The kept route is remembered per character and profession as recipe-per-skill-range. Pinning or resetting a recipe forgets it.
+- Candidate routes. Under Cheapest the planner builds up to four routes, each costed by the one accounting: the market-price route as before (always), a route ranked with sale values (when any may be used), a route that also gets the owned stock (when the character owns a usable reagent), and the plan in hand: the route kept by the last calculation, carried on from the current skill (when one is remembered and usable stock is owned). Of the first three the cheapest for the player wins, a tie keeping the earlier one. The plan in hand is kept instead when it costs no more than the market route and no more than that winner plus a small margin (5% of what the market route costs with nothing owned). A candidate that leaves more of the skill range uncovered cannot win.
+- The kept route is remembered per character and profession as recipe-per-skill-range. Carried on from the very skill it was planned at, the same steps come out; from a later skill its bounds are read as whole skills, each recipe is held to the end of its range, and a recipe the planner could not choose any more (not obtainable, or without a known cost) is not forced. A pin or a reset forgets the remembered range it covers. Fastest and the what-if from skill 1 neither use nor replace the memory.
 
-Because the market-price route is always a candidate, the kept route never costs the player more than the route before this decision, by the addon's own accounting. Because the last kept route is a candidate too, a new calculation never costs more than carrying on with the plan shown before.
+Because the market-price route is always a candidate and the plan in hand is never kept above it, the kept route never costs the player more than the route before this decision, by the addon's own accounting.
 
-Why the last route has to be a candidate: once the player holds the whole shopping list of a route, several recipes cost nothing and the greedy planner has no reason left to prefer the one it chose. Planned from scratch it used the long-lived recipe first and let short-lived stock go grey, then asked for more to be bought. Replaying the remembered route costs nothing in that situation, so it is kept.
+Why the plan in hand has to be a candidate, and has to be favoured: once the player holds the shopping list of a route, most routes cost next to nothing, and the greedy planner has no reason left to prefer the one it chose. Planned from scratch at every skill-up it wandered between them - using the long-lived recipe first and letting short-lived stock go grey - and the reagents bought for the abandoned route were stranded. Simulated on the bundled recipe data (buy the list, craft point by point with average luck, plan again at every skill), a player following the planner without the remembered route bought another 8% to 40% of the list later; with it, the same as a player who simply followed the plan that was shopped for.
 
 ### Alternatives Considered
 
@@ -494,7 +494,9 @@ Why the last route has to be a candidate: once the player holds the whole shoppi
 
 ### Trade-offs Accepted
 
-- Up to four planner runs per calculation instead of one (measured headless on the bundled recipe data: 4-10 ms for a plain run, 15-32 ms for three candidates). Bag changes still do not plan again.
+- Up to four planner runs per calculation instead of one (measured headless on the bundled recipe data: 4-10 ms for a plain run, about 30-45 ms for four candidates). Bag changes still do not plan again.
+- Within the margin the plan in hand is kept although another candidate is a little cheaper: stability is worth more than a saving smaller than the rounding of the estimate.
+- Each new calculation rounds the crafts still expected, so the shopping list of a plan whose reagents were all bought can show a craft or two of top-up again while the plan is followed.
 - The planner is still greedy: the kept route is the best of the candidates, not the optimum.
 - Crafts that later steps of the same path use as reagents are still counted as sold, and the shopping list still has the player get them again; the shown net is an upper bound for a player who keeps them.
 - One item per craft is assumed (the recipe data has no yield), so multi-yield recipes are understated.
@@ -503,7 +505,7 @@ Why the last route has to be a candidate: once the player holds the whole shoppi
 ### Consequences
 
 - Routes can change with what the player owns and with what crafts sell for; `/lp diag prices` prints which candidate was kept and each candidate's amounts.
-- After shopping, the player holds the reagents of the plan; the remembered route keeps that plan in place unless another route really costs less.
+- After shopping, the player holds the reagents of the plan; the remembered route keeps that plan in place unless another route is clearly cheaper.
 - New planner ideas can be added as further candidates without risk to the "never dearer" property.
 
 ---
