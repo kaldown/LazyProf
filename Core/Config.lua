@@ -69,6 +69,10 @@ LazyProf.defaults = {
         -- profile (Modules/Guide/TrainerMemory.lua)
         trainers = {},
         trainerFees = {},
+        -- Each character's bags and bank as last seen, and the account bank
+        -- per world (Modules/Inventory/StockMemory.lua, which also writes the
+        -- table's format number: it must not be a default)
+        stock = {},
     },
     char = {
         -- Per-character price cache

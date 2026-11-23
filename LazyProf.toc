@@ -63,6 +63,7 @@ Core\Config.lua
 Core\CharStore.lua
 
 # Modules - Data
+Modules\Inventory\StockMemory.lua
 Modules\Inventory\Scanner.lua
 Modules\Shopping\VendorMemory.lua
 Modules\Pricing\Providers\TSM.lua

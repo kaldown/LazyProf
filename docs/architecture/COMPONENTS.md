@@ -20,6 +20,7 @@ LazyProf/
 │   └── Registry.lua           # CraftLib integration, learned recipe tracking
 ├── Modules/
 │   ├── Inventory/
+│   │   ├── StockMemory.lua    # Each character's bags and bank as last seen, the account bank per world
 │   │   └── Scanner.lua        # Multi-source inventory scanning (bags/bank/mail/AH/guild/alts)
 │   ├── Pricing/
 │   │   ├── PriceManager.lua   # Provider orchestration, caching, price provenance, /lp diag prices
