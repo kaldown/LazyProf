@@ -631,9 +631,19 @@ local function SignedMoney(copper)
     return copper < 0 and Green(text) or ("|cFFFF6666" .. text .. "|r")
 end
 
--- Tooltip of an alternative: what it is, why it may be blocked, what it costs
--- over the run and what its crafts sell for.
-local function AlternativeTooltip(alt)
+-- An alternative that cannot bring the skill to the end of the stage
+-- (alt.covers == false): how far it gets, in place of differences that would
+-- compare a part of the run with the whole.
+local function ReachText(stage, alt)
+    if alt.coversTo <= stage.fromDisplay then
+        return "no skill-ups here"
+    end
+    return "only up to " .. tostring(alt.coversTo)
+end
+
+-- Tooltip of an alternative of `stage`: what it is, why it may be blocked,
+-- what it costs over the run and what its crafts sell for.
+local function AlternativeTooltip(alt, stage)
     local recipe = alt.recipe
     local c = Views.DifficultyColor(alt.color)
     local lines = { { text = recipe.name or "Unknown", r = c[1], g = c[2], b = c[3] } }
@@ -649,7 +659,13 @@ local function AlternativeTooltip(alt)
     end
     lines[#lines + 1] = { text = string.format("Difficulty: %s (%d%% skillup chance)", tostring(alt.color),
         (alt.expectedSkillups or 0) * 100), r = 0.7, g = 0.7, b = 0.7 }
-    if alt.priced then
+    if alt.covers == false then
+        local text = "Gives no skill-ups in this range, so it cannot cover this run."
+        if alt.coversTo > stage.fromDisplay then
+            text = string.format("Gives skill-ups only up to %d, so it cannot cover this run.", alt.coversTo)
+        end
+        lines[#lines + 1] = { text = text, r = 1, g = 0.5, b = 0 }
+    elseif alt.priced then
         -- The same figures the row's difference is made of: what it costs
         -- over the run, what its crafts sell for, and the net of the two.
         local cost, sale = Round(alt.projectedCost), Round(alt.projectedSale)
@@ -692,7 +708,9 @@ local function AlternativeRow(stage, alt, ctx)
         name = name .. " |cFFFF8800[!]|r"
     end
     local right
-    if alt.priced then
+    if alt.covers == false then
+        right = Grey(ReachText(stage, alt))
+    elseif alt.priced then
         right = Signed(alt.craftsDelta, "crafts") .. "  " .. SignedMoney(alt.costDelta)
     else
         right = Grey("no price")
@@ -700,7 +718,7 @@ local function AlternativeRow(stage, alt, ctx)
     return {
         kind = "line", alt = alt, indent = 6, text = name, color = Views.DifficultyColor(alt.color),
         right = right, alpha = alt.unavailable and 0.5 or 1,
-        bg = BG_SUB, hoverBg = BG_ROW_HOVER, tooltip = AlternativeTooltip(alt),
+        bg = BG_SUB, hoverBg = BG_ROW_HOVER, tooltip = AlternativeTooltip(alt, stage),
         onClick = function() ctx.onShowRecipe(alt.recipe, stage.fromDisplay) end,
         button = { text = "Use this", width = 62, tooltip = UseTooltip(alt), onClick = function() ctx.onUseAlternative(stage, alt) end },
     }
@@ -966,12 +984,14 @@ end
 -- The alternative to offer under a run's row: the best usable one, when it is
 -- close (Views.CLOSE_ALTERNATIVE of what the run costs the player after its
 -- crafts are sold, so for a run that pays for itself only one that is no
--- dearer) or cheaper. None on a run the player pinned or has finished, or
--- whose own cost is not known.
+-- dearer) or cheaper. Only the first of the stage's sorted alternatives is
+-- considered: when that one cannot be obtained, cannot cover the run or has
+-- no price, none is offered. None either on a run the player pinned or has
+-- finished, or whose own cost is not known.
 local function CloseAlternative(stage)
     if stage.pinned or stage.done or UnpricedToBuy(stage) then return nil end
     local alt = stage.alternatives and stage.alternatives[1]
-    if not alt or alt.unavailable or not alt.priced then return nil end
+    if not alt or alt.unavailable or alt.covers == false or not alt.priced then return nil end
     local net = stage.outOfPocketCost + (stage.feeIncluded and 0 or (stage.fee or 0)) - (stage.sale or 0)
     if alt.costDelta <= Views.CLOSE_ALTERNATIVE * math.max(0, net) then
         return alt
@@ -983,7 +1003,9 @@ end
 -- player (after what the crafts sell for) and in crafts, and a Use button.
 local function PathAlternativeRow(stage, alt, view, ctx)
     local right
-    if alt.priced then
+    if alt.covers == false then
+        right = Grey(ReachText(stage, alt))
+    elseif alt.priced then
         right = CostDifference(alt.costDelta, Grey("same cost")) .. "  " .. CraftsDifference(alt.craftsDelta)
     else
         right = Grey("no price")
@@ -991,7 +1013,7 @@ local function PathAlternativeRow(stage, alt, view, ctx)
     return {
         kind = "line", alt = alt, indent = 6, text = AlternativeName(alt, view.profile),
         color = Views.DifficultyColor(alt.color), right = right, alpha = alt.unavailable and 0.5 or 1,
-        bg = BG_SUB, hoverBg = BG_ROW_HOVER, tooltip = AlternativeTooltip(alt),
+        bg = BG_SUB, hoverBg = BG_ROW_HOVER, tooltip = AlternativeTooltip(alt, stage),
         onClick = function() ctx.onShowRecipe(alt.recipe, stage.fromDisplay) end,
         button = { text = "Use", width = 40, tooltip = UseTooltip(alt), onClick = function() ctx.onUseAlternative(stage, alt) end },
     }
@@ -1133,7 +1155,7 @@ local function AddRun(rows, stage, learn, isCurrent, view, ctx)
         rows[#rows + 1] = {
             kind = "line", sub = true, stage = stage, alt = alt, color = GREY,
             text = "or: " .. AlternativeName(alt, view.profile) .. ", " .. CostDifference(alt.costDelta, "same cost"),
-            tooltip = AlternativeTooltip(alt),
+            tooltip = AlternativeTooltip(alt, stage),
             onClick = function() ctx.onShowRecipe(alt.recipe, stage.fromDisplay) end,
             button = { text = "Use", width = 40, tooltip = UseTooltip(alt), onClick = function() ctx.onUseAlternative(stage, alt) end },
         }

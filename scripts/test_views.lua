@@ -590,10 +590,12 @@ T.section("guide card", function()
     T.eq("step cost", t[6], " | Step cost  19s")
     T.eq("alternatives header after a separator", t[7] .. " " .. t[8], "--- Alternatives")
     -- Sorted: usable and cheapest for the player first; unavailable last.
-    T.eq("first alternative: fewer or more crafts and the cost difference",
-        t[9], "Boots |cFFFF8800[!]|r | |cFF66FF66-2 crafts|r  |cFFFF6666+16s 30c|r [Use this]")
-    T.eq("second alternative", t[10], "Belt | |cFFFF6666+15 crafts|r  |cFFFF6666+32s|r [Use this]")
-    T.eq("third alternative", t[11], "Bag | |cFF66FF66-2 crafts|r  |cFFFF6666+49s|r [Use this]")
+    -- Every alternative turns yellow at 150 like the Gloves, and takes 21
+    -- crafts for 143-160 counted craft by craft.
+    T.eq("first alternative: crafts and cost difference",
+        t[9], "Belt | |cFFFF6666+2 crafts|r  |cFFFF6666+12s 50c|r [Use this]")
+    T.eq("second alternative, with its recipe to learn", t[10], "Boots |cFFFF8800[!]|r | |cFFFF6666+2 crafts|r  |cFFFF6666+19s 90c|r [Use this]")
+    T.eq("third alternative", t[11], "Bag | |cFFFF6666+2 crafts|r  |cFFFF6666+65s|r [Use this]")
     T.eq("the rest is behind Show all", t[12], "Show all 4")
     T.eq("next stages after a separator", t[13] .. " " .. t[14], "--- Next")
     T.eq("next stage row", t[15], "160-180 | |cFF888888craft|r  20x Shirt (green: no better recipe) | 40s")
@@ -602,22 +604,22 @@ T.section("guide card", function()
 
     rows[2].onClick()
     T.eq("title click opens the recipe details", calls[#calls], "recipe:Gloves:143")
-    rows[9].button.onClick()
+    rows[10].button.onClick()
     T.eq("Use this pins over the stage's exact range", calls[#calls], "use:Boots:143-160")
-    rows[9].onClick()
+    rows[10].onClick()
     T.eq("alternative click opens its recipe", calls[#calls], "recipe:Boots:143")
     rows[12].onClick()
     T.eq("Show all asks to expand", calls[#calls], "all:true")
     rows[15].onClick()
     T.eq("a next row opens that stage", calls[#calls], "open:2")
-    local tip = rows[9].tooltip
+    local tip = rows[10].tooltip
     T.eq("alternative tooltip: unlearned source", tip[2].text, "[!] Unlearned: Vendor")
     T.check("alternative tooltip: learning fee", tip[5].text:find("to learn the recipe", 1, true) ~= nil, tip[5].text)
 
     view.showAllAlts = true
     rows = Views.GuideCard(view, ctx)
     t = texts(rows)
-    T.eq("expanded: the unavailable one is last", t[12], "Hat | |cFFFF6666+15 crafts|r  |cFF66FF66-2s|r [Use this]")
+    T.eq("expanded: the unavailable one is last", t[12], "Hat | |cFFFF6666+2 crafts|r  |cFF66FF66-8s 50c|r [Use this]")
     T.eq("and dimmed", rows[12].alpha, 0.5)
     T.eq("with today's reason in its tooltip", rows[12].tooltip[2].text, "Needs Alchemy")
     T.eq("Show fewer closes it", t[13], "Show fewer")
@@ -779,7 +781,7 @@ T.section("path list", function()
         local gloves = recipe(34, "Barbaric Gloves", 150, 170, 180, 190, { unlearned = true,
             sourceInfo = { type = "ah", price = 8500, source = "TSM" } })
         local pants = recipe(35, "Dark Pants", 120, 150, 160, 170)
-        local vest = recipe(36, "Vest", 120, 150, 160, 170)
+        local vest = recipe(36, "Vest", 120, 130, 140, 150)     -- yellow from 130: 19 crafts for 125-140
         local fine = recipe(37, "Fine Pants", 120, 150, 160, 170, { unlearned = true, sourceInfo = { type = "vendor", cost = 3000 } })
         fine.source = { type = "vendor" }
         local belt = recipe(38, "Belt", 120, 150, 160, 170)
@@ -788,17 +790,24 @@ T.section("path list", function()
         local alts = {
             { recipe = shoulders, score = 1, color = "orange", expectedSkillups = 1 },
             { recipe = pants, score = 2, color = "orange", expectedSkillups = 1 },
-            { recipe = vest, score = 3, color = "yellow", expectedSkillups = 0.75 },
+            { recipe = vest, score = 3, color = "orange", expectedSkillups = 1 },
             { recipe = fine, score = 4, color = "orange", expectedSkillups = 1 },
             { recipe = belt, score = 5, color = "orange", expectedSkillups = 1 },
             { recipe = hat, score = math.huge, color = "orange", expectedSkillups = 1 },
         }
+        if opts.scarf then
+            -- Cheap, but grey at 134: it cannot do the whole of 125-140.
+            alts[#alts + 1] = { recipe = recipe(43, "Scarf", 120, 126, 130, 134), score = 6, color = "orange", expectedSkillups = 1 }
+        end
+        if opts.onlyScarf then
+            alts = { alts[1], alts[#alts] }
+        end
         return {
             profession = "Leatherworking", professionKey = "leatherworking", hasProfession = true,
             currentSkill = 117, actualSkill = opts.skill or 117, targetSkill = 190, capSkill = 300, racialBonus = 0,
             milestones = MILESTONES, complete = false, sale = opts.sale,
             prices = { [131] = 100, [132] = 100, [133] = 80, [134] = 105, [135] = opts.pantsPrice or 110,
-                       [136] = 150, [137] = 120, [138] = 200, [139] = 50 },
+                       [136] = 150, [137] = 120, [138] = 200, [139] = 50, [143] = 10 },
             steps = {
                 step(boots, 117, 121, 5, 0), step(boots, 121, 125, 5, 0),
                 step(shoulders, 125, 140, 15, 0, { alternatives = alts }),
@@ -997,8 +1006,8 @@ T.section("path list", function()
     T.eq("opened run: no inline alternative (they are listed below)", t[5], "Reagent | Need,Have,Buy,Cost")
     T.eq("opened run: alternatives header names the range", t[7], "Other recipes for 125-140")
     T.eq("first alternative: cost and crafts difference", t[8], "Dark Pants | +1s 50c  |cFF888888same crafts|r [Use]")
-    T.eq("second (same cost for the player: by name)", t[9], "Belt | +15s  |cFF888888same crafts|r [Use]")
-    T.eq("third", t[10], "Vest | +15s  +5 crafts [Use]")
+    T.eq("second: more crafts, as its chance falls inside the run", t[9], "Vest | +13s 50c  +4 crafts [Use]")
+    T.eq("third", t[10], "Belt | +15s  |cFF888888same crafts|r [Use]")
     T.eq("the rest behind Show all, with the details button", t[11], "Show all 5 [Recipe details]")
     T.eq("then the next run", t[12], "Armor Kit | 140-150,12,9s 60c")
     rows[8].button.onClick()
@@ -1022,11 +1031,31 @@ T.section("path list", function()
     -- Shown for one run only.
     rows = list(nil, { expanded = closed({ [SHOULDERS_KEY] = true }), showAllAlts = { [KIT_KEY] = true } })
     T.check("show all is per run", find(rows, "Show all 5") ~= nil)
-    -- Fewer crafts, one craft.
+    -- Fewer crafts, one craft: the run's own recipe turns yellow at 137 and
+    -- needs 16 crafts, the alternative stays orange.
     local fewer = listPath()
-    fewer.steps[3].alternatives[3].expectedSkillups = 15 / 14
+    fewer.steps[3].recipe.skillRange = { orange = 125, yellow = 137, green = 144, gray = 150 }
+    fewer.steps[3].quantity = 16
     rows = Views.Path(shopView(fewer, { liveCap = 150, expanded = closed({ [SHOULDERS_KEY] = true }) }), ctx)
-    T.eq("one craft fewer", texts(rows)[9], "Vest | +6s  |cFF66FF66-1 craft|r [Use]")
+    T.eq("one craft fewer", texts(rows)[8], "Dark Pants | +50c  |cFF66FF66-1 craft|r [Use]")
+
+    -- An alternative that goes grey inside the run cannot cover it: it is
+    -- listed after the ones that can, says how far it gets, and is never
+    -- offered under the row - however cheap it is.
+    rows = list({ scarf = true }, { expanded = closed({ [SHOULDERS_KEY] = true }), showAllAlts = { [SHOULDERS_KEY] = true } })
+    t = texts(rows)
+    T.eq("goes grey inside the run: after the ones that cover it", t[12], "Scarf | |cFF888888only up to 134|r [Use]")
+    T.eq("goes grey inside the run: before the unobtainable one", t[13], "Hat | |cFF66FF66-7s 50c|r  |cFF888888same crafts|r [Use]")
+    tip = {}
+    for _, line in ipairs(rows[12].tooltip) do tip[#tip + 1] = line.text end
+    tip = table.concat(tip, " / ")
+    T.check("goes grey inside the run: the tooltip says so",
+        tip:find("Gives skill-ups only up to 134, so it cannot cover this run.", 1, true) ~= nil, tip)
+    T.check("goes grey inside the run: no cost over a run it cannot do", tip:find("crafts for this run", 1, true) == nil, tip)
+    rows[12].button.onClick()
+    T.eq("goes grey inside the run: it can still be chosen", calls[#calls], "use:Scarf:125-140")
+    rows = list({ onlyScarf = true })
+    T.check("goes grey inside the run: never the inline alternative", find(rows, "or:") == nil)
 
     -- A pinned run says so and offers Reset.
     rows = list(nil, { expanded = closed({ [SHOULDERS_KEY] = true }), pins = pins })
