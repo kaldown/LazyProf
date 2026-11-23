@@ -1718,7 +1718,7 @@ function Views.Merchant(plan, state, ctx)
     for _, entry in ipairs(plan and plan.entries or {}) do
         rows[#rows + 1] = {
             kind = "line", entry = entry, text = entry.name, itemId = entry.itemId,
-            right = string.format("%d   %s", entry.quantity, Utils.FormatMoneyShort(entry.cost)),
+            right = string.format("%d   %s", entry.quantity, Money(entry.cost)),
             bg = BG_SUB, hoverBg = BG_ROW_HOVER,
             tooltip = { { text = string.format("%d to buy at %s each", entry.quantity, Money(entry.unitPrice)), r = 0.7, g = 0.7, b = 0.7 } },
             button = { text = "Buy", width = 44, enabled = not state.busy, onClick = function() ctx.onBuy(entry) end },

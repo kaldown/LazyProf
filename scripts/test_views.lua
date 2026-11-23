@@ -1817,4 +1817,16 @@ T.section("arrow tooltip", function()
     end
 end)
 
+T.section("merchant panel: the rows add up to the button", function()
+    -- Costs the two-unit format would cut short.
+    local plan = { entries = {
+        { name = "Thread", itemId = 1, quantity = 37, unitPrice = 333, cost = 12321 },
+        { name = "Dye", itemId = 2, quantity = 3, unitPrice = 415, cost = 1245 },
+    }, skipped = {}, total = 13566 }
+    local rows = Views.Merchant(plan, {}, { onBuy = function() end })
+    T.eq("a row shows its cost to the copper", rows[1].right, "37   1g 23s 21c")
+    T.eq("the other row", rows[2].right, "3   12s 45c")
+    T.eq("the button's total is their sum", Views.MerchantBuyAll(plan, {}), "Buy all - 1g 35s 66c")
+end)
+
 T.finish()
