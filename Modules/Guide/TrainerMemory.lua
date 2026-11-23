@@ -110,7 +110,7 @@ function TrainerMemory:Record(info, services)
         entry.mapId = info.mapId
         entry.x, entry.y = info.x, info.y
         entry.faction = info.faction
-        entry.seen = GetServerTime and GetServerTime() or entry.seen
+        entry.seen = LazyProf.Client:Now() or entry.seen
         for recipeId in pairs(listed) do
             if not entry.teaches[recipeId] then
                 entry.teaches[recipeId] = true

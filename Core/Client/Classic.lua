@@ -398,6 +398,119 @@ function Client:RunTrainerDiagnostic(lines)
     lines[#lines + 1] = "trainer: visited trainers are not recorded on this client"
 end
 
+-- Stock: bags, the bank, who the character is, the clock ------------------------
+
+-- What the character carries: items ({ [itemId] = count }), the soulbound
+-- part of them, and the backpack's slot count (zero means the bags could not
+-- be read just now). Backpack and the four bags, through whichever container
+-- call the client has: the table-returning one, or the older positional one
+-- (count is its 2nd return, the item link its 7th). The older call does not
+-- say what is soulbound, so on such a client nothing is reported as bound.
+function Client:BagContents()
+    local items, bound = {}, {}
+    local backpackSlots = 0
+    local modern = C_Container and C_Container.GetContainerNumSlots and C_Container.GetContainerItemInfo
+    if not modern and not (GetContainerNumSlots and GetContainerItemInfo) then
+        return items, bound, backpackSlots
+    end
+    for bag = 0, 4 do
+        local slots = (modern and C_Container.GetContainerNumSlots(bag) or GetContainerNumSlots(bag)) or 0
+        if bag == 0 then
+            backpackSlots = slots
+        end
+        for slot = 1, slots do
+            local itemId, count, isBound
+            if modern then
+                local info = C_Container.GetContainerItemInfo(bag, slot)
+                if info then
+                    itemId, count, isBound = info.itemID, info.stackCount, info.isBound
+                end
+            else
+                local _, itemCount, _, _, _, _, itemLink = GetContainerItemInfo(bag, slot)
+                if itemLink then
+                    itemId = tonumber(itemLink:match("item:(%d+)"))
+                    count = itemCount
+                end
+            end
+            if itemId and count then
+                items[itemId] = (items[itemId] or 0) + count
+                if isBound then
+                    bound[itemId] = (bound[itemId] or 0) + count
+                end
+            end
+        end
+    end
+    return items, bound, backpackSlots
+end
+
+-- The bank is not read on these clients: its calls and events could not be
+-- checked against client source here, and a bank read on a guess could
+-- remember a wrong or an empty bank. So the bank never counts as open,
+-- nothing is returned for it and no container is a bank container; bank
+-- stock on these clients comes from an inventory addon only.
+function Client:IsBankOpen()
+    return false
+end
+
+function Client:BankContents(kind)
+    return nil
+end
+
+function Client:BankKindOfBag(bagId)
+    return nil
+end
+
+-- Who the character is: { guid, name, world, faction }. Realms are real on
+-- these clients, so the realm name is the world. A part the client cannot
+-- give is nil.
+function Client:CharacterIdentity()
+    return {
+        guid = UnitGUID and UnitGUID("player") or nil,
+        name = UnitName and (UnitName("player")) or nil,
+        world = GetRealmName and GetRealmName() or nil,
+        faction = UnitFactionGroup and (UnitFactionGroup("player")) or nil,
+    }
+end
+
+-- Server time in seconds; the computer's clock on a client without that call.
+function Client:Now()
+    if GetServerTime then
+        return GetServerTime()
+    end
+    return time()
+end
+
+-- callbacks: onBankOpened(), onBankChanged(kind), onBankClosed(), onLogout().
+-- Only logout is reported here (see the bank note above). BAG_UPDATE belongs
+-- to Core/Init.lua, which passes bag updates on.
+function Client:StartStock(callbacks)
+    LazyProf:RegisterEvent("PLAYER_LOGOUT", function()
+        callbacks.onLogout()
+    end)
+end
+
+-- /lp diag stock: the bags as this adapter reads them. Read-only.
+function Client:RunStockDiagnostic(lines)
+    local function add(text) lines[#lines + 1] = text end
+    local modern = C_Container and C_Container.GetContainerNumSlots and C_Container.GetContainerItemInfo
+    local legacy = GetContainerNumSlots and GetContainerItemInfo
+    add("api: C_Container=" .. tostring(modern and true or false) .. " GetContainerItemInfo=" .. tostring(legacy and true or false)
+        .. " GetServerTime=" .. tostring(GetServerTime ~= nil))
+    if modern or legacy then
+        for bag = 0, 4 do
+            local slots = (modern and C_Container.GetContainerNumSlots(bag) or GetContainerNumSlots(bag)) or 0
+            add("bag[" .. tostring(bag) .. "] slots=" .. tostring(slots))
+        end
+    end
+    local items, bound, backpackSlots = self:BagContents()
+    local itemCount, boundCount = 0, 0
+    for _ in pairs(items) do itemCount = itemCount + 1 end
+    for _ in pairs(bound) do boundCount = boundCount + 1 end
+    add("adapter bags: items=" .. tostring(itemCount) .. " soulbound=" .. tostring(boundCount)
+        .. " backpackSlots=" .. tostring(backpackSlots))
+    add("bank: not recorded on this client")
+end
+
 -- /lp diag learned: append learned-recipe detection lines to `lines`. It
 -- contrasts what each id-resolution path sees: the legacy recipe-link scan
 -- (parsedIds), the active filter/header state, CraftLib match counts, the real

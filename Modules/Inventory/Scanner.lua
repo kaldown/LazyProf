@@ -9,35 +9,10 @@ local Inventory = LazyProf.Inventory
 -- Each returns {[itemId] = count}
 -- ============================================================================
 
--- Scan bags using native WoW API (no Syndicator dependency)
+-- The bags the character carries, read by the client adapter (which bags
+-- there are and how a slot is read differ per client).
 function Inventory:ScanBags()
-    local items = {}
-
-    for bag = 0, 4 do
-        local numSlots = C_Container and C_Container.GetContainerNumSlots(bag) or GetContainerNumSlots(bag)
-        for slot = 1, numSlots do
-            local itemId, count
-            if C_Container then
-                local info = C_Container.GetContainerItemInfo(bag, slot)
-                if info then
-                    itemId = info.itemID
-                    count = info.stackCount
-                end
-            else
-                local _, itemCount, _, _, _, _, itemLink = GetContainerItemInfo(bag, slot)
-                if itemLink then
-                    itemId = tonumber(itemLink:match("item:(%d+)"))
-                    count = itemCount
-                end
-            end
-
-            if itemId and count then
-                items[itemId] = (items[itemId] or 0) + count
-            end
-        end
-    end
-
-    return items
+    return (LazyProf.Client:BagContents())
 end
 
 -- Scan bags from Syndicator character data (for alts)

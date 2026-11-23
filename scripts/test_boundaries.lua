@@ -14,6 +14,11 @@ local FORBIDDEN = {
     -- Trainer window calls and the map (the adapter's TrainerInfo / TrainerServices)
     "GetTrainer", "GetNumTrainerServices", "IsTradeskillTrainer", "BuyTrainerService", "ClassTrainerFrame",
     "C_Map", "GetRealZoneText", "GetSubZoneText",
+    -- Bags and the bank (the adapter's BagContents / BankContents / IsBankOpen)
+    "C_Container", "GetContainerItemInfo", "GetContainerNumSlots", "C_Bank", "BANKFRAME", "BANK_TABS_CHANGED",
+    -- The world a character belongs to and the server clock (the adapter's
+    -- CharacterIdentity / Now): a realm name is no stable key on every client
+    "C_GameRules", "GetCurrentRegionName", "GetRealmName", "GetServerTime",
 }
 
 local EXEMPT_DIRS = { "Core/Client/", "Modules/UI/Widgets/" }
@@ -60,6 +65,10 @@ local function hasBareGetItemInfo(line)
     return hasBareCall(line, "GetItemInfo")
 end
 
+-- Global calls WoW Forever does not have (their C_Item / C_Container forms
+-- are the ones to use there).
+local FOREVER_BARE_FORBIDDEN = { "GetItemInfo", "GetContainerItemInfo", "GetContainerNumSlots" }
+
 -- Client globals that may only be called inside the adapter: the character's
 -- professions (spell-book list on WoW Forever) and money.
 local BARE_FORBIDDEN = { "GetProfessions", "GetProfessionInfo", "GetMoney" }
@@ -102,8 +111,8 @@ for _, path in ipairs(files) do
 end
 
 -- Forever runs the shared code too, so no file may use the legacy UI calls
--- or the global item-info call (C_Item.GetItemInfo instead) - except the
--- Classic adapter and the Classic section of the dropdown widget, which only
+-- or the global item-info and container calls (C_Item / C_Container instead)
+-- - except the Classic adapter and the Classic section of the dropdown widget, which only
 -- run on Classic clients. That section runs from the "-- Classic ---" line to
 -- the "-- Forever ---" line of Modules/UI/Widgets/Dropdown.lua.
 local FOREVER_FORBIDDEN = {
@@ -140,9 +149,13 @@ for _, path in ipairs(files) do
                         offenders[#offenders + 1] = string.format("%s:%d: %s (not on Forever)", path, n, name)
                     end
                 end
-                -- Outside the exempt directories the general check above already reports it.
-                if exempt(path) and hasBareGetItemInfo(line) then
-                    offenders[#offenders + 1] = string.format("%s:%d: GetItemInfo( (not on Forever)", path, n)
+                -- Outside the exempt directories the general check above already reports them.
+                if exempt(path) then
+                    for _, name in ipairs(FOREVER_BARE_FORBIDDEN) do
+                        if hasBareCall(line, name) then
+                            offenders[#offenders + 1] = string.format("%s:%d: %s( (not on Forever)", path, n, name)
+                        end
+                    end
                 end
             end
         end

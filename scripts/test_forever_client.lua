@@ -54,7 +54,14 @@ end
 -- GetProfessions/GetProfessionInfo, C_Item, timers, scroll-box events.
 -- ===========================================================================
 _G.Enum = { TradeskillRelativeDifficulty = { Optimal = 0, Medium = 1, Easy = 2, Trivial = 3 },
-            CraftingReagentType = { Modifying = 0, Basic = 1, Finishing = 2, Automatic = 3 } }
+            CraftingReagentType = { Modifying = 0, Basic = 1, Finishing = 2, Automatic = 3 },
+            -- Containers: carried bags 0-5, the character bank's tabs 6-14, the account bank's 15-23.
+            BagIndex = { Accountbanktab = -3, Characterbanktab = -2, Keyring = -1, Backpack = 0,
+                         Bag_1 = 1, Bag_2 = 2, Bag_3 = 3, Bag_4 = 4, ReagentBag = 5,
+                         CharacterBankTab_1 = 6, CharacterBankTab_9 = 14,
+                         AccountBankTab_1 = 15, AccountBankTab_9 = 23 },
+            BankType = { Character = 0, Guild = 1, Account = 2 },
+            GameRule = { HardcoreRuleset = 10, PvPRuleset = 213, RPRuleset = 214 } }
 _G.BaseScrollBoxEvents = { OnScroll = "OnScroll" }
 _G.ScrollBoxListMixin = { Event = { OnDataRangeChanged = "OnDataRangeChanged" } }
 
@@ -198,7 +205,9 @@ local SURFACE = { "IsOpen", "AnchorFrame", "PanelOffsetX", "GetLine", "NoDataPro
                   "UnlearnedHiddenByFilter", "Start", "RunDiagnostic",
                   "StartMerchant", "IsMerchantOpen", "MerchantAnchorFrame", "MerchantItems", "BuyFromMerchant",
                   "FreeBagSlots", "Money", "RunMerchantDiagnostic",
-                  "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic" }
+                  "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic",
+                  "BagContents", "IsBankOpen", "BankContents", "BankKindOfBag", "CharacterIdentity", "Now",
+                  "StartStock", "RunStockDiagnostic" }
 
 -- Names of the functions an adapter installs.
 local function methodNames(client)
@@ -689,6 +698,293 @@ section("trainer", function()
     ok = pcall(Client.RunTrainerDiagnostic, Client, lines)
     check(p .. "diag: a failing section is reported", ok and table.concat(lines, "\n"):find("SECTION ERROR", 1, true) ~= nil)
     _G.issecretvalue = nil
+end)
+
+-- ===========================================================================
+-- 4d. Stock: bags, the bank, who the character is, the clock
+-- ===========================================================================
+section("stock", function()
+    local p = "stock: "
+
+    -- Containers as the client reports them: [bag] = { slots, [slot] = info }.
+    local containers = {}
+    local slotCalls = {}      -- container ids asked for their slot count, in order
+    local function slot(itemId, stack, isBound)
+        return { itemID = itemId, stackCount = stack, isBound = isBound and true or false }
+    end
+    _G.C_Container = {
+        GetContainerNumSlots = function(bag)
+            slotCalls[#slotCalls + 1] = bag
+            return containers[bag] and containers[bag].slots or 0
+        end,
+        GetContainerItemInfo = function(bag, index)
+            return containers[bag] and containers[bag][index] or nil
+        end,
+        GetContainerNumFreeSlots = function() return 0, 0 end,
+    }
+    -- The Classic container calls do not exist on this client.
+    _G.GetContainerNumSlots = function() error("global GetContainerNumSlots called on Forever") end
+    _G.GetContainerItemInfo = function() error("global GetContainerItemInfo called on Forever") end
+
+    -- The bank as C_Bank reports it.
+    local bank = {
+        [0] = { canView = true, locked = nil, tabs = { { ID = 6 }, { ID = 8 } } },
+        [2] = { canView = true, locked = nil, tabs = { { ID = 15 } } },
+    }
+    local fetched = {}
+    _G.C_Bank = {
+        CanViewBank = function(bankType) return bank[bankType] and bank[bankType].canView or false end,
+        FetchBankLockedReason = function(bankType) return bank[bankType] and bank[bankType].locked or nil end,
+        FetchPurchasedBankTabData = function(bankType)
+            fetched[#fetched + 1] = bankType
+            return bank[bankType] and bank[bankType].tabs or {}
+        end,
+        ShouldUsePlayerBagsInBank = function() return true end,
+    }
+
+    local function resetContainers()
+        containers = {
+            [0] = { slots = 16, slot(2589, 20), slot(2589, 5), nil, slot(6948, 1, true) },
+            [1] = { slots = 8, slot(2592, 10, true), slot(2592, 4) },
+            [4] = { slots = 6, slot(4306, 7) },
+            [5] = { slots = 32, slot(765, 11), slot(2447, 3) },              -- the reagent bag
+            [6] = { slots = 28, slot(2589, 100), slot(2770, 9, true) },      -- character bank: the bank itself
+            [7] = { slots = 16, slot(99999, 1) },                            -- not a purchased tab: never read
+            [8] = { slots = 12, slot(2770, 1), slot(4306, 2) },              -- character bank: a bank bag
+            [15] = { slots = 98, slot(2589, 60), slot(774, 2, true) },       -- account bank
+            [-1] = { slots = 4, slot(5396, 1) },                             -- keyring: not stock
+        }
+    end
+    resetContainers()
+
+    local addon = loadAdapter(16001)
+    local Client = addon.Client
+
+    -- Bags -----------------------------------------------------------------
+    slotCalls = {}
+    local items, bound, backpackSlots = Client:BagContents()
+    check(p .. "bags: stacks of one item are added up", items[2589] == 25, items[2589])
+    check(p .. "bags: the reagent bag (5) is read", items[765] == 11 and items[2447] == 3)
+    check(p .. "bags: every carried bag", items[2592] == 14 and items[4306] == 7 and items[6948] == 1)
+    check(p .. "bags: nothing from the bank or the keyring", items[2770] == nil and items[99999] == nil and items[5396] == nil)
+    check(p .. "bags: exactly containers 0 to 5 are asked", table.concat(slotCalls, ",") == "0,1,2,3,4,5",
+        table.concat(slotCalls, ","))
+    check(p .. "bags: soulbound counts are split off", bound[2592] == 10 and bound[6948] == 1 and bound[2589] == nil)
+    check(p .. "bags: the backpack's slot count is the third return", backpackSlots == 16, backpackSlots)
+    containers[0] = nil
+    items, bound, backpackSlots = Client:BagContents()
+    check(p .. "bags: a backpack that reports no slots is reported as such", backpackSlots == 0 and type(items) == "table")
+    resetContainers()
+
+    -- Bank kinds of a container id -------------------------------------------
+    check(p .. "kind: 5 (reagent bag) is no bank", Client:BankKindOfBag(5) == nil)
+    check(p .. "kind: 6 is the character bank", Client:BankKindOfBag(6) == "character")
+    check(p .. "kind: 14 is the character bank", Client:BankKindOfBag(14) == "character")
+    check(p .. "kind: 15 is the account bank", Client:BankKindOfBag(15) == "account")
+    check(p .. "kind: 23 is the account bank", Client:BankKindOfBag(23) == "account")
+    check(p .. "kind: 24 is no bank", Client:BankKindOfBag(24) == nil)
+    check(p .. "kind: the backpack, the keyring and nothing are no bank",
+        Client:BankKindOfBag(0) == nil and Client:BankKindOfBag(-1) == nil and Client:BankKindOfBag(nil) == nil)
+
+    -- Events -----------------------------------------------------------------
+    local seen = {}
+    local openDuringClose = nil
+    local before = {}
+    for event in pairs(addon.events) do before[event] = true end
+    Client:StartStock({
+        onBankOpened = function() seen[#seen + 1] = "opened" end,
+        onBankChanged = function(kind) seen[#seen + 1] = "changed:" .. tostring(kind) end,
+        onBankClosed = function()
+            seen[#seen + 1] = "closed"
+            openDuringClose = Client:IsBankOpen()
+        end,
+        onLogout = function() seen[#seen + 1] = "logout" end,
+    })
+    local added = {}
+    for event in pairs(addon.events) do
+        if not before[event] then added[event] = true end
+    end
+    -- BAG_UPDATE belongs to Core/Init.lua (one handler per event on the addon object).
+    check(p .. "registers the two bank window events, the tab event and logout - not BAG_UPDATE",
+        sortedKeys(added) == "BANKFRAME_CLOSED,BANKFRAME_OPENED,BANK_TABS_CHANGED,PLAYER_LOGOUT", sortedKeys(added))
+
+    -- Closed: nothing is read, whatever the containers hold.
+    check(p .. "bank closed at first", Client:IsBankOpen() == false)
+    fetched = {}
+    check(p .. "closed: no character bank", Client:BankContents("character") == nil)
+    check(p .. "closed: no account bank", Client:BankContents("account") == nil)
+    check(p .. "closed: the bank is not even asked", #fetched == 0, #fetched)
+    addon.events.BANK_TABS_CHANGED("BANK_TABS_CHANGED", 0)
+    check(p .. "closed: a tab change is not passed on", #seen == 0, table.concat(seen, ","))
+
+    addon.events.BANKFRAME_OPENED("BANKFRAME_OPENED")
+    check(p .. "BANKFRAME_OPENED -> onBankOpened, bank open", seen[1] == "opened" and Client:IsBankOpen() == true)
+
+    -- Open: read tab by tab, by the tab's container id.
+    fetched = {}
+    items, bound = Client:BankContents("character")
+    check(p .. "open: the character bank is asked by its bank type", fetched[1] == 0, fetched[1])
+    check(p .. "open: both purchased tabs are read by their id", items and items[2589] == 100 and items[2770] == 10
+        and items[4306] == 2)
+    check(p .. "open: a container that is not a purchased tab is not read", items[99999] == nil)
+    check(p .. "open: nothing from the bags or the account bank", items[765] == nil and items[774] == nil)
+    check(p .. "open: soulbound counts are split off", bound and bound[2770] == 9 and bound[2589] == nil)
+    fetched = {}
+    items, bound = Client:BankContents("account")
+    check(p .. "open: the account bank is asked by its bank type", fetched[1] == 2, fetched[1])
+    check(p .. "open: the account bank's tab", items and items[2589] == 60 and items[774] == 2 and bound[774] == 2)
+    check(p .. "open: an unknown kind is nothing", Client:BankContents("guild") == nil and Client:BankContents(nil) == nil)
+
+    -- A bank bag slot without a bag reports no slots: the rest still counts.
+    bank[0].tabs = { { ID = 6 }, { ID = 9 }, { ID = 8 } }
+    items = Client:BankContents("character")
+    check(p .. "open: a tab without slots among others is fine", items and items[2589] == 100 and items[4306] == 2)
+    bank[0].tabs = { { ID = 6 }, { ID = 8 } }
+
+    -- Not readable now: nil, never an empty bank.
+    bank[0].canView = false
+    check(p .. "open but not viewable -> nil", Client:BankContents("character") == nil)
+    bank[0].canView = true
+    bank[0].locked = 2
+    check(p .. "open but locked -> nil", Client:BankContents("character") == nil)
+    bank[0].locked = 0   -- any reason counts as locked, as in the bank window itself
+    check(p .. "open, locked with reason 0 -> nil", Client:BankContents("character") == nil)
+    bank[0].locked = nil
+    bank[0].tabs = {}
+    check(p .. "open with no tabs -> nil", Client:BankContents("character") == nil)
+    bank[0].tabs = { { ID = 6 }, { ID = 8 } }
+    local savedSix, savedEight = containers[6], containers[8]
+    containers[6], containers[8] = nil, nil
+    check(p .. "open, tabs that report no slots at all -> nil", Client:BankContents("character") == nil)
+    containers[6], containers[8] = savedSix, savedEight
+    bank[2].canView = false
+    check(p .. "an account bank that cannot be viewed -> nil, the character bank still reads",
+        Client:BankContents("account") == nil and Client:BankContents("character") ~= nil)
+    bank[2].canView = true
+    containers[6] = { slots = 28 }
+    containers[8] = { slots = 12 }
+    items = Client:BankContents("character")
+    check(p .. "an empty bank that has slots is an empty table, not nil", type(items) == "table" and next(items) == nil)
+    resetContainers()
+
+    -- Tab events while open.
+    addon.events.BANK_TABS_CHANGED("BANK_TABS_CHANGED", 0)
+    addon.events.BANK_TABS_CHANGED("BANK_TABS_CHANGED", 2)
+    addon.events.BANK_TABS_CHANGED("BANK_TABS_CHANGED", 1)   -- the guild bank is not ours
+    check(p .. "BANK_TABS_CHANGED -> onBankChanged with the kind",
+        seen[2] == "changed:character" and seen[3] == "changed:account" and #seen == 3, table.concat(seen, ","))
+
+    addon.events.BANKFRAME_CLOSED("BANKFRAME_CLOSED")
+    addon.events.BANKFRAME_CLOSED("BANKFRAME_CLOSED")
+    check(p .. "BANKFRAME_CLOSED twice -> onBankClosed once", #seen == 4 and seen[4] == "closed", table.concat(seen, ","))
+    check(p .. "the bank already counts as closed inside onBankClosed", openDuringClose == false)
+    check(p .. "closed again: nothing is read", Client:IsBankOpen() == false and Client:BankContents("character") == nil)
+
+    addon.events.PLAYER_LOGOUT("PLAYER_LOGOUT")
+    check(p .. "PLAYER_LOGOUT -> onLogout", seen[5] == "logout", table.concat(seen, ","))
+
+    -- Who the character is -----------------------------------------------------
+    local rules = { [213] = true }   -- PvP
+    local region = "EU"
+    local guidCalls = 0
+    local SECRET = {}
+    local guid = "Player-4444-0A1B2C3D"
+    _G.issecretvalue = function(value) return value == SECRET end
+    _G.UnitGUID = function(unit)
+        guidCalls = guidCalls + 1
+        return unit == "player" and guid or nil
+    end
+    _G.UnitFactionGroup = function() return "Horde", "Horde" end
+    _G.NameUtil = { GetUnmodifiedUnitFullName = function(unit) return unit == "player" and "Thrag Ironhide" or nil end }
+    _G.C_GameRules = { IsGameRuleActive = function(rule) return rules[rule] == true end }
+    _G.GetCurrentRegionName = function() return region end
+    -- The realm name is a shard name here: it must never be part of a key.
+    _G.GetRealmName = function() error("GetRealmName called on Forever") end
+
+    local function identityOf(setup)
+        local fresh = loadAdapter(16001)
+        if setup then setup() end
+        return fresh.Client:CharacterIdentity(), fresh.Client
+    end
+
+    local id = identityOf()
+    check(p .. "identity: the GUID", id.guid == "Player-4444-0A1B2C3D", id.guid)
+    check(p .. "identity: the full name", id.name == "Thrag Ironhide", id.name)
+    check(p .. "identity: the faction", id.faction == "Horde", id.faction)
+    check(p .. "identity: the world is region and ruleset", id.world == "eu-pvp", id.world)
+
+    rules = {}
+    check(p .. "world: no ruleset flag -> normal", identityOf().world == "eu-normal", identityOf().world)
+    rules = { [214] = true }
+    check(p .. "world: roleplay", identityOf().world == "eu-rp", identityOf().world)
+    rules = { [213] = true, [214] = true }
+    region = "US"
+    check(p .. "world: roleplay PvP, another region", identityOf().world == "us-rppvp", identityOf().world)
+    rules = { [10] = true, [213] = true }
+    check(p .. "world: hardcore PvP", identityOf().world == "us-hc-pvp", identityOf().world)
+    rules = { [10] = true }
+    check(p .. "world: hardcore", identityOf().world == "us-hc-normal", identityOf().world)
+    rules = { [213] = true }
+    region = ""
+    id = identityOf()
+    check(p .. "world: no region name -> no world, the rest still read", id.world == nil and id.guid ~= nil)
+    region = nil
+    check(p .. "world: nil region -> no world, no error", identityOf().world == nil)
+    region = "EU"
+
+    -- A value the client keeps secret is not read out.
+    guid = SECRET
+    id = identityOf()
+    check(p .. "identity: a secret GUID is not returned", id.guid == nil and id.name == "Thrag Ironhide")
+    guid = "Player-4444-0A1B2C3D"
+
+    -- Nothing of it changes during a session: read once, when all of it is there.
+    local client
+    region = ""
+    id, client = identityOf()
+    region = "EU"
+    check(p .. "identity: an incomplete read is tried again", client:CharacterIdentity().world == "eu-pvp")
+    guidCalls = 0
+    guid = "Player-4444-CHANGED"
+    id = client:CharacterIdentity()
+    check(p .. "identity: a complete read is kept", id.guid == "Player-4444-0A1B2C3D" and guidCalls == 0, guidCalls)
+    guid = "Player-4444-0A1B2C3D"
+
+    -- The clock ----------------------------------------------------------------
+    _G.GetServerTime = function() return 1763900000 end
+    check(p .. "Now is the server time", Client:Now() == 1763900000, Client:Now())
+
+    -- Diagnostic -----------------------------------------------------------------
+    addon.events.BANKFRAME_OPENED("BANKFRAME_OPENED")
+    local lines = {}
+    local ok, err = pcall(Client.RunStockDiagnostic, Client, lines)
+    check(p .. "diag: no Lua error", ok, err)
+    local text = table.concat(lines, "\n")
+    check(p .. "diag: no SECTION ERROR", not text:find("SECTION ERROR", 1, true), text)
+    check(p .. "diag: the bags, container by container", text:find("bag[5] slots=32 used=2", 1, true) ~= nil, text)
+    check(p .. "diag: bank state", text:find("bank: open=true", 1, true) ~= nil
+        and text:find("usesPlayerBags=true", 1, true) ~= nil, text)
+    check(p .. "diag: raw facts of the character bank",
+        text:find("bank character: canView=true lockedReason=nil tabs=2 [6:28/2 8:12/2]", 1, true) ~= nil, text)
+    check(p .. "diag: raw facts of the account bank",
+        text:find("bank account: canView=true lockedReason=nil tabs=1 [15:98/2]", 1, true) ~= nil, text)
+    check(p .. "diag: what the adapter reads", text:find("adapter bank character: items=3 soulbound=1", 1, true) ~= nil, text)
+    check(p .. "diag: the world's parts", text:find("region=EU", 1, true) ~= nil and text:find("pvp=true", 1, true) ~= nil, text)
+    check(p .. "diag: plain ASCII", not text:find("[\128-\255]"))
+    bank[2].canView = false
+    lines = {}
+    Client:RunStockDiagnostic(lines)
+    check(p .. "diag: a bank that cannot be read says so",
+        table.concat(lines, "\n"):find("adapter bank account: not readable now", 1, true) ~= nil, table.concat(lines, "\n"))
+    bank[2].canView = true
+    _G.C_Bank.FetchPurchasedBankTabData = function() error("boom") end
+    lines = {}
+    ok = pcall(Client.RunStockDiagnostic, Client, lines)
+    check(p .. "diag: a failing section is reported, the rest still prints",
+        ok and table.concat(lines, "\n"):find("SECTION ERROR", 1, true) ~= nil
+        and table.concat(lines, "\n"):find("region=EU", 1, true) ~= nil)
+    _G.issecretvalue = nil
+    _G.GetContainerNumSlots, _G.GetContainerItemInfo, _G.GetRealmName = nil, nil, nil
 end)
 
 -- ===========================================================================

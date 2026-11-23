@@ -287,7 +287,6 @@ T.section("diag trainer", function()
     local env = setup()
     local addon = env.addon
     _G.CraftLib = { GetActiveProfile = function() return "FOREVER" end }
-    _G.GetServerTime = function() return 1 end
     addon.Professions.registry = { tailoring = { name = "Tailoring", recipes = { W.GLOVES, W.SHIRT } } }
     local open = true
     addon.Client.StartTrainer = function() end

@@ -22,7 +22,9 @@ local LazyProf = harness.loadLazyProf({
 local Memory = LazyProf.TrainerMemory
 LazyProf.db.global = { characters = {} }
 _G.CraftLib = { GetActiveProfile = function() return "FOREVER" end }
-_G.GetServerTime = function() return 5000 end
+-- The clock is the client adapter's; the global is never read from here.
+LazyProf.Client = { Now = function() return 5000 end }
+_G.GetServerTime = function() error("the server clock is read through the client adapter") end
 
 local function recipe(id, name) return { id = id, name = name, source = { type = "trainer" }, reagents = {} } end
 LazyProf.Professions = { registry = {

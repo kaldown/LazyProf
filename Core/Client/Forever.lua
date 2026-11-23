@@ -628,6 +628,271 @@ function Client:RunTrainerDiagnostic(lines)
     end)
 end
 
+-- Stock: bags, the bank, who the character is, the clock ------------------------
+-- Paths below are under Blizzard_APIDocumentationGenerated/ unless they name
+-- another folder.
+
+-- Add what a container holds to `items` ({ [itemId] = count }) and the
+-- soulbound part of it to `bound`; returns the container's slot count.
+-- C_Container.GetContainerNumSlots(containerIndex) returns a number
+-- (ContainerDocumentation.lua:313-326); GetContainerItemInfo(containerIndex,
+-- slotIndex) returns a table with itemID, stackCount and isBound, or nothing
+-- for an empty slot (ContainerDocumentation.lua:192-207, 766-781).
+local function ReadContainer(container, items, bound)
+    local slots = C_Container.GetContainerNumSlots(container)
+    for slot = 1, slots do
+        local info = C_Container.GetContainerItemInfo(container, slot)
+        if info and info.itemID and info.stackCount then
+            items[info.itemID] = (items[info.itemID] or 0) + info.stackCount
+            if info.isBound then
+                bound[info.itemID] = (bound[info.itemID] or 0) + info.stackCount
+            end
+        end
+    end
+    return slots
+end
+
+-- What the character carries: items, the soulbound part of them, and the
+-- backpack's slot count (zero means the bags could not be read just now).
+-- Carried bags are Enum.BagIndex.Backpack (0) to ReagentBag (5): four bag
+-- slots and the reagent-bag slot (BagIndexConstantsDocumentation.lua:18-52;
+-- the client's counts are in the dump, LuaEnum.lua:9729-9735). Blizzard's
+-- own bag searches run over the same range
+-- (Blizzard_UIPanels_Game/Mainline/ContainerFrame.lua:400-427 with
+-- Blizzard_FrameXMLBase/Constants.lua:165-170). The keyring (-1) is not stock.
+function Client:BagContents()
+    local items, bound = {}, {}
+    local backpackSlots = 0
+    for bag = Enum.BagIndex.Backpack, Enum.BagIndex.ReagentBag do
+        local slots = ReadContainer(bag, items, bound)
+        if bag == Enum.BagIndex.Backpack then
+            backpackSlots = slots
+        end
+    end
+    return items, bound, backpackSlots
+end
+
+-- The bank. This client has the tab-based C_Bank bank
+-- (Blizzard_UIPanels_Game/Blizzard_UIPanels_Game.toc:137-142 loads
+-- Mainline/BankFrameTemplates.lua and Camelot/BankFrame.lua). A bank type
+-- (Enum.BankType: Character = 0, Account = 2, ItemConstantsDocumentation.lua:17-27)
+-- has purchased tabs, each a container of its own (Enum.BagIndex
+-- CharacterBankTab_1..9 = 6..14, AccountBankTab_1..9 = 15..23,
+-- BagIndexConstantsDocumentation.lua:18-52). Here the tabs after the first
+-- are shown as bank bag slots (Blizzard_UIPanels_Game/Camelot/BankFrame.lua:136-191)
+-- and a bought slot may be without a bag (Enum.BankTabFlags.AllowMissingBag,
+-- ItemConstantsDocumentation.lua:5-15), so a single tab that reports no slots
+-- is not taken for an unreadable bank.
+-- Whether a bank's containers can be read while its window is closed could
+-- not be settled from source, so they are only read between BANKFRAME_OPENED
+-- and BANKFRAME_CLOSED (events without payload, BankDocumentation.lua:389-400).
+local bankOpen = false
+
+local function BankType(kind)
+    if kind == "character" then return Enum.BankType.Character end
+    if kind == "account" then return Enum.BankType.Account end
+    return nil
+end
+
+function Client:IsBankOpen()
+    return bankOpen
+end
+
+-- What a bank holds right now: items and the soulbound part of them. kind is
+-- "character" or "account". nil when it cannot be read now - the window is
+-- closed, the bank may not be viewed, it is locked, it has no tabs or none of
+-- them reports a slot - so that "could not read" is never taken for "empty".
+-- The gates and the reading are the bank window's own: C_Bank.CanViewBank
+-- (Blizzard_UIPanels_Game/Mainline/BankFrameTemplates.lua:70), a non-nil
+-- C_Bank.FetchBankLockedReason is locked (same file :872-874),
+-- C_Bank.FetchPurchasedBankTabData(bankType) lists the tabs (:974-976;
+-- BankDocumentation.lua:241-255, each with its container `ID`, :440-451),
+-- read slot by slot (:1064-1070, :1126-1130, :578).
+-- Verify in game (/lp diag stock with the bank open): the tab ids, their slot
+-- counts and whether the account bank can be viewed at all.
+function Client:BankContents(kind)
+    local bankType = BankType(kind)
+    if not bankOpen or bankType == nil then return nil end
+    if not C_Bank.CanViewBank(bankType) then return nil end
+    if C_Bank.FetchBankLockedReason(bankType) ~= nil then return nil end
+    local tabs = C_Bank.FetchPurchasedBankTabData(bankType)
+    if not tabs or #tabs == 0 then return nil end
+    local items, bound = {}, {}
+    local slots = 0
+    for _, tab in ipairs(tabs) do
+        slots = slots + ReadContainer(tab.ID, items, bound)
+    end
+    if slots == 0 then return nil end
+    return items, bound
+end
+
+-- Which bank a container id belongs to ("character" | "account"), nil for
+-- the carried bags and anything else. A BAG_UPDATE carries the container id
+-- (ContainerDocumentation.lua:659-667); the bank window reads it the same
+-- way (Blizzard_UIPanels_Game/Mainline/BankFrameTemplates.lua:791-795).
+function Client:BankKindOfBag(bagId)
+    if type(bagId) ~= "number" then return nil end
+    local index = Enum.BagIndex
+    if bagId >= index.CharacterBankTab_1 and bagId <= index.CharacterBankTab_9 then
+        return "character"
+    elseif bagId >= index.AccountBankTab_1 and bagId <= index.AccountBankTab_9 then
+        return "account"
+    end
+    return nil
+end
+
+-- The world a character lives in: region and ruleset, "eu-pvp", "us-normal",
+-- "eu-rppvp", "eu-hc-pvp". This client has no realms - the realm name is a
+-- shard that changes under the player - so stored data is scoped by this
+-- key, never by a realm name. C_GameRules.IsGameRuleActive(gameRule)
+-- (GameRulesDocumentation.lua:225-238) with Enum.GameRule.RPRuleset,
+-- PvPRuleset and HardcoreRuleset (dump, LuaEnum.lua:3441, 3587-3588);
+-- GetCurrentRegionName() is the region's short name (compared with "US" at
+-- Blizzard_GroupFinder/Mainline/LFGList.lua:2422). nil while the region has
+-- no name: then nothing is taken for a character of the same world.
+local function WorldKey()
+    local region = GetCurrentRegionName()
+    if type(region) ~= "string" or region == "" then return nil end
+    local on, rule = C_GameRules.IsGameRuleActive, Enum.GameRule
+    local ruleset = (on(rule.RPRuleset) and "rp" or "") .. (on(rule.PvPRuleset) and "pvp" or "")
+    if ruleset == "" then ruleset = "normal" end
+    if on(rule.HardcoreRuleset) then ruleset = "hc-" .. ruleset end
+    return region:lower() .. "-" .. ruleset
+end
+
+-- Who the character is: { guid, name, world, faction }. A part that cannot
+-- be read is nil (the caller saves nothing without a guid and counts no
+-- alts without a world and a faction).
+--   guid     UnitGUID("player") (UnitDocumentation.lua:1241-1255)
+--   name     first name and surname, the way the client writes a full name
+--            (NameUtil.GetUnmodifiedUnitFullName,
+--            Blizzard_FrameXMLUtil/Camelot/NameUtil.lua:14-21)
+--   world    WorldKey() above
+--   faction  UnitFactionGroup("player"), its first return
+--            (UnitDocumentation.lua:1207-1222)
+-- None of them changes during a session, so a complete read is kept.
+-- Verify in game: the GUID is the same after a relog and on another shard.
+local identity = nil
+
+function Client:CharacterIdentity()
+    if identity then return identity end
+    local guid = Readable(UnitGUID("player"))
+    local result = {
+        guid = type(guid) == "string" and guid or nil,
+        name = Readable(NameUtil.GetUnmodifiedUnitFullName("player")),
+        world = WorldKey(),
+        faction = Readable((UnitFactionGroup("player"))),
+    }
+    if result.guid and result.name and result.world and result.faction then
+        identity = result
+    end
+    return result
+end
+
+-- Server time in seconds (SystemTimeDocumentation.lua:30-36): the same on
+-- every character and computer, which the computer's own clock is not.
+function Client:Now()
+    return GetServerTime()
+end
+
+-- Bank window and logout reports.
+-- callbacks: onBankOpened(), onBankChanged(kind), onBankClosed(), onLogout().
+-- BANK_TABS_CHANGED carries the bank type (BankDocumentation.lua:379-388; the
+-- bank window rebuilds itself on it, Blizzard_UIPanels_Game/Mainline/
+-- BankFrameTemplates.lua:778-782); PLAYER_LOGOUT has no payload
+-- (SystemDocumentation.lua:157-161). The bank counts as closed before
+-- onBankClosed runs, so nothing is read from a bank that is going away.
+-- BAG_UPDATE is not registered here: the addon object has one handler per
+-- event and Core/Init.lua owns that one; it passes bag updates on.
+function Client:StartStock(callbacks)
+    LazyProf:RegisterEvent("BANKFRAME_OPENED", function()
+        bankOpen = true
+        callbacks.onBankOpened()
+    end)
+    LazyProf:RegisterEvent("BANK_TABS_CHANGED", function(_, bankType)
+        if not bankOpen then return end
+        if bankType == Enum.BankType.Character then
+            callbacks.onBankChanged("character")
+        elseif bankType == Enum.BankType.Account then
+            callbacks.onBankChanged("account")
+        end
+    end)
+    LazyProf:RegisterEvent("BANKFRAME_CLOSED", function()
+        if not bankOpen then return end   -- the event can fire twice per close
+        bankOpen = false
+        callbacks.onBankClosed()
+    end)
+    LazyProf:RegisterEvent("PLAYER_LOGOUT", function()
+        callbacks.onLogout()
+    end)
+end
+
+-- /lp diag stock: the raw bag, bank and identity values and what the adapter
+-- makes of them. Read-only.
+function Client:RunStockDiagnostic(lines)
+    local function add(text) lines[#lines + 1] = text end
+    local function section(name, fn)
+        local ok, err = pcall(fn)
+        if not ok then add("SECTION ERROR: " .. name .. ": " .. tostring(err)) end
+    end
+    local function Count(t)
+        local n = 0
+        for _ in pairs(t) do n = n + 1 end
+        return n
+    end
+    -- "slots/used" of a container
+    local function Usage(container)
+        local slots = C_Container.GetContainerNumSlots(container)
+        local used = 0
+        for slot = 1, slots do
+            if C_Container.GetContainerItemInfo(container, slot) then used = used + 1 end
+        end
+        return slots, used
+    end
+    section("bags", function()
+        for bag = Enum.BagIndex.Backpack, Enum.BagIndex.ReagentBag do
+            local slots, used = Usage(bag)
+            add("bag[" .. tostring(bag) .. "] slots=" .. tostring(slots) .. " used=" .. tostring(used))
+        end
+        local items, bound, backpackSlots = self:BagContents()
+        add("adapter bags: items=" .. tostring(Count(items)) .. " soulbound=" .. tostring(Count(bound))
+            .. " backpackSlots=" .. tostring(backpackSlots))
+    end)
+    section("bank", function()
+        add("bank: open=" .. tostring(bankOpen)
+            .. " usesPlayerBags=" .. tostring(C_Bank.ShouldUsePlayerBagsInBank()))
+    end)
+    for _, kind in ipairs({ "character", "account" }) do
+        section("bank " .. kind, function()
+            local bankType = BankType(kind)
+            local tabs = C_Bank.FetchPurchasedBankTabData(bankType) or {}
+            local parts = {}
+            for _, tab in ipairs(tabs) do
+                local slots, used = Usage(tab.ID)
+                parts[#parts + 1] = tostring(tab.ID) .. ":" .. tostring(slots) .. "/" .. tostring(used)
+            end
+            add("bank " .. kind .. ": canView=" .. tostring(C_Bank.CanViewBank(bankType))
+                .. " lockedReason=" .. tostring(C_Bank.FetchBankLockedReason(bankType))
+                .. " tabs=" .. tostring(#tabs) .. " [" .. table.concat(parts, " ") .. "]")
+            local items, bound = self:BankContents(kind)
+            if items then
+                add("adapter bank " .. kind .. ": items=" .. tostring(Count(items))
+                    .. " soulbound=" .. tostring(Count(bound)))
+            else
+                add("adapter bank " .. kind .. ": not readable now")
+            end
+        end)
+    end
+    section("identity", function()
+        local on, rule = C_GameRules.IsGameRuleActive, Enum.GameRule
+        local guid = UnitGUID("player")
+        local secret = issecretvalue ~= nil and guid ~= nil and issecretvalue(guid) or false
+        add("world: region=" .. tostring(GetCurrentRegionName()) .. " rp=" .. tostring(on(rule.RPRuleset))
+            .. " pvp=" .. tostring(on(rule.PvPRuleset)) .. " hardcore=" .. tostring(on(rule.HardcoreRuleset))
+            .. " guidSecret=" .. tostring(secret) .. " serverTime=" .. tostring(GetServerTime()))
+    end)
+end
+
 -- /lp diag forever: a read-only dump of the client facts and of what this
 -- adapter makes of them (documented in docs/development/TROUBLESHOOTING.md).
 -- Each section runs under pcall so one failure prints "SECTION ERROR" and the

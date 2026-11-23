@@ -10,7 +10,7 @@ The pure logic (path, candidate routes, sale value, stages, shopping rows, purch
 bash scripts/run_tests.sh
 ```
 
-The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks every Lua file under `Core`, `Modules` and `Professions` with `luac5.1`. It must end with `OK: 34 suites passed, ...` before every commit; the same command runs on every push. A single suite runs from the repo root, for example `lua5.1 scripts/test_views.lua`.
+The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks every Lua file under `Core`, `Modules` and `Professions` with `luac5.1`. It must end with `OK: 35 suites passed, ...` before every commit; the same command runs on every push. A single suite runs from the repo root, for example `lua5.1 scripts/test_views.lua`.
 
 | Suite | What it covers |
 |-------|----------------|
@@ -32,6 +32,7 @@ The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks ever
 | `test_merchant.lua` | The merchant panel and `/lp diag merchant` |
 | `test_trainers.lua` | Remembered trainers and fees |
 | `test_stockmemory.lua` | Remembered bags and bank per character and the account bank per world: saving, alts of the same world and faction, soulbound items, the 180-day limit, the age wording |
+| `test_scanner.lua` | Which owned stock counts: the bags, read through the client adapter |
 | `test_views.lua` | What the window shows, as data: header, receipt, target model, Path list, Shopping list, recipe search, arrow tooltip |
 | `test_window.lua` | The window's frames on both client families: header, More options, target box and slider, receipt, the two tabs, closed state, combat, planning mode |
 | `test_controls.lua` | The widget layer: tabs, button group, number box, checkbox, search box, slider, resize bounds, the row list |
@@ -230,7 +231,7 @@ See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for the diagnostic commands (`/lp d
 
 ## Test Checklist for PRs
 
-- [ ] `bash scripts/run_tests.sh` ends with `OK: 34 suites passed`
+- [ ] `bash scripts/run_tests.sh` ends with `OK: 35 suites passed`
 - [ ] Opens without errors on each supported profession
 - [ ] Path and Shopping tabs display correctly
 - [ ] The receipt adds up to the Shopping tab

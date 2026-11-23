@@ -193,7 +193,9 @@ section("selection", function()
                          "AnchorFrame", "PanelOffsetX", "NoDataProfessionName", "Start", "RunDiagnostic",
                          "StartMerchant", "IsMerchantOpen", "MerchantAnchorFrame", "MerchantItems", "BuyFromMerchant",
                          "FreeBagSlots", "Money", "RunMerchantDiagnostic",
-                         "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic" }) do
+                         "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic",
+                         "BagContents", "IsBankOpen", "BankContents", "BankKindOfBag", "CharacterIdentity", "Now",
+                         "StartStock", "RunStockDiagnostic" }) do
         check(p .. "Client:" .. m .. " exists", type(classic.Client[m]) == "function")
     end
 end)
@@ -430,6 +432,127 @@ section("trainer", function()
     check(p .. "the diagnostic says so", lines[1] == "trainer: visited trainers are not recorded on this client", lines[1])
     check(p .. "nothing called back", called == false)
     _G.GetNumTrainerServices, _G.GetTrainerServiceInfo = nil, nil
+end)
+
+-- ===========================================================================
+-- 4d. Stock: bags through either container API; the bank is not read here
+-- ===========================================================================
+section("stock", function()
+    local p = "stock: "
+    local addon = loadAdapter(11508)
+    local Client = addon.Client
+
+    -- [bag] = { slots, [slot] = { itemId, count, bound } }
+    local bags = {
+        [0] = { slots = 16, { 2589, 20 }, { 2589, 5 }, nil, { 6948, 1, true } },
+        [1] = { slots = 8, { 2592, 10, true }, { 2592, 4 } },
+        [4] = { slots = 6, { 4306, 7 } },
+        [5] = { slots = 20, { 99999, 1 } },    -- not a carried bag on these clients
+        [-1] = { slots = 4, { 5396, 1 } },     -- keyring
+    }
+    local asked = {}
+    local function numSlots(bag)
+        asked[#asked + 1] = bag
+        return bags[bag] and bags[bag].slots or 0
+    end
+
+    -- The table-returning container API, where the client has it.
+    _G.GetContainerNumSlots, _G.GetContainerItemInfo = nil, nil
+    _G.C_Container = {
+        GetContainerNumSlots = numSlots,
+        GetContainerItemInfo = function(bag, index)
+            local entry = bags[bag] and bags[bag][index]
+            if not entry then return nil end
+            return { itemID = entry[1], stackCount = entry[2], isBound = entry[3] and true or false }
+        end,
+    }
+    local items, bound, backpackSlots = Client:BagContents()
+    check(p .. "bags: stacks are added up", items[2589] == 25 and items[2592] == 14 and items[4306] == 7, items[2589])
+    check(p .. "bags: the backpack and the four bags only", table.concat(asked, ",") == "0,1,2,3,4", table.concat(asked, ","))
+    check(p .. "bags: nothing beyond them", items[99999] == nil and items[5396] == nil)
+    check(p .. "bags: soulbound counts are split off", bound[2592] == 10 and bound[6948] == 1 and bound[2589] == nil)
+    check(p .. "bags: the backpack's slot count is the third return", backpackSlots == 16, backpackSlots)
+
+    -- The older positional API: count is the 2nd return, the link the 7th.
+    _G.C_Container = nil
+    _G.GetContainerNumSlots = numSlots
+    _G.GetContainerItemInfo = function(bag, index)
+        local entry = bags[bag] and bags[bag][index]
+        if not entry then return nil end
+        return "tex", entry[2], false, 1, false, false, "|cffffffff|Hitem:" .. entry[1] .. "::::::::60:::::|h[x]|h|r"
+    end
+    asked = {}
+    items, bound, backpackSlots = Client:BagContents()
+    check(p .. "older call: item id from the link, count from the second return",
+        items[2589] == 25 and items[2592] == 14 and items[4306] == 7, items[2589])
+    check(p .. "older call: the same five containers", table.concat(asked, ",") == "0,1,2,3,4", table.concat(asked, ","))
+    check(p .. "older call: it does not say what is soulbound", next(bound) == nil)
+    check(p .. "older call: backpack slots", backpackSlots == 16, backpackSlots)
+
+    -- No container call at all: nothing, and the backpack counts as unread.
+    _G.GetContainerNumSlots, _G.GetContainerItemInfo = nil, nil
+    items, bound, backpackSlots = Client:BagContents()
+    check(p .. "no container call: empty, no backpack slots, no error",
+        type(items) == "table" and next(items) == nil and type(bound) == "table" and backpackSlots == 0)
+
+    -- The bank is not read on these clients.
+    _G.C_Bank = { FetchPurchasedBankTabData = function() error("bank read on a Classic client") end }
+    check(p .. "the bank never counts as open", Client:IsBankOpen() == false)
+    check(p .. "no bank contents", Client:BankContents("character") == nil and Client:BankContents("account") == nil)
+    check(p .. "no container is a bank container", Client:BankKindOfBag(6) == nil and Client:BankKindOfBag(-1) == nil)
+    _G.C_Bank = nil
+
+    local seen = {}
+    local before = {}
+    for event in pairs(addon.events) do before[event] = true end
+    Client:StartStock({
+        onBankOpened = function() seen[#seen + 1] = "opened" end,
+        onBankChanged = function() seen[#seen + 1] = "changed" end,
+        onBankClosed = function() seen[#seen + 1] = "closed" end,
+        onLogout = function() seen[#seen + 1] = "logout" end,
+    })
+    local added = {}
+    for event in pairs(addon.events) do
+        if not before[event] then added[event] = true end
+    end
+    check(p .. "only the logout event is registered", sortedKeys(added) == "PLAYER_LOGOUT", sortedKeys(added))
+    addon.events.PLAYER_LOGOUT("PLAYER_LOGOUT")
+    check(p .. "PLAYER_LOGOUT -> onLogout", table.concat(seen, ",") == "logout", table.concat(seen, ","))
+
+    -- Who the character is: realms are real on these clients.
+    _G.UnitGUID = function(unit) return unit == "player" and "Player-5555-00ABCDEF" or nil end
+    _G.UnitName = function(unit) return unit == "player" and "Thrag" or nil, nil end
+    _G.GetRealmName = function() return "Nightslayer" end
+    _G.UnitFactionGroup = function() return "Horde", "Horde" end
+    local id = Client:CharacterIdentity()
+    check(p .. "identity: guid, name, realm as the world, faction",
+        id.guid == "Player-5555-00ABCDEF" and id.name == "Thrag" and id.world == "Nightslayer" and id.faction == "Horde",
+        tostring(id.guid) .. "," .. tostring(id.name) .. "," .. tostring(id.world) .. "," .. tostring(id.faction))
+    _G.UnitGUID = nil
+    check(p .. "identity: no GUID call, no guid, no error", Client:CharacterIdentity().guid == nil)
+    _G.UnitGUID = function() return "Player-5555-00ABCDEF" end
+
+    _G.GetServerTime = function() return 1763900000 end
+    check(p .. "Now is the server time", Client:Now() == 1763900000, Client:Now())
+    _G.GetServerTime = nil
+    _G.time = function() return 1700000000 end
+    check(p .. "Now without a server-time call is the clock the client has", Client:Now() == 1700000000, Client:Now())
+    _G.time = nil
+    _G.GetServerTime = function() return 1763900000 end
+
+    _G.C_Container = nil
+    _G.GetContainerNumSlots = numSlots
+    _G.GetContainerItemInfo = function() return nil end
+    local lines = {}
+    local ok, err = pcall(Client.RunStockDiagnostic, Client, lines)
+    check(p .. "diag: no Lua error", ok, err)
+    local text = table.concat(lines, "\n")
+    check(p .. "diag: says the bank is not recorded here", text:find("bank: not recorded on this client", 1, true) ~= nil, text)
+    check(p .. "diag: the bags", text:find("bag[0] slots=16", 1, true) ~= nil, text)
+    _G.GetContainerNumSlots, _G.GetContainerItemInfo = nil, nil
+    lines = {}
+    check(p .. "diag without the container calls: no Lua error", pcall(Client.RunStockDiagnostic, Client, lines))
+    _G.GetRealmName = nil
 end)
 
 -- ===========================================================================

@@ -113,6 +113,7 @@ function M.load(family, extraFiles)
         GetItemInfo = function() return nil end,
         PlayerSkill = function() return env.playerSkill or 0 end,
         ProfessionRank = function() return env.playerSkill or 0, env.playerCap end,
+        Now = function() return env.now or 1 end,
     }
     addon.Pathfinder = {
         currentPath = nil,

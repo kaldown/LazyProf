@@ -1570,7 +1570,6 @@ T.section("visited trainers", function()
     local window, ui, addon = env.window, env.ui, env.addon
     env.cap = 150
     _G.CraftLib = { GetActiveProfile = function() return "FOREVER" end }
-    _G.GetServerTime = function() return 1 end
     local boots = W.recipe(9, "Boots", 150, 200, 210, 220, { unlearned = true, sourceInfo = { type = "trainer", cost = 250, costSeen = true } })
     addon.Professions.registry = { tailoring = { name = "Tailoring", recipes = { boots, W.GLOVES } } }
     local function path()
