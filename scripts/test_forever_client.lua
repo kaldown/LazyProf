@@ -988,6 +988,153 @@ section("stock", function()
 end)
 
 -- ===========================================================================
+-- 4e. Stock, end to end: the real adapter, scanner and memory over two
+-- characters of one account (no inventory addon)
+-- ===========================================================================
+section("stock end to end", function()
+    local p = "stock e2e: "
+    local DAY = 86400
+    local serverTime = 20000 * DAY + 3600
+    local frame = 0
+    _G.GetTime = function() return frame end
+    _G.GetServerTime = function() return serverTime end
+    _G.Syndicator = nil
+    timers = {}
+    local function settle()          -- run what is waiting, then move to the next frame
+        for _ = 1, 5 do runTimers() end
+        frame = frame + 1
+    end
+
+    local containers, bank = {}, {}
+    local function slot(itemId, stack, isBound)
+        return { itemID = itemId, stackCount = stack, isBound = isBound and true or false }
+    end
+    _G.C_Container = {
+        GetContainerNumSlots = function(bag) return containers[bag] and containers[bag].slots or 0 end,
+        GetContainerItemInfo = function(bag, index) return containers[bag] and containers[bag][index] or nil end,
+        GetContainerNumFreeSlots = function() return 0, 0 end,
+    }
+    _G.C_Bank = {
+        CanViewBank = function(bankType) return bank[bankType] ~= nil end,
+        FetchBankLockedReason = function() return nil end,
+        FetchPurchasedBankTabData = function(bankType) return bank[bankType] or {} end,
+        ShouldUsePlayerBagsInBank = function() return true end,
+    }
+    _G.C_GameRules = { IsGameRuleActive = function(rule) return rule == 213 end }
+    _G.GetCurrentRegionName = function() return "EU" end
+    _G.UnitFactionGroup = function() return "Horde", "Horde" end
+    _G.issecretvalue = nil
+
+    -- One account: the saved table outlives a character's session.
+    local savedGlobal = {}
+    local function login(guid, name)
+        _G.UnitGUID = function(unit) return unit == "player" and guid or nil end
+        _G.NameUtil = { GetUnmodifiedUnitFullName = function() return name end }
+        local addon = loadAdapter(16001)
+        addon.db = { profile = { includeBankItems = true, includeAltCharacters = true, includeGuildBank = false },
+                     char = { learnedRecipes = {}, selfFoundMode = false }, global = savedGlobal }
+        assert(loadfile("Modules/Inventory/StockMemory.lua"))("LazyProf", addon)
+        assert(loadfile("Modules/Inventory/Scanner.lua"))("LazyProf", addon)
+        addon.Inventory:Initialize()
+        return addon
+    end
+
+    -- The banker's character: thread in the reagent bag, a soulbound hearthstone, linen in the bank.
+    containers = {
+        [0] = { slots = 16, slot(2589, 20), slot(6948, 1, true) },
+        [5] = { slots = 32, slot(2320, 40) },
+        [6] = { slots = 28, slot(2589, 100), slot(4306, 30) },
+        [8] = { slots = 12, slot(2592, 10, true) },
+        [15] = { slots = 98, slot(2770, 50) },
+    }
+    bank = { [0] = { { ID = 6 }, { ID = 8 } }, [2] = { { ID = 15 } } }
+    local banker = login("Player-4444-000000AA", "Banker Goldtooth")
+    settle()
+    local memory = banker.StockMemory
+    local summary = memory:Summary()
+    check(p .. "after login the character's bags are remembered",
+        #summary.characters == 1 and summary.characters[1].name == "Banker Goldtooth"
+        and summary.characters[1].world == "eu-pvp" and summary.characters[1].bagItems == 3, summary.characters[1] and summary.characters[1].bagItems)
+    check(p .. "the bank is not remembered before it was opened", memory:OwnBank("Player-4444-000000AA") == nil)
+    local combined, breakdown, meta = banker.Inventory:ScanAll()
+    check(p .. "closed bank: only the bags count, the reagent bag among them",
+        combined[2589] == 20 and combined[2320] == 40 and combined[4306] == nil and meta.bankSeenAt == nil)
+
+    -- At the bank.
+    banker.events.BANKFRAME_OPENED("BANKFRAME_OPENED")
+    settle()
+    combined, breakdown, meta = banker.Inventory:ScanAll()
+    check(p .. "bank open: its tabs count as bank stock", breakdown[2589].bank == 100 and breakdown[4306].bank == 30
+        and breakdown[2592].bank == 10)
+    check(p .. "bank open: the account bank counts as bank stock too", breakdown[2770].bank == 50 and meta.accountSeenAt == serverTime)
+    check(p .. "bank open: seen now", meta.bankSeenAt == serverTime)
+
+    -- Take 60 linen out: the bags and the bank both change.
+    containers[6][1] = slot(2589, 40)
+    containers[0][3] = slot(2589, 60)
+    banker.Inventory:OnBagUpdate(6)
+    banker.Inventory:OnBagUpdate(0)
+    settle()
+    combined, breakdown = banker.Inventory:ScanAll()
+    check(p .. "a withdrawal is counted once", combined[2589] == 120 and breakdown[2589].bags == 80 and breakdown[2589].bank == 40,
+        combined[2589])
+
+    -- Leaving the bank: its containers may read as empty from now on.
+    banker.events.BANKFRAME_CLOSED("BANKFRAME_CLOSED")
+    containers[6] = { slots = 28 }
+    containers[8] = { slots = 12 }
+    containers[15] = { slots = 98 }
+    banker.Inventory:OnBagUpdate(6)
+    banker.Inventory:OnBagUpdate(0)
+    settle()
+    combined, breakdown, meta = banker.Inventory:ScanAll()
+    check(p .. "after closing, the bank is what was seen while it was open",
+        breakdown[2589].bank == 40 and breakdown[4306].bank == 30 and breakdown[2770].bank == 50, breakdown[2589].bank)
+
+    -- Loot just before logging out: the waiting save is written at logout.
+    containers[0][4] = slot(765, 7)
+    banker.Inventory:OnBagUpdate(0)
+    banker.events.PLAYER_LOGOUT("PLAYER_LOGOUT")
+    timers = {}
+
+    -- Two days later, the crafter of the same world and faction.
+    serverTime = serverTime + 2 * DAY
+    containers = { [0] = { slots = 16, slot(2589, 5) } }
+    bank = {}
+    local crafter = login("Player-4444-000000BB", "Crafter Goldtooth")
+    settle()
+    combined, breakdown, meta = crafter.Inventory:ScanAll()
+    local alt = breakdown[2589].alts and breakdown[2589].alts["Banker Goldtooth"]
+    check(p .. "the other character is an alt: its bags and its bank", alt ~= nil and alt.bags == 80 and alt.bank == 40,
+        alt and (tostring(alt.bags) .. "/" .. tostring(alt.bank)))
+    check(p .. "what it looted last is there (saved at logout)", breakdown[765] ~= nil and breakdown[765].alts["Banker Goldtooth"].bags == 7)
+    check(p .. "its reagent bag is there", breakdown[2320].alts["Banker Goldtooth"].bags == 40)
+    check(p .. "its soulbound items are not offered", combined[6948] == nil and combined[2592] == nil)
+    check(p .. "the account bank is this character's bank stock", breakdown[2770].bank == 50 and breakdown[2770].alts == nil)
+    check(p .. "own bags are live", breakdown[2589].bags == 5)
+    check(p .. "total linen: 5 carried, 80 + 40 on the alt", combined[2589] == 125, combined[2589])
+    check(p .. "ages: the alt was seen two days ago, its bank too",
+        crafter.StockMemory.AgeText(serverTime, meta.alts["Banker Goldtooth"].bags) == "2 days ago"
+        and crafter.StockMemory.AgeText(serverTime, meta.alts["Banker Goldtooth"].bank) == "2 days ago"
+        and crafter.StockMemory.AgeText(serverTime, meta.accountSeenAt) == "2 days ago")
+    check(p .. "this character's own bank was never seen", meta.bankSeenAt == nil)
+
+    -- Self-Found: nothing of the others.
+    crafter.db.char.selfFoundMode = true
+    crafter.Inventory:InvalidateCache()
+    combined = crafter.Inventory:ScanAll()
+    check(p .. "Self-Found: only what the character carries", combined[2589] == 5 and combined[2770] == nil and combined[2320] == nil)
+    crafter.db.char.selfFoundMode = false
+
+    -- The saved table: one record per character, a format number, plain data.
+    check(p .. "saved: format 1, two characters, one account bank", savedGlobal.stock.schema == 1
+        and savedGlobal.stock.characters["Player-4444-000000AA"] ~= nil
+        and savedGlobal.stock.characters["Player-4444-000000BB"] ~= nil
+        and savedGlobal.stock.account["eu-pvp"] ~= nil)
+    _G.GetServerTime = nil
+end)
+
+-- ===========================================================================
 -- 5. Addon compartment replaces the minimap button on Forever (ruling L8)
 -- ===========================================================================
 section("compartment", function()
