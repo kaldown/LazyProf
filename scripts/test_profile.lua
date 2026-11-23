@@ -206,14 +206,42 @@ local gnome_jc = Utils.GetRacialProfessionBonus("jewelcrafting")
 check("2.7 Gnome JC bonus is 0 (wrong profession for racial)",
     gnome_jc == 0, gnome_jc)
 
--- FOREVER: racial bonuses unverified on that client -> 0 for every race.
+-- FOREVER: races give no profession bonus there (confirmed in game: a gnome
+-- has no +15 Engineering) -> 0 for every race and every profession.
 ACTIVE_PROFILE = "FOREVER"
-check("2.8 Gnome Engineering bonus is 0 under FOREVER (unverified)",
+check("2.8 Gnome Engineering bonus is 0 under FOREVER",
     Utils.GetRacialProfessionBonus("engineering") == 0,
     Utils.GetRacialProfessionBonus("engineering"))
 _G.UnitRace = function(_unit) return "Draenei", "Draenei" end
 check("2.9 Draenei JC bonus is 0 under FOREVER",
     Utils.GetRacialProfessionBonus("jewelcrafting") == 0)
+do
+    local races = { "Human", "Dwarf", "NightElf", "Gnome", "Draenei", "Orc", "Scourge", "Tauren", "Troll",
+                    "BloodElf", "Skyborne", "SomeRaceNobodyKnows" }
+    local professions = { "alchemy", "blacksmithing", "cooking", "enchanting", "engineering", "firstAid",
+                          "jewelcrafting", "leatherworking", "mining", "tailoring", "Engineering" }
+    local nonzero = {}
+    for _, race in ipairs(races) do
+        _G.UnitRace = function(_unit) return race, race end
+        for _, profession in ipairs(professions) do
+            local bonus = Utils.GetRacialProfessionBonus(profession)
+            if bonus ~= 0 then nonzero[#nonzero + 1] = race .. "/" .. profession .. "=" .. tostring(bonus) end
+        end
+    end
+    check("2.9b no race has a profession bonus under FOREVER", #nonzero == 0, table.concat(nonzero, " "))
+    -- The same loop finds the bonuses the other profiles do have.
+    ACTIVE_PROFILE = "TBC"
+    local found = 0
+    for _, race in ipairs(races) do
+        _G.UnitRace = function(_unit) return race, race end
+        for _, profession in ipairs(professions) do
+            if Utils.GetRacialProfessionBonus(profession) ~= 0 then found = found + 1 end
+        end
+    end
+    check("2.9c the same sweep finds the TBC bonuses (gnome twice by spelling, blood elf, draenei)", found == 4, found)
+    ACTIVE_PROFILE = "FOREVER"
+    _G.UnitRace = function(_unit) return "Draenei", "Draenei" end
+end
 
 -- No profile: no TBC table guessed -> 0.
 ACTIVE_PROFILE = nil

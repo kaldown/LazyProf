@@ -338,8 +338,8 @@ end
 -- Racial profession bonuses by client profile. TBC races (Draenei, Blood Elf) do
 -- not exist on Vanilla/SoD, so those profiles get only the Classic-race bonus.
 -- WotLK adds no new playable races, so WOTLK == TBC here.
--- FOREVER: unverified: 0 until measured in game (which races get a profession
--- bonus there, including the new Skyborne race, is not known yet).
+-- FOREVER: no race has a profession bonus there (checked in game on
+-- 2026-11-23: a gnome has no +15 Engineering), so its table is empty.
 local RACIAL_PROFESSION_BONUSES = {
     VANILLA = { Gnome = { profession = "engineering", bonus = 15 } },
     SOD     = { Gnome = { profession = "engineering", bonus = 15 } },
