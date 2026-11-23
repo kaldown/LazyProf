@@ -216,6 +216,34 @@ function Views.Receipt(view)
     return lines
 end
 
+-- Target ------------------------------------------------------------------------
+
+-- The target slider's model, or nil without a path (or a cap):
+--   min, max     the real skill (1 for a profession the character does not
+--                have) and the last cap; never inverted
+--   value        the path's target, clamped into that range
+--   enabled      there is something to choose: the target can be no lower
+--                than the real skill + 1, so one point of room is none
+--   leftLabel, rightLabel   the two ends as text
+function Views.Target(view)
+    local path = view.path
+    if not path then return nil end
+    local milestones = path.milestones or {}
+    local max = path.capSkill or milestones[#milestones]
+    if not max then return nil end
+    local min = 1
+    if path.hasProfession ~= false then
+        min = view.skill or path.actualSkill or 1
+    end
+    min = math.max(1, math.min(min, max))
+    local value = math.max(min, math.min(max, path.targetSkill or max))
+    return {
+        min = min, max = max, value = value,
+        enabled = (max - min) > 1,
+        leftLabel = tostring(min), rightLabel = tostring(max),
+    }
+end
+
 -- Footer ---------------------------------------------------------------------
 
 local function PayText(totals, marginSide)
@@ -1463,8 +1491,9 @@ end
 
 -- Arrow tooltip ------------------------------------------------------------------
 
--- What the arrow's tooltip says: the current step, the next two, the totals
--- and where the prices came from. (The whole path is on the Steps tab.)
+-- What the arrow's tooltip says: the current step, the next two, the
+-- receipt's amounts (what is spent, what comes back from selling, the net)
+-- and where the prices came from. (The whole path is on the Path tab.)
 -- Returns { { text, right, r, g, b, rr, rg, rb, wrap }, ... }; a line with
 -- `right` is a two-column line.
 function Views.ArrowTooltip(view)
@@ -1525,22 +1554,27 @@ function Views.ArrowTooltip(view)
         end
         local more = #stages - math.min(current.index + 2, #stages)
         if more > 0 then
-            add(string.format("... and %d more step%s (see the Steps tab)", more, more == 1 and "" or "s"), 0.5, 0.5, 0.5)
+            add(string.format("... and %d more step%s (see the Path tab)", more, more == 1 and "" or "s"), 0.5, 0.5, 0.5)
         end
     end
 
-    -- Totals: with gaps they cover only the path's steps, and say so.
-    if summary.cost then
-        add(" ")
-        if summary.pay < summary.cost then
-            addDouble(Text.TotalLabel(path, "You Pay"), Money(summary.pay), 1, 1, 1, 0.4, 1, 0.4)
-            addDouble(Text.TotalLabel(path, "Market Price"), Money(summary.cost), 0.5, 0.5, 0.5, 0.5, 0.5, 0.5)
-        else
-            addDouble(Text.TotalLabel(path, "Total Cost"), Money(summary.cost), 1, 1, 1, 1, 0.82, 0)
-        end
-        if summary.marginPay then
-            addDouble(string.format("With %d%% margin: ", view.marginPercent or 0), Money(summary.marginPay),
-                0.7, 0.7, 0.7, 0.7, 0.7, 0.7)
+    -- The receipt's amounts, label left and amount right (with gaps they
+    -- cover only the path's steps, and the label says so), and its note that
+    -- the amounts include spare crafts.
+    local blank = false
+    for _, line in ipairs(Views.Receipt(view)) do
+        local amounts = (line.key == "spend" or line.key == "back" or line.key == "net")
+        if amounts or line.key == "margin" then
+            if not blank then
+                add(" ")
+                blank = true
+            end
+            if amounts then
+                local c = line.amountColor or WHITE
+                addDouble(line.label .. ": ", line.amount, 1, 1, 1, c[1], c[2], c[3])
+            else
+                add(line.note, 0.7, 0.7, 0.7)
+            end
         end
     end
 

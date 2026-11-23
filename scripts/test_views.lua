@@ -2,7 +2,8 @@
 --
 -- What the LazyProf window shows, checked as data: the header lines, the
 -- receipt, the footer totals, the Steps tab's rows, the "nothing left" states
--- and the recipe search. No frames are involved.
+-- and the recipe search; the path list, the shopping list, the target model
+-- and the arrow tooltip. No frames are involved.
 --
 -- Run from the addon root:  lua5.1 scripts/test_views.lua
 
@@ -1304,6 +1305,57 @@ T.section("shopping list", function()
     T.eq("nothing left: the notice", Views.Shopping(shopView(done), ctx)[1].text, "Nothing left: Tailoring is at its cap of 300.")
 end)
 
+-- The target slider's model: from the real skill to the last cap.
+T.section("target", function()
+    local function target(extra)
+        return Views.Target({ path = makePath(extra), skill = (extra or {}).actualSkill or 143 })
+    end
+    local m = target({ currentSkill = 117, actualSkill = 117, targetSkill = 225 })
+    T.eq("left end: the real skill", m.min, 117)
+    T.eq("right end: the last cap", m.max, 300)
+    T.eq("value: the target", m.value, 225)
+    T.eq("it can be moved", m.enabled, true)
+    T.eq("left label", m.leftLabel, "117")
+    T.eq("right label", m.rightLabel, "300")
+
+    m = target({ currentSkill = 117, actualSkill = 117, targetSkill = 300 })
+    T.eq("target at the cap: the handle is at the right end", m.value, 300)
+    T.eq("and can be moved down", m.enabled, true)
+
+    -- No room to move: the target cannot go below the real skill + 1.
+    m = target({ currentSkill = 299, actualSkill = 299, targetSkill = 300 })
+    T.check("skill one below the cap: the only target is the cap", m.enabled == false and m.value == 300)
+    T.check("its range is not inverted", m.min == 299 and m.max == 300 and m.min <= m.max)
+    m = target({ currentSkill = 298, actualSkill = 298, targetSkill = 300 })
+    T.eq("two below the cap: there is a choice", m.enabled, true)
+    m = target({ currentSkill = 300, actualSkill = 300, targetSkill = 300, steps = {}, gaps = {}, nothingLeft = true })
+    T.check("skill at the cap: nothing to move", m.enabled == false and m.min == 300 and m.max == 300 and m.value == 300)
+    m = target({ currentSkill = 315, actualSkill = 315, targetSkill = 300, steps = {}, gaps = {}, nothingLeft = true })
+    T.check("skill past the cap: still no inverted range", m.enabled == false and m.min <= m.max and m.value == 300)
+
+    -- Target reached (the stored target is at or below the skill): the
+    -- handle sits at the left end and the target can be raised.
+    m = target({ currentSkill = 200, actualSkill = 200, targetSkill = 180, steps = {}, gaps = {}, nothingLeft = true })
+    T.check("target reached: clamped to the real skill, still movable", m.value == 200 and m.min == 200 and m.enabled == true)
+
+    -- A profession the character does not have starts at 1.
+    m = target({ hasProfession = false, currentSkill = 1, actualSkill = 1, targetSkill = 150 })
+    T.check("not learned: the left end is 1", m.min == 1 and m.leftLabel == "1" and m.value == 150 and m.enabled == true)
+    -- "Plan from skill 1" changes where the plan starts, not the left end.
+    m = target({ planFromOne = true, currentSkill = 1, actualSkill = 143, targetSkill = 225 })
+    T.eq("what-if from 1: the left end stays the real skill", m.min, 143)
+    -- The view's skill wins over the path's when both are there.
+    m = Views.Target({ path = makePath({ actualSkill = 143, targetSkill = 225 }), skill = 150 })
+    T.eq("the view's skill is the real skill", m.min, 150)
+    m = Views.Target({ path = makePath({ actualSkill = 143, targetSkill = 225 }) })
+    T.eq("else the path's", m.min, 143)
+
+    T.check("no path: no model", Views.Target({}) == nil)
+    T.check("no cap known: no model", Views.Target({ path = makePath({ capSkill = false, milestones = {} }) }) == nil)
+    m = Views.Target({ path = makePath({ capSkill = false, actualSkill = 117, targetSkill = 225 }) })
+    T.eq("the cap from the profession's milestones when the path names none", m.max, 300)
+end)
+
 T.section("arrow tooltip", function()
     local function lines(view)
         local out = {}
@@ -1312,52 +1364,73 @@ T.section("arrow tooltip", function()
         end
         return out
     end
-    local view = makeView(makePath(), { range = "all",
-        priceLines = { { text = "Prices: TSM 2", r = 0.6, g = 0.6, b = 0.6 } } })
+    local function sold(mode, values)
+        return { mode = mode, values = values, sources = {}, rank = {}, loading = 0, loadingItems = {} }
+    end
+    local view = shopView(makePath(), { priceLines = { { text = "Prices: TSM 2", r = 0.6, g = 0.6, b = 0.6 } } })
     local t = lines(view)
     T.eq("title", t[1], "LazyProf - Optimal Path")
     T.eq("the current step and its cost", t[3], "Now: 19x Gloves | 19s")
     T.eq("its skill range", t[4], "   Skill 143 to 160")
     T.eq("the next step", t[5], "Then: 20x Shirt (green: no better recipe) | 40s")
     T.eq("the one after", t[6], "Then: No recipe for 180-200: train elsewhere or missing data")
-    T.eq("the rest is on the Steps tab", t[7], "... and 2 more steps (see the Steps tab)")
-    T.eq("total, flagged when the path has gaps", t[9], "Total Cost (excluding gaps): | 59s")
-    T.eq("labels keep their colon and space for the two-column line", Views.ArrowTooltip(view)[9].text, "Total Cost (excluding gaps): ")
+    T.eq("the rest is on the Path tab", t[7], "... and 2 more steps (see the Path tab)")
+    T.eq("what is spent, flagged when the path has gaps", t[9], "You spend (excluding gaps): | 59s")
+    T.eq("labels keep their colon and space for the two-column line", Views.ArrowTooltip(view)[9].text, "You spend (excluding gaps): ")
     T.eq("price lines last", t[11], "Prices: TSM 2")
-    T.eq("no more lines than that", #t, 11)
+    T.eq("no more lines than that: nothing sells, so no other amount", #t, 11)
 
-    -- Owned stock: you pay and the market price, as before.
-    view = makeView(makePath({ complete = true }), { range = "all", inventory = { [101] = 19 } })
+    -- What the crafts sell for: the receipt's three lines.
+    view = shopView(makePath({ complete = true, sale = sold("vendor", { [1] = 30 }) }))
+    t = lines(view)
+    T.eq("sale value: spend", t[9], "You spend: | 59s")
+    T.eq("sale value: back", t[10], "Back from selling: | -5s 70c")
+    T.eq("sale value: net", t[11], "Net cost: | 53s 30c")
+    T.eq("sale value: nothing after the net", #t, 11)
+    local all = Views.ArrowTooltip(view)
+    T.check("money that comes back is green", all[10].rr < 1 and all[10].rg == 1)
+    T.check("what is spent is not", all[9].rr == 1 and all[9].rg == 1 and all[9].rb == 1)
+    view = shopView(makePath({ complete = true, sale = sold("auction", { [1] = 400 }) }))
+    t = lines(view)
+    T.eq("a gain is worded as a gain", t[11], "Net gain: | 17s")
+    T.eq("the receipt and the tooltip agree", t[11], Views.Receipt(view)[3].label .. ": | " .. Views.Receipt(view)[3].amount)
+
+    -- Owned stock: the amount is what is left to pay.
+    view = shopView(makePath({ complete = true }), { inventory = { [101] = 19 } })
     t = lines(view)
     T.eq("stock: the current step costs nothing", t[3], "Now: 19x Gloves | 0c")
-    T.eq("stock: you pay", t[9], "You Pay: | 40s")
-    T.eq("stock: market price", t[10], "Market Price: | 59s")
+    T.eq("stock: what is spent", t[9], "You spend: | 40s")
+    T.eq("stock: one amount", #t, 9)
 
-    -- Margin
-    view = makeView(makePath({ complete = true }), { range = "all", margin = 15 })
+    -- Spare crafts: the amount covers them, and says so.
+    view = shopView(makePath({ complete = true }), { margin = 15 })
     t = lines(view)
     T.eq("margin: the larger count", t[3], "Now: 22x Gloves | 22s")
-    T.eq("margin: its own total line", t[10], "With 15% margin: | 68s")
+    T.eq("margin: the amount covers the spare crafts", t[9], "You spend: | 68s")
+    T.eq("margin: and says so", t[10], "Includes 15% spare crafts")
 
     -- Learn and rank steps as the current step
     local boots = recipe(8, "Boots", 143, 200, 210, 220, { unlearned = true, sourceInfo = { type = "vendor", cost = 1500 } })
     local path = makePath({ complete = true, gaps = {}, totalCost = 3200, prices = { [108] = 100 },
         steps = { step(boots, 143, 150, 7, 7 * 100 + 1500), step(boots, 150, 160, 10, 1000) } })
-    view = makeView(path, { range = "all" })
-    view.stages, view.summary = Stages.Build(path, { includeLearn = true, liveCap = 150 })
-    view.profile, view.liveCap = "FOREVER", 150
+    view = shopView(path, { liveCap = 150 })
     t = lines(view)
     T.eq("learn step first, with its fee", t[3], "Now: Learn Boots | 15s")
     T.eq("where it comes from", t[4], "   Sold by a vendor.")
     T.eq("then the craft", t[7], "Then: 7x Boots | 7s")
     T.eq("then the rank step", t[8], "Then: Train the next rank before 150")
-    T.eq("total includes the fee", t[11], "Total Cost: | 32s")
+    T.eq("one more step, on the Path tab", t[9], "... and 1 more step (see the Path tab)")
+    T.eq("what is spent includes the fee", t[11], "You spend: | 32s")
 
     -- Nothing left, and no path
     local done = makePath({ steps = {}, gaps = {}, totalCost = 0, nothingLeft = true, actualSkill = 300, currentSkill = 300 })
-    t = lines(makeView(done, { range = "all" }))
+    t = lines(shopView(done))
     T.eq("nothing left says so", t[3], "Nothing left: Tailoring is at its cap of 300.")
+    T.eq("nothing left: no amounts", #t, 3)
     T.eq("no path: just the title", #lines({}), 1)
+    -- A view without an account (none was worked out) shows no amounts.
+    t = lines(makeView(makePath(), { range = "all" }))
+    T.eq("no account: the steps only", #t, 7)
     for _, l in ipairs(Views.ArrowTooltip(view)) do
         if l.text:find("[\128-\255]") then T.check("tooltip text is plain ASCII", false, l.text) end
     end

@@ -85,11 +85,12 @@ local function fresh()
     _G.UIParent = newFrame("UIParent")
     _G.CreateFrame = function(_type, name) return newFrame(name) end
     _G.InCombatLockdown = function() return env.combat end
-    env.tooltip = { left = {}, right = {} }
+    env.tooltip = { left = {}, right = {}, rightColor = {} }
     _G.GameTooltip = setmetatable({}, { __index = methodFallback })
-    function GameTooltip:AddDoubleLine(l, r)
+    function GameTooltip:AddDoubleLine(l, r, _lr, _lg, _lb, rr, rg, rb)
         env.tooltip.left[#env.tooltip.left + 1] = l
         env.tooltip.right[#env.tooltip.right + 1] = r
+        env.tooltip.rightColor[#env.tooltip.rightColor + 1] = { rr, rg, rb }
     end
 
     local addon = {}
@@ -265,7 +266,10 @@ section("tooltip", function()
         { text = "LazyProf - Optimal Path", r = 1, g = 0.82, b = 0 },
         { text = "Now: 5x Linen Bandage", right = "5s", r = 1, g = 1, b = 1, rr = 1, rg = 0.82, rb = 0 },
         { text = "   Skill 1 to 30", r = 0.5, g = 0.5, b = 0.5 },
-        { text = "Total Cost: ", right = "5s", r = 1, g = 1, b = 1 },
+        -- The receipt's amounts: label left, amount right in its own colour.
+        { text = "You spend: ", right = "5s", r = 1, g = 1, b = 1, rr = 1, rg = 1, rb = 1 },
+        { text = "Back from selling: ", right = "-1s 20c", r = 1, g = 1, b = 1, rr = 0.4, rg = 1, rb = 0.4 },
+        { text = "Net cost: ", right = "3s 80c", r = 1, g = 1, b = 1, rr = 1, rg = 1, rb = 1 },
         { text = "Prices: TSM 2", r = 0.6, g = 0.6, b = 0.6, wrap = true },
     }
     env.arrow:Update(env.path)
@@ -274,7 +278,13 @@ section("tooltip", function()
     check(p .. "plain lines drawn in order", #plain == 3 and plain[1].text == "LazyProf - Optimal Path"
         and plain[2].text == "   Skill 1 to 30", #plain)
     check(p .. "two-column lines drawn as such", env.tooltip.left[1] == "Now: 5x Linen Bandage" and env.tooltip.right[1] == "5s"
-        and env.tooltip.left[2] == "Total Cost: ", table.concat(env.tooltip.left, "|"))
+        and env.tooltip.left[2] == "You spend: ", table.concat(env.tooltip.left, "|"))
+    check(p .. "the receipt's three amounts, in order", env.tooltip.left[3] == "Back from selling: "
+        and env.tooltip.right[3] == "-1s 20c" and env.tooltip.left[4] == "Net cost: " and env.tooltip.right[4] == "3s 80c",
+        table.concat(env.tooltip.right, "|"))
+    local back, spend = env.tooltip.rightColor[3], env.tooltip.rightColor[2]
+    check(p .. "money that comes back keeps its green", back[1] == 0.4 and back[2] == 1 and back[3] == 0.4)
+    check(p .. "what is spent keeps its white", spend[1] == 1 and spend[2] == 1 and spend[3] == 1)
     check(p .. "wrapping passed on", plain[3].wrap == true)
     check(p .. "the tooltip is shown once", shown == 1, shown)
 
