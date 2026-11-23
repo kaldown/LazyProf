@@ -119,6 +119,47 @@ local function loadPricing(opts)
 end
 
 -- ===========================================================================
+-- Market-only prices (what a crafted item sells for at auction)
+-- ===========================================================================
+section("market price", function()
+    local p = "market price: "
+    local addon = loadPricing()
+    local pm = addon.PriceManager
+    check(p .. "the first market source in the configured order", pm:MarketPrice(2589) == 120, pm:MarketPrice(2589))
+    check(p .. "an item a vendor sells has no market price here (2320: vendor 10, auction 15)",
+        pm:MarketPrice(2320) == nil, pm:MarketPrice(2320))
+    check(p .. "no market data: nil, not the sell estimate", pm:MarketPrice(2996) == nil, pm:MarketPrice(2996))
+    check(p .. "unknown item: nil, not the floor", pm:MarketPrice(424242) == nil)
+    check(p .. "nothing is cached by it", pm.cache[2589] == nil and pm.cache[2996] == nil)
+
+    -- Kept for as long as the reagent prices are: the sources are not asked
+    -- again for every calculation.
+    tsmValues.DBRecent["i:2589"] = 777
+    check(p .. "a second lookup does not ask the sources again", pm:MarketPrice(2589) == 120, pm:MarketPrice(2589))
+    check(p .. "an item without a market price is remembered as such", pm:MarketPrice(2996) == nil)
+    now = now + 301
+    check(p .. "after the cache time it is read again", pm:MarketPrice(2589) == 777, pm:MarketPrice(2589))
+    now = 1000
+    resetTsm()
+
+    -- A fresh Auctionator price (seen today, auction house visited) wins,
+    -- and leaving the auction house expires what was kept.
+    check(p .. "before the visit: the configured order", pm:MarketPrice(2770) == 50, pm:MarketPrice(2770))
+    pm:OnAuctionHouseVisited()
+    check(p .. "a fresh scan wins over the configured order", pm:MarketPrice(2770) == 45, pm:MarketPrice(2770))
+
+    addon = loadPricing({ tsm = false, auctionator = false })
+    check(p .. "no auction addon: nil", addon.PriceManager:MarketPrice(2589) == nil)
+
+    local real = addon.PriceManager.IsRealSource
+    check(p .. "a vendor buy price is a real price", real({ source = "Vendor" }) == true)
+    check(p .. "so are TSM and Auctionator prices", real({ source = "TSM" }) == true and real({ source = "Auctionator" }) == true)
+    check(p .. "the sell estimate is not", real({ source = "VendorSell" }) == false)
+    check(p .. "nor the floor or no price", real({ source = "floor" }) == false and real({ source = "none" }) == false)
+    check(p .. "nor nothing", real(nil) == false)
+end)
+
+-- ===========================================================================
 -- Where a price came from
 -- ===========================================================================
 section("provenance", function()

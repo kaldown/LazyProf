@@ -105,12 +105,20 @@ end
 -- When a reagent we could only price with the absolute floor (because its
 -- GetItemInfo data had not arrived yet) finishes caching, drop the floor and
 -- recalculate so the path reflects the real vendor sell value.
+-- The same goes for a crafted item whose sale value was waiting for its data;
+-- there a failed load counts too, because the "still loading" note has to go.
 function LazyProf:OnItemInfoReceived(event, itemId, success)
-    if not success then return end
+    local changed = false
+    if self.SaleValue and self.SaleValue:OnItemInfo(itemId, success) then
+        changed = true
+    end
     local pm = self.PriceManager
-    if pm and pm.flooredItems and pm.flooredItems[itemId] then
+    if success and pm and pm.flooredItems and pm.flooredItems[itemId] then
         pm.flooredItems[itemId] = nil
         pm.cache[itemId] = nil
+        changed = true
+    end
+    if changed then
         self:ScheduleItemInfoRecalc()
     end
 end
@@ -265,6 +273,22 @@ function LazyProf:ScheduleItemInfoRecalc()
         itemInfoToken = 0
         itemInfoDeadline = nil
         LazyProf:Recalculate("item info settled")
+    end)
+end
+
+-- A crafted item whose data never arrives stops counting as "still loading"
+-- after Constants.SALE_LOADING_TIMEOUT seconds. Nothing else happens at that
+-- moment, so one redraw is scheduled for it (pending flag, as above): the
+-- note goes away by itself. A redraw only, never a recalculation.
+local saleLoadingPending = false
+function LazyProf:ScheduleSaleLoadingRefresh()
+    if saleLoadingPending then return end
+    saleLoadingPending = true
+    C_Timer.After(self.Constants.SALE_LOADING_TIMEOUT + 1, function()
+        saleLoadingPending = false
+        if LazyProf.GuideWindow then
+            LazyProf.GuideWindow:Refresh()
+        end
     end)
 end
 

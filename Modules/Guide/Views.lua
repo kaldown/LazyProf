@@ -794,11 +794,22 @@ end
 -- The craft / buy button of a craftable reagent. Its text is the state in
 -- force; a click switches it, a right-click goes back to automatic.
 local function ChoiceButton(row, ctx)
+    -- The choice in force: the player's when one was made (also while the
+    -- stock covers the need and nothing is crafted), else what the list does.
+    local craft
+    if row.choice then
+        craft = (row.choice == "craft")
+    else
+        craft = row.crafted and true or false
+    end
     local lines = {}
     if row.choice then
-        lines[#lines + 1] = { text = row.crafted and "You chose to craft this yourself." or "You chose to buy this.", r = 1, g = 1, b = 1 }
+        lines[#lines + 1] = { text = craft and "You chose to craft this yourself." or "You chose to buy this.", r = 1, g = 1, b = 1 }
+        if craft and not row.crafted then
+            lines[#lines + 1] = { text = "Your stock covers it, so nothing has to be crafted now.", r = 0.7, g = 0.7, b = 0.7 }
+        end
     else
-        lines[#lines + 1] = { text = row.crafted and "Chosen automatically: crafting is cheaper."
+        lines[#lines + 1] = { text = craft and "Chosen automatically: crafting is cheaper."
             or "Chosen automatically: buying is cheaper, or automatic crafting is off.", r = 1, g = 1, b = 1 }
     end
     if row.craftRecipeName then
@@ -807,13 +818,13 @@ local function ChoiceButton(row, ctx)
     lines[#lines + 1] = { text = "Click to switch. Right-click for automatic.", r = 0.5, g = 0.5, b = 0.5 }
     lines[#lines + 1] = { text = "This changes the shopping list only, not the path.", r = 0.5, g = 0.5, b = 0.5 }
     return {
-        text = row.crafted and "I craft it" or "I buy it",
+        text = craft and "I craft it" or "I buy it",
         tooltip = lines,
         onClick = function(mouseButton)
             if mouseButton == "RightButton" then
                 ctx.onCraftChoice(row, nil)
             else
-                ctx.onCraftChoice(row, row.crafted and "buy" or "craft")
+                ctx.onCraftChoice(row, craft and "buy" or "craft")
             end
         end,
     }
@@ -883,7 +894,7 @@ function Views.Shopping(view, ctx)
         if not (view.hideOwned and row.toBuy <= 0 and not row.crafted) then
             local buy = row.toBuy > 0 and tostring(row.toBuy) or "-"
             local cost
-            if row.crafted or row.toBuy <= 0 then
+            if row.toBuy <= 0 then
                 cost = row.crafted and "" or "-"
             elseif row.unpriced then
                 cost = "?"

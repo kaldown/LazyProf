@@ -58,6 +58,18 @@ LazyProf.Constants = {
         ALWAYS_CRAFT = "craft",  -- Always use raw materials
     },
 
+    -- What a crafted item is counted as selling for
+    SALE_MODE = {
+        VENDOR = "vendor",    -- sold to a vendor (always possible)
+        AUCTION = "auction",  -- sold at auction, after the cut; never below the vendor value
+        NONE = "none",        -- not counted
+    },
+    -- The auction house keeps this share of a sale
+    AUCTION_CUT = 0.05,
+    -- A crafted item whose data has not arrived counts as "still loading"
+    -- for this many seconds after it was first asked for, then as worth nothing
+    SALE_LOADING_TIMEOUT = 20,
+
     -- Cache TTL in seconds
     PRICE_CACHE_TTL = 300,        -- 5 minutes
     -- An Auctionator price last seen this many days ago or more counts as stale

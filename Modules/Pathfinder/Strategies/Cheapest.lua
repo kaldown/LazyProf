@@ -13,8 +13,9 @@ LazyProf.PathfinderStrategies.cheapest = {
     -- racialBonus: skill bonus from racial trait (e.g., Gnome +15 Engineering)
     --              This extends how long recipes stay orange/yellow/green
     -- pinnedRecipes: optional pin list ({ from, to, recipeId } ranges, see Pins.lua) overriding best picks
-    Calculate = function(self, currentSkill, targetSkill, recipes, inventory, prices, racialBonus, pinnedRecipes)
-        return LazyProf.StrategyCore:Run(self, currentSkill, targetSkill, recipes, inventory, prices, racialBonus, pinnedRecipes)
+    -- ctx: optional sale values, see StrategyCore.Run
+    Calculate = function(self, currentSkill, targetSkill, recipes, inventory, prices, racialBonus, pinnedRecipes, ctx)
+        return LazyProf.StrategyCore:Run(self, currentSkill, targetSkill, recipes, inventory, prices, racialBonus, pinnedRecipes, ctx)
     end,
 
     -- Get recipes that can be crafted and give skillups at current skill
@@ -74,7 +75,9 @@ LazyProf.PathfinderStrategies.cheapest = {
     -- IMPORTANT: Uses actualCost (materials to buy) not theoreticalCost (full market value)
     -- racialBonus: extends color ranges (e.g., Gnome +15 Engineering)
     -- purchasedRecipes: table of recipe IDs already "bought" in this simulation
-    ScoreRecipe = function(self, recipe, currentSkill, targetSkill, inventory, prices, racialBonus, purchasedRecipes)
+    -- ctx: optional run context (StrategyCore.Run); ctx.rankSale[recipeId] is
+    --      what one craft sells for, when that may be used for ranking
+    ScoreRecipe = function(self, recipe, currentSkill, targetSkill, inventory, prices, racialBonus, purchasedRecipes, ctx)
         racialBonus = racialBonus or 0
         purchasedRecipes = purchasedRecipes or {}
         local effectiveSkill = currentSkill - racialBonus
@@ -122,6 +125,15 @@ LazyProf.PathfinderStrategies.cheapest = {
                 actualCost = actualCost + (recipeCost / expectedCrafts)
             end
             -- "learned" and "inventory" types are free - no cost added
+        end
+
+        -- What the craft sells for comes off its cost, down to zero and no
+        -- further: with a negative cost the cost per skill-up would improve
+        -- as the skill-up chance falls, so a recipe that pays for itself
+        -- would rank better the less often it gives a point.
+        local saleValue = ctx and ctx.rankSale and ctx.rankSale[recipe.id]
+        if saleValue and saleValue > 0 then
+            actualCost = math.max(0, actualCost - saleValue)
         end
 
         -- Get expected skillups at current skill level (uses effective skill for color)

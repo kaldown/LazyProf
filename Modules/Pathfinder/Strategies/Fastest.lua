@@ -13,8 +13,9 @@ LazyProf.PathfinderStrategies.fastest = {
     -- racialBonus: skill bonus from racial trait (e.g., Gnome +15 Engineering)
     --              This extends how long recipes stay orange/yellow/green
     -- pinnedRecipes: optional pin list ({ from, to, recipeId } ranges, see Pins.lua) overriding best picks
-    Calculate = function(self, currentSkill, targetSkill, recipes, inventory, prices, racialBonus, pinnedRecipes)
-        return LazyProf.StrategyCore:Run(self, currentSkill, targetSkill, recipes, inventory, prices, racialBonus, pinnedRecipes)
+    -- ctx: optional sale values, see StrategyCore.Run
+    Calculate = function(self, currentSkill, targetSkill, recipes, inventory, prices, racialBonus, pinnedRecipes, ctx)
+        return LazyProf.StrategyCore:Run(self, currentSkill, targetSkill, recipes, inventory, prices, racialBonus, pinnedRecipes, ctx)
     end,
 
     -- Get recipes that can be crafted and give skillups at current skill

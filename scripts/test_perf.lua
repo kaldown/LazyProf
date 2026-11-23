@@ -59,7 +59,7 @@ local function deepcopy(t)
     for k, v in pairs(t) do r[k] = deepcopy(v) end
     return r
 end
-addon.Constants = {}
+addon.Constants = { SALE_LOADING_TIMEOUT = 20 }   -- as in Core/Constants.lua
 addon.Utils = {
     DeepCopy = deepcopy,
     GetSkillColor = function(_skill, _range) return "orange" end,
@@ -161,7 +161,56 @@ section("C", function()
     LP:OnItemInfoReceived("e", 456, false)  -- success == false -> ignored
     check("C failed item-info -> no schedule", schedCount == 1, schedCount)
 
+    -- A crafted item a sale value is waiting for: its arrival plans again
+    -- through the same coalescing path, and so does its failure (the "still
+    -- loading" note has to go).
+    local waited = { [700] = true, [701] = true }
+    local told = {}
+    LP.SaleValue = { OnItemInfo = function(_self, itemId, success)
+        told[#told + 1] = tostring(itemId) .. ":" .. tostring(success)
+        local was = waited[itemId] or false
+        waited[itemId] = nil
+        return was
+    end }
+    LP:OnItemInfoReceived("e", 700, true)
+    check("C waited sale item -> one coalesced schedule", schedCount == 2, schedCount)
+    LP:OnItemInfoReceived("e", 701, false)
+    check("C waited sale item that failed -> scheduled too", schedCount == 3, schedCount)
+    check("C the sale module is told the outcome", told[1] == "700:true" and told[2] == "701:false", table.concat(told, " "))
+    LP:OnItemInfoReceived("e", 999, true)
+    check("C unrelated item with sale values present -> no schedule", schedCount == 3, schedCount)
+    LP.PriceManager.flooredItems[800] = true
+    waited[800] = true
+    LP:OnItemInfoReceived("e", 800, true)
+    check("C floored reagent that is also a waited item -> one schedule, not two", schedCount == 4, schedCount)
+    LP.SaleValue = nil
+
     LP.ScheduleItemInfoRecalc = saved
+end)
+
+-- ===========================================================================
+-- C2: the "still loading" note goes away by itself: one redraw when the wait
+-- for crafted-item data is over, never a recalculation
+-- ===========================================================================
+section("C2", function()
+    check("C2 ScheduleSaleLoadingRefresh exists", type(LP.ScheduleSaleLoadingRefresh) == "function")
+    advance(10)   -- let timers left by the sections above run out first
+    local refreshes, recalcs = 0, 0
+    local savedWindow, savedRecalc = LP.GuideWindow, LP.Recalculate
+    LP.GuideWindow = { Refresh = function() refreshes = refreshes + 1 end }
+    LP.Recalculate = function() recalcs = recalcs + 1 end
+    for _ = 1, 5 do LP:ScheduleSaleLoadingRefresh() end
+    advance(19)
+    check("C2 nothing before the wait is over", refreshes == 0, refreshes)
+    advance(3)
+    check("C2 one redraw for many requests", refreshes == 1, refreshes)
+    check("C2 no recalculation", recalcs == 0, recalcs)
+    advance(60)
+    check("C2 and no further redraw", refreshes == 1, refreshes)
+    LP:ScheduleSaleLoadingRefresh()
+    advance(22)
+    check("C2 a later request redraws again", refreshes == 2, refreshes)
+    LP.GuideWindow, LP.Recalculate = savedWindow, savedRecalc
 end)
 
 -- ===========================================================================

@@ -9,6 +9,8 @@ local PriceManager = LazyProf.PriceManager
 PriceManager.providers = {}
 -- itemId -> price info (see GetPriceInfo). Other modules read .price.
 PriceManager.cache = {}
+-- itemId -> { price = copper or false, timestamp } (see MarketPrice)
+PriceManager.marketCache = {}
 
 -- Two auction sources whose prices for one item differ by more than this
 -- factor are flagged in /lp diag prices.
@@ -124,6 +126,44 @@ function PriceManager:GetPriceInfo(itemId)
     return { price = nil, source = "none", timestamp = time() }
 end
 
+-- What the auction addons say an item goes for, or nil: market sources only
+-- (a fresh price first, else the first in the configured order). Never a
+-- vendor buy price, the sell-value estimate or the floor, and nil for an item
+-- a vendor sells (nobody pays more at auction than the vendor asks). Used for
+-- what a crafted item sells for. Kept as long as the reagent prices are, in a
+-- cache of its own.
+function PriceManager:MarketPrice(itemId)
+    local cached = self.marketCache[itemId]
+    if cached and (time() - cached.timestamp) < Constants.PRICE_CACHE_TTL then
+        return cached.price or nil
+    end
+
+    local found
+    local vendor = LazyProf.PriceProviders and LazyProf.PriceProviders.vendor
+    local vendorPrice = vendor and vendor:GetPrice(itemId)
+    if not (vendorPrice and vendorPrice > 0) then
+        for _, provider in ipairs(self.providers) do
+            local price, _, ageDays = provider:GetPrice(itemId)
+            if price and price > 0 then
+                if self:IsFreshAge(ageDays) then
+                    found = price
+                    break
+                end
+                found = found or price
+            end
+        end
+    end
+    self.marketCache[itemId] = { price = found or false, timestamp = time() }
+    return found
+end
+
+-- A price somebody really charges: a vendor's or an auction addon's. The
+-- sell-value estimate and the floor are stand-ins, not prices.
+function PriceManager.IsRealSource(info)
+    local source = info and info.source
+    return source == "Vendor" or source == "TSM" or source == "Auctionator"
+end
+
 -- The price info the last calculation used: the cached entry whatever its
 -- age, so reports match the path's totals; looked up only when not cached.
 function PriceManager:PeekPriceInfo(itemId)
@@ -148,6 +188,7 @@ end
 -- Clear price cache
 function PriceManager:ClearCache()
     self.cache = {}
+    self.marketCache = {}
     self.flooredItems = {}
     LazyProf:Print("Price cache cleared.")
 end
@@ -173,6 +214,9 @@ function PriceManager:OnAuctionHouseVisited()
     self.auctionHouseVisited = true
     for _, info in pairs(self.cache) do
         info.timestamp = 0
+    end
+    for _, entry in pairs(self.marketCache) do
+        entry.timestamp = 0
     end
 end
 

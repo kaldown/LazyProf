@@ -70,6 +70,7 @@ Modules\Pricing\Providers\Auctionator.lua
 Modules\Pricing\Providers\Vendor.lua
 Modules\Pricing\Providers\VendorSell.lua
 Modules\Pricing\PriceManager.lua
+Modules\Pricing\SaleValue.lua
 
 # Modules - Recipes
 Modules\Recipes\Availability.lua

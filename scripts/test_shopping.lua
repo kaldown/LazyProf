@@ -238,4 +238,149 @@ T.section("edges", function()
     T.eq("no steps: zero total", empty.buyTotal, 0)
 end)
 
+T.section("a function of its arguments", function()
+    -- The bags' count comes from the source breakdown; nothing is scanned here.
+    local m = calc({ bags = { [CLOTH] = 99 } })   -- a scan would say 99, the breakdown says 5
+    T.eq("bags come from the breakdown", rowOf(m, CLOTH).inBags, 5)
+    T.eq("and what is left to buy follows it", rowOf(m, CLOTH).toBuy, 50)
+
+    -- Asked with nothing owned, it answers for empty bags whatever the bags hold.
+    bags = { [CLOTH] = 99, [THREAD] = 99 }
+    m = PF:CalculateMissingMaterials(STEPS, {}, {}, PRICES)
+    T.eq("nothing owned: all the cloth is bought", rowOf(m, CLOTH).toBuy, 65)
+    T.eq("nothing owned: all the thread is bought", rowOf(m, THREAD).toBuy, 10)
+    T.eq("nothing owned: the total", m.buyTotal, 6500 + 100 + 1500)
+end)
+
+T.section("owned stock of a crafted reagent", function()
+    -- Eight bolts in the bank: they are used first, the other twelve are made.
+    local m = calc({ bags = {}, inventory = { [BOLT] = 8 }, breakdown = { [BOLT] = { bank = 8 } } })
+    local bolt, cloth = rowOf(m, BOLT), rowOf(m, CLOTH)
+    T.check("still crafted", bolt.crafted == true)
+    T.eq("only the rest is crafted", bolt.craftQuantity, 12)
+    T.eq("have counts the bank", bolt.have, 8)
+    T.eq("the row says where the owned ones are", bolt.sources.bank, 8)
+    T.eq("collect them from the bank first", listHas(m.fromBank, BOLT) and listHas(m.fromBank, BOLT).missing, 8)
+    T.eq("to craft: twelve", listHas(m.toCraft, BOLT).quantity, 12)
+    T.eq("cloth for twelve bolts and the direct use", cloth.need, 36 + 5)
+    T.eq("nothing of the bolts is bought", bolt.toBuy, 0)
+    T.eq("the total", m.buyTotal, 4100 + 100 + 1500)
+
+    -- The bank covers them all: nothing is crafted, nothing bought.
+    m = calc({ bags = {}, inventory = { [BOLT] = 25 }, breakdown = { [BOLT] = { bank = 25 } } })
+    bolt, cloth = rowOf(m, BOLT), rowOf(m, CLOTH)
+    T.check("covered by the bank: not crafted", bolt.crafted == false)
+    T.eq("covered by the bank: nothing to buy", bolt.toBuy, 0)
+    T.eq("covered by the bank: collect twenty", listHas(m.fromBank, BOLT).missing, 20)
+    T.eq("covered by the bank: cloth only for its direct use", cloth.need, 5)
+end)
+
+T.section("a crafted reagent that is also the source of another", function()
+    -- Plates are made from bars (recipe 700, known); bars are also used
+    -- directly and, by choice, smelted from ore. One level deep: the bars
+    -- the plates take are bought, and that purchase is on the bar's row.
+    local PLATE = 15
+    NAMES[PLATE] = "Plate"
+    PRODUCERS[PLATE] = { { professionKey = "tailoring", recipe = { id = 700, name = "Make Plate", source = { type = "trainer" },
+        reagents = { { itemId = BAR, count = 2, name = "Bar" } } } } }
+    LazyProf.db.char.learnedRecipes = { tailoring = { [500] = true, [700] = true }, mining = { [600] = true } }
+    choose(BAR, "craft")
+    local R3 = { id = 3, name = "Armor", learned = true, reagents = {
+        { itemId = PLATE, count = 1, name = "Plate" }, { itemId = BAR, count = 1, name = "Bar" } } }
+    local prices = { [PLATE] = 900, [BAR] = 300, [ORE] = 200 }
+    local m = PF:CalculateMissingMaterials({ { recipe = R3, quantity = 3, skillStart = 1 } }, {}, {}, prices)
+    local plate, bar, ore = rowOf(m, PLATE), rowOf(m, BAR), rowOf(m, ORE)
+    T.check("plates are crafted (600 of bars against 900)", plate.crafted == true and plate.craftQuantity == 3)
+    T.check("bars for the direct use are smelted", bar.crafted == true and bar.craftQuantity == 3)
+    T.eq("the bar row needs the direct ones and the plates' ones", bar.need, 3 + 6)
+    T.eq("the plates' bars are bought", bar.toBuy, 6)
+    T.eq("and paid for on the row", bar.cost, 1800)
+    T.eq("ore for the smelted bars", ore.toBuy, 6)
+    T.eq("the total counts both", m.buyTotal, 1800 + 1200)
+    choose(BAR, nil)
+    PRODUCERS[PLATE], NAMES[PLATE] = nil, nil
+    LazyProf.db.char.learnedRecipes = { tailoring = { [500] = true } }
+end)
+
+T.section("craft or buy does not count stock twice", function()
+    -- Bars are used directly and plates are made from bars. Bars smelt from
+    -- ore (156 a bar against 465), plates cost 289 to buy against 930 of bars.
+    local PLATE = 15
+    NAMES[PLATE] = "Plate"
+    PRODUCERS[PLATE] = { { professionKey = "tailoring", recipe = { id = 700, name = "Make Plate", source = { type = "trainer" },
+        reagents = { { itemId = BAR, count = 2, name = "Bar" } } } } }
+    local savedBar = PRODUCERS[BAR]
+    PRODUCERS[BAR] = { { professionKey = "tailoring", recipe = { id = 600, name = "Smelt Bar", source = { type = "trainer" },
+        reagents = { { itemId = ORE, count = 3, name = "Ore" } } } } }
+    LazyProf.db.char.learnedRecipes = { tailoring = { [500] = true, [600] = true, [700] = true } }
+    local steps = {
+        { recipe = { id = 1, name = "A", learned = true, reagents = { { itemId = BAR, count = 4, name = "Bar" } } }, quantity = 5, skillStart = 1 },
+        { recipe = { id = 2, name = "B", learned = true, reagents = { { itemId = PLATE, count = 4, name = "Plate" } } }, quantity = 6, skillStart = 10 },
+    }
+    local prices = { [ORE] = 52, [BAR] = 465, [PLATE] = 289 }
+
+    local none = PF:CalculateMissingMaterials(steps, {}, {}, prices)
+    T.check("nothing owned: bars are smelted, plates bought", rowOf(none, BAR).crafted == true and rowOf(none, PLATE).crafted == false)
+    T.eq("nothing owned: the total", none.buyTotal, 60 * 52 + 24 * 289)
+
+    -- 35 bars owned: 20 go to the direct use, 15 are left - not enough to
+    -- make plates cheaper than buying them.
+    local with = PF:CalculateMissingMaterials(steps, { [BAR] = 35 }, { [BAR] = { bags = 35 } }, prices)
+    T.check("with 35 bars: plates are still bought", rowOf(with, PLATE).crafted == false)
+    T.eq("with 35 bars: no bars to buy", rowOf(with, BAR).toBuy, 0)
+    T.eq("with 35 bars: only the plates are paid for", with.buyTotal, 24 * 289)
+    T.check("owning stock never makes the list dearer", with.buyTotal <= none.buyTotal)
+    T.eq("and the saving is what the smelting would have cost", PF:StockSaving(steps, prices, with.buyTotal), 60 * 52)
+
+    -- Enough bars left over after the direct use: now the plates are made.
+    local plenty = PF:CalculateMissingMaterials(steps, { [BAR] = 68 }, { [BAR] = { bags = 68 } }, prices)
+    T.check("with 68 bars: plates are made from the 48 left over", rowOf(plenty, PLATE).crafted == true)
+    T.eq("with 68 bars: nothing to buy", plenty.buyTotal, 0)
+
+    -- Two crafted reagents share a source: the stock goes to the first one only.
+    local X1, X2, S = 21, 22, 23
+    NAMES[X1], NAMES[X2], NAMES[S] = "X1", "X2", "S"
+    PRODUCERS[X1] = { { professionKey = "tailoring", recipe = { id = 801, name = "Make X1", source = { type = "trainer" },
+        reagents = { { itemId = S, count = 1, name = "S" } } } } }
+    PRODUCERS[X2] = { { professionKey = "tailoring", recipe = { id = 802, name = "Make X2", source = { type = "trainer" },
+        reagents = { { itemId = S, count = 1, name = "S" } } } } }
+    LazyProf.db.char.learnedRecipes.tailoring[801] = true
+    LazyProf.db.char.learnedRecipes.tailoring[802] = true
+    local shared = {
+        { recipe = { id = 3, name = "C", learned = true, reagents = {
+            { itemId = X1, count = 1, name = "X1" }, { itemId = X2, count = 1, name = "X2" } } }, quantity = 10, skillStart = 1 },
+    }
+    local sharedPrices = { [X1] = 80, [X2] = 90, [S] = 100 }
+    local m = PF:CalculateMissingMaterials(shared, { [S] = 10 }, { [S] = { bags = 10 } }, sharedPrices)
+    T.check("shared source: the first reagent is made from the stock", rowOf(m, X1).crafted == true)
+    T.check("shared source: the second is bought (the stock is spoken for)", rowOf(m, X2).crafted == false)
+    T.eq("shared source: the total", m.buyTotal, 900)
+
+    PRODUCERS[PLATE], PRODUCERS[X1], PRODUCERS[X2] = nil, nil, nil
+    PRODUCERS[BAR] = savedBar
+    LazyProf.db.char.learnedRecipes = { tailoring = { [500] = true } }
+end)
+
+T.section("recipes to learn", function()
+    local function unlearned(id, name, info)
+        return { id = id, name = name, learned = false, _sourceInfo = info,
+            reagents = { { itemId = THREAD, count = 1, name = "Thread" } } }
+    end
+    local steps = {
+        { recipe = unlearned(31, "Zebra Hat", { type = "vendor", cost = 250 }), quantity = 1, skillStart = 1 },
+        { recipe = unlearned(32, "Free Hat", { type = "inventory" }), quantity = 1, skillStart = 2 },
+        { recipe = unlearned(33, "Auction Hat", { type = "ah", price = 400 }), quantity = 1, skillStart = 3 },
+        { recipe = unlearned(33, "Auction Hat", { type = "ah", price = 400 }), quantity = 2, skillStart = 4 },
+        { recipe = R1, quantity = 1, skillStart = 5 },
+    }
+    local m = PF:CalculateMissingMaterials(steps, {}, {}, PRICES)
+    T.eq("one row per recipe that costs something", #m.recipeRows, 2)
+    T.eq("by name", m.recipeRows[1].name, "Auction Hat")
+    T.eq("its price", m.recipeRows[1].cost, 400)
+    T.eq("where it comes from", m.recipeRows[1].sourceInfo.type, "ah")
+    T.eq("the other", m.recipeRows[2].cost, 250)
+    T.eq("the sum is the recipe costs", m.recipeCosts, 650)
+    T.eq("no steps: no rows", #PF:CalculateMissingMaterials({}, {}, {}, PRICES).recipeRows, 0)
+end)
+
 T.finish()

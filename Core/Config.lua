@@ -14,6 +14,8 @@ LazyProf.defaults = {
         -- "With margin": extra crafts for bad luck, as a percentage of each step
         useMargin = false,
         marginPercent = 15,
+        -- What crafted items are counted as selling for (Constants.SALE_MODE)
+        saleValueMode = Constants.SALE_MODE.VENDOR,
 
         -- Display
         displayMode = Constants.DISPLAY_MODE.ARROW_TOOLTIP,
@@ -143,6 +145,29 @@ LazyProf.options = {
                     get = function() return LazyProf.db.profile.suggestUnlearnedRecipes end,
                     set = function(_, v)
                         LazyProf.db.profile.suggestUnlearnedRecipes = v
+                        LazyProf:Recalculate("setting changed")
+                    end,
+                },
+                saleValueMode = {
+                    name = "Count what crafts sell for",
+                    desc = "The crafted items are worth something when you sell them. The " ..
+                           "Cheapest strategy counts that when it compares recipes whose " ..
+                           "reagents all have a real price.\n\n" ..
+                           "Sold to a vendor: the vendor's price, which you always get.\n" ..
+                           "Sold at auction: the auction price after the 5% cut (never less " ..
+                           "than the vendor's price). An auction may not sell.\n" ..
+                           "Do not count: costs only.",
+                    type = "select",
+                    order = 3.2,
+                    values = {
+                        [Constants.SALE_MODE.VENDOR] = "Sold to a vendor",
+                        [Constants.SALE_MODE.AUCTION] = "Sold at auction (after the 5% cut)",
+                        [Constants.SALE_MODE.NONE] = "Do not count",
+                    },
+                    sorting = { Constants.SALE_MODE.VENDOR, Constants.SALE_MODE.AUCTION, Constants.SALE_MODE.NONE },
+                    get = function() return LazyProf.db.profile.saleValueMode end,
+                    set = function(_, v)
+                        LazyProf.db.profile.saleValueMode = v
                         LazyProf:Recalculate("setting changed")
                     end,
                 },

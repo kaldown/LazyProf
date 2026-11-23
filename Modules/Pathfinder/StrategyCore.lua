@@ -19,9 +19,10 @@ local GAP_NO_RECIPE = "no recipe"
 
 -- Score every candidate and return the alternatives list, best (lowest score) first.
 -- ScoreRecipe is called with the superset
--- (recipe, skill, targetSkill, inventory, prices, racialBonus, purchasedRecipes);
--- a strategy ignores what it does not use.
-local function ScoreCandidates(strategy, candidates, skill, targetSkill, inventory, prices, racialBonus, purchasedRecipes, label)
+-- (recipe, skill, targetSkill, inventory, prices, racialBonus, purchasedRecipes, scoreCtx);
+-- a strategy ignores what it does not use. scoreCtx is the run's context
+-- (see Run): { rankSale, sale, recipes }.
+local function ScoreCandidates(strategy, candidates, skill, targetSkill, inventory, prices, racialBonus, purchasedRecipes, label, scoreCtx)
     local effectiveSkill = skill - racialBonus
     if strategy.logScoring and LazyProf:IsDebugEnabled("scoring") then
         LazyProf:Debug("scoring", "=== Scoring candidates at skill " .. skill .. " (effective: " .. effectiveSkill .. ")"
@@ -29,7 +30,7 @@ local function ScoreCandidates(strategy, candidates, skill, targetSkill, invento
     end
     local alternatives = {}
     for _, recipe in ipairs(candidates) do
-        local score = strategy:ScoreRecipe(recipe, skill, targetSkill, inventory, prices, racialBonus, purchasedRecipes)
+        local score = strategy:ScoreRecipe(recipe, skill, targetSkill, inventory, prices, racialBonus, purchasedRecipes, scoreCtx)
         local color = Utils.GetSkillColor(effectiveSkill, recipe.skillRange)
         local expectedSkillups = strategy:GetExpectedSkillups(recipe, skill, racialBonus)
 
@@ -107,8 +108,14 @@ end
 LazyProf.StrategyCore = {
     -- pins: optional pin list (Modules/Pathfinder/Pins.lua); with none the
     -- loop's output is what the optimizer picks.
-    Run = function(_core, self, currentSkill, targetSkill, recipes, inventory, prices, racialBonus, pins)
+    -- ctx: optional { rankSale = { [recipeId] = copper }, sale = { [recipeId] = copper } }
+    --   rankSale  what one craft sells for, for the recipes whose ranking may
+    --             use it (a strategy that ranks by cost takes it off)
+    --   sale      what one craft sells for, put on the steps (saleEach, sale)
+    -- Without ctx the output is exactly what it was before sale values existed.
+    Run = function(_core, self, currentSkill, targetSkill, recipes, inventory, prices, racialBonus, pins, ctx)
         racialBonus = racialBonus or 0
+        local scoreCtx = { rankSale = ctx and ctx.rankSale or nil, sale = ctx and ctx.sale or nil, recipes = recipes }
         local path = {}
         local gaps = {}
         local simulatedSkill = currentSkill
@@ -122,7 +129,7 @@ LazyProf.StrategyCore = {
             -- Use effective skill (base - bonus) for color calculations
             local candidates = self:GetCandidates(recipes, simulatedSkill, racialBonus)
             local alternatives = ScoreCandidates(self, candidates, simulatedSkill, targetSkill,
-                simulatedInventory, prices, racialBonus, purchasedRecipes)
+                simulatedInventory, prices, racialBonus, purchasedRecipes, nil, scoreCtx)
             local best, bestScore = PickBest(alternatives, pinnedId)
             local bridge = false
 
@@ -133,7 +140,7 @@ LazyProf.StrategyCore = {
                 local effectiveSkill = simulatedSkill - racialBonus
                 local wideCandidates = self:GetCandidates(recipes, simulatedSkill, racialBonus, true)
                 local wideAlternatives = ScoreCandidates(self, wideCandidates, simulatedSkill, targetSkill,
-                    simulatedInventory, prices, racialBonus, purchasedRecipes, " [bridge: green allowed]")
+                    simulatedInventory, prices, racialBonus, purchasedRecipes, " [bridge: green allowed]", scoreCtx)
                 best, bestScore = PickBest(wideAlternatives, pinnedId, function(recipe)
                     return Utils.GetSkillUpChance(effectiveSkill, recipe.skillRange) >= minChance
                 end)
@@ -167,7 +174,9 @@ LazyProf.StrategyCore = {
 
                 local totalSkillups, totalCost = self:CalculateTotalCostAndSkillups(best, simulatedSkill, quantity, simulatedInventory, prices, racialBonus, purchasedRecipes)
 
-                -- Add step to path (with alternatives for UI)
+                -- Add step to path (with alternatives for UI). What its
+                -- crafts sell for rides along when sale values were given.
+                local saleEach = scoreCtx.sale and scoreCtx.sale[best.id] or nil
                 table.insert(path, {
                     recipe = best,
                     quantity = quantity,
@@ -176,6 +185,8 @@ LazyProf.StrategyCore = {
                     totalCost = totalCost,
                     alternatives = alternatives,
                     bridge = bridge or nil,
+                    saleEach = saleEach,
+                    sale = saleEach and (saleEach * quantity) or nil,
                 })
 
                 -- Mark recipe as purchased in simulation (so future evaluations don't re-add cost)
