@@ -211,7 +211,7 @@ LazyProf.options = {
                     end,
                 },
                 marginPercent = {
-                    name = "Margin (percent)",
+                    name = "Spare crafts (percent)",
                     desc = "Skill-ups are a matter of chance, so the planned number of crafts " ..
                            "is an average. With \"Spare crafts\" ticked in the LazyProf window " ..
                            "(under More options), every step plans this many percent more " ..

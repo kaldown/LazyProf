@@ -291,6 +291,11 @@ function LazyProf:ScheduleSaleLoadingRefresh()
         if LazyProf.GuideWindow then
             LazyProf.GuideWindow:Refresh()
         end
+        -- Items asked for after the first ones have a later deadline: come
+        -- back for them.
+        if LazyProf.SaleValue and LazyProf.SaleValue.WaitingCount and LazyProf.SaleValue:WaitingCount() > 0 then
+            LazyProf:ScheduleSaleLoadingRefresh()
+        end
     end)
 end
 

@@ -210,6 +210,21 @@ section("C2", function()
     LP:ScheduleSaleLoadingRefresh()
     advance(22)
     check("C2 a later request redraws again", refreshes == 2, refreshes)
+
+    -- Items asked for later than the first batch have a later deadline: while
+    -- any is still waiting when the redraw runs, another redraw is scheduled.
+    local waitingCount = 1
+    LP.SaleValue = { WaitingCount = function() return waitingCount end, OnItemInfo = function() return false end }
+    LP:ScheduleSaleLoadingRefresh()
+    advance(22)
+    check("C2 redraw with something still waiting", refreshes == 3, refreshes)
+    waitingCount = 0
+    advance(22)
+    check("C2 it is followed by another one", refreshes == 4, refreshes)
+    advance(60)
+    check("C2 and that is the last once nothing waits", refreshes == 4, refreshes)
+    check("C2 still no recalculation", recalcs == 0, recalcs)
+    LP.SaleValue = nil
     LP.GuideWindow, LP.Recalculate = savedWindow, savedRecalc
 end)
 

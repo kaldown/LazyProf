@@ -143,6 +143,7 @@ T.section("settings", function()
     T.eq("margin is off by default", LazyProf.defaults.profile.useMargin, false)
     T.eq("margin percent default", LazyProf.defaults.profile.marginPercent, 15)
     local opt = LazyProf.options.args.general.args.marginPercent
+    T.eq("the option is named as the window names it", opt.name, "Spare crafts (percent)")
     T.check("margin percent option exists", opt ~= nil)
     T.eq("option minimum", opt and opt.min, 5)
     T.eq("option maximum", opt and opt.max, 30)

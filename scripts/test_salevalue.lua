@@ -178,6 +178,8 @@ T.section("waiting for item data", function()
     T.eq("no longer counted as loading after that", SV:Build(recipes, opts).loading, 0)
     T.eq("the earlier table says so too, without being rebuilt", SV:LoadingCount(sale), 0)
     T.eq("no table: nothing loading", SV:LoadingCount(nil), 0)
+    T.eq("nothing is being waited for any more", SV:WaitingCount(), 0)
+    clock = 100
 
     -- The data arrives after all: it was still being waited for.
     info[701] = 30
@@ -191,6 +193,7 @@ T.section("waiting for item data", function()
     clock = 200
     local waitingSale = SV:Build(more, opts)
     T.eq("a new missing item is loading", waitingSale.loading, 1)
+    T.eq("one item is being waited for", SV:WaitingCount(), 1)
     T.check("its failed load is reported", SV:OnItemInfo(704, false) == true)
     T.eq("a table built before the failure stops counting it", SV:LoadingCount(waitingSale), 0)
     T.eq("and it stops counting as loading", SV:Build(more, opts).loading, 0)
