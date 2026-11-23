@@ -74,11 +74,6 @@ function LazyProf:OnEnable()
     if self.MinimapButton then
         self.MinimapButton:Initialize()
     end
-    -- Bank and logout events, and remembering this character's bags
-    if self.Inventory then
-        self.Inventory:Initialize()
-    end
-
     -- Profession-window events and hooks belong to the client adapter (the
     -- event names differ between client families).
     self.Client:Start({
@@ -96,6 +91,12 @@ function LazyProf:OnEnable()
     self:RegisterEvent("BAG_UPDATE", "OnBagUpdate")
     self:RegisterEvent("GET_ITEM_INFO_RECEIVED", "OnItemInfoReceived")
     self:RegisterEvent("AUCTION_HOUSE_CLOSED", "OnAuctionHouseClosed")
+
+    -- Last, so that nothing above depends on it: the bank and logout events,
+    -- and remembering this character's bags (it protects itself)
+    if self.Inventory then
+        self.Inventory:Initialize()
+    end
 end
 
 -- Leaving the auction house: a scan may just have run there, so fresh

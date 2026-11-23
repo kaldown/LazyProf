@@ -26,6 +26,14 @@
 -- day the format changes. A table in a format this file does not know is
 -- neither read nor written over.
 --
+-- The saved table is read defensively: it may have been edited by hand, cut
+-- off by a crash or written by a build with a defect. A record that is not a
+-- table is skipped, as is a bags / bank / bound part that is not one, an
+-- item id that is not a number, a count that is not a positive whole number
+-- and a name that is not text. Nothing negative is ever handed out, and what
+-- is handed out is a copy. Reading changes nothing; the next save replaces
+-- what was not a table.
+--
 -- This file is pure: who the character is, what it holds and what time it is
 -- are passed in (the client adapter supplies them).
 --   identity = { guid, name, world, faction }
@@ -39,35 +47,69 @@ local HOUR = 3600
 local DAY = 86400
 StockMemory.KEEP_DAYS = 180
 
--- The saved table, or nil when there is no database yet or the table is in
--- another format. The second return is the format number found.
-local function Store()
+-- The two saved tables - characters by GUID and account banks by world - and
+-- the format number found. nil tables when there is no database yet or the
+-- saved table is in another format.
+-- repair: a save is coming, so whatever is not a table is replaced now;
+-- without it a reader gets empty tables in their place and nothing is
+-- written.
+local function Store(repair)
     local global = LazyProf.db and LazyProf.db.global
-    if not global then return nil, nil end
-    if type(global.stock) ~= "table" then
-        global.stock = {}
-    end
+    if type(global) ~= "table" then return nil, nil, nil end
     local stock = global.stock
+    if type(stock) ~= "table" then
+        if not repair then return {}, {}, SCHEMA end
+        stock = {}
+        global.stock = stock
+    end
     if stock.schema == nil then
-        stock.schema = SCHEMA
+        if repair then stock.schema = SCHEMA end
+    elseif stock.schema ~= SCHEMA then
+        return nil, nil, stock.schema
     end
-    if stock.schema ~= SCHEMA then
-        return nil, stock.schema
+    local characters, account = stock.characters, stock.account
+    if type(characters) ~= "table" then
+        characters = {}
+        if repair then stock.characters = characters end
     end
-    stock.characters = stock.characters or {}
-    stock.account = stock.account or {}
-    return stock, SCHEMA
+    if type(account) ~= "table" then
+        account = {}
+        if repair then stock.account = account end
+    end
+    return characters, account, SCHEMA
 end
 
--- A copy holding only the positive counts.
+local function IsCount(value)
+    return type(value) == "number" and value > 0 and value < math.huge and value == math.floor(value)
+end
+
+-- A copy of an item table holding only what can be counted: item ids that
+-- are numbers, with counts that are positive whole numbers.
 local function Counts(items)
     local copy = {}
-    for itemId, count in pairs(items or {}) do
-        if type(count) == "number" and count > 0 then
+    if type(items) ~= "table" then return copy end
+    for itemId, count in pairs(items) do
+        if type(itemId) == "number" and IsCount(count) then
             copy[itemId] = count
         end
     end
     return copy
+end
+
+local function Text(value)
+    return type(value) == "string" and value or nil
+end
+
+local function Time(value)
+    return type(value) == "number" and value or nil
+end
+
+-- A saved part of a record (its bags or its bank) when it can be read: a
+-- table with an items table. nil otherwise.
+local function Part(record, key)
+    local part = type(record) == "table" and record[key] or nil
+    if type(part) ~= "table" or type(part.items) ~= "table" then return nil end
+    return part
 end
 
 local function Snapshot(items, bound, now)
@@ -79,15 +121,14 @@ local function Snapshot(items, bound, now)
     return snapshot
 end
 
--- What of a snapshot can be sent to another character: counts less their
+-- What of a saved part can be sent to another character: counts less their
 -- soulbound part.
-local function Sendable(snapshot)
-    local items = {}
-    local bound = snapshot.bound or {}
-    for itemId, count in pairs(snapshot.items or {}) do
-        local free = count - (bound[itemId] or 0)
-        if free > 0 then
-            items[itemId] = free
+local function Sendable(part)
+    local items = Counts(part.items)
+    for itemId, boundCount in pairs(Counts(part.bound)) do
+        local count = items[itemId]
+        if count then
+            items[itemId] = count > boundCount and (count - boundCount) or nil
         end
     end
     return items
@@ -99,17 +140,18 @@ local function Size(t)
     return n
 end
 
--- The character's record, made when missing, with who it is brought up to
--- date. A value that could not be read this time keeps what was remembered.
-local function Record(stock, identity, now)
-    local record = stock.characters[identity.guid]
-    if not record then
+-- The character's record, made when missing (or when what is saved under its
+-- GUID is not a table), with who it is brought up to date. A value that
+-- could not be read this time keeps what was remembered.
+local function Record(characters, identity, now)
+    local record = characters[identity.guid]
+    if type(record) ~= "table" then
         record = {}
-        stock.characters[identity.guid] = record
+        characters[identity.guid] = record
     end
-    record.name = identity.name or record.name
-    record.world = identity.world or record.world
-    record.faction = identity.faction or record.faction
+    record.name = Text(identity.name) or Text(record.name)
+    record.world = Text(identity.world) or Text(record.world)
+    record.faction = Text(identity.faction) or Text(record.faction)
     if type(record.seen) ~= "number" or now > record.seen then
         record.seen = now
     end
@@ -117,12 +159,12 @@ local function Record(stock, identity, now)
 end
 
 local function Save(part, identity, items, bound, now)
-    if not (identity and identity.guid and type(items) == "table" and type(now) == "number") then
+    if not (type(identity) == "table" and identity.guid and type(items) == "table" and type(now) == "number") then
         return false
     end
-    local stock = Store()
-    if not stock then return false end
-    Record(stock, identity, now)[part] = Snapshot(items, bound, now)
+    local characters = Store(true)
+    if not characters then return false end
+    Record(characters, identity, now)[part] = Snapshot(items, bound, now)
     return true
 end
 
@@ -139,39 +181,37 @@ end
 
 -- Remember the account-wide bank of a world.
 function StockMemory:SaveAccountBank(world, items, now)
-    if not (world and type(items) == "table" and type(now) == "number") then
+    if not (type(world) == "string" and type(items) == "table" and type(now) == "number") then
         return false
     end
-    local stock = Store()
-    if not stock then return false end
-    stock.account[world] = { items = Counts(items), at = now }
+    local _, account = Store(true)
+    if not account then return false end
+    account[world] = { items = Counts(items), at = now }
     return true
 end
 
--- A character's own bank as last seen: items (soulbound ones included) and
--- the time. nil when it was never seen. The items table is the saved one:
--- read it, do not change it.
+-- A character's own bank as last seen: a copy of its items (soulbound ones
+-- included) and the time. nil when it was never seen.
 function StockMemory:OwnBank(guid)
-    local stock = Store()
-    local record = stock and guid and stock.characters[guid]
-    local bank = record and record.bank
+    local characters = Store()
+    local bank = characters and guid ~= nil and Part(characters[guid], "bank")
     if not bank then return nil end
-    return bank.items, bank.at
+    return Counts(bank.items), Time(bank.at)
 end
 
--- The account-wide bank of a world as last seen: items (the saved table, as
--- above) and the time. nil when it was never seen.
+-- The account-wide bank of a world as last seen: a copy of its items and the
+-- time. nil when it was never seen.
 function StockMemory:AccountBank(world)
-    local stock = Store()
-    local bank = stock and world and stock.account[world]
-    if not bank then return nil end
-    return bank.items, bank.at
+    local _, account = Store()
+    local bank = account and world ~= nil and account[world]
+    if type(bank) ~= "table" or type(bank.items) ~= "table" then return nil end
+    return Counts(bank.items), Time(bank.at)
 end
 
 -- The other remembered characters of this character's world and faction, by
 -- name: { { guid, name, bags, bagsAt, bank, bankAt }, ... }. bags / bank are
 -- what could be sent over (soulbound counts taken off); a part never seen is
--- nil.
+-- nil, and so is the time of a part that has none.
 -- A name belongs to one character of a world, so a record under the asking
 -- character's own name is not an alt (it is a character that is gone, or
 -- this one under an older id), and of several records under one name only
@@ -179,30 +219,30 @@ end
 -- out: it could not be shown.
 function StockMemory:Alts(identity)
     local list = {}
-    local stock = Store()
-    if not (stock and identity and identity.guid and identity.world and identity.faction) then
+    local characters = Store()
+    if not (characters and type(identity) == "table" and identity.guid and identity.world and identity.faction) then
         return list
     end
     local byName = {}
-    for guid, record in pairs(stock.characters) do
-        local name = record.name
-        if guid ~= identity.guid and name and name ~= identity.name
+    for guid, record in pairs(characters) do
+        local name = type(record) == "table" and Text(record.name) or nil
+        if name and guid ~= identity.guid and name ~= identity.name
                 and record.world == identity.world and record.faction == identity.faction then
-            local seen = record.seen or 0
+            local seen = Time(record.seen) or 0
             local other = byName[name]
-            if not other or seen > other.seen or (seen == other.seen and guid < other.guid) then
+            if not other or seen > other.seen or (seen == other.seen and tostring(guid) < tostring(other.guid)) then
                 byName[name] = { guid = guid, seen = seen, record = record }
             end
         end
     end
     for name, entry in pairs(byName) do
-        local record = entry.record
         local alt = { guid = entry.guid, name = name }
-        if record.bags then
-            alt.bags, alt.bagsAt = Sendable(record.bags), record.bags.at
+        local bags, bank = Part(entry.record, "bags"), Part(entry.record, "bank")
+        if bags then
+            alt.bags, alt.bagsAt = Sendable(bags), Time(bags.at)
         end
-        if record.bank then
-            alt.bank, alt.bankAt = Sendable(record.bank), record.bank.at
+        if bank then
+            alt.bank, alt.bankAt = Sendable(bank), Time(bank.at)
         end
         list[#list + 1] = alt
     end
@@ -211,57 +251,69 @@ function StockMemory:Alts(identity)
 end
 
 -- Drop the characters not seen for KEEP_DAYS days (a deleted character must
--- not supply stock for ever), and the account banks of worlds no remembered
--- character is left in. keepGuid: the character being played, which is never
--- dropped. Returns how many characters were dropped.
+-- not supply stock for ever) and whatever is saved in a record's place
+-- without being one, and the account banks of worlds no remembered character
+-- is left in. keepGuid: the character being played, whose entry is never
+-- dropped. Returns how many entries were dropped.
 function StockMemory:Prune(now, keepGuid)
-    local stock = Store()
-    if not stock or type(now) ~= "number" then return 0 end
+    local characters, account = Store()
+    if not characters or type(now) ~= "number" then return 0 end
     local dropped = 0
     local limit = self.KEEP_DAYS * DAY
-    for guid, record in pairs(stock.characters) do
-        if guid ~= keepGuid and (type(record.seen) ~= "number" or now - record.seen > limit) then
-            stock.characters[guid] = nil
+    for guid, record in pairs(characters) do
+        local seen = type(record) == "table" and Time(record.seen) or nil
+        if guid ~= keepGuid and (not seen or now - seen > limit) then
+            characters[guid] = nil
             dropped = dropped + 1
         end
     end
     local worlds = {}
-    for _, record in pairs(stock.characters) do
-        if record.world then worlds[record.world] = true end
+    for _, record in pairs(characters) do
+        if type(record) == "table" and Text(record.world) then
+            worlds[record.world] = true
+        end
     end
-    for world in pairs(stock.account) do
+    for world in pairs(account) do
         if not worlds[world] then
-            stock.account[world] = nil
+            account[world] = nil
         end
     end
     return dropped
 end
 
--- Forget everything remembered, for every character and world.
+-- Forget everything remembered, for every character and world. Also what
+-- puts a damaged saved table right again.
 function StockMemory:Forget()
-    local stock = Store()
-    if not stock then return end
-    stock.characters = {}
-    stock.account = {}
+    local characters, account = Store(true)
+    if not characters then return end
+    for guid in pairs(characters) do characters[guid] = nil end
+    for world in pairs(account) do account[world] = nil end
 end
 
 -- What is remembered, for the diagnostic:
---   { usable, schema,
+--   { usable, schema, unreadable,
 --     characters = { { guid, name, world, faction, seen, bagItems, bagsAt, bankItems, bankAt }, ... },
 --     account = { { world, items, at }, ... } }
 -- bagItems / bankItems count distinct items (nil for a part never seen).
 -- usable is false when there is no database or the saved table is in another
--- format (schema then says which).
+-- format (schema then says which). unreadable counts the entries that are
+-- not what this file writes and are skipped.
 function StockMemory:Summary()
-    local stock, schema = Store()
-    local summary = { usable = stock ~= nil, schema = schema, characters = {}, account = {} }
-    if not stock then return summary end
-    for guid, record in pairs(stock.characters) do
-        summary.characters[#summary.characters + 1] = {
-            guid = guid, name = record.name, world = record.world, faction = record.faction, seen = record.seen,
-            bagItems = record.bags and Size(record.bags.items) or nil, bagsAt = record.bags and record.bags.at or nil,
-            bankItems = record.bank and Size(record.bank.items) or nil, bankAt = record.bank and record.bank.at or nil,
-        }
+    local characters, account, schema = Store()
+    local summary = { usable = characters ~= nil, schema = schema, unreadable = 0, characters = {}, account = {} }
+    if not characters then return summary end
+    for guid, record in pairs(characters) do
+        if type(record) == "table" then
+            local bags, bank = Part(record, "bags"), Part(record, "bank")
+            summary.characters[#summary.characters + 1] = {
+                guid = guid, name = Text(record.name), world = Text(record.world), faction = Text(record.faction),
+                seen = Time(record.seen),
+                bagItems = bags and Size(Counts(bags.items)) or nil, bagsAt = bags and Time(bags.at) or nil,
+                bankItems = bank and Size(Counts(bank.items)) or nil, bankAt = bank and Time(bank.at) or nil,
+            }
+        else
+            summary.unreadable = summary.unreadable + 1
+        end
     end
     table.sort(summary.characters, function(a, b)
         local worldA, worldB = tostring(a.world), tostring(b.world)
@@ -270,8 +322,12 @@ function StockMemory:Summary()
         if nameA ~= nameB then return nameA < nameB end
         return tostring(a.guid) < tostring(b.guid)
     end)
-    for world, bank in pairs(stock.account) do
-        summary.account[#summary.account + 1] = { world = world, items = Size(bank.items), at = bank.at }
+    for world, bank in pairs(account) do
+        if type(bank) == "table" and type(bank.items) == "table" then
+            summary.account[#summary.account + 1] = { world = world, items = Size(Counts(bank.items)), at = Time(bank.at) }
+        else
+            summary.unreadable = summary.unreadable + 1
+        end
     end
     table.sort(summary.account, function(a, b) return tostring(a.world) < tostring(b.world) end)
     return summary

@@ -180,6 +180,32 @@ local function CannotReceive()
     return (char and char.selfFoundMode) and true or false
 end
 
+-- The memory must never stop the addon: a damaged saved table or a client
+-- call that fails would otherwise break login or every scan. Its entry
+-- points therefore run protected. A failure is not hidden: the first one is
+-- written to the debug log, and /lp diag stock prints the last one and how
+-- many there were.
+local memoryErrors = { count = 0, last = nil, where = nil }
+
+local function NoteMemoryError(where, err)
+    memoryErrors.count = memoryErrors.count + 1
+    memoryErrors.last = tostring(err)
+    memoryErrors.where = where
+    if memoryErrors.count == 1 then
+        LazyProf:Debug("pathfinder", "Stock memory failed (" .. where .. "): " .. tostring(err))
+    end
+end
+
+-- Run fn(...) protected. Returns whether it ran through, then its first result.
+local function Protected(where, fn, ...)
+    local ok, result = pcall(fn, ...)
+    if not ok then
+        NoteMemoryError(where, result)
+        return false, nil
+    end
+    return true, result
+end
+
 -- Frame-level cache: ScanAll is called many times per frame (once per recipe in
 -- GetCandidates). Cache results so only the first call per frame does real work.
 local scanCache = { time = 0, combined = nil, breakdown = nil, meta = nil }
@@ -335,7 +361,15 @@ function Inventory:ScanAll()
     if self:UsesSyndicator() then
         AddSyndicatorStock(self, combined, breakdown, countAlts)
     else
-        meta = AddRememberedStock(self, combined, breakdown, countAlts)
+        local ok, result = Protected("scan", AddRememberedStock, self, combined, breakdown, countAlts)
+        if ok then
+            meta = result
+        else
+            -- The memory could not be read: count what is carried, nothing else.
+            combined, breakdown = {}, {}
+            mergeSource(bagItems, "bags", nil, combined, breakdown)
+            meta = { remembered = true, alts = {} }
+        end
     end
 
     scanCache.time = now
@@ -416,7 +450,7 @@ function Inventory:RequestBagSave(fromUpdate)
         bagSavePending = false
         local trustEmpty = bagUpdateSeen
         bagUpdateSeen = false
-        Inventory:SaveBags(trustEmpty)
+        Protected("bag save", Inventory.SaveBags, Inventory, trustEmpty)
     end)
 end
 
@@ -457,7 +491,7 @@ function Inventory:ReadBank()
         bankLookAgainPending = true
         C_Timer.After(settleLeft, function()
             bankLookAgainPending = false
-            Inventory:OnBankSeen()
+            Protected("bank read", Inventory.OnBankSeen, Inventory)
         end)
     end
     return saved
@@ -475,13 +509,14 @@ function Inventory:RequestBankRead()
     bankReadPending = true
     C_Timer.After(BANK_READ_DELAY, function()
         bankReadPending = false
-        Inventory:OnBankSeen()   -- reads nothing when the bank has closed meanwhile
+        -- reads nothing when the bank has closed meanwhile
+        Protected("bank read", Inventory.OnBankSeen, Inventory)
     end)
 end
 
 function Inventory:OnBankOpened()
     bankOpenedAt = GetTime()
-    self:OnBankSeen()
+    Protected("bank read", self.OnBankSeen, self)
 end
 
 -- A bag update (Core/Init.lua passes every BAG_UPDATE on with its container
@@ -490,13 +525,15 @@ end
 -- update of a bank container is not a change of the bags.
 function Inventory:OnBagUpdate(bagId)
     if self:UsesSyndicator() then return end
-    local Client = LazyProf.Client
-    if Client:IsBankOpen() then
-        self:RequestBankRead()
-    end
-    if not Client:BankKindOfBag(bagId) then
-        self:RequestBagSave(true)
-    end
+    Protected("bag update", function()
+        local Client = LazyProf.Client
+        if Client:IsBankOpen() then
+            self:RequestBankRead()
+        end
+        if not Client:BankKindOfBag(bagId) then
+            self:RequestBagSave(true)
+        end
+    end)
 end
 
 -- Logout (the client's event, and the database's own shutdown notice, which
@@ -506,25 +543,30 @@ function Inventory:OnLogout()
     if not bagSavePending then return end
     bagSavePending = false
     bagUpdateSeen = false
-    self:SaveBags(false)
+    Protected("logout", self.SaveBags, self, false)
 end
 
 -- Start listening (called once the addon is enabled). Characters not seen
 -- for a long time are dropped here - never the one being played - and the
 -- character is remembered shortly after login even if its bags never change.
+-- Nothing in here can stop the addon from starting.
 function Inventory:Initialize()
-    LazyProf.Client:StartStock({
-        onBankOpened = function() Inventory:OnBankOpened() end,
-        onBankChanged = function() Inventory:RequestBankRead() end,
-        onBankClosed = function() end,
-        onLogout = function() Inventory:OnLogout() end,
-    })
+    Protected("start", function()
+        LazyProf.Client:StartStock({
+            onBankOpened = function() Inventory:OnBankOpened() end,
+            onBankChanged = function() Inventory:RequestBankRead() end,
+            onBankClosed = function() end,
+            onLogout = function() Inventory:OnLogout() end,
+        })
+    end)
     if self:UsesSyndicator() then return end
-    local Client = LazyProf.Client
-    local identity = Client:CharacterIdentity() or {}
-    if identity.guid then
-        LazyProf.StockMemory:Prune(Client:Now(), identity.guid)
-    end
+    Protected("start", function()
+        local Client = LazyProf.Client
+        local identity = Client:CharacterIdentity() or {}
+        if identity.guid then
+            LazyProf.StockMemory:Prune(Client:Now(), identity.guid)
+        end
+    end)
     self:RequestBagSave()
 end
 
@@ -552,7 +594,19 @@ function Inventory:RunDiagnostic(lines)
     add("settings: bank=" .. tostring(profile.includeBankItems) .. " alts=" .. tostring(profile.includeAltCharacters)
         .. " guildBank=" .. tostring(profile.includeGuildBank) .. " selfFound=" .. tostring(CannotReceive()))
 
-    local identity = Client:CharacterIdentity() or {}
+    if memoryErrors.count > 0 then
+        add("last error: " .. tostring(memoryErrors.last) .. " (in: " .. tostring(memoryErrors.where) .. "; "
+            .. tostring(memoryErrors.count) .. " so far this session - stock outside the bags is not counted while it lasts)")
+    end
+
+    -- Who the character is may be the very call that fails: the rest of the
+    -- dump is still worth having.
+    local identityRead, identity = pcall(Client.CharacterIdentity, Client)
+    if not identityRead then
+        add("identity: could not be read: " .. tostring(identity))
+        identity = {}
+    end
+    identity = identity or {}
     local now = Client:Now()
     add("identity: guid=" .. tostring(identity.guid) .. " name=" .. tostring(identity.name)
         .. " world=" .. tostring(identity.world) .. " faction=" .. tostring(identity.faction))
@@ -567,6 +621,10 @@ function Inventory:RunDiagnostic(lines)
     add("memory: format=" .. tostring(summary.schema) .. " characters=" .. tostring(#summary.characters)
         .. " accountBanks=" .. tostring(#summary.account)
         .. " (characters not seen for " .. tostring(Memory.KEEP_DAYS) .. " days are dropped)")
+    if summary.unreadable > 0 then
+        add("memory: unreadable=" .. tostring(summary.unreadable)
+            .. " (saved entries that are not what LazyProf writes; they are skipped, and Forget remembered characters removes them)")
+    end
 
     local isAlt = {}
     for _, alt in ipairs(Memory:Alts(identity)) do isAlt[alt.guid] = true end

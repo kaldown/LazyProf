@@ -10,7 +10,7 @@ The pure logic (path, candidate routes, sale value, stages, shopping rows, purch
 bash scripts/run_tests.sh
 ```
 
-The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks every Lua file under `Core`, `Modules` and `Professions` with `luac5.1`. It must end with `OK: 35 suites passed, ...` before every commit; the same command runs on every push. A single suite runs from the repo root, for example `lua5.1 scripts/test_views.lua`.
+The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks every Lua file under `Core`, `Modules` and `Professions` with `luac5.1`. It must end with `OK: 36 suites passed, ...` before every commit; the same command runs on every push. A single suite runs from the repo root, for example `lua5.1 scripts/test_views.lua`.
 
 | Suite | What it covers |
 |-------|----------------|
@@ -32,6 +32,7 @@ The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks ever
 | `test_merchant.lua` | The merchant panel and `/lp diag merchant` |
 | `test_trainers.lua` | Remembered trainers and fees |
 | `test_stockmemory.lua` | Remembered bags and bank per character and the account bank per world: saving, alts of the same world and faction, soulbound items, the 180-day limit, the age wording |
+| `test_stockflow.lua` | Stock through whole sessions on the real WoW Forever adapter, scanner and memory together: saved stock that is not what the addon wrote, a client call that fails |
 | `test_scanner.lua` | Which owned stock counts and how the stock memory is kept: Syndicator's stock unchanged, bank and alts from memory without it, bags saved a moment after a change and at logout, the bank only while its window is open, Self-Found, the stock options, `/lp diag stock` |
 | `test_views.lua` | What the window shows, as data: header, receipt, target model, Path list, Shopping list (with the age of remembered bank and alt stock), recipe search, arrow tooltip |
 | `test_window.lua` | The window's frames on both client families: header, More options, target box and slider, receipt, the two tabs, closed state, combat, planning mode |
@@ -49,7 +50,7 @@ The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks ever
 | `test_debuglog.lua` | The debug-log buffer and its rendering |
 | `test_utils.lua` | The pure helpers in `Core/Utils.lua` |
 
-Shared helpers live in `scripts/lib/`: `harness.lua` (stubs the game's globals, loads the recipe data of a chosen client and the addon's modules), `check.lua` (pass / fail bookkeeping), `fakeui.lua` (a fake frame API), `window.lua` (loads the window against the fake UI) and `shown.lua` (reads the amounts a view shows back into numbers, so a suite can check that what a player sees adds up).
+Shared helpers live in `scripts/lib/`: `harness.lua` (stubs the game's globals, loads the recipe data of a chosen client and the addon's modules), `check.lua` (pass / fail bookkeeping), `fakeui.lua` (a fake frame API), `window.lua` (loads the window against the fake UI), `stockworld.lua` (a WoW Forever client small enough to follow stock through: bags, bank, characters, a clock; sessions load the real adapter, scanner and memory) and `shown.lua` (reads the amounts a view shows back into numbers, so a suite can check that what a player sees adds up).
 
 Path and stage snapshots are rewritten with `UPDATE_SNAPSHOTS=1 lua5.1 scripts/test_paths.lua` (and `scripts/test_stages.lua`). Read the diff before committing it: with no sale values and no owned stock a snapshot only changes when the planner's choices or the recipe data changed.
 
@@ -240,7 +241,7 @@ See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for the diagnostic commands (`/lp d
 
 ## Test Checklist for PRs
 
-- [ ] `bash scripts/run_tests.sh` ends with `OK: 35 suites passed`
+- [ ] `bash scripts/run_tests.sh` ends with `OK: 36 suites passed`
 - [ ] Opens without errors on each supported profession
 - [ ] Path and Shopping tabs display correctly
 - [ ] The receipt adds up to the Shopping tab

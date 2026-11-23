@@ -48,7 +48,9 @@ T.section("store", function()
     fresh()
     T.check("nothing remembered at first: no bank", Memory:OwnBank(MAIN.guid) == nil)
     T.eq("nothing remembered at first: no alts", #Memory:Alts(MAIN), 0)
-    T.eq("the store carries its format number once it exists", LazyProf.db.global.stock.schema, 1)
+    T.check("reading makes nothing", LazyProf.db.global.stock == nil)
+    Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW)
+    T.eq("the store carries its format number from the first save", LazyProf.db.global.stock.schema, 1)
 end)
 
 T.section("save and read back", function()
@@ -75,13 +77,18 @@ T.section("save and read back", function()
     T.eq("saving the bags keeps the bank", (Memory:OwnBank(MAIN.guid))[4306], 7)
     T.eq("still one record", count(LazyProf.db.global.stock.characters), 1)
 
+    -- What is handed out is a copy: a caller cannot change what is remembered.
+    got = Memory:OwnBank(MAIN.guid)
+    got[4306] = 9999
+    T.eq("the bank handed out is a copy", (Memory:OwnBank(MAIN.guid))[4306], 7)
+
     T.check("another character has no bank", Memory:OwnBank("Player-1-OTHER") == nil)
     T.check("no guid asked: nothing", Memory:OwnBank(nil) == nil)
 
-    -- Counts that are not positive numbers are not kept.
-    Memory:SaveBank(MAIN, { [1] = 0, [2] = -3, [3] = "x", [4] = 2 }, {}, NOW)
+    -- Only item ids that are numbers with counts that are positive whole numbers are kept.
+    Memory:SaveBank(MAIN, { [1] = 0, [2] = -3, [3] = "x", [4] = 2, [5] = 1.5, [6] = math.huge, name = 3, [7] = true }, {}, NOW)
     got = Memory:OwnBank(MAIN.guid)
-    T.check("only positive counts are kept", got[4] == 2 and got[1] == nil and got[2] == nil and got[3] == nil)
+    T.check("only positive whole counts under numeric ids are kept", got[4] == 2 and count(got) == 1, count(got))
 end)
 
 T.section("nothing is saved without a character or a time", function()
@@ -257,6 +264,143 @@ T.section("another format is left alone", function()
         and theirs.characters[MAIN.guid].something == "else" and theirs.characters[MAIN.guid].bags == nil)
     T.eq("the summary says which format it found", Memory:Summary().schema, 2)
     T.check("and that it is not used", Memory:Summary().usable == false)
+end)
+
+-- The saved table can hold anything: a file edited by hand, cut off by a
+-- crash, or written by a build with a defect. Whatever is not what this file
+-- writes is skipped, never an error, and never a negative count.
+T.section("saved data that is not what the addon wrote", function()
+    local ALT = who("Player-1-ALT", "Alt Character")
+    local function goodAlt()
+        return { name = "Alt Character", world = "eu-pvp", faction = "Alliance", seen = NOW - 100,
+                 bags = { items = { [2589] = 20 }, at = NOW - 100 } }
+    end
+    local function own(bankItems)
+        return { name = "Main Character", world = "eu-pvp", faction = "Alliance", seen = NOW - 50,
+                 bank = { items = bankItems, at = NOW - 50 } }
+    end
+    -- What every reader makes of a saved table: no error, nothing negative.
+    local function read(stock)
+        LazyProf.db.global = { characters = {}, stock = stock }
+        local out = {}
+        local ok, err = pcall(function()
+            out.bank = Memory:OwnBank(MAIN.guid)
+            out.account = Memory:AccountBank("eu-pvp")
+            out.alts = Memory:Alts(MAIN)
+            out.summary = Memory:Summary()
+        end)
+        out.ok, out.err = ok, err
+        out.negative = false
+        local function scan(items)
+            for itemId, n in pairs(items or {}) do
+                if type(itemId) ~= "number" or type(n) ~= "number" or n <= 0 or n ~= math.floor(n) then out.negative = true end
+            end
+        end
+        scan(out.bank); scan(out.account)
+        for _, alt in ipairs(out.alts or {}) do scan(alt.bags); scan(alt.bank) end
+        return out
+    end
+    local function linen(out)
+        local n = 0
+        for _, alt in ipairs(out.alts or {}) do n = n + ((alt.bags or {})[2589] or 0) + ((alt.bank or {})[2589] or 0) end
+        return n + ((out.bank or {})[2589] or 0) + ((out.account or {})[2589] or 0)
+    end
+
+    local cases = {
+        -- label, the saved table, the linen that may be counted from it
+        { "the store is a string", "broken", 0 },
+        { "the store is an empty table", {}, 0 },
+        { "characters is a string", { schema = 1, characters = "x", account = {} }, 0 },
+        { "account is a number", { schema = 1, characters = { [ALT.guid] = goodAlt() }, account = 5 }, 20 },
+        { "a record that is true", { schema = 1, characters = { X = true, [ALT.guid] = goodAlt() }, account = {} }, 20 },
+        { "a record that is a string", { schema = 1, characters = { X = "gone" }, account = {} }, 0 },
+        { "the character's own record is a number", { schema = 1, characters = { [MAIN.guid] = 7 }, account = {} }, 0 },
+        { "a record without fields", { schema = 1, characters = { X = {} }, account = {} }, 0 },
+        { "bags is a number", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags = 5; return r end)() }, account = {} }, 0 },
+        { "bags without items", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags = { at = 1 }; return r end)() }, account = {} }, 0 },
+        { "bags.items is a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.items = "x"; return r end)() }, account = {} }, 0 },
+        { "bound is a number", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.bound = 3; return r end)() }, account = {} }, 20 },
+        { "a count that is a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.items[2589] = "abc"; return r end)() }, account = {} }, 0 },
+        { "a count that is negative", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.items[2589] = -50; return r end)() }, account = {} }, 0 },
+        { "a count that is true", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.items[2589] = true; return r end)() }, account = {} }, 0 },
+        { "a count that is not whole", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.items[2589] = 2.5; return r end)() }, account = {} }, 0 },
+        { "an item id that is a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.items = { ["2589"] = 20 }; return r end)() }, account = {} }, 0 },
+        { "a bound count larger than the count", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.bound = { [2589] = 50 }; return r end)() }, account = {} }, 0 },
+        { "a bound count that is negative", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.bound = { [2589] = -5 }; return r end)() }, account = {} }, 20 },
+        { "own bank with a negative count", { schema = 1, characters = { [MAIN.guid] = own({ [2589] = -30 }) }, account = {} }, 0 },
+        { "own bank with a string count", { schema = 1, characters = { [MAIN.guid] = own({ [2589] = "x", [4306] = 2 }) }, account = {} }, 0 },
+        { "own bank is true", { schema = 1, characters = { [MAIN.guid] = { seen = 1, bank = true } }, account = {} }, 0 },
+        { "an account bank that is true", { schema = 1, characters = {}, account = { ["eu-pvp"] = true } }, 0 },
+        { "an account bank without items", { schema = 1, characters = {}, account = { ["eu-pvp"] = { at = 5 } } }, 0 },
+        { "an account bank with a negative count", { schema = 1, characters = {}, account = { ["eu-pvp"] = { items = { [2589] = -4, [4306] = 1 }, at = 5 } } }, 0 },
+        { "a name that is a number", { schema = 1, characters = { X = (function() local r = goodAlt(); r.name = 12; return r end)(), [ALT.guid] = goodAlt() }, account = {} }, 20 },
+        { "a world that is a table", { schema = 1, characters = { X = (function() local r = goodAlt(); r.world = {}; return r end)() }, account = {} }, 0 },
+        { "seen is a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.seen = "yesterday"; return r end)() }, account = {} }, 20 },
+        { "two records of one name, one with seen as a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.seen = "x"; r.bags.items[2589] = 99; return r end)(), [ALT.guid] = goodAlt() }, account = {} }, 20 },
+        { "a part without a time", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.at = nil; return r end)() }, account = {} }, 20 },
+        { "a part whose time is a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.at = "noon"; return r end)() }, account = {} }, 20 },
+        { "a key that is a number", { schema = 1, characters = { [7] = goodAlt(), [8] = goodAlt() }, account = {} }, 20 },
+    }
+    for _, case in ipairs(cases) do
+        local label, stock, want = case[1], case[2], case[3]
+        local out = read(stock)
+        T.check(label .. ": no error", out.ok, out.err)
+        T.check(label .. ": nothing but positive whole counts", out.negative == false)
+        T.eq(label .. ": linen counted", linen(out), want)
+    end
+
+    -- A part without a usable time is counted but has no age.
+    local out = read({ schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.at = "noon"; return r end)() }, account = {} })
+    T.check("a part without a usable time has no time", out.alts[1] ~= nil and out.alts[1].bagsAt == nil)
+    -- The summary says how many records it could not read.
+    out = read({ schema = 1, characters = { X = true, Y = "gone", [ALT.guid] = goodAlt() }, account = { ["eu-pvp"] = true } })
+    T.check("the summary lists what it can read and counts the rest",
+        #out.summary.characters == 1 and out.summary.unreadable == 3, out.summary.unreadable)
+
+    -- Reading repairs nothing by itself ...
+    local broken = { schema = 1, characters = "x", account = 5 }
+    read(broken)
+    T.check("reading leaves the saved table as it was", broken.characters == "x" and broken.account == 5)
+    -- ... a save does.
+    LazyProf.db.global = { stock = broken }
+    T.check("a save into it works", Memory:SaveBags(MAIN, { [2589] = 3 }, {}, NOW) == true
+        and Memory:SaveAccountBank("eu-pvp", { [2589] = 4 }, NOW) == true)
+    T.check("and replaces what was not a table", type(broken.characters) == "table" and type(broken.account) == "table"
+        and broken.characters[MAIN.guid].bags.items[2589] == 3)
+    LazyProf.db.global = { stock = "broken" }
+    T.check("a store that was a string is replaced by the first save", Memory:SaveBank(MAIN, { [2589] = 3 }, {}, NOW) == true
+        and type(LazyProf.db.global.stock) == "table" and LazyProf.db.global.stock.schema == 1)
+    -- The character's own record that is not a table is replaced by its next save.
+    LazyProf.db.global = { stock = { schema = 1, characters = { [MAIN.guid] = 7, [ALT.guid] = "gone" }, account = {} } }
+    T.check("a save over a record that is not a table", Memory:SaveBank(MAIN, { [2589] = 8 }, {}, NOW) == true
+        and (Memory:OwnBank(MAIN.guid))[2589] == 8)
+    -- A name, world or faction that is not text is dropped by the next save.
+    LazyProf.db.global = { stock = { schema = 1, characters = { [MAIN.guid] = { name = 12, world = {}, faction = true } }, account = {} } }
+    Memory:SaveBags({ guid = MAIN.guid }, { [1] = 1 }, {}, NOW)
+    local record = LazyProf.db.global.stock.characters[MAIN.guid]
+    T.check("who a record is holds text or nothing", record.name == nil and record.world == nil and record.faction == nil)
+
+    -- Prune and Forget cope, and Forget repairs.
+    LazyProf.db.global = { stock = { schema = 1, characters = { X = true, Y = "gone", Z = { seen = "x" }, [MAIN.guid] = 7,
+        [ALT.guid] = goodAlt() }, account = { ["eu-pvp"] = true, ["us-pvp"] = { items = {}, at = 1 } } } }
+    local ok, dropped = pcall(Memory.Prune, Memory, NOW, MAIN.guid)
+    T.check("prune does not fail on them", ok, dropped)
+    local characters = LazyProf.db.global.stock.characters
+    T.check("prune drops what is not a record, keeps the good one and the played character's entry",
+        characters.X == nil and characters.Y == nil and characters.Z == nil and characters[ALT.guid] ~= nil
+        and characters[MAIN.guid] ~= nil)
+    for _, stock in ipairs({ "broken", { schema = 1, characters = "x", account = 5 },
+            { schema = 1, characters = { X = true }, account = { ["eu-pvp"] = true } } }) do
+        LazyProf.db.global = { stock = stock }
+        T.check("forget does not fail", pcall(Memory.Forget, Memory))
+        local after = LazyProf.db.global.stock
+        T.check("forget leaves a clean store", type(after) == "table" and type(after.characters) == "table"
+            and next(after.characters) == nil and type(after.account) == "table" and next(after.account) == nil)
+        T.check("that saves again", Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW) == true)
+    end
+    -- A format number that is not this version's (even the text "1") is another format.
+    out = read({ schema = "1", characters = { [ALT.guid] = goodAlt() } })
+    T.check("a format number that is text is not this format", out.ok and linen(out) == 0 and out.summary.usable == false)
 end)
 
 T.section("age text", function()

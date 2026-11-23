@@ -802,6 +802,14 @@ T.section("diagnostic lines", function()
         and text:find("not used", 1, true) ~= nil, text)
     _G.Syndicator = nil
 
+    -- Entries that are not what LazyProf writes are counted, not listed.
+    LazyProf.db.global.stock.characters["Player-1-JUNK"] = true
+    LazyProf.db.global.stock.account["eu-normal"] = "x"
+    lines = {}
+    Inventory:RunDiagnostic(lines)
+    T.check("unreadable entries are counted in the dump", table.concat(lines, "\n"):find("unreadable=2", 1, true) ~= nil,
+        table.concat(lines, "\n"))
+
     LazyProf.db.global.stock = { schema = 9 }
     lines = {}
     Inventory:RunDiagnostic(lines)
