@@ -708,6 +708,9 @@ T.section("options", function()
         text(bank.desc):find("when you last opened it", 1, true) ~= nil, text(bank.desc))
     T.check("alts: says what is remembered without an inventory addon",
         text(alts.desc):find("each character's bags", 1, true) ~= nil, text(alts.desc))
+    T.check("bank and alts: say where the age of remembered stock is shown",
+        text(bank.desc):find("Collect first", 1, true) ~= nil and text(bank.desc):find("how old", 1, true) ~= nil
+        and text(alts.desc):find("Collect first", 1, true) ~= nil and text(alts.desc):find("how old", 1, true) ~= nil)
     T.check("alts: says which characters and that soulbound items do not count",
         text(alts.desc):find("same world and faction", 1, true) ~= nil and text(alts.desc):find("soulbound", 1, true) ~= nil)
     -- The bank is not remembered on the other clients: the option would tick and count nothing.

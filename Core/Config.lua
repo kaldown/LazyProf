@@ -329,7 +329,8 @@ LazyProf.options = {
                            "With the Syndicator addon the bank is read from it. Without an " ..
                            "inventory addon LazyProf remembers your bank itself, as it was " ..
                            "when you last opened it (on WoW Forever; on other clients the " ..
-                           "bank needs Syndicator).\n\n" ..
+                           "bank needs Syndicator). The tooltip of a \"From bank\" row " ..
+                           "under \"Collect first\" on the Shopping tab says how old that is.\n\n" ..
                            "Example: You need 20 Thorium Bars but have 8 in your bank. " ..
                            "The shopping list shows 12 to buy from the AH.",
                     type = "toggle",
@@ -356,7 +357,9 @@ LazyProf.options = {
                            "it has seen itself: each character's bags when you play it, and " ..
                            "its bank when you open it (the bank with \"Include bank items\" " ..
                            "on, and on WoW Forever only). It then counts the characters of " ..
-                           "the same world and faction, without their soulbound items.\n\n" ..
+                           "the same world and faction, without their soulbound items. The " ..
+                           "tooltip of a \"From alts\" row under \"Collect first\" on the " ..
+                           "Shopping tab says how old each character's stock is.\n\n" ..
                            "A character in Self-Found mode cannot be sent anything, so no " ..
                            "alt stock is counted for it.\n\n" ..
                            "Example: Your alt has 200 Silk Cloth. The shopping list " ..

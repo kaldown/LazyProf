@@ -21,6 +21,7 @@ local LazyProf = harness.loadLazyProf({
     "Core/Client/Classic.lua",
     "Core/Config.lua",
     "Core/CharStore.lua",
+    "Modules/Inventory/StockMemory.lua",
     "Modules/Pathfinder/Pins.lua",
     "Modules/Pathfinder/MaterialResolver.lua",
     "Modules/Pathfinder/Pathfinder.lua",
@@ -1416,6 +1417,113 @@ T.section("shopping list", function()
         "No reagents needed in this path.")
     local done = makePath({ steps = {}, gaps = {}, totalCost = 0, nothingLeft = true, actualSkill = 300, currentSkill = 300 })
     T.eq("nothing left: the notice", Views.Shopping(shopView(done), ctx)[1].text, "Nothing left: Tailoring is at its cap of 300.")
+end)
+
+-- Stock that LazyProf remembers itself (the bank as last opened, the alts as
+-- last played) says how old it is in the "Collect first" tooltips. Stock read
+-- from an inventory addon carries no age and its tooltips are unchanged.
+T.section("collect first: how old remembered stock is", function()
+    local SILK, WOOL = 165, 166
+    local DAY = 86400
+    local NOW = 20000 * DAY + 3600
+    local robe = recipe(50, "Robe", 100, 150, 160, 170, { reagents = {
+        { itemId = SILK, count = 3, name = "Silk" }, { itemId = WOOL, count = 2, name = "Wool" } } })
+    local prices = { [SILK] = 200, [WOOL] = 100 }
+    -- Ten robes: 30 Silk, 20 Wool. Silk: 12 in the bank, 10 on Zed (bags) and
+    -- 8 on Amy (bank). Wool: 20 on Zed, in the bags and in the bank.
+    local inventory = { [SILK] = 30, [WOOL] = 20 }
+    local breakdown = {
+        [SILK] = { bank = 12, alts = { ["Zed Alt"] = { bags = 10 }, ["Amy Alt"] = { bank = 8 } } },
+        [WOOL] = { alts = { ["Zed Alt"] = { bags = 5, bank = 15 } } },
+    }
+    local function view(meta, now)
+        local path = makePath({ complete = true, gaps = {}, currentSkill = 100, actualSkill = 100, prices = prices,
+            steps = { step(robe, 100, 110, 10, 0) }, inventory = inventory, sourceBreakdown = breakdown, stockMeta = meta })
+        local v = shopView(path, { inventory = inventory, breakdown = breakdown })
+        v.stockMeta, v.now = meta, now
+        return v
+    end
+    -- The collect rows of a view: [lead .. " " .. item name] = tooltip texts.
+    local function tips(v)
+        local out = {}
+        for _, row in ipairs(Views.Shopping(v)) do
+            if row.lead then
+                local lines = {}
+                for _, line in ipairs(row.tooltip or {}) do lines[#lines + 1] = line.text end
+                out[row.lead .. " " .. tostring(row.text):match("^%d+x (%a+)")] = lines
+            end
+        end
+        return out
+    end
+    local function has(lines, text)
+        for _, line in ipairs(lines or {}) do
+            if line == text then return true end
+        end
+        return false
+    end
+    local function joined(lines) return table.concat(lines or {}, " / ") end
+
+    -- An inventory addon's stock: no age anywhere, the tooltips as they were.
+    local plain = tips(view(nil, nil))
+    T.eq("no ages: the bank row's tooltip", joined(plain["From bank Silk"]), "In bank: 12 | Grab: 12 / Shift-click to link")
+    T.eq("no ages: an alt row's tooltip", joined(plain["From alts Wool"]),
+        "On your alts: /   Zed Alt: 20 / Transfer to this character before crafting / Shift-click to link")
+
+    -- Remembered stock.
+    local meta = {
+        remembered = true, bankSeenAt = NOW - 2 * DAY,
+        alts = { ["Zed Alt"] = { bags = NOW - DAY, bank = NOW - 40 * DAY }, ["Amy Alt"] = { bags = NOW, bank = NOW - 3 * DAY } },
+    }
+    local t = tips(view(meta, NOW))
+    T.check("bank row: says when the bank was seen", has(t["From bank Silk"], "Bank as seen 2 days ago"), joined(t["From bank Silk"]))
+    T.eq("bank row: after what is in it, before the hint", joined(t["From bank Silk"]),
+        "In bank: 12 | Grab: 12 / Bank as seen 2 days ago / Shift-click to link")
+    T.check("no account bank remembered: no line for it", not joined(t["From bank Silk"]):find("Account bank", 1, true))
+
+    -- Each character with the age of the part its items are in.
+    T.check("alt row: a character whose items are in its bags",
+        has(t["From alts Silk"], "  Zed Alt: 10 - bags as seen 1 day ago"), joined(t["From alts Silk"]))
+    T.check("alt row: a character whose items are in its bank",
+        has(t["From alts Silk"], "  Amy Alt: 8 - bank as seen 3 days ago"), joined(t["From alts Silk"]))
+    T.check("alt row: items in both name both ages",
+        has(t["From alts Wool"], "  Zed Alt: 20 - bags as seen 1 day ago, bank as seen 40 days ago"), joined(t["From alts Wool"]))
+    T.check("alt row: the transfer note stays", has(t["From alts Wool"], "Transfer to this character before crafting"))
+
+    -- Seen today.
+    meta.bankSeenAt = NOW - 60
+    meta.alts["Zed Alt"].bags = NOW
+    t = tips(view(meta, NOW))
+    T.check("bank seen today", has(t["From bank Silk"], "Bank as seen today"), joined(t["From bank Silk"]))
+    T.check("an alt played today", has(t["From alts Silk"], "  Zed Alt: 10 - bags as seen today"), joined(t["From alts Silk"]))
+
+    -- The account-wide bank is bank stock too and has an age of its own.
+    meta.accountSeenAt = NOW - 5 * DAY
+    t = tips(view(meta, NOW))
+    T.eq("with an account bank: both ages", joined(t["From bank Silk"]),
+        "In bank: 12 | Grab: 12 / Bank as seen today / Account bank as seen 5 days ago / Shift-click to link")
+    meta.bankSeenAt = nil
+    t = tips(view(meta, NOW))
+    T.eq("only the account bank remembered", joined(t["From bank Silk"]),
+        "In bank: 12 | Grab: 12 / Account bank as seen 5 days ago / Shift-click to link")
+    meta.accountSeenAt = nil
+
+    -- An alt the ages do not know (it should not happen): its line stays plain.
+    meta.alts["Amy Alt"] = nil
+    t = tips(view(meta, NOW))
+    T.check("an alt without a known age gets no age", has(t["From alts Silk"], "  Amy Alt: 8"), joined(t["From alts Silk"]))
+    -- No clock: nothing is said rather than something wrong.
+    t = tips(view(meta, nil))
+    T.eq("no clock: no age on the bank row", joined(t["From bank Silk"]), "In bank: 12 | Grab: 12 / Shift-click to link")
+    T.check("no clock: no age on the alt row", has(t["From alts Silk"], "  Zed Alt: 10"), joined(t["From alts Silk"]))
+
+    -- The rows themselves are unchanged, and nothing here is a symbol.
+    local rows = Views.Shopping(view(meta, NOW))
+    T.eq("the row's own text is as before", rows[2].text, "12x Silk")
+    for _, row in ipairs(rows) do
+        for _, line in ipairs(row.tooltip or {}) do
+            T.check("plain ASCII: " .. tostring(line.text), not tostring(line.text):find("[\128-\255]"))
+        end
+    end
 end)
 
 -- The target slider's model: from the real skill to the last cap.

@@ -167,7 +167,7 @@ The bags are read live through the client adapter. Stock outside them comes from
 
 A character in Self-Found mode cannot be sent anything, so nothing that belongs to other characters is counted for it, from either place.
 
-Returns the `combined` inventory, a `sourceBreakdown` that says where each item is and, when the stock outside the bags is remembered, a `meta` table with how old each part is (it travels on the path as `path.stockMeta`). The same stock is used for the route (Cheapest), every total and the shopping list.
+Returns the `combined` inventory, a `sourceBreakdown` that says where each item is and, when the stock outside the bags is remembered, a `meta` table with how old each part is (it travels on the path as `path.stockMeta`, and the "Collect first" tooltips of the Shopping tab are worded from it). The same stock is used for the route (Cheapest), every total and the shopping list.
 
 The scanner also keeps the memory up to date, and does nothing of it while Syndicator is installed. The bags are saved two seconds after a bag update (one save for a burst) and, when a save is still waiting, at logout; bags that report no backpack slots are not saved. The bank is read only while its window is open - when it opens and on the frame after any bag update or tab change - and a bank the adapter cannot read leaves what is remembered untouched. Nothing is read when the window closes. None of this plans the path again.
 

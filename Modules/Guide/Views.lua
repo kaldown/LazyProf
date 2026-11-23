@@ -930,7 +930,40 @@ local COLLECT = {
     { list = "fromAlts", label = "From alts", color = { 0.8, 0.6, 1 } },
 }
 
-local function CollectRow(section, mat)
+-- How long ago a remembered part of the stock was seen ("today", "2 days
+-- ago"), counted from the view's clock; nil when there is nothing to say.
+local function SeenAgo(view, at)
+    local memory = LazyProf.StockMemory
+    if not (memory and view.now and at) then return nil end
+    return memory.AgeText(view.now, at)
+end
+
+-- How old what a remembered alt holds of an item is: "bags as seen today",
+-- "bank as seen 3 days ago", or both when the item is in both. The path's
+-- source breakdown says where the alt has it. nil for stock that is not
+-- remembered (an inventory addon's) or an alt without a known age.
+local function AltAge(view, itemId, name)
+    local meta = view.stockMeta
+    local seen = meta and meta.alts and meta.alts[name]
+    if not seen then return nil end
+    local sources = view.path and view.path.sourceBreakdown and view.path.sourceBreakdown[itemId]
+    local held = sources and sources.alts and sources.alts[name] or nil
+    local parts = {}
+    for _, part in ipairs({ "bags", "bank" }) do
+        local ago = SeenAgo(view, seen[part])
+        if ago and (held == nil or (held[part] or 0) > 0) then
+            parts[#parts + 1] = part .. " as seen " .. ago
+        end
+    end
+    if #parts == 0 then return nil end
+    return table.concat(parts, ", ")
+end
+
+-- view (optional) supplies how old remembered stock is: view.stockMeta (the
+-- scan's ages, nil for stock an inventory addon supplied) and view.now.
+local function CollectRow(section, mat, view)
+    view = view or {}
+    local meta = view.stockMeta
     local text = string.format("%dx %s", mat.missing, mat.name or "Unknown")
     local tooltip = {}
     if section.list == "fromAlts" then
@@ -939,7 +972,12 @@ local function CollectRow(section, mat)
         for _, char in ipairs(mat.characters or {}) do
             -- Character name without the realm part
             names[#names + 1] = (char.name:match("^([^-]+)") or char.name) .. ":" .. tostring(char.count)
-            tooltip[#tooltip + 1] = { text = string.format("  %s: %d", char.name, char.count), r = 1, g = 1, b = 1 }
+            local line = string.format("  %s: %d", char.name, char.count)
+            local age = AltAge(view, mat.itemId, char.name)
+            if age then
+                line = line .. " - " .. age
+            end
+            tooltip[#tooltip + 1] = { text = line, r = 1, g = 1, b = 1 }
         end
         text = text .. " " .. Grey("(" .. table.concat(names, ", ") .. ")")
         tooltip[#tooltip + 1] = { text = "Transfer to this character before crafting", r = 0.6, g = 0.6, b = 0.6 }
@@ -951,6 +989,18 @@ local function CollectRow(section, mat)
         tooltip[#tooltip + 1] = { text = section.tip(mat), r = c[1], g = c[2], b = c[3] }
         if section.warning then
             tooltip[#tooltip + 1] = { text = section.warning, r = 0.6, g = 0.6, b = 0.6 }
+        end
+        -- A remembered bank: when it was last seen. The character's own bank
+        -- and the account-wide one are both bank stock, each with its age.
+        if section.list == "fromBank" and meta then
+            local ago = SeenAgo(view, meta.bankSeenAt)
+            if ago then
+                tooltip[#tooltip + 1] = { text = "Bank as seen " .. ago, r = 0.7, g = 0.7, b = 0.7 }
+            end
+            ago = SeenAgo(view, meta.accountSeenAt)
+            if ago then
+                tooltip[#tooltip + 1] = { text = "Account bank as seen " .. ago, r = 0.7, g = 0.7, b = 0.7 }
+            end
         end
     end
     tooltip[#tooltip + 1] = { text = "Shift-click to link", r = 0.5, g = 0.5, b = 0.5 }
@@ -1048,7 +1098,9 @@ end
 
 -- The shopping list. view.missing is the shopping list of the whole path
 -- (the account's, Pathfinder:CalculateMissingMaterials of every run). In order:
---   "Collect first": owned stock that is not in the bags
+--   "Collect first": owned stock that is not in the bags; a bank or an alt
+--     that LazyProf remembers itself says in its tooltip how old that is
+--     (view.stockMeta, view.now)
 --   the table (need / have / buy / cost, a "vendor" mark): reagents with
 --     something left to buy, the dearest first and those without a price
 --     last; then the reagents the character makes, each with what it is made
@@ -1078,7 +1130,7 @@ function Views.Shopping(view, ctx)
     local collect = {}
     for _, section in ipairs(COLLECT) do
         for _, mat in ipairs(missing[section.list] or {}) do
-            collect[#collect + 1] = CollectRow(section, mat)
+            collect[#collect + 1] = CollectRow(section, mat, view)
         end
     end
     if #collect > 0 then

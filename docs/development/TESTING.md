@@ -33,7 +33,7 @@ The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks ever
 | `test_trainers.lua` | Remembered trainers and fees |
 | `test_stockmemory.lua` | Remembered bags and bank per character and the account bank per world: saving, alts of the same world and faction, soulbound items, the 180-day limit, the age wording |
 | `test_scanner.lua` | Which owned stock counts and how the stock memory is kept: Syndicator's stock unchanged, bank and alts from memory without it, bags saved a moment after a change and at logout, the bank only while its window is open, Self-Found, the stock options, `/lp diag stock` |
-| `test_views.lua` | What the window shows, as data: header, receipt, target model, Path list, Shopping list, recipe search, arrow tooltip |
+| `test_views.lua` | What the window shows, as data: header, receipt, target model, Path list, Shopping list (with the age of remembered bank and alt stock), recipe search, arrow tooltip |
 | `test_window.lua` | The window's frames on both client families: header, More options, target box and slider, receipt, the two tabs, closed state, combat, planning mode |
 | `test_controls.lua` | The widget layer: tabs, button group, number box, checkbox, search box, slider, resize bounds, the row list |
 | `test_widgets.lua` | The row pool and the per-client dropdown |
@@ -137,6 +137,7 @@ After making changes, run `/reload` and verify:
 3. Close the bank and `/reload`: the "From bank" row is still there
 4. Withdraw them: the row goes and the Have column still counts them (now in the bags)
 5. Log in an alt of the same world and faction that carries materials, log back: a "From alts" row names it
+   (hover it: "<name>: N - bags as seen today"; hover the "From bank" row: "Bank as seen today")
 6. `/lp diag stock` lists both characters with `today` as the age of their bags
 7. Tick Self-Found mode: the "From alts" row goes, "From bank" stays
 8. "Forget remembered characters": the "From alts" row goes until the alt is played again

@@ -993,6 +993,26 @@ T.section("shopping tab", function()
     window:Update(W.path())
     ui.fire(window.tabs.buttons[2], "OnClick")
     T.eq("shopping tab selected", window.tab, "shopping")
+
+    -- Stock an inventory addon supplied has no age: the view carries none.
+    T.check("no remembered stock: the view has no ages and asks no clock",
+        window.view.stockMeta == nil and window.view.now == nil)
+    ui.fire(W.findRow(window, "From bank"), "OnEnter")
+    T.check("no remembered stock: the bank row's tooltip has no age",
+        ui.tooltip:Text():find("In bank: 40", 1, true) ~= nil and not ui.tooltip:Text():find("as seen", 1, true),
+        ui.tooltip:Text())
+    -- Remembered stock: its age, counted from the server clock, is in the tooltips.
+    env.now = 20000 * 86400 + 3600
+    local meta = { remembered = true, bankSeenAt = env.now - 2 * 86400, alts = { ["Bankalt-Realm"] = { bags = env.now - 86400 } } }
+    window:Update(W.path({ stockMeta = meta }))
+    T.check("remembered stock: the view carries its ages and the time", window.view.stockMeta == meta and window.view.now == env.now)
+    ui.fire(W.findRow(window, "From bank"), "OnEnter")
+    T.check("remembered stock: the bank row says how old it is",
+        ui.tooltip:Text():find("Bank as seen 2 days ago", 1, true) ~= nil, ui.tooltip:Text())
+    ui.fire(W.findRow(window, "From alts"), "OnEnter")
+    T.check("remembered stock: the alt row says how old each character's is",
+        ui.tooltip:Text():find("Bankalt-Realm: 20 - bags as seen 1 day ago", 1, true) ~= nil, ui.tooltip:Text())
+    window:Update(W.path())
     local call = env.accountCalls[#env.accountCalls]
     T.eq("the list is the whole path's: every craft run", #call.steps, 2)
     T.eq("from the runs' quantities", call.steps[1].quantity, 19)

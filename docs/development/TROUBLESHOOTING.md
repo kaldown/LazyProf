@@ -511,15 +511,20 @@ read from it; check in Syndicator / Baganator that it knows the character.
 5. Mail, auctions and the guild bank are never known without Syndicator.
 6. In Self-Found mode (Settings, General) nothing from other characters is counted.
 
-`/lp diag stock` lists every remembered character, whether it counts for the character you
-are on, and how old its bags and bank are.
+How old the remembered stock is shows in the tooltips under "Collect first" on the
+Shopping tab: a "From bank" row says "Bank as seen 2 days ago" (and "Account bank as seen
+..." when an account-wide bank is remembered), a "From alts" row names each character with
+the age of the bags or the bank its items are in. Ages are whole days of the server clock;
+"today" is the current UTC day. `/lp diag stock` lists every remembered character, whether
+it counts for the character you are on, and how old its bags and bank are.
 
 ### Stock of a Character That Is Gone Is Still Counted
 
 **Symptoms:** "From alts" names a character you deleted, or reagents you no longer have
 
 Without Syndicator the stock of other characters is a memory of when they were last
-played. A character is forgotten when it has not been seen for 180 days. To forget
+played (the tooltip of the "From alts" row says how long ago that was). A character is
+forgotten when it has not been seen for 180 days. To forget
 everything at once use "Forget remembered characters" (Settings, Display, "Your stock"): the
 character you are on is remembered again right away, the others the next time you play
 them.
