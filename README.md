@@ -112,7 +112,7 @@ With [Syndicator](https://www.curseforge.com/wow/addons/syndicator) installed, s
 
 Without it LazyProf remembers what it has seen itself: each character's bags when you play it and, on WoW Forever, its bank as it was when you last had the bank window open (with the account-wide bank, where the game has one). Your own bank counts as bank stock; the other characters of the same world and faction count as alts, without their soulbound items. So play each alt once, and open the bank once on every character whose bank should count. Under "Collect first" on the Shopping tab the tooltip of a row says how old the remembered stock is ("Bank as seen 2 days ago"). A character not played for 180 days is forgotten. Mail, auctions and the guild bank are only known with Syndicator, and on the other clients so is the bank ("Include bank items" is greyed out there without it).
 
-A character in Self-Found mode cannot be sent anything, so no stock of other characters is counted for it.
+A character in Self-Found mode cannot be sent anything and cannot send anything: no stock of other characters is counted for it, and (without Syndicator) its own stock is not counted for them.
 
 The target skill, the recipes you chose, the route you follow, craft-or-buy choices and the last tab you used are remembered per character.
 

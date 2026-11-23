@@ -165,7 +165,7 @@ The bags are read live through the client adapter. Stock outside them comes from
 5. Guild bank (when "Include guild bank" is on - off by default; Syndicator only)
 6. Alt characters (when "Include alt characters" is on - the default): with Syndicator their bags, bank, mail and listings; from memory the bags and banks of the remembered characters of the same world and faction, without soulbound items
 
-A character in Self-Found mode cannot be sent anything, so nothing that belongs to other characters is counted for it, from either place.
+A character in Self-Found mode cannot be sent anything, so nothing that belongs to other characters is counted for it, from either place. It cannot send anything either: every save of its stock stores that, and the memory does not offer it to the other characters as an alt.
 
 Returns the `combined` inventory, a `sourceBreakdown` that says where each item is and, when the stock outside the bags is remembered, a `meta` table with how old each part is (it travels on the path as `path.stockMeta`, and the "Collect first" tooltips of the Shopping tab are worded from it). The same stock is used for the route (Cheapest), every total and the shopping list.
 

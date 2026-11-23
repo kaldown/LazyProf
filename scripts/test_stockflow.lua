@@ -173,4 +173,64 @@ T.section("a failing client call", function()
     T.eq("a healthy session: nothing logged", #addon.debugLines, 0)
 end)
 
+-- ===========================================================================
+-- A Self-Found character cannot send anything: what it holds is not offered
+-- to its alts.
+-- ===========================================================================
+T.section("a Self-Found alt", function()
+    local function session(saved, guid, name, linen, opts)
+        World.reset()
+        World.guid, World.name = guid, name
+        World.containers = { [0] = { slots = 16, slot(HEARTHSTONE, 1, true), slot(LINEN, linen) } }
+        local addon = World.login(saved, opts)
+        World.advance(3)
+        return addon
+    end
+    local function linenOf(addon)
+        local combined, breakdown = World.scan(addon)
+        return combined[LINEN], breakdown[LINEN].alts
+    end
+
+    local saved = {}
+    local solo = session(saved, "Player-4444-000000SF", "Solo Goldtooth", 80, { selfFound = true })
+    World.event(solo, "PLAYER_LOGOUT")
+    local main = session(saved, MAIN_GUID, "Main Goldtooth", 5)
+    local total, alts = linenOf(main)
+    T.eq("the main counts only what it carries", total, 5)
+    T.check("and names no alt", alts == nil)
+    World.event(main, "PLAYER_LOGOUT")
+
+    -- The mode is turned off on the alt: after its next save it counts.
+    solo = session(saved, "Player-4444-000000SF", "Solo Goldtooth", 80, { selfFound = false })
+    World.event(solo, "PLAYER_LOGOUT")
+    main = session(saved, MAIN_GUID, "Main Goldtooth", 5)
+    total, alts = linenOf(main)
+    T.eq("with the mode off on the alt its linen counts", total, 85)
+    T.check("under its name", alts ~= nil and alts["Solo Goldtooth"] ~= nil and alts["Solo Goldtooth"].bags == 80)
+
+    -- Turned on in the middle of a session: the record follows without a bag change.
+    World.event(main, "PLAYER_LOGOUT")
+    solo = session(saved, "Player-4444-000000SF", "Solo Goldtooth", 80, { selfFound = false })
+    solo.db.char.selfFoundMode = true
+    solo.Inventory:OnSendingChanged()
+    World.advance(3)
+    main = session(saved, MAIN_GUID, "Main Goldtooth", 5)
+    T.eq("turned on mid-session: its linen is no longer offered", (linenOf(main)), 5)
+
+    -- A bank visit of a Self-Found character does not make it a source either.
+    World.event(main, "PLAYER_LOGOUT")
+    World.reset()
+    World.guid, World.name = "Player-4444-000000SF", "Solo Goldtooth"
+    World.containers = { [0] = { slots = 16, slot(LINEN, 80) }, [6] = { slots = 28, slot(LINEN, 300) } }
+    World.bank = { [0] = { tabs = { { ID = 6 } } } }
+    solo = World.login(saved, { selfFound = true })
+    World.advance(3)
+    World.event(solo, "BANKFRAME_OPENED")
+    World.advance(3)
+    World.event(solo, "BANKFRAME_CLOSED")
+    T.check("the Self-Found character still counts its own bank", (select(2, World.scan(solo)))[LINEN].bank == 300)
+    main = session(saved, MAIN_GUID, "Main Goldtooth", 5)
+    T.eq("its bank is not offered either", (linenOf(main)), 5)
+end)
+
 T.finish()

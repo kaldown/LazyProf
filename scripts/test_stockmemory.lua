@@ -179,6 +179,51 @@ T.section("one name, one character", function()
         and alts[1].bags[2589] == 6)
 end)
 
+-- A character that cannot send anything (Self-Found) is no source of stock
+-- for the others. Whether it can is stored with each of its saves; the store
+-- is told, it does not read settings.
+T.section("a character that cannot send", function()
+    fresh()
+    local solo = who("Player-1-SOLO", "Solo Alt")
+    Memory:SaveBags(MAIN, { [2589] = 9 }, {}, NOW)
+    Memory:SaveBags(solo, { [2589] = 80 }, {}, NOW, false)
+    Memory:SaveBank(solo, { [2589] = 300 }, {}, NOW, false)
+    T.eq("it is not an alt", #Memory:Alts(MAIN), 0)
+    T.check("its own bank is still its own", (Memory:OwnBank(solo.guid))[2589] == 300)
+    local s = Memory:Summary()
+    T.check("the summary says it cannot send", s.characters[2].guid == solo.guid and s.characters[2].canSend == false
+        and s.characters[1].canSend == true)
+
+    -- The mode goes off: its next save says so, whichever part is saved.
+    Memory:SaveBags(solo, { [2589] = 80 }, {}, NOW + 60, true)
+    local alts = Memory:Alts(MAIN)
+    T.check("a later save that can send makes it an alt again, bank included",
+        #alts == 1 and alts[1].bags[2589] == 80 and alts[1].bank[2589] == 300)
+    Memory:SaveBank(solo, { [2589] = 300 }, {}, NOW + 120, false)
+    T.eq("and a bank save that cannot send takes it out again", #Memory:Alts(MAIN), 0)
+    Memory:SaveBags(solo, { [2589] = 80 }, {}, NOW + 180)
+    T.eq("a save that does not say counts as able to send", #Memory:Alts(MAIN), 1)
+
+    -- The setting can change without a save: the record is told directly.
+    T.check("told that it cannot send", Memory:SetCanSend(solo.guid, false) == true and #Memory:Alts(MAIN) == 0)
+    T.check("told that it can again", Memory:SetCanSend(solo.guid, true) == true and #Memory:Alts(MAIN) == 1)
+    T.check("a character that is not remembered: nothing to tell", Memory:SetCanSend("Player-1-NOBODY", false) == false
+        and Memory:Summary().characters[3] == nil)
+    T.check("no guid: nothing to tell", Memory:SetCanSend(nil, false) == false)
+
+    -- A record from before this was stored counts as able to send.
+    fresh()
+    LazyProf.db.global.stock = { schema = 1, account = {}, characters = { [solo.guid] = {
+        name = "Solo Alt", world = "eu-pvp", faction = "Alliance", seen = NOW,
+        bags = { items = { [2589] = 80 }, at = NOW } } } }
+    T.eq("a record without the field is an alt", #Memory:Alts(MAIN), 1)
+    T.check("and the summary says it can send", Memory:Summary().characters[1].canSend == true)
+    -- Seen from the character that cannot send itself: the others are still
+    -- listed (whether it counts them is the scanner's decision).
+    Memory:SaveBags(MAIN, { [2589] = 9 }, {}, NOW)
+    T.eq("the store does not judge the asking character", #Memory:Alts(solo), 1)
+end)
+
 T.section("account bank", function()
     fresh()
     T.check("none at first", Memory:AccountBank("eu-pvp") == nil)

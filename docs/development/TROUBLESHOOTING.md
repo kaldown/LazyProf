@@ -511,7 +511,8 @@ read from it; check in Syndicator / Baganator that it knows the character.
    Forever, the realm elsewhere) **and faction**. Their soulbound items are left out.
 4. An alt's bank needs both options on.
 5. Mail, auctions and the guild bank are never known without Syndicator.
-6. In Self-Found mode (Settings, General) nothing from other characters is counted.
+6. In Self-Found mode (Settings, General) nothing from other characters is counted, and a
+   character with the mode on is no alt for the others: what it holds is not counted for them.
 
 How old the remembered stock is shows in the tooltips under "Collect first" on the
 Shopping tab: a "From bank" row says "Bank as seen 2 days ago" (and "Account bank as seen

@@ -140,7 +140,7 @@ After making changes, run `/reload` and verify:
 5. Log in an alt of the same world and faction that carries materials, log back: a "From alts" row names it
    (hover it: "<name>: N - bags as seen less than an hour ago"; hover the "From bank" row: "Bank as seen less than an hour ago")
 6. `/lp diag stock` lists both characters with `less than an hour ago` as the age of their bags
-7. Tick Self-Found mode: the "From alts" row goes, "From bank" stays
+7. Tick Self-Found mode: the "From alts" row goes, "From bank" stays; on the alt, the ticked character is no longer listed under "From alts"
 8. "Forget remembered characters": the "From alts" row goes until the alt is played again
 
 **Stock and the route (Cheapest):**

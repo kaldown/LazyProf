@@ -174,8 +174,10 @@ function Inventory:UsesSyndicator()
     return (Syndicator and Syndicator.API) and true or false
 end
 
--- A Self-Found character cannot receive anything from other characters.
-local function CannotReceive()
+-- A Self-Found character can neither be sent anything nor send anything:
+-- nothing of the other characters is counted for it, and what it holds is
+-- not offered to them (every save of its stock says so).
+local function IsSelfFound()
     local char = LazyProf.db and LazyProf.db.char
     return (char and char.selfFoundMode) and true or false
 end
@@ -304,7 +306,7 @@ local function AddRememberedStock(self, combined, breakdown, countAlts)
             mergeSource(items, "bank", nil, combined, breakdown)
             meta.bankSeenAt = seenAt
         end
-        if not CannotReceive() then
+        if not IsSelfFound() then
             items, seenAt = Memory:AccountBank(identity.world)
             if items then
                 mergeSource(items, "bank", nil, combined, breakdown)
@@ -357,7 +359,7 @@ function Inventory:ScanAll()
     LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items in bags", bagCount))
 
     -- 2. Everything outside the bags
-    local countAlts = LazyProf.db.profile.includeAltCharacters and not CannotReceive()
+    local countAlts = LazyProf.db.profile.includeAltCharacters and not IsSelfFound()
     if self:UsesSyndicator() then
         AddSyndicatorStock(self, combined, breakdown, countAlts)
     else
@@ -434,7 +436,7 @@ function Inventory:SaveBags(trustEmpty)
     if not trustEmpty and next(items) == nil then
         return false   -- slots but no items, and nothing says they are loaded
     end
-    return LazyProf.StockMemory:SaveBags(Client:CharacterIdentity(), items, bound, Client:Now())
+    return LazyProf.StockMemory:SaveBags(Client:CharacterIdentity(), items, bound, Client:Now(), not IsSelfFound())
 end
 
 -- fromUpdate: asked for by a bag update (see SaveBags).
@@ -477,7 +479,7 @@ function Inventory:ReadBank()
     local saved = false
     local items, bound = Client:BankContents("character")
     if Usable(items) then
-        saved = Memory:SaveBank(identity, items, bound, now) or saved
+        saved = Memory:SaveBank(identity, items, bound, now, not IsSelfFound()) or saved
     end
     items = Client:BankContents("account")
     if Usable(items) then
@@ -570,6 +572,18 @@ function Inventory:Initialize()
     self:RequestBagSave()
 end
 
+-- The Self-Found setting changed: what is remembered of this character says
+-- from now on whether it can send (its alts read that), and the next scan
+-- starts afresh.
+function Inventory:OnSendingChanged()
+    self:InvalidateCache()
+    if self:UsesSyndicator() then return end
+    Protected("setting", function()
+        local identity = LazyProf.Client:CharacterIdentity() or {}
+        LazyProf.StockMemory:SetCanSend(identity.guid, not IsSelfFound())
+    end)
+end
+
 -- Forget every remembered character and account bank (the options button).
 -- The character being played is remembered again by itself.
 function Inventory:ForgetRemembered()
@@ -592,7 +606,7 @@ function Inventory:RunDiagnostic(lines)
         add("source: LazyProf's own memory (no inventory addon)")
     end
     add("settings: bank=" .. tostring(profile.includeBankItems) .. " alts=" .. tostring(profile.includeAltCharacters)
-        .. " guildBank=" .. tostring(profile.includeGuildBank) .. " selfFound=" .. tostring(CannotReceive()))
+        .. " guildBank=" .. tostring(profile.includeGuildBank) .. " selfFound=" .. tostring(IsSelfFound()))
 
     if memoryErrors.count > 0 then
         add("last error: " .. tostring(memoryErrors.last) .. " (in: " .. tostring(memoryErrors.where) .. "; "

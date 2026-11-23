@@ -851,6 +851,25 @@ T.section("options", function()
     _G.Syndicator = nil
     LazyProf.ClientFamily = "forever"
 
+    -- Self-Found is stored with the character's stock, so turning it on or
+    -- off has the character saved again (its alts read the stored value).
+    local selfFound = LazyProf.options.args.general.args.selfFoundMode
+    LazyProf.Recalculate = function() end
+    Inventory:SaveBags(true)
+    T.check("before: the character is remembered as able to send", Memory:Summary().characters[1].canSend == true)
+    selfFound.set(nil, true)
+    T.check("Self-Found on: the setting is stored", LazyProf.db.char.selfFoundMode == true)
+    T.check("Self-Found on: the remembered character can no longer send", Memory:Summary().characters[1].canSend == false)
+    Inventory:SaveBags(true)
+    T.check("Self-Found on: its next save says the same", Memory:Summary().characters[1].canSend == false)
+    selfFound.set(nil, false)
+    T.check("Self-Found off: it can send again", Memory:Summary().characters[1].canSend == true)
+    installSyndicator()
+    selfFound.set(nil, true)
+    T.check("with Syndicator the memory is not touched", Memory:Summary().characters[1].canSend == true)
+    selfFound.set(nil, false)
+    _G.Syndicator = nil
+
     -- Forget remembered characters.
     T.check("the button exists", forget ~= nil and forget.type == "execute" and forget.name == "Forget remembered characters")
     T.check("it asks first", forget.confirm == true and type(forget.confirmText) == "string")

@@ -10,6 +10,8 @@
 --       name, world, faction,    who it is; alts are the characters of the
 --                                same world and faction
 --       seen,                    time of its last save of either kind
+--       noSend,                  true when it cannot send anything to other
+--                                characters (Self-Found); absent otherwise
 --       bags = { items = { [itemId] = count }, bound = { [itemId] = count }, at },
 --       bank = { items = ..., bound = ..., at },
 --   }
@@ -158,25 +160,40 @@ local function Record(characters, identity, now)
     return record
 end
 
-local function Save(part, identity, items, bound, now)
+local function Save(part, identity, items, bound, now, canSend)
     if not (type(identity) == "table" and identity.guid and type(items) == "table" and type(now) == "number") then
         return false
     end
     local characters = Store(true)
     if not characters then return false end
-    Record(characters, identity, now)[part] = Snapshot(items, bound, now)
+    local record = Record(characters, identity, now)
+    record[part] = Snapshot(items, bound, now)
+    record.noSend = (canSend == false) or nil
     return true
 end
 
 -- Remember a character's bags. items / bound: { [itemId] = count }.
+-- canSend: false when the character cannot send anything to others
+-- (Self-Found); its stock is then no alt stock for anyone. It is stored with
+-- every save, so the caller passes the setting and this file reads none.
 -- Returns whether anything was saved (never without a GUID or a time).
-function StockMemory:SaveBags(identity, items, bound, now)
-    return Save("bags", identity, items, bound, now)
+function StockMemory:SaveBags(identity, items, bound, now, canSend)
+    return Save("bags", identity, items, bound, now, canSend)
 end
 
 -- Remember a character's bank.
-function StockMemory:SaveBank(identity, items, bound, now)
-    return Save("bank", identity, items, bound, now)
+function StockMemory:SaveBank(identity, items, bound, now, canSend)
+    return Save("bank", identity, items, bound, now, canSend)
+end
+
+-- The character's setting changed between saves: note on its record whether
+-- it can send. Returns whether there was a record to note it on.
+function StockMemory:SetCanSend(guid, canSend)
+    local characters = Store()
+    local record = characters and guid ~= nil and characters[guid]
+    if type(record) ~= "table" then return false end
+    record.noSend = (canSend == false) or nil
+    return true
 end
 
 -- Remember the account-wide bank of a world.
@@ -216,7 +233,7 @@ end
 -- character's own name is not an alt (it is a character that is gone, or
 -- this one under an older id), and of several records under one name only
 -- the one seen last counts. A record whose name was never readable is left
--- out: it could not be shown.
+-- out: it could not be shown. So is a character that cannot send anything.
 function StockMemory:Alts(identity)
     local list = {}
     local characters = Store()
@@ -226,7 +243,7 @@ function StockMemory:Alts(identity)
     local byName = {}
     for guid, record in pairs(characters) do
         local name = type(record) == "table" and Text(record.name) or nil
-        if name and guid ~= identity.guid and name ~= identity.name
+        if name and guid ~= identity.guid and name ~= identity.name and record.noSend ~= true
                 and record.world == identity.world and record.faction == identity.faction then
             local seen = Time(record.seen) or 0
             local other = byName[name]
@@ -292,7 +309,7 @@ end
 
 -- What is remembered, for the diagnostic:
 --   { usable, schema, unreadable,
---     characters = { { guid, name, world, faction, seen, bagItems, bagsAt, bankItems, bankAt }, ... },
+--     characters = { { guid, name, world, faction, seen, canSend, bagItems, bagsAt, bankItems, bankAt }, ... },
 --     account = { { world, items, at }, ... } }
 -- bagItems / bankItems count distinct items (nil for a part never seen).
 -- usable is false when there is no database or the saved table is in another
@@ -307,7 +324,7 @@ function StockMemory:Summary()
             local bags, bank = Part(record, "bags"), Part(record, "bank")
             summary.characters[#summary.characters + 1] = {
                 guid = guid, name = Text(record.name), world = Text(record.world), faction = Text(record.faction),
-                seen = Time(record.seen),
+                seen = Time(record.seen), canSend = record.noSend ~= true,
                 bagItems = bags and Size(Counts(bags.items)) or nil, bagsAt = bags and Time(bags.at) or nil,
                 bankItems = bank and Size(Counts(bank.items)) or nil, bankAt = bank and Time(bank.at) or nil,
             }

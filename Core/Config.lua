@@ -241,6 +241,9 @@ LazyProf.options = {
                            "not an Alchemist. Allowed: items you own, vendor-sold reagents, " ..
                            "gathered materials, and anything you can craft with a profession " ..
                            "you have.\n\n" ..
+                           "Such a character cannot be sent anything and cannot send " ..
+                           "anything: stock of your other characters is not counted for " ..
+                           "it, and its own stock is not counted for them.\n\n" ..
                            "This setting is per character.",
                     type = "toggle",
                     order = 6,
@@ -248,6 +251,8 @@ LazyProf.options = {
                     get = function() return LazyProf.db.char.selfFoundMode end,
                     set = function(_, v)
                         LazyProf.db.char.selfFoundMode = v
+                        -- What is remembered of this character says whether it can send
+                        LazyProf.Inventory:OnSendingChanged()
                         LazyProf:Recalculate("setting changed")
                     end,
                 },
