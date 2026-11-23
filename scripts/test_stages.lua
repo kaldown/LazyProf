@@ -345,6 +345,30 @@ T.section("alternatives and pins", function()
     T.check("without pins it is not", not Stages.Build(path, { prices = PRICES, milestones = MILESTONES })[1].pinned)
 end)
 
+T.section("alternatives with the margin on", function()
+    -- A twin of the stage's recipe: same reagent price, same chance. With the
+    -- margin on, both sides carry it, so the twin costs the same.
+    local A = recipe(1, "A", 1, 400, 410, 420)
+    local Twin = recipe(2, "Twin", 1, 400, 410, 420, { reagents = { { itemId = 101, count = 1, name = "MatA" } } })
+    local alts = {
+        { recipe = A, score = 1, color = "orange", expectedSkillups = 1, craftCost = 100 },
+        { recipe = Twin, score = 1, color = "orange", expectedSkillups = 1, craftCost = 100 },
+    }
+    local path = { targetSkill = 75, steps = { step(A, 1, 21, 20, 2000, { alternatives = alts }) }, gaps = {}, totalCost = 2000 }
+    local stages = Stages.Build(path, { prices = PRICES, milestones = MILESTONES, marginPercent = 15,
+        sale = { [1] = 10, [2] = 10 } })
+    local st, twin = stages[1], stages[1].alternatives[1]
+    T.eq("fixture: the stage has 23 crafts with the margin", st.quantity, 23)
+    T.eq("the alternative is projected with the same margin", twin.projectedCrafts, 23)
+    T.eq("same crafts", twin.craftsDelta, 0)
+    T.eq("same cost", twin.costDelta, 0)
+    T.eq("its sale counts the margin's crafts too", twin.projectedSale, 230)
+
+    stages = Stages.Build(path, { prices = PRICES, milestones = MILESTONES })
+    T.eq("margin off: projected as before", stages[1].alternatives[1].projectedCrafts, 20)
+    T.eq("margin off: same cost", stages[1].alternatives[1].costDelta, 0)
+end)
+
 T.section("what crafts sell for", function()
     local prices = { [101] = 100, [102] = 120, [103] = 300 }
     local A = recipe(1, "A", 1, 400, 410, 420)   -- 100 a craft

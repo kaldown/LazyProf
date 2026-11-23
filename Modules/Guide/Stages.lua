@@ -99,8 +99,9 @@ end
 -- The other recipes that could cover the stage, from the first fragment's
 -- scored list, with what choosing each would mean for the stage: crafts and
 -- cost over the stage's range, against what the stage costs the player. Both
--- sides are net of what the crafts sell for (saleValues by recipe id).
-local function Alternatives(stage, inventoryBefore, prices, stagePay, saleValues)
+-- sides are net of what the crafts sell for (saleValues by recipe id) and both
+-- carry the margin when it is on, so like is compared with like.
+local function Alternatives(stage, inventoryBefore, prices, stagePay, saleValues, margin)
     local out = {}
     local span = stage.to - stage.from
     for _, alt in ipairs(stage.fragments[1].alternatives or {}) do
@@ -109,6 +110,7 @@ local function Alternatives(stage, inventoryBefore, prices, stagePay, saleValues
             if alt.expectedSkillups and alt.expectedSkillups > 0 and span > 0 then
                 crafts = math.ceil(span / alt.expectedSkillups - 1e-9)
             end
+            crafts = WithMargin(crafts, margin)
             local reagentCost, priced = 0, true
             for _, reagent in ipairs(alt.recipe.reagents or {}) do
                 local price = prices[reagent.itemId]
@@ -134,7 +136,7 @@ local function Alternatives(stage, inventoryBefore, prices, stagePay, saleValues
                 saleEach = saleEach,
                 projectedSale = projectedSale,
                 projectedNet = projectedNet,
-                craftsDelta = crafts - stage.baseQuantity,
+                craftsDelta = crafts - stage.quantity,
                 costDelta = projectedNet - (stagePay - stage.sale),
                 unavailable = alt.recipe._isUnavailable and true or false,
                 reason = alt.recipe._unavailableReason,
@@ -360,7 +362,7 @@ function Stages.Build(path, opts)
             stage.color, stage.colorChanges = Colors(stage.recipe, stage.from, stage.to, racialBonus)
             stage.pinned = (LazyProf.Pins.Find(opts.pins, stage.from) == stage.recipe.id) or nil
             stage.alternatives = Alternatives(stage, before, prices,
-                stage.outOfPocketCost + (stage.feeIncluded and 0 or stage.fee), saleValues)
+                stage.outOfPocketCost + (stage.feeIncluded and 0 or stage.fee), saleValues, margin)
         end
     end
 
