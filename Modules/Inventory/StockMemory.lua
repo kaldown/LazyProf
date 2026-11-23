@@ -286,5 +286,5 @@ function StockMemory.AgeText(now, at)
     elseif days == 1 then
         return "1 day ago"
     end
-    return string.format("%d days ago", days)
+    return tostring(days) .. " days ago"
 end

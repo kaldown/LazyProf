@@ -182,7 +182,7 @@ function M.load(family, extraFiles)
         end,
     }
     addon.Inventory = {
-        ScanAll = function() return env.stock or {}, env.stockSources or {} end,
+        ScanAll = function() return env.stock or {}, env.stockSources or {}, env.stockMeta end,
         ScanBags = function() return env.stock or {} end,
     }
     addon.RecipeDetails = {

@@ -37,7 +37,7 @@ See [CraftLib's profession coverage](https://github.com/kaldown/CraftLib#profess
 - **Two strategies** - Cheapest (minimize gold) or Fastest (minimize crafts)
 - **Spare crafts** - Plan extra crafts and reagents for bad luck with skill-ups (5 to 30 percent, 15 by default)
 - **More options** - One switch in the window shows the rest: Cheapest / Fastest, "Spare crafts", the selling mode, where the prices come from, the recipe search, "Hide what I have" and the craft-or-buy buttons
-- **Need / Have / Buy** - The shopping list is one table per reagent: what is still to buy first, the dearest on top, then what you make yourself, then what you already own. What is in your bags is taken off, and with Syndicator also what is in your bank, mail, auctions and on alts (the guild bank if you turn it on). Vendor-sold reagents carry a "vendor" mark, and the recipes still to buy or learn are listed with their price
+- **Need / Have / Buy** - The shopping list is one table per reagent: what is still to buy first, the dearest on top, then what you make yourself, then what you already own. What is in your bags is taken off, and so is what is in your bank and on your other characters: read from Syndicator when it is installed (then also mail, your auctions and, if you turn it on, the guild bank), otherwise remembered by LazyProf itself. Vendor-sold reagents carry a "vendor" mark, and the recipes still to buy or learn are listed with their price
 - **Craft or buy per reagent** - LazyProf crafts intermediates (e.g., smelt ore into bars) when that is cheaper; under More options you can choose "I craft it" or "I buy it" per item instead
 - **Buy vendor reagents in one click** - At a merchant that sells reagents on your list, a small panel offers a Buy button per reagent and "Buy all" with the total on the button. Limited-stock items and items not sold for gold are listed but never bought automatically
 - **Skill gaps** - Paths bridge a gap with a green recipe while its skill-up chance is at least 10%, otherwise the gap is shown
@@ -67,13 +67,13 @@ An Auctionator price from a scan you made this session (since login or /reload) 
 |-------|---------|
 | [TradeSkillMaster](https://www.curseforge.com/wow/addons/tradeskill-master) | TSM pricing integration |
 | [Auctionator](https://www.curseforge.com/wow/addons/auctionator) | Auctionator pricing + shift-click search |
-| [Syndicator](https://www.curseforge.com/wow/addons/syndicator) | Stock outside your bags: bank, mail, your auctions, alts, guild bank |
+| [Syndicator](https://www.curseforge.com/wow/addons/syndicator) | Stock outside your bags read from it: bank, mail, your auctions, alts, guild bank. Without it LazyProf remembers bags and bank itself (see "Your stock" below) |
 
 ## Usage
 
 1. **Open any profession window** - The LazyProf window opens beside it, and an arrow marks the next recipe in the profession's list
 2. **Choose how far to level** - Drag the "Level to" slider, or type a skill and press Enter. The receipt under it says what that costs
-3. **Shop** - The Shopping tab lists what to collect first (bank, mail, alts - with Syndicator) and what to buy
+3. **Shop** - The Shopping tab lists what to collect first (from your bank and your alts; with Syndicator also mail and your auctions) and what to buy
 4. **Come back and craft** - The Path tab marks the recipe you are on and moves on by itself as your skill goes up
 5. **Minimap button** (addon compartment on WoW Forever) - Plan any profession without opening it
    - Left-click: Open profession browser
@@ -87,7 +87,7 @@ Commands:
 - `/lp browse` - Open profession browser
 - `/lp resetpanels` - Move the window and panels back to their default place and size
 - `/lp log` - Open debug log window
-- `/lp diag` - List the diagnostic dumps (prices, merchant, trainer, client)
+- `/lp diag` - List the diagnostic dumps (prices, merchant, trainer, stock, client)
 
 ## Settings
 
@@ -99,13 +99,20 @@ Access via `/lp` or the Interface Options panel:
 - **Material Resolution** - What reagents without a choice of their own do: never craft intermediates, craft when cheaper, or always craft
 - **Suggest unlearned recipes** - Include recipes you haven't learned yet
 - **Open with the profession window** - Show the LazyProf window whenever you open a profession (on by default)
-- **Include bank items** - Count what is in your bank as owned, for the path and the shopping list (on by default; requires Syndicator)
-- **Include alt characters** - Count materials on all your characters as owned (on by default; requires Syndicator)
+- **Include bank items** - Count what is in your bank as owned, for the path and the shopping list (on by default)
+- **Include alt characters** - Count materials on your other characters as owned (on by default)
 - **Include guild bank** - Count guild bank materials as owned (off by default; requires Syndicator)
+- **Forget remembered characters** - Forget the bags and banks LazyProf remembers for your characters (shown when Syndicator is not installed)
 - **Include recipes bought with currency** - Suggest recipes sold for a currency (such as Merchant's Favor) even before you learn them (off by default)
 - **Reset panel positions** - Move the window and panels back to their default place and size (also `/lp resetpanels`)
 
-Without Syndicator the three stock options are greyed out and only your bags are counted.
+### Your stock
+
+With [Syndicator](https://www.curseforge.com/wow/addons/syndicator) installed, stock outside your bags is read from it: bank, mail, your auctions, alts and the guild bank.
+
+Without it LazyProf remembers what it has seen itself: each character's bags when you play it and, on WoW Forever, its bank as it was when you last had the bank window open (with the account-wide bank, where the game has one). Your own bank counts as bank stock; the other characters of the same world and faction count as alts, without their soulbound items. So play each alt once, and open the bank once on every character whose bank should count. A character not played for 180 days is forgotten. Mail, auctions and the guild bank are only known with Syndicator, and on the other clients so is the bank ("Include bank items" is greyed out there without it).
+
+A character in Self-Found mode cannot be sent anything, so no stock of other characters is counted for it.
 
 The target skill, the recipes you chose, the route you follow, craft-or-buy choices and the last tab you used are remembered per character.
 

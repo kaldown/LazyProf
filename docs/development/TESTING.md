@@ -32,7 +32,7 @@ The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks ever
 | `test_merchant.lua` | The merchant panel and `/lp diag merchant` |
 | `test_trainers.lua` | Remembered trainers and fees |
 | `test_stockmemory.lua` | Remembered bags and bank per character and the account bank per world: saving, alts of the same world and faction, soulbound items, the 180-day limit, the age wording |
-| `test_scanner.lua` | Which owned stock counts: the bags, read through the client adapter |
+| `test_scanner.lua` | Which owned stock counts and how the stock memory is kept: Syndicator's stock unchanged, bank and alts from memory without it, bags saved a moment after a change and at logout, the bank only while its window is open, Self-Found, the stock options, `/lp diag stock` |
 | `test_views.lua` | What the window shows, as data: header, receipt, target model, Path list, Shopping list, recipe search, arrow tooltip |
 | `test_window.lua` | The window's frames on both client families: header, More options, target box and slider, receipt, the two tabs, closed state, combat, planning mode |
 | `test_controls.lua` | The widget layer: tabs, button group, number box, checkbox, search box, slider, resize bounds, the row list |
@@ -45,7 +45,7 @@ The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks ever
 | `test_learned.lua` | Learned-recipe detection |
 | `test_profile.lua` | Per-client branches: Wowhead links, racial bonuses, skill brackets |
 | `test_brackets.lua` | A what-if path from skill 1: the arrow follows the real skill |
-| `test_perf.lua` | Debounced recalculation, the item-info trailing debounce, the availability memo |
+| `test_perf.lua` | Debounced recalculation, the item-info trailing debounce, the availability memo, a burst of bag updates (one light refresh, one remembered snapshot, no recalculation) |
 | `test_debuglog.lua` | The debug-log buffer and its rendering |
 | `test_utils.lua` | The pure helpers in `Core/Utils.lua` |
 
@@ -131,7 +131,15 @@ After making changes, run `/reload` and verify:
 - Enable "Include guild bank" - verify a "From guild bank" row appears
 - "Include alt characters" - verify a "From alts" row with character names
 
-**Without Syndicator:** the three stock options are greyed out and only the bags count.
+**Without Syndicator** (LazyProf's own memory; WoW Forever for the bank):
+1. "Include bank items" and "Include alt characters" are usable; "Include guild bank" is greyed out and "Forget remembered characters" is shown
+2. Put materials in the bank, keep the bank window open, open a profession: a "From bank" row lists them
+3. Close the bank and `/reload`: the "From bank" row is still there
+4. Withdraw them: the row goes and the Have column still counts them (now in the bags)
+5. Log in an alt of the same world and faction that carries materials, log back: a "From alts" row names it
+6. `/lp diag stock` lists both characters with `today` as the age of their bags
+7. Tick Self-Found mode: the "From alts" row goes, "From bank" stays
+8. "Forget remembered characters": the "From alts" row goes until the alt is played again
 
 **Stock and the route (Cheapest):**
 1. Own enough reagents for a whole run of a recipe that is not on the path

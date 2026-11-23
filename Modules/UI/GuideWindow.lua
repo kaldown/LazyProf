@@ -251,7 +251,7 @@ end
 function GuideWindow:MerchantRows()
     local path = self.shoppingPath
     if not path then return nil end
-    path.inventory, path.sourceBreakdown = LazyProf.Inventory:ScanAll()
+    path.inventory, path.sourceBreakdown, path.stockMeta = LazyProf.Inventory:ScanAll()
     local view = self:BuildView(path, path.planning and "planning" or "closed", true)
     return view.missing and view.missing.rows or {}, tostring(path.profession)
 end

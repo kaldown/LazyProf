@@ -1,4 +1,17 @@
 -- Modules/Inventory/Scanner.lua
+-- Which owned stock counts: for the route, every total and the shopping list.
+--
+-- The bags are always read live (through the client adapter). Stock outside
+-- them comes from one of two places:
+--   - the Syndicator addon, when it is installed: bank, mail, own auctions,
+--     alts, guild bank. Nothing below changes that, and LazyProf's own memory
+--     is then neither read nor written.
+--   - otherwise LazyProf's own memory (StockMemory.lua): the character's bank
+--     and the account bank as last seen with the bank window open, and the
+--     bags and banks of the other characters of the same world and faction.
+--     This file keeps that memory up to date (see "Keeping the memory").
+-- A Self-Found character cannot be sent anything, so nothing that belongs to
+-- other characters is counted for it, from either place.
 local ADDON_NAME, LazyProf = ...
 
 LazyProf.Inventory = {}
@@ -156,23 +169,160 @@ local function mergeSource(items, sourceKey, charName, combined, breakdown)
     end
 end
 
+-- Is the Syndicator addon there to read stock from?
+function Inventory:UsesSyndicator()
+    return (Syndicator and Syndicator.API) and true or false
+end
+
+-- A Self-Found character cannot receive anything from other characters.
+local function CannotReceive()
+    local char = LazyProf.db and LazyProf.db.char
+    return (char and char.selfFoundMode) and true or false
+end
+
 -- Frame-level cache: ScanAll is called many times per frame (once per recipe in
 -- GetCandidates). Cache results so only the first call per frame does real work.
-local scanCache = { time = 0, combined = nil, breakdown = nil }
+local scanCache = { time = 0, combined = nil, breakdown = nil, meta = nil }
+
+-- Stock from Syndicator: the character's bank, mail and auctions, the alts,
+-- the guild bank.
+local function AddSyndicatorStock(self, combined, breakdown, countAlts)
+    local charName = Syndicator.API.GetCurrentCharacter()
+    local charData = charName and Syndicator.API.GetByCharacterFullName(charName)
+
+    if charData then
+        for _, source in ipairs(PER_CHAR_SOURCES) do
+            if not source.configKey or LazyProf.db.profile[source.configKey] then
+                local scanMethod = "Scan" .. source.key:sub(1,1):upper() .. source.key:sub(2)
+                local items = self[scanMethod](self, charData)
+                mergeSource(items, source.key, nil, combined, breakdown)
+
+                local count = 0
+                for _ in pairs(items) do count = count + 1 end
+                LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items in %s", count, source.key))
+            else
+                LazyProf:Debug("pathfinder", "Inventory scan: " .. source.key .. " disabled")
+            end
+        end
+    end
+
+    -- Alt characters (if enabled, and the character can be sent things)
+    if countAlts then
+        local currentChar = Syndicator.API.GetCurrentCharacter()
+        local allChars = Syndicator.API.GetAllCharacters()
+        local totalAltItems = 0
+
+        if allChars then
+            for _, altName in ipairs(allChars) do
+                if altName ~= currentChar then
+                    local altData = Syndicator.API.GetByCharacterFullName(altName)
+                    if altData then
+                        -- Bags
+                        local altBags = self:ScanBagsSyndicator(altData)
+                        mergeSource(altBags, "bags", altName, combined, breakdown)
+
+                        -- Bank, mail, auctions (respecting config for bank)
+                        for _, source in ipairs(PER_CHAR_SOURCES) do
+                            if not source.configKey or LazyProf.db.profile[source.configKey] then
+                                local scanMethod = "Scan" .. source.key:sub(1,1):upper() .. source.key:sub(2)
+                                local items = self[scanMethod](self, altData)
+                                mergeSource(items, source.key, altName, combined, breakdown)
+                            end
+                        end
+
+                        for itemId in pairs(altBags) do totalAltItems = totalAltItems + 1 end
+                    end
+                end
+            end
+        end
+
+        LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items from alts", totalAltItems))
+    else
+        LazyProf:Debug("pathfinder", "Inventory scan: alts not counted")
+    end
+
+    -- Guild bank (if enabled)
+    if LazyProf.db.profile.includeGuildBank then
+        local guildItems = self:ScanGuildBank()
+        mergeSource(guildItems, "guildBank", nil, combined, breakdown)
+
+        local guildCount = 0
+        for _ in pairs(guildItems) do guildCount = guildCount + 1 end
+        LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items in guild bank", guildCount))
+    else
+        LazyProf:Debug("pathfinder", "Inventory scan: guild bank disabled")
+    end
+end
+
+-- Stock from LazyProf's own memory. Returns how old each part is:
+--   { remembered = true,
+--     bankSeenAt     when the character's bank was seen (nil: never, or not counted)
+--     accountSeenAt  when the account bank of its world was seen
+--     alts = { [name] = { bags = time, bank = time } } }   the alts counted
+-- The character's own bank and the account bank are both bank stock (the
+-- account bank is other characters' stock too, so a character that cannot
+-- receive anything does not count it). An alt's bank needs both settings.
+local function AddRememberedStock(self, combined, breakdown, countAlts)
+    local Memory, Client = LazyProf.StockMemory, LazyProf.Client
+    local countBank = LazyProf.db.profile.includeBankItems and true or false
+    local identity = Client:CharacterIdentity() or {}
+    local meta = { remembered = true, alts = {} }
+
+    if countBank then
+        -- With the bank window open, count what is in it now.
+        if Client:IsBankOpen() then
+            self:ReadBank()
+        end
+        local items, seenAt = Memory:OwnBank(identity.guid)
+        if items then
+            mergeSource(items, "bank", nil, combined, breakdown)
+            meta.bankSeenAt = seenAt
+        end
+        if not CannotReceive() then
+            items, seenAt = Memory:AccountBank(identity.world)
+            if items then
+                mergeSource(items, "bank", nil, combined, breakdown)
+                meta.accountSeenAt = seenAt
+            end
+        end
+    end
+
+    if countAlts then
+        for _, alt in ipairs(Memory:Alts(identity)) do
+            local seen = {}
+            if alt.bags then
+                mergeSource(alt.bags, "bags", alt.name, combined, breakdown)
+                seen.bags = alt.bagsAt
+            end
+            if countBank and alt.bank then
+                mergeSource(alt.bank, "bank", alt.name, combined, breakdown)
+                seen.bank = alt.bankAt
+            end
+            meta.alts[alt.name] = seen
+        end
+    end
+    return meta
+end
 
 -- Scan all inventory sources based on settings
--- Returns: combinedInventory, sourceBreakdown
+-- Returns: combinedInventory, sourceBreakdown, meta
+--   combinedInventory  { [itemId] = count } over every source that counts
+--   sourceBreakdown    { [itemId] = { bags, bank, mail, auctions, guildBank,
+--                        alts = { [name] = { bags, bank, mail, auctions } } } }
+--   meta               how old the remembered parts are (AddRememberedStock);
+--                      nil when the stock comes from Syndicator
 function Inventory:ScanAll()
     -- Return cached results if called again in the same frame
     local now = GetTime()
     if scanCache.combined and scanCache.time == now then
-        return scanCache.combined, scanCache.breakdown
+        return scanCache.combined, scanCache.breakdown, scanCache.meta
     end
 
     local combined = {}
     local breakdown = {}
+    local meta = nil
 
-    -- 1. Current character bags (native API, always on)
+    -- 1. Current character bags (read live, always on)
     local bagItems = self:ScanBags()
     mergeSource(bagItems, "bags", nil, combined, breakdown)
 
@@ -180,80 +330,20 @@ function Inventory:ScanAll()
     for _ in pairs(bagItems) do bagCount = bagCount + 1 end
     LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items in bags", bagCount))
 
-    -- 2. Current character Syndicator sources (bank, mail, auctions)
-    if Syndicator and Syndicator.API then
-        local charName = Syndicator.API.GetCurrentCharacter()
-        local charData = charName and Syndicator.API.GetByCharacterFullName(charName)
-
-        if charData then
-            for _, source in ipairs(PER_CHAR_SOURCES) do
-                if not source.configKey or LazyProf.db.profile[source.configKey] then
-                    local scanMethod = "Scan" .. source.key:sub(1,1):upper() .. source.key:sub(2)
-                    local items = self[scanMethod](self, charData)
-                    mergeSource(items, source.key, nil, combined, breakdown)
-
-                    local count = 0
-                    for _ in pairs(items) do count = count + 1 end
-                    LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items in %s", count, source.key))
-                else
-                    LazyProf:Debug("pathfinder", "Inventory scan: " .. source.key .. " disabled")
-                end
-            end
-        end
-
-        -- 3. Alt characters (if enabled)
-        if LazyProf.db.profile.includeAltCharacters then
-            local currentChar = Syndicator.API.GetCurrentCharacter()
-            local allChars = Syndicator.API.GetAllCharacters()
-            local totalAltItems = 0
-
-            if allChars then
-                for _, altName in ipairs(allChars) do
-                    if altName ~= currentChar then
-                        local altData = Syndicator.API.GetByCharacterFullName(altName)
-                        if altData then
-                            -- Bags
-                            local altBags = self:ScanBagsSyndicator(altData)
-                            mergeSource(altBags, "bags", altName, combined, breakdown)
-
-                            -- Bank, mail, auctions (respecting config for bank)
-                            for _, source in ipairs(PER_CHAR_SOURCES) do
-                                if not source.configKey or LazyProf.db.profile[source.configKey] then
-                                    local scanMethod = "Scan" .. source.key:sub(1,1):upper() .. source.key:sub(2)
-                                    local items = self[scanMethod](self, altData)
-                                    mergeSource(items, source.key, altName, combined, breakdown)
-                                end
-                            end
-
-                            for itemId in pairs(altBags) do totalAltItems = totalAltItems + 1 end
-                        end
-                    end
-                end
-            end
-
-            LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items from alts", totalAltItems))
-        else
-            LazyProf:Debug("pathfinder", "Inventory scan: alts disabled")
-        end
-
-        -- 4. Guild bank (if enabled)
-        if LazyProf.db.profile.includeGuildBank then
-            local guildItems = self:ScanGuildBank()
-            mergeSource(guildItems, "guildBank", nil, combined, breakdown)
-
-            local guildCount = 0
-            for _ in pairs(guildItems) do guildCount = guildCount + 1 end
-            LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items in guild bank", guildCount))
-        else
-            LazyProf:Debug("pathfinder", "Inventory scan: guild bank disabled")
-        end
+    -- 2. Everything outside the bags
+    local countAlts = LazyProf.db.profile.includeAltCharacters and not CannotReceive()
+    if self:UsesSyndicator() then
+        AddSyndicatorStock(self, combined, breakdown, countAlts)
+    else
+        meta = AddRememberedStock(self, combined, breakdown, countAlts)
     end
 
     scanCache.time = now
     scanCache.combined = combined
     scanCache.breakdown = breakdown
+    scanCache.meta = meta
 
-    return combined, breakdown
+    return combined, breakdown, meta
 end
 
 -- Invalidate the ScanAll cache (call when inventory changes mid-frame)
@@ -261,10 +351,200 @@ function Inventory:InvalidateCache()
     scanCache.time = 0
     scanCache.combined = nil
     scanCache.breakdown = nil
+    scanCache.meta = nil
 end
 
 -- ============================================================================
--- Utility methods (unchanged)
+-- Keeping the memory
+-- Nothing here plans the path again; a changed bank only asks the shown list
+-- to redraw. With Syndicator installed none of it does anything.
+--
+-- Bags: saved BAG_SAVE_DELAY seconds after a bag update (one save for a burst
+-- of updates) and, when a save is still waiting, at logout. Bags that report
+-- no backpack slots could not be read and are not saved.
+-- Bank: read while the bank window is open only - when it opens, and on the
+-- frame after anything changes while it is open. The adapter returns nothing
+-- for a bank it cannot read, and then what is remembered stays. Nothing is
+-- read when the window closes: whether the bank can still be read at that
+-- moment is not known, and a read that found slots without items would
+-- replace the memory with an empty bank.
+-- ============================================================================
+
+local BAG_SAVE_DELAY = 2
+local BANK_READ_DELAY = 0   -- the next frame
+
+-- First-wins debounces on a pending flag (C_Timer.After returns nothing).
+local bagSavePending = false
+local bankReadPending = false
+
+-- Remember what the character carries. Returns whether it was saved.
+function Inventory:SaveBags()
+    if self:UsesSyndicator() then return false end
+    local Client = LazyProf.Client
+    local items, bound, backpackSlots = Client:BagContents()
+    if not backpackSlots or backpackSlots <= 0 then
+        return false   -- the bags could not be read just now
+    end
+    return LazyProf.StockMemory:SaveBags(Client:CharacterIdentity(), items, bound, Client:Now())
+end
+
+function Inventory:RequestBagSave()
+    if bagSavePending or self:UsesSyndicator() then return end
+    bagSavePending = true
+    C_Timer.After(BAG_SAVE_DELAY, function()
+        if not bagSavePending then return end   -- written at logout meanwhile
+        bagSavePending = false
+        Inventory:SaveBags()
+    end)
+end
+
+-- Read the open bank (the character's and the account's) and remember what
+-- can be read. Returns whether anything was saved.
+function Inventory:ReadBank()
+    if self:UsesSyndicator() then return false end
+    local Client, Memory = LazyProf.Client, LazyProf.StockMemory
+    if not Client:IsBankOpen() then return false end
+    local identity = Client:CharacterIdentity() or {}
+    local now = Client:Now()
+    local saved = false
+    local items, bound = Client:BankContents("character")
+    if items then
+        saved = Memory:SaveBank(identity, items, bound, now) or saved
+    end
+    items = Client:BankContents("account")
+    if items then
+        saved = Memory:SaveAccountBank(identity.world, items, now) or saved
+    end
+    if saved then
+        self:InvalidateCache()
+    end
+    return saved
+end
+
+-- The bank opened or changed: remember it and let a shown list redraw.
+function Inventory:OnBankSeen()
+    if self:ReadBank() and LazyProf.ScheduleShoppingListRefresh then
+        LazyProf:ScheduleShoppingListRefresh()
+    end
+end
+
+function Inventory:RequestBankRead()
+    if bankReadPending or self:UsesSyndicator() then return end
+    bankReadPending = true
+    C_Timer.After(BANK_READ_DELAY, function()
+        bankReadPending = false
+        Inventory:OnBankSeen()   -- reads nothing when the bank has closed meanwhile
+    end)
+end
+
+-- A bag update (Core/Init.lua passes every BAG_UPDATE on with its container
+-- id). While the bank is open an item may have gone into it or come out of
+-- it whatever container the update names, so the bank is read again; an
+-- update of a bank container is not a change of the bags.
+function Inventory:OnBagUpdate(bagId)
+    if self:UsesSyndicator() then return end
+    local Client = LazyProf.Client
+    if Client:IsBankOpen() then
+        self:RequestBankRead()
+    end
+    if not Client:BankKindOfBag(bagId) then
+        self:RequestBagSave()
+    end
+end
+
+-- Logout (the client's event, and the database's own shutdown notice, which
+-- is sure to come before the saved tables are tidied): write a bag save that
+-- is still waiting.
+function Inventory:OnLogout()
+    if not bagSavePending then return end
+    bagSavePending = false
+    self:SaveBags()
+end
+
+-- Start listening (called once the addon is enabled). Characters not seen
+-- for a long time are dropped here - never the one being played - and the
+-- character is remembered shortly after login even if its bags never change.
+function Inventory:Initialize()
+    LazyProf.Client:StartStock({
+        onBankOpened = function() Inventory:OnBankSeen() end,
+        onBankChanged = function() Inventory:RequestBankRead() end,
+        onBankClosed = function() end,
+        onLogout = function() Inventory:OnLogout() end,
+    })
+    if self:UsesSyndicator() then return end
+    local Client = LazyProf.Client
+    local identity = Client:CharacterIdentity() or {}
+    if identity.guid then
+        LazyProf.StockMemory:Prune(Client:Now(), identity.guid)
+    end
+    self:RequestBagSave()
+end
+
+-- Forget every remembered character and account bank (the options button).
+-- The character being played is remembered again by itself.
+function Inventory:ForgetRemembered()
+    LazyProf.StockMemory:Forget()
+    self:InvalidateCache()
+    self:ReadBank()
+    self:RequestBagSave()
+end
+
+-- /lp diag stock: where stock outside the bags comes from, who the character
+-- is and what is remembered. Read-only (an open bank is not saved by it).
+function Inventory:RunDiagnostic(lines)
+    local function add(text) lines[#lines + 1] = text end
+    local Memory, Client = LazyProf.StockMemory, LazyProf.Client
+    local profile = LazyProf.db.profile
+
+    if self:UsesSyndicator() then
+        add("source: Syndicator (LazyProf's own memory is not used and not updated)")
+    else
+        add("source: LazyProf's own memory (no inventory addon)")
+    end
+    add("settings: bank=" .. tostring(profile.includeBankItems) .. " alts=" .. tostring(profile.includeAltCharacters)
+        .. " guildBank=" .. tostring(profile.includeGuildBank) .. " selfFound=" .. tostring(CannotReceive()))
+
+    local identity = Client:CharacterIdentity() or {}
+    local now = Client:Now()
+    add("identity: guid=" .. tostring(identity.guid) .. " name=" .. tostring(identity.name)
+        .. " world=" .. tostring(identity.world) .. " faction=" .. tostring(identity.faction))
+    add("waiting: bagSave=" .. tostring(bagSavePending) .. " bankRead=" .. tostring(bankReadPending)
+        .. " bankOpen=" .. tostring(Client:IsBankOpen()))
+
+    local summary = Memory:Summary()
+    if not summary.usable then
+        add("memory: format=" .. tostring(summary.schema) .. " - not a format this version reads; it is left alone")
+        return
+    end
+    add("memory: format=" .. tostring(summary.schema) .. " characters=" .. tostring(#summary.characters)
+        .. " accountBanks=" .. tostring(#summary.account)
+        .. " (characters not seen for " .. tostring(Memory.KEEP_DAYS) .. " days are dropped)")
+
+    local isAlt = {}
+    for _, alt in ipairs(Memory:Alts(identity)) do isAlt[alt.guid] = true end
+    local function part(label, items, at)
+        if items == nil then return label .. "=never seen" end
+        return label .. "=" .. tostring(items) .. " items (" .. tostring(Memory.AgeText(now, at)) .. ")"
+    end
+    for _, c in ipairs(summary.characters) do
+        local role = "not counted"
+        if c.guid == identity.guid then
+            role = "this character"
+        elseif isAlt[c.guid] then
+            role = "alt"
+        end
+        add("character: " .. tostring(c.name) .. " [" .. role .. "] world=" .. tostring(c.world)
+            .. " faction=" .. tostring(c.faction) .. " " .. part("bags", c.bagItems, c.bagsAt)
+            .. " " .. part("bank", c.bankItems, c.bankAt) .. " guid=" .. tostring(c.guid))
+    end
+    for _, bank in ipairs(summary.account) do
+        add("account bank: world=" .. tostring(bank.world) .. " items=" .. tostring(bank.items)
+            .. " (" .. tostring(Memory.AgeText(now, bank.at)) .. ")")
+    end
+end
+
+-- ============================================================================
+-- Utility methods
 -- ============================================================================
 
 -- Get count of specific item in bags

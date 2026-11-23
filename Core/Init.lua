@@ -22,6 +22,9 @@ function LazyProf:OnInitialize()
     if self.MigrateSettings then
         self.MigrateSettings(self.db.sv)
     end
+    -- At logout the database tidies the saved tables. Its shutdown notice
+    -- comes before that: the moment for a last write that is sure to be kept.
+    self.db.RegisterCallback(self, "OnDatabaseShutdown", "OnDatabaseShutdown")
     self:RegisterChatCommand("lazyprof", "SlashCommand")
     self:RegisterChatCommand("lp", "SlashCommand")
     if self.SetupConfig then
@@ -66,6 +69,10 @@ function LazyProf:OnEnable()
     end
     if self.MinimapButton then
         self.MinimapButton:Initialize()
+    end
+    -- Bank and logout events, and remembering this character's bags
+    if self.Inventory then
+        self.Inventory:Initialize()
     end
 
     -- Profession-window events and hooks belong to the client adapter (the
@@ -151,6 +158,9 @@ function LazyProf:SlashCommand(input)
         self:Print("Diagnostics: /lp diag prices - lists every reagent price of the path and where it came from.")
         self:Print("Diagnostics: /lp diag merchant - at a merchant: what it sells as LazyProf reads it, and what would be bought.")
         self:Print("Diagnostics: /lp diag trainer - at a profession trainer: what it lists as LazyProf reads it, and what is remembered.")
+        self:Print("Diagnostics: /lp diag stock - which bags and banks are remembered for your characters, and what the bank reads as (run it at an open bank).")
+    elseif cmd == "diag stock" then
+        self:RunStockDiagnostic()
     elseif cmd == "diag prices" then
         self:RunPriceDiagnostic()
     elseif cmd == "diag merchant" then
@@ -215,7 +225,14 @@ function LazyProf:OnTradeSkillClose()
     end
 end
 
-function LazyProf:OnBagUpdate()
+-- The database is about to be saved (logout or reload).
+function LazyProf:OnDatabaseShutdown()
+    if self.Inventory then
+        self.Inventory:OnLogout()
+    end
+end
+
+function LazyProf:OnBagUpdate(event, bagId)
     -- PERFORMANCE FIX (GitHub Issue #3): Don't trigger full recalculation on bag changes.
     -- A change of stock never plans again by itself: the shown route stays and only its
     -- counts and the shopping list are redrawn (lightweight RefreshShoppingList()). The
@@ -229,6 +246,12 @@ function LazyProf:OnBagUpdate()
     -- At a merchant: a purchase may have arrived
     if self.MerchantPanel then
         self.MerchantPanel:OnInventoryChanged()
+    end
+    -- What the character carries is remembered for its other characters (and
+    -- the bank while its window is open). This is the one BAG_UPDATE handler
+    -- of the addon, so the update is passed on from here.
+    if self.Inventory then
+        self.Inventory:OnBagUpdate(bagId)
     end
 end
 
@@ -330,12 +353,13 @@ function LazyProf:RefreshShoppingList()
     end
 
     -- Rescan inventory; the stages and the shopping list are drawn from it
-    local inventory, sourceBreakdown = self.Inventory:ScanAll()
+    -- (stockMeta: how old the remembered part of the stock is)
+    local inventory, sourceBreakdown, stockMeta = self.Inventory:ScanAll()
     if live then
-        live.inventory, live.sourceBreakdown = inventory, sourceBreakdown
+        live.inventory, live.sourceBreakdown, live.stockMeta = inventory, sourceBreakdown, stockMeta
     end
     if planning then
-        planning.inventory, planning.sourceBreakdown = inventory, sourceBreakdown
+        planning.inventory, planning.sourceBreakdown, planning.stockMeta = inventory, sourceBreakdown, stockMeta
     end
 
     if window then
@@ -648,6 +672,25 @@ function LazyProf:RunTrainerDiagnostic()
     if not ok then add("SECTION ERROR: memory: " .. tostring(err)) end
 
     self:Print("diag trainer: output ready - copy it from the window that opened.")
+    self:ShowDiagnosticOutput(table.concat(out, "\n"))
+end
+
+-- /lp diag stock: the bags and the bank as the client reports them and as the
+-- adapter reads them, who the character is, and what is remembered of every
+-- character's bags and bank. Read-only; run it with the bank window open for
+-- the bank lines.
+function LazyProf:RunStockDiagnostic()
+    local out = {}
+    local function add(text) out[#out + 1] = text end
+    local version, build, _, interface = GetBuildInfo()
+    add("diag stock: build=" .. tostring(version) .. " (" .. tostring(build) .. ") interface=" .. tostring(interface)
+        .. " family=" .. tostring(self.ClientFamily))
+    local ok, err = pcall(self.Client.RunStockDiagnostic, self.Client, out)
+    if not ok then add("SECTION ERROR: adapter: " .. tostring(err)) end
+    ok, err = pcall(self.Inventory.RunDiagnostic, self.Inventory, out)
+    if not ok then add("SECTION ERROR: memory: " .. tostring(err)) end
+
+    self:Print("diag stock: output ready - copy it from the window that opened.")
     self:ShowDiagnosticOutput(table.concat(out, "\n"))
 end
 

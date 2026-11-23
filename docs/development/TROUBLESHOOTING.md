@@ -18,6 +18,7 @@ Run these in-game to check addon health:
 /lp diag prices        -- List every reagent price of the path, where it came from and which route was kept (copyable window)
 /lp diag merchant      -- At a merchant: what it sells as LazyProf reads it, and what would be bought (copyable window)
 /lp diag trainer       -- At a profession trainer: what it lists as LazyProf reads it, and what is remembered (copyable window)
+/lp diag stock         -- Which bags and banks are remembered for your characters; at an open bank, what the bank reads as (copyable window)
 /lp resetpanels        -- Move the LazyProf window and its panels back to their default place and size
 /lp reset              -- Reset database to defaults
 ```
@@ -184,6 +185,39 @@ WoW Forever only; on other clients the dump says so.
 | `this trainer: profession=.. services=N` | The profession LazyProf matched this trainer to: the one most of whose recipe names appear in its list. `nil` means no listed service is a recipe LazyProf knows (a class trainer, a filter hiding everything, or a client language whose recipe names differ from the recipe data). |
 | `known <profession> trainer: Name - Zone (x, y) mapId=.. faction=.. recipesListed=N` | Each remembered trainer of that profession. A recipe still to learn names a trainer only when the trainer listed that recipe; a "Train the next rank" row names every remembered trainer of the profession. Only trainers visited by a character of your faction are shown. |
 
+### `/lp diag stock` - remembered bags and banks, and what the bank reads as
+
+**When to use:** reagents in your bank or on an alt are not counted (or are counted although
+they are gone), a character is missing from "From alts", or the bank's contents look wrong.
+Run it anywhere for what is remembered; run it **with the bank window open** for the bank
+lines. Works on every client; the bank is read on WoW Forever only, and on the other clients
+the dump says so.
+
+| Line | Meaning |
+|------|---------|
+| `diag stock: build=.. interface=.. family=..` | Client build and which adapter is active. |
+| `bag[i] slots=N used=N` | Each carried bag as the client reports it. On WoW Forever bags 0 to 5 are read; 5 is the reagent bag. |
+| `adapter bags: items=N soulbound=N backpackSlots=N` | The bags as LazyProf reads them: distinct items, how many of those have a soulbound part, and the backpack's slot count. `backpackSlots=0` means the bags could not be read just now; such a read is never remembered. |
+| `bank: open=.. usesPlayerBags=..` | Whether LazyProf saw the bank window open (the bank is only ever read while it is), and whether the client shows the bank's tabs as one page of bag slots. |
+| `bank character: canView=.. lockedReason=.. tabs=N [id:slots/used ...]` | The character bank as the client reports it: whether it may be viewed, the lock reason (`nil` = not locked), and each purchased tab with its container id, slot count and used slots. The same line follows for `bank account` (the account-wide bank). |
+| `adapter bank character: items=N soulbound=N` / `... not readable now` | What LazyProf reads from that bank. `not readable now` = the window is closed, the bank may not be viewed, it is locked, it has no tabs or none reports a slot. Then nothing is saved and what was remembered stays. |
+| `api: C_Container=.. GetContainerItemInfo=.. GetServerTime=..` / `bank: not recorded on this client` | Classic clients only, in place of the bank lines: which container call is used for the bags, and that the bank is not read there. |
+| `world: region=.. rp=.. pvp=.. hardcore=.. guidSecret=.. serverTime=..` | What the character's world is made of on WoW Forever (region and ruleset - there are no realms), whether the client withheld the character's id, and the server clock the ages are counted from. |
+| `source: ...` | `LazyProf's own memory (no inventory addon)`, or `Syndicator (...)`: then the stock comes from Syndicator and the memory is neither used nor updated. |
+| `settings: bank=.. alts=.. guildBank=.. selfFound=..` | The stock options. With `selfFound=true` nothing that belongs to other characters is counted. |
+| `identity: guid=.. name=.. world=.. faction=..` | Who LazyProf takes the character for. Without a `guid` nothing is remembered; without a `world` or a `faction` no other character counts as an alt. |
+| `waiting: bagSave=.. bankRead=.. bankOpen=..` | Whether a save of the bags (two seconds after a bag change) or a read of the bank (the frame after a change while it is open) is still to come. |
+| `memory: format=1 characters=N accountBanks=N ...` | How much is remembered, account-wide. Any other `format` was written by a version this one does not understand: it is left alone and nothing is counted from it. |
+| `character: <name> [this character / alt / not counted] world=.. faction=.. bags=N items (<age>) bank=N items (<age>) guid=..` | One line per remembered character. `alt` = counted for the character you are on (same world and faction); `not counted` = another world or faction, or an older record under a name another character now has. `bank=never seen` = the bank was never open on that character. |
+| `account bank: world=.. items=N (<age>)` | The account-wide bank remembered for a world. It counts as bank stock for every character of that world. |
+
+Reading it: an alt with `not counted` cannot supply stock (check `world` and `faction`). An
+age that never becomes `today` on the character you play means its bags or bank are not
+being saved: look at `backpackSlots`, `identity` and, at the bank, the `canView` /
+`lockedReason` / `tabs` values. A character you deleted stays listed until it has not been
+seen for 180 days, or until "Forget remembered characters" (Settings, Display, "Your
+stock") is used.
+
 ### Adding a new diagnostic
 
 `/lp diag` is meant to grow. To add `/lp diag <topic>`: add an `elseif cmd == "diag <topic>"`
@@ -195,8 +229,9 @@ in combat-adjacent situations. Document the new topic's output lines in this sec
 Lines that read the profession window or other client APIs belong in the client
 adapter (`Core/Client/Classic.lua` for Classic clients, `Core/Client/Forever.lua` for
 WoW Forever): `/lp diag learned` gets its lines from `LazyProf.Client:RunDiagnostic(lines)`,
-`/lp diag merchant` from `Client:RunMerchantDiagnostic(lines)` and `/lp diag trainer` from
-`Client:RunTrainerDiagnostic(lines)`, so each client family reports what its own API sees.
+`/lp diag merchant` from `Client:RunMerchantDiagnostic(lines)`, `/lp diag trainer` from
+`Client:RunTrainerDiagnostic(lines)` and `/lp diag stock` from
+`Client:RunStockDiagnostic(lines)`, so each client family reports what its own API sees.
 
 ---
 
@@ -381,8 +416,8 @@ Under the Cheapest strategy four things decide the route besides the reagent pri
    auction price of a crafted item, or sale values that arrived after the first calculation
    can move the route.
 2. **Your stock.** Reagents you own count when the route is chosen, against whole runs of
-   a recipe: your bags, and with Syndicator your bank, mail, auctions and alts (the guild
-   bank if it is turned on). A bag change alone never plans again; the route is planned
+   a recipe: your bags, your bank and your alts (with Syndicator also mail, your auctions
+   and, if it is turned on, the guild bank). A bag change alone never plans again; the route is planned
    again when the profession window opens, your skill changes, you change the target, the
    strategy, a recipe or a setting, item data arrives, you close the auction house, or a
    merchant shows a vendor price LazyProf had not seen (with the profession window open).
@@ -455,11 +490,39 @@ per craft in an opened row (More options).
 
 **Symptoms:** Reagents in your bank or on an alt are still on the list to buy
 
-Stock outside your bags (bank, mail, your auctions, alts, guild bank) is read from the
-Syndicator addon. "Include bank items" and "Include alt characters" are on by default
-(Settings, Display, "Your stock"); without Syndicator they are greyed out and only your
-bags count. "Include guild bank" is off by default. Stock that is counted but not in your
-bags is listed under "Collect first" on the Shopping tab.
+"Include bank items" and "Include alt characters" are on by default (Settings, Display,
+"Your stock"); "Include guild bank" is off by default. Stock that is counted but not in
+your bags is listed under "Collect first" on the Shopping tab.
+
+**With Syndicator** stock outside your bags (bank, mail, your auctions, alts, guild bank) is
+read from it; check in Syndicator / Baganator that it knows the character.
+
+**Without Syndicator** LazyProf counts what it has seen itself:
+
+1. A character's bags are remembered while you play it (two seconds after a bag change and
+   at logout). An alt you have not logged in since this was added is not known yet.
+2. A bank is remembered only while its window is open, on WoW Forever. Open the bank once
+   on every character whose bank should count, and again when the bank changed while
+   LazyProf was not running (the addon switched off, or another computer). On other
+   clients the bank is not remembered and "Include bank items" is greyed out.
+3. Alts are the remembered characters of the **same world** (region and ruleset on WoW
+   Forever, the realm elsewhere) **and faction**. Their soulbound items are left out.
+4. An alt's bank needs both options on.
+5. Mail, auctions and the guild bank are never known without Syndicator.
+6. In Self-Found mode (Settings, General) nothing from other characters is counted.
+
+`/lp diag stock` lists every remembered character, whether it counts for the character you
+are on, and how old its bags and bank are.
+
+### Stock of a Character That Is Gone Is Still Counted
+
+**Symptoms:** "From alts" names a character you deleted, or reagents you no longer have
+
+Without Syndicator the stock of other characters is a memory of when they were last
+played. A character is forgotten when it has not been seen for 180 days. To forget
+everything at once use "Forget remembered characters" (Settings, Display, "Your stock"): the
+character you are on is remembered again right away, the others the next time you play
+them.
 
 ### Nothing Left / Target Reached
 

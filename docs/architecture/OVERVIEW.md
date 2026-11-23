@@ -41,13 +41,13 @@ The addon is built around one loop: open a profession, see the cheapest path fro
 | CraftLib | Yes | Recipe database with skill-up data |
 | TradeSkillMaster | No | AH pricing data (recommended) |
 | Auctionator | No | Alternative AH pricing |
-| Syndicator | No | Stock outside the bags: bank, mail, own auctions, alts, guild bank. Without it only the bags count |
+| Syndicator | No | Stock outside the bags: bank, mail, own auctions, alts, guild bank. Without it LazyProf remembers each character's bags and (on WoW Forever) bank itself and counts the bank and the alts from that |
 
 ## Data Flow
 
 1. **Load**: Registry loads profession data from CraftLib
 2. **Detect**: Registry detects which profession window is open (through the client adapter, which also gives the skill and the learned recipes)
-3. **Scan**: Inventory Scanner collects items from the bags and, with Syndicator, from bank, mail, AH listings, alts and guild bank
+3. **Scan**: Inventory Scanner collects items from the bags and from outside them: with Syndicator from bank, mail, AH listings, alts and guild bank; without it from the remembered bank and alts
 4. **Price**: PriceManager prices every reagent (vendor price first, then TSM / Auctionator, then the vendor sell value as an estimate) and records where each price came from
 5. **Sale value**: SaleValue works out what one craft of each usable recipe sells for (to a vendor by default)
 6. **Check**: Availability module filters recipes by obtainability

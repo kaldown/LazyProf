@@ -1093,7 +1093,10 @@ T.section("shopping tab", function()
 
     -- The merchant panel buys from the whole path's list.
     env.stock, env.stockSources = { [101] = 7 }, { [101] = { bags = 7 } }
+    env.stockMeta = { remembered = true, bankSeenAt = 5, alts = {} }
     local merchantRows, name = window:MerchantRows()
+    T.check("merchant rows: the stock's age is refreshed with the stock", window.shoppingPath.stockMeta == env.stockMeta)
+    env.stockMeta = nil
     T.check("merchant rows: the whole path's shopping rows", merchantRows == missing.rows)
     T.eq("merchant rows: named after the profession", name, "Tailoring")
     T.eq("merchant rows: every craft run", #env.accountCalls[#env.accountCalls].steps, 2)

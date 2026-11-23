@@ -8,6 +8,9 @@
 --   5. LazyProf:ScheduleRecalculation() / ScheduleShoppingListRefresh() /
 --      ScheduleDebugWindowUpdate() (Core/Init.lua) - first-wins debounces;
 --      C_Timer.After returns nothing
+--   6. LazyProf:OnBagUpdate (Core/Init.lua) with the stock memory behind it
+--      (Modules/Inventory/Scanner.lua): a burst of bag updates is one light
+--      refresh and one remembered snapshot, never a recalculation
 --
 -- Run from the addon root:  lua5.1 scripts/test_perf.lua
 -- Not shipped: scripts/ is excluded from the package via .pkgmeta.
@@ -380,6 +383,50 @@ section("I", function()
     advance(0.6)
     check("I window closed: visit noted, no recalc", #clears == 1 and #recalcs == 0, #recalcs)
     LP.PriceManager, LP.Client = savedPM, savedClient
+end)
+
+-- ===========================================================================
+-- J: a burst of bag updates (batch crafting) with the stock memory wired in:
+-- one light refresh, one bag snapshot, no recalculation
+-- ===========================================================================
+section("J", function()
+    assert(loadfile("Modules/Inventory/StockMemory.lua"))("LazyProf", LP)
+    assert(loadfile("Modules/Inventory/Scanner.lua"))("LazyProf", LP)
+    local savedClient, savedDb = LP.Client, LP.db
+    local bagReads, bankReads = 0, 0
+    LP.db = { profile = { includeBankItems = true, includeAltCharacters = true }, char = {}, global = {} }
+    LP.Client = {
+        IsOpen = function() return true end,
+        BagContents = function() bagReads = bagReads + 1; return { [1] = 1 }, {}, 16 end,
+        IsBankOpen = function() return false end,
+        BankContents = function() bankReads = bankReads + 1; return nil end,
+        BankKindOfBag = function() return nil end,
+        CharacterIdentity = function() return { guid = "Player-1-PERF", name = "Perf", world = "eu-pvp", faction = "Horde" } end,
+        Now = function() return 1763900000 end,
+    }
+    _G.Syndicator = nil
+    local recalcs, refreshes = 0, 0
+    LP.Recalculate = function() recalcs = recalcs + 1 end
+    LP.RefreshShoppingList = function() refreshes = refreshes + 1 end
+    LP.MerchantPanel = nil
+    LP.GuideWindow = nil
+
+    flush(); recalcs, refreshes, bagReads = 0, 0, 0
+    for _ = 1, 40 do                      -- forty crafts' worth of bag updates within a second
+        LP:OnBagUpdate("BAG_UPDATE", 0)
+        LP:OnBagUpdate("BAG_UPDATE", 1)
+        advance(0.02)
+    end
+    check("J no bag read inside the burst", bagReads == 0, bagReads)
+    advance(3)
+    check("J one bag snapshot for the burst", bagReads == 1, bagReads)
+    check("J the bank is not read while it is closed", bankReads == 0, bankReads)
+    check("J light refreshes only (debounced)", refreshes >= 1 and refreshes <= 4, refreshes)
+    check("J no recalculation", recalcs == 0, recalcs)
+    check("J the snapshot is in the saved table",
+        LP.db.global.stock.characters["Player-1-PERF"].bags.items[1] == 1)
+    flush()
+    LP.Client, LP.db = savedClient, savedDb
 end)
 
 print(string.format("\n%d/%d checks passed", total - failures, total))

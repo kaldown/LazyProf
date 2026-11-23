@@ -85,7 +85,7 @@ Defines `STRATEGY`, `DISPLAY_MODE`, `PRICE_SOURCE`, `TSM_PRICE_SOURCE`, `MATERIA
 - closed - hide the arrow and the recipe details; the window hides or goes back to a planning view
 
 **Events registered here**:
-- `BAG_UPDATE` - lightweight refresh: the stock is rescanned into the shown path and the window redrawn. A change of stock never plans the route again by itself
+- `BAG_UPDATE` - lightweight refresh: the stock is rescanned into the shown path and the window redrawn. A change of stock never plans the route again by itself. The update is also passed to the inventory scanner, which remembers the bags (and the bank while its window is open); the addon has this one handler for the event
 - `GET_ITEM_INFO_RECEIVED` - item data arrived for a reagent priced by the floor, or for a crafted item whose sale value was waiting: one recalculation once the stream has gone quiet
 - `AUCTION_HOUSE_CLOSED` - cached prices are expired and, with a profession window open, the path is planned again
 
@@ -155,17 +155,27 @@ Checks: player inventory (bags/bank/alts), trainer requirements (faction), vendo
 
 **Purpose**: What the character owns, from every enabled source.
 
-The bags are read with the game's own calls. Everything else is read from the Syndicator addon and is absent without it.
+The bags are read live through the client adapter. Stock outside them comes from the Syndicator addon when it is installed, otherwise from LazyProf's own memory (`StockMemory.lua`).
 
 **Sources** (in the order the shopping list draws on them):
 1. Bags (always scanned)
-2. Bank (when "Include bank items" is on - the default)
-3. Mail (always scanned with Syndicator)
-4. Active AH listings (always scanned with Syndicator)
-5. Guild bank (when "Include guild bank" is on - off by default)
-6. Alt characters: their bags, bank, mail and listings (when "Include alt characters" is on - the default)
+2. Bank (when "Include bank items" is on - the default). From memory: the character's bank and the account bank of its world, as last seen with the bank window open
+3. Mail (always scanned with Syndicator; not known without it)
+4. Active AH listings (always scanned with Syndicator; not known without it)
+5. Guild bank (when "Include guild bank" is on - off by default; Syndicator only)
+6. Alt characters (when "Include alt characters" is on - the default): with Syndicator their bags, bank, mail and listings; from memory the bags and banks of the remembered characters of the same world and faction, without soulbound items
 
-Returns the `combined` inventory and a `sourceBreakdown` that says where each item is. The same stock is used for the route (Cheapest), every total and the shopping list.
+A character in Self-Found mode cannot be sent anything, so nothing that belongs to other characters is counted for it, from either place.
+
+Returns the `combined` inventory, a `sourceBreakdown` that says where each item is and, when the stock outside the bags is remembered, a `meta` table with how old each part is (it travels on the path as `path.stockMeta`). The same stock is used for the route (Cheapest), every total and the shopping list.
+
+The scanner also keeps the memory up to date, and does nothing of it while Syndicator is installed. The bags are saved two seconds after a bag update (one save for a burst) and, when a save is still waiting, at logout; bags that report no backpack slots are not saved. The bank is read only while its window is open - when it opens and on the frame after any bag update or tab change - and a bank the adapter cannot read leaves what is remembered untouched. Nothing is read when the window closes. None of this plans the path again.
+
+### StockMemory.lua
+
+**Purpose**: What each character had in its bags and bank when it was last seen, and the account bank per world. Pure: the character, the items and the time are passed in.
+
+One record per character GUID in `LazyProfDB.global.stock`, replaced on every save, with the character's name, world and faction. The world is region and ruleset on WoW Forever (there are no realms) and the realm name elsewhere; the client adapter supplies it. Alts are the other records of the same world and faction; a second record under one name is counted once, and soulbound counts are taken off what an alt can supply. Records not seen for 180 days are dropped at login (never the character being played). The table carries a format number that is written by the module, not by the database defaults; a table in another format is left alone.
 
 ### PriceManager.lua
 
