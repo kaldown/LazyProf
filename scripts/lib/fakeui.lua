@@ -125,6 +125,7 @@ function M.install(opts)
         function f:SetMovable(m) self.movable = m end
         function f:IsMovable() return self.movable end
         function f:SetResizable(r) self.resizable = r end
+        function f:SetResizeBounds(minW, minH, maxW, maxH) self.resizeBounds = { minW, minH, maxW, maxH } end
         function f:EnableMouse(m) self.mouse = m end
         function f:RegisterEvent(e) self.events[e] = true end
         function f:UnregisterEvent(e) self.events[e] = nil end
@@ -141,8 +142,9 @@ function M.install(opts)
             self.regions[#self.regions + 1] = r
             return r
         end
-        function f:CreateTexture()
+        function f:CreateTexture(_, layer)
             local r = newRegion("Texture", self)
+            r.layer = layer
             self.regions[#self.regions + 1] = r
             return r
         end

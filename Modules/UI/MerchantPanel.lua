@@ -20,7 +20,13 @@ LazyProf.MerchantPanel = MerchantPanel
 
 local WIDTH = 300
 local ROW_HEIGHT = 20
-local CHROME_HEIGHT = 74    -- title, Buy all button, margins
+local LIST_TOP = 32         -- under the title
+local LIST_BOTTOM = 38      -- above the Buy all button
+local LIST_PAD = 8          -- the row list's content ends this far under its last row
+-- Everything but the rows. The list frame is then exactly as tall as its
+-- content, so nothing scrolls (and no scroll bar shows) until there are more
+-- rows than MAX_ROWS.
+local CHROME_HEIGHT = LIST_TOP + LIST_BOTTOM + LIST_PAD
 local MAX_ROWS = 10
 
 MerchantPanel.frame = nil
@@ -84,8 +90,8 @@ function MerchantPanel:Build()
     frame.closeBtn:SetScript("OnClick", function() PanelShell:Close(frame) end)
 
     self.list = Widgets.CreateRowList(body, "LazyProfMerchantList")
-    self.list.frame:SetPoint("TOPLEFT", 10, -32)
-    self.list.frame:SetPoint("BOTTOMRIGHT", -30, 38)
+    self.list.frame:SetPoint("TOPLEFT", 10, -LIST_TOP)
+    self.list.frame:SetPoint("BOTTOMRIGHT", -30, LIST_BOTTOM)
     self.list:SetWidth(WIDTH - 44)
 
     self.buyAllBtn = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")

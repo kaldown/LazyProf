@@ -83,6 +83,8 @@ for _, family in ipairs({ "forever", "classic" }) do
         T.eq(p .. "default width", frame.width, 420)
         T.eq(p .. "as tall as the profession window", frame.height, 500)
         T.check(p .. "resizable and clamped to the screen", frame.resizable == true)
+        T.eq(p .. "it cannot be made narrower than 380 or lower than 440",
+            frame.resizeBounds[1] .. "x" .. frame.resizeBounds[2], "380x440")
 
         if family == "forever" then
             T.eq(p .. "native frame art", frame.NineSlice and frame.NineSlice.layout, "ButtonFrameTemplateNoPortrait")
@@ -133,6 +135,16 @@ for _, family in ipairs({ "forever", "classic" }) do
         T.check(p .. "no hide-owned box without More options", not window.shopRow.shown)
         ui.fire(window.tabs.buttons[1], "OnClick")
         T.eq(p .. "and back", window.tab, "path")
+
+        -- The list ends above the resize grip in the bottom right corner, so
+        -- the grip does not sit on the list's scroll-down button.
+        local grip = window.resizeGrip
+        local listBottom = window.list.frame.points[2]
+        T.check(p .. "the grip is in the bottom right corner", grip.points[1][1] == "BOTTOMRIGHT" and grip.points[1][2] == 0
+            and grip.points[1][3] == 0)
+        T.check(p .. "the list is anchored to the bottom", listBottom[1] == "BOTTOMRIGHT")
+        T.check(p .. "the list ends above the grip", listBottom[5] >= grip.height, tostring(listBottom[5]) .. " under " .. tostring(grip.height))
+        T.check(p .. "the grip is no smaller than its icon", grip.height >= grip.icon.height and grip.width >= grip.icon.width)
 
         -- What the window no longer has
         T.check(p .. "no footer", window.footer1 == nil and window.footer2 == nil)
@@ -1130,6 +1142,28 @@ T.section("states", function()
     ui.event("PLAYER_REGEN_ENABLED")
     T.check("combat over, closed by the player: stays closed", not frame.shown)
     env.shell:ResetClosed()
+    window:Update(W.path())
+
+    -- A size saved by a build that allowed a smaller window is raised to the
+    -- minimum when the window takes it.
+    addon.db.profile.panelSizes.guide = { width = 400, height = 360 }
+    env.shell:ResetClosed()
+    window.sized = nil
+    window:Update(W.path())
+    T.eq("a saved size under the minimum: the height is raised", frame.height, 440)
+    T.eq("a saved size under the minimum: the width it had is kept", frame.width, 400)
+    addon.db.profile.panelSizes.guide = { width = 300, height = 700 }
+    window.sized = nil
+    window:Update(W.path())
+    T.eq("a saved width under the minimum is raised too", frame.width .. "x" .. frame.height, "380x700")
+    addon.db.profile.panelSizes.guide = nil
+    window.sized = nil
+    -- Docked beside a low profession window, the default height is the minimum.
+    env.anchor.height = 300
+    window:Update(W.path())
+    T.eq("a low profession window: the window is as tall as its minimum", frame.height, 440)
+    env.anchor.height = 500
+    window.sized = nil
     window:Update(W.path())
 
     -- Size and reset

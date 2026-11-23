@@ -61,6 +61,15 @@ for _, family in ipairs({ "forever", "classic" }) do
                 "Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
             T.check(p .. "a track of its own", slider.track ~= nil and slider.track.kind == "Texture")
             T.check(p .. "a size of its own", frame.height > 0)
+            -- The track has to show on a dark window: a light grey, nearly
+            -- opaque, with a thin darker edge drawn under it.
+            local c, e = slider.track.vertexColor, slider.trackEdge and slider.trackEdge.vertexColor
+            T.check(p .. "the track is a light grey", c[1] >= 0.3 and c[1] == c[2] and c[2] == c[3] and c[4] >= 0.85, table.concat(c, ","))
+            T.check(p .. "with a darker edge", e ~= nil and e[1] < c[1] and e[4] >= 0.8)
+            T.check(p .. "the edge is a little larger than the track", slider.trackEdge ~= nil
+                and slider.trackEdge.height == slider.track.height + 2)
+            T.check(p .. "and drawn under it", slider.trackEdge ~= nil and slider.trackEdge.layer == "BACKGROUND"
+                and slider.track.layer == "BORDER")
         end
         T.eq(p .. "whole steps", frame.step, 1)
         T.check(p .. "steps obeyed while dragging", frame.obeyStep == true)
@@ -624,13 +633,13 @@ T.section("column layouts", function()
         { kind = "cols", text = "Wool Cloth", cols = { "123", "40", "83", "888g 88s 88c" }, mark = "vendor" },
     })
     local row = list.rows[2]
-    T.eq("reagents: the cost column holds an amount to the copper", column(row, 4), "84@64")
-    T.eq("reagents: buy", column(row, 3), "34@148")
-    T.eq("reagents: have", column(row, 2), "34@182")
-    T.eq("reagents: need", column(row, 1), "34@216")
-    T.eq("reagents: the name ends where the numbers begin", nameEnd(row), 252)
+    T.eq("reagents: the cost column holds an amount to the copper", column(row, 4), "84@56")
+    T.eq("reagents: buy", column(row, 3), "30@140")
+    T.eq("reagents: have", column(row, 2), "30@170")
+    T.eq("reagents: need", column(row, 1), "30@200")
+    T.eq("reagents: the name ends where the numbers begin", nameEnd(row), 232)
     T.eq("reagents: the mark", row.mark.text, "vendor")
-    T.eq("the widget says how wide the columns are", W.RowListColumnsWidth, 250)
+    T.eq("reagents: the mark starts inside its column", -row.mark.points[1][4], 52)
 
     -- The path list: skill range, crafts, cost; no mark column.
     local clicked
@@ -664,13 +673,13 @@ T.section("column layouts", function()
     })
     row = list.rows[2]
     T.eq("no mark column: cost at the right edge", column(row, 4), "84@4")
-    T.eq("no mark column: need", column(row, 1), "34@156")
-    T.eq("no mark column: the name gets the room", nameEnd(row), 192)
+    T.eq("no mark column: need", column(row, 1), "30@148")
+    T.eq("no mark column: the name gets the room", nameEnd(row), 180)
 
     -- A pooled row laid out one way is laid out again for the next.
     list:Render({ { kind = "cols", text = "Wool Cloth", cols = { "1", "2", "3", "4c" }, mark = "vendor" } })
     T.check("a reused row is the same frame", list.rows[1] == header)
-    T.eq("a reused row takes the new layout", column(list.rows[1], 4), "84@64")
+    T.eq("a reused row takes the new layout", column(list.rows[1], 4), "84@56")
     T.check("and shows its fourth column again", list.rows[1].cols[4].shown ~= false)
 
     -- A row whose first columns are empty lets its text run over them.
@@ -678,8 +687,68 @@ T.section("column layouts", function()
         { kind = "cols", text = "Charged Scorpid Bracers - auction house", cols = { "", "", "", "68s 63c" } },
         { kind = "cols", text = "Wool", cols = { "165", "", "", "" }, mark = "in list" },
     })
-    T.eq("empty leading columns: the name runs up to the first one used", nameEnd(list.rows[1]), 150)
-    T.eq("a first column in use: the name ends before it", nameEnd(list.rows[2]), 252)
+    T.eq("empty leading columns: the name runs up to the first one used", nameEnd(list.rows[1]), 142)
+    T.eq("a first column in use: the name ends before it", nameEnd(list.rows[2]), 232)
+
+    -- Nothing sits on anything else, at the narrowest, the default and the
+    -- widest window (the list is the window's width less 44), and the
+    -- reagent's name keeps a column worth reading.
+    local function spans(r, rowWidth)
+        -- { what, left, right } of each part, measured from the row's left edge
+        local out = {}
+        local nameLeft = r.text.points[1][4]
+        out[#out + 1] = { "name", nameLeft, rowWidth - nameEnd(r) }
+        for i, col in ipairs(r.cols) do
+            if col.shown ~= false then
+                local right = rowWidth + col.points[#col.points][4]
+                out[#out + 1] = { "column " .. i, right - col.width, right }
+            end
+        end
+        if r.button and r.button.shown then
+            local right = rowWidth + r.button.points[#r.button.points][4]
+            out[#out + 1] = { "button", right - r.button.width, right }
+        elseif r.mark.text ~= "" then
+            local left = rowWidth + r.mark.points[1][4]
+            out[#out + 1] = { "mark", left, left + r.mark:GetStringWidth() }
+        end
+        return out
+    end
+    local function overlap(r, rowWidth)
+        local parts = spans(r, rowWidth)
+        table.sort(parts, function(a, b) return a[2] < b[2] end)
+        for i, part in ipairs(parts) do
+            if part[2] < 0 or part[3] > rowWidth then return part[1] .. " leaves the row" end
+            if part[3] <= part[2] then return part[1] .. " has no width" end
+            if parts[i + 1] and part[3] > parts[i + 1][2] then return part[1] .. " runs into " .. parts[i + 1][1] end
+        end
+        return nil
+    end
+    for _, window in ipairs({ 380, 420, 640 }) do
+        local width = window - 44
+        list:SetWidth(width)
+        list:Render({
+            { kind = "cols", header = true, text = "Reagent", cols = { "Need", "Have", "Buy", "Cost" } },
+            { kind = "cols", icon = "icon", text = "Heavy Scorpid Scale", cols = { "1234", "1234", "1234", "888g 88s 88c" }, mark = "vendor" },
+            { kind = "cols", icon = "icon", text = "Bolt of Runecloth", cols = { "55", "0", "-", "" },
+              button = { text = "I craft it", onClick = function() end } },
+            { kind = "cols", layout = "path", text = "> Charged Scorpid Bracers", cols = { "274-280", "100", "888g 88s 88c" } },
+            { kind = "cols", layout = "nomark", indent = 14, icon = "icon", text = "Heavy Scorpid Scale", cols = { "28", "0", "28", "3g 82s" } },
+        })
+        local p = "window " .. window .. ": "
+        for i, name in ipairs({ "header", "reagent with a mark", "reagent with a button", "path row", "run's reagent" }) do
+            local r = list.rows[i]
+            T.check(p .. name .. ": nothing overlaps", overlap(r, r.width) == nil, overlap(r, r.width))
+        end
+        local marked, button = list.rows[2], list.rows[3].button
+        T.check(p .. "the craft / buy button stays inside the mark column",
+            button.width <= 56 and -button.points[#button.points][4] + button.width <= 56, button.width)
+        local name = spans(marked, marked.width)[1]
+        T.check(p .. "a reagent's name keeps at least 80 wide", name[3] - name[2] >= 80, name[3] - name[2])
+    end
+    list:SetWidth(376)
+    list:Render({ { kind = "cols", icon = "icon", text = "Heavy Scorpid Scale", cols = { "28", "0", "28", "3g 82s" }, mark = "vendor" } })
+    local name = spans(list.rows[1], 376)[1]
+    T.eq("default width: the reagent's name column", name[3] - name[2], 124)
 end)
 
 T.section("sub-lines", function()

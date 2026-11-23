@@ -125,6 +125,38 @@ T.section("panel", function()
     T.eq("Buy all carries the total", panel.buyAllBtn.text, "Buy all - 87s")
     T.check("Buy all enabled", panel.buyAllBtn.enabled)
 
+    -- The panel is as tall as its rows need, so nothing scrolls and the
+    -- list shows no scroll bar. (The fake UI lays nothing out: the list's
+    -- height is what its two anchors leave of the panel.)
+    local function listHeight()
+        local list = panel.list.frame
+        return frame.height + list.points[1][3] - list.points[2][3]
+    end
+    panel.list.frame.height = listHeight()
+    panel:Render()
+    panel.list.frame.height = listHeight()
+    T.eq("three rows: the list is as tall as its content", panel.list.frame.height, panel.list.content.height)
+    T.eq("three rows: nothing to scroll", panel.list.frame:GetVerticalScrollRange(), 0)
+    T.check("three rows: no scroll bar", panel.list.frame.ScrollBar.shown == false)
+    -- More rows than the panel shows at once do scroll.
+    local saved = env.account.missing.rows
+    local many, sold = {}, {}
+    for i = 1, 14 do
+        many[i] = { itemId = 300 + i, name = "Reagent " .. i, toBuy = 2, need = 2, have = 0, crafted = false }
+        sold[i] = { index = i, itemId = 300 + i, name = "Reagent " .. i, price = 100, bundle = 1, stock = -1, maxStack = 20,
+            extendedCost = false, purchasable = true }
+    end
+    local items = m.items
+    env.account.missing.rows, m.items = many, sold
+    panel:Refresh()
+    panel.list.frame.height = listHeight()
+    panel:Render()
+    T.eq("fourteen rows: all listed", #panel.list.rows, 14)
+    T.check("fourteen rows: the panel stops growing and the list scrolls",
+        panel.list.frame:GetVerticalScrollRange() > 0 and panel.list.frame.ScrollBar.shown == true)
+    env.account.missing.rows, m.items = saved, items
+    panel:Refresh()
+
     -- Buy all: the first purchase in the click, the rest as each one arrives.
     ui.fire(panel.buyAllBtn, "OnClick")
     T.eq("first purchase made in the click", table.concat(m.bought, " "), "2x20")

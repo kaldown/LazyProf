@@ -45,10 +45,13 @@ function Widgets.SetResizeBounds(frame, minW, minH, maxW, maxH)
     end
 end
 
--- The bottom-right resize grip. onDone() runs when the user lets go.
+-- The bottom-right resize grip. onDone() runs when the user lets go. It
+-- takes clicks in a square of RESIZE_GRIP_SIZE around its 16 x 16 icon:
+-- whatever a window puts in that corner has to end above or left of it.
+local RESIZE_GRIP_SIZE = 20
 function Widgets.CreateResizeGrip(frame, onDone)
     local grip = CreateFrame("Button", nil, frame)
-    grip:SetSize(32, 32)
+    grip:SetSize(RESIZE_GRIP_SIZE, RESIZE_GRIP_SIZE)
     grip:SetPoint("BOTTOMRIGHT", 0, 0)
     -- A nearly invisible texture so the whole corner takes the click
     grip:SetNormalTexture("Interface\\Buttons\\WHITE8x8")

@@ -41,7 +41,9 @@ LazyProf.GuideWindow = GuideWindow
 
 local DEFAULT_WIDTH = 420
 local MIN_WIDTH, MAX_WIDTH = 380, 640
-local MIN_HEIGHT, MAX_HEIGHT = 360, 900
+-- (With every block of the header shown - More options in planning - the
+-- list still has room for a handful of rows at the minimum height.)
+local MIN_HEIGHT, MAX_HEIGHT = 440, 900
 local FALLBACK_HEIGHT = 480
 local PLANNING_HEIGHT = 540
 
@@ -64,7 +66,10 @@ local RECEIPT_NOTE_MIN = 60
 local SEARCH_HEIGHT = 26
 local SHOP_ROW_HEIGHT = 26
 local LIST_GAP = 4                -- between the header and the list
-local LIST_LEFT, LIST_RIGHT, LIST_BOTTOM = 10, 30, 10   -- LIST_RIGHT leaves room for the scroll bar
+-- LIST_RIGHT leaves room for the scroll bar; LIST_BOTTOM ends the list above
+-- the resize grip in the corner, which would otherwise sit on the bar's
+-- scroll-down button.
+local LIST_LEFT, LIST_RIGHT, LIST_BOTTOM = 10, 30, 20
 
 local GOLD = { 1, 0.82, 0 }
 local WHITE = { 1, 1, 1 }
@@ -207,7 +212,6 @@ function GuideWindow:BuildView(path, mode, plain)
     view.skill = path.actualSkill
     view.hideOwned = LazyProf.CharStore:Get().hideOwned and true or false
     view.advanced = LazyProf.db.profile.showAdvanced and true or false
-    view.planning = (mode == "planning") or nil
 
     -- The account of the whole path: its shopping list from the stages'
     -- quantities (so the margin is in it), less what the crafts sell for,
@@ -575,16 +579,17 @@ function GuideWindow:Build()
 end
 
 -- Default size: docked, as tall as the profession window, within sensible
--- limits; undocked, a fixed height. The size the player dragged it to wins.
+-- limits; undocked, a fixed height. The size the player dragged it to wins,
+-- raised to the minimum if it was saved when the window could be smaller.
 function GuideWindow:ApplySize()
     local height = PLANNING_HEIGHT
     if self.mode ~= "planning" then
         local anchor = LazyProf.Client:AnchorFrame()
         height = anchor and anchor.GetHeight and anchor:GetHeight() or 0
         if not height or height <= 0 then height = FALLBACK_HEIGHT end
-        height = math.max(MIN_HEIGHT + 60, math.min(700, height))
+        height = math.max(MIN_HEIGHT, math.min(700, height))
     end
-    LazyProf.PanelShell:ApplySize(self.frame, DEFAULT_WIDTH, height)
+    LazyProf.PanelShell:ApplySize(self.frame, DEFAULT_WIDTH, height, MIN_WIDTH, MIN_HEIGHT)
     self.sized = self.mode
     self:Layout()
 end

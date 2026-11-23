@@ -53,8 +53,9 @@
 --   Blizzard_Console/Blizzard_Console.lua:308).
 --   Whether the value-changed script tells a player's change from one made
 --   by code is not relied on: this widget marks its own changes itself.
--- classic - a plain Slider frame with a track texture of its own and the
---   stock horizontal thumb; base widget calls only.
+-- classic - a plain Slider frame with a track of its own (light grey, a thin
+--   dark edge) and the stock horizontal thumb; base widget calls only. Not
+--   seen on a client.
 local ADDON_NAME, LazyProf = ...
 
 LazyProf.Widgets = LazyProf.Widgets or {}
@@ -223,6 +224,7 @@ end
 -- Classic -----------------------------------------------------------------
 
 local TRACK = "Interface\\Buttons\\WHITE8x8"
+local TRACK_HEIGHT = 6
 local THUMB = "Interface\\Buttons\\UI-SliderBar-Button-Horizontal"
 
 local function CreateClassic(parent, name, opts)
@@ -239,10 +241,18 @@ local function CreateClassic(parent, name, opts)
         frame:SetObeyStepOnDrag(true)
     end
     local slider = New(frame, opts)
-    slider.track = frame:CreateTexture(nil, "BACKGROUND")
+    -- A light grey track with a thin dark edge under it: a dark track is lost
+    -- on the window's dark backdrop.
+    slider.trackEdge = frame:CreateTexture(nil, "BACKGROUND")
+    slider.trackEdge:SetTexture(TRACK)
+    slider.trackEdge:SetVertexColor(0.05, 0.05, 0.05, 0.9)
+    slider.trackEdge:SetHeight(TRACK_HEIGHT + 2)
+    slider.trackEdge:SetPoint("LEFT", -1, 0)
+    slider.trackEdge:SetPoint("RIGHT", 1, 0)
+    slider.track = frame:CreateTexture(nil, "BORDER")
     slider.track:SetTexture(TRACK)
-    slider.track:SetVertexColor(0, 0, 0, 0.6)
-    slider.track:SetHeight(6)
+    slider.track:SetVertexColor(0.35, 0.35, 0.35, 0.9)
+    slider.track:SetHeight(TRACK_HEIGHT)
     slider.track:SetPoint("LEFT", 0, 0)
     slider.track:SetPoint("RIGHT", 0, 0)
     return slider

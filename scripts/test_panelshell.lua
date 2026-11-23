@@ -935,6 +935,21 @@ section("owner", function()
     env.shell:ApplySize(f, 420, 500)
     check(p .. "the saved size for its key", f.width == 480 and f.height == 620)
 
+    -- A size saved when the frame could be smaller is raised to today's
+    -- minimum when it is applied; the saved value itself is left alone.
+    env.addon.db.profile.panelSizes.guidePlanning = { width = 300, height = 360 }
+    env.shell:ApplySize(f, 420, 500, 380, 440)
+    check(p .. "a saved size under the minimum is raised to it", f.width == 380 and f.height == 440, f.width .. "x" .. f.height)
+    check(p .. "what is saved stays as it was", env.addon.db.profile.panelSizes.guidePlanning.height == 360)
+    env.addon.db.profile.panelSizes.guidePlanning = { width = 480, height = 400 }
+    env.shell:ApplySize(f, 420, 500, 380, 440)
+    check(p .. "each side by itself", f.width == 480 and f.height == 440, f.width .. "x" .. f.height)
+    env.addon.db.profile.panelSizes.guidePlanning = { width = 480, height = 620 }
+    env.shell:ApplySize(f, 420, 500, 380, 440)
+    check(p .. "a saved size above the minimum is kept", f.width == 480 and f.height == 620)
+    env.shell:ApplySize(f, 420, 500)
+    check(p .. "no minimum given: the saved size as it is", f.width == 480 and f.height == 620)
+
     env.shell:ResetPositions()
     check(p .. "reset forgets spots and sizes", next(env.addon.db.profile.panelPositions) == nil
         and next(env.addon.db.profile.panelSizes) == nil)

@@ -63,10 +63,12 @@ local SUB_COLOR = { 0.7, 0.7, 0.7 }
 -- left to right, and what is kept free right of the last one (the mark
 -- column, or a little air before the row's edge). The cost column is as
 -- wide as an amount written to the copper ("888g 88s 88c") in the small
--- font.
-local COL_MARK_WIDTH = 64
+-- font; a number column holds four digits and the titles "Need" and "Have";
+-- the mark column holds "vendor", "in list" and the craft / buy button.
+-- What they leave is the name's, so they are no wider than that needs.
+local COL_MARK_WIDTH = 56
 local COL_COST_WIDTH = 84
-local COL_NUMBER_WIDTH = 34
+local COL_NUMBER_WIDTH = 30
 local COL_EDGE = 4
 local MAX_COLUMNS = 4
 local REAGENT_WIDTHS = { COL_NUMBER_WIDTH, COL_NUMBER_WIDTH, COL_NUMBER_WIDTH, COL_COST_WIDTH }
@@ -75,7 +77,6 @@ local LAYOUTS = {
     nomark = { widths = REAGENT_WIDTHS, trailing = COL_EDGE },
     path = { widths = { 62, 46, COL_COST_WIDTH }, trailing = COL_EDGE },   -- skill range, crafts, cost
 }
-Widgets.RowListColumnsWidth = COL_MARK_WIDTH + COL_COST_WIDTH + 3 * COL_NUMBER_WIDTH
 
 local function Font(name)
     return _G[name] or name
