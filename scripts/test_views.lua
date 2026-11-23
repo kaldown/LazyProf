@@ -1110,8 +1110,9 @@ end)
 T.section("shopping rows", function()
     local chosen = {}
     local ctx = { onCraftChoice = function(row, choice) chosen[#chosen + 1] = { row.itemId, choice == nil and "auto" or choice } end }
+    -- (The craft / buy button belongs to the advanced controls.)
     local function shop(rows)
-        return Views.Shopping({ path = makePath(), missing = { rows = rows } }, ctx)
+        return Views.Shopping({ path = makePath(), missing = { rows = rows }, advanced = true }, ctx)
     end
     local function find(rows, name)
         for _, r in ipairs(rows) do
@@ -1159,6 +1160,148 @@ T.section("shopping rows", function()
     T.eq("automatic craft", find(rows, "Automatic craft").button.text, "I craft it")
     T.check("automatic craft: tooltip", find(rows, "Automatic craft").button.tooltip[1].text:find("automatically", 1, true) ~= nil)
     T.eq("automatic buy", find(rows, "Automatic buy").button.text, "I buy it")
+end)
+
+-- The Shopping tab: what is left to buy first, dearest first; then what the
+-- character makes; then what is already owned; the two sums of the receipt.
+T.section("shopping list", function()
+    local THREAD, LEATHER, DYE, DUST, SILK = 161, 162, 163, 164, 165
+    local shirt = recipe(40, "Shirt", 100, 150, 160, 170, { reagents = {
+        { itemId = BOLT, count = 2, name = "Bolt" }, { itemId = THREAD, count = 1, name = "Thread" } } })
+    local hat = recipe(41, "Hat", 110, 150, 160, 170, { unlearned = true, sourceInfo = { type = "ah", price = 8500, source = "TSM" },
+        reagents = { { itemId = LEATHER, count = 2, name = "Leather" }, { itemId = DUST, count = 1, name = "Dust" } } })
+    local belt = recipe(42, "Belt", 120, 150, 160, 170, { unlearned = true, sourceInfo = { type = "trainer", cost = 400 },
+        reagents = { { itemId = DYE, count = 1, name = "Dye" }, { itemId = SILK, count = 3, name = "Silk" } } })
+    -- Dust has no price. Ten of each recipe: 20 Bolt (made from 60 Cloth),
+    -- 10 Thread, 20 Leather, 10 Dust, 10 Dye, 30 Silk.
+    local prices = { [BOLT] = 500, [CLOTH] = 100, [THREAD] = 10, [LEATHER] = 300, [DYE] = 50, [SILK] = 200 }
+    local function shopPath()
+        return makePath({ complete = true, gaps = {}, currentSkill = 100, actualSkill = 100, prices = prices,
+            steps = { step(shirt, 100, 110, 10, 0), step(hat, 110, 120, 10, 0), step(belt, 120, 130, 10, 0) } })
+    end
+    local stock = { [DYE] = 25, [SILK] = 12 }
+    local chosen, shown = {}, {}
+    local ctx = {
+        onCraftChoice = function(row, choice) chosen[#chosen + 1] = { row.itemId, choice == nil and "auto" or choice } end,
+        onShowRecipe = function(r) shown[#shown + 1] = r.name end,
+    }
+    local function texts(rows)
+        local out = {}
+        for _, r in ipairs(rows) do
+            if r.kind == "sep" then
+                out[#out + 1] = "---"
+            else
+                out[#out + 1] = (r.text or "") .. (r.cols and (" | " .. table.concat(r.cols, ",")) or "")
+                    .. (r.button and (" [" .. r.button.text .. "]") or "")
+            end
+        end
+        return out
+    end
+    local function shopping(opts)
+        opts = opts or {}
+        opts.inventory = opts.inventory or stock
+        local view = shopView(shopPath(), opts)
+        return Views.Shopping(view, ctx), view
+    end
+
+    local rows, view = shopping()
+    local t = texts(rows)
+    T.eq("table header", t[1], "Reagent | Need,Have,Buy,Cost")
+    T.eq("to buy, dearest first (same cost: by name)", t[2], "Cloth | 60,0,60,60s")
+    T.eq("second", t[3], "Leather | 20,0,20,60s")
+    T.eq("third, partly owned", t[4], "Silk | 30,12,18,36s")
+    T.eq("the cheapest priced one", t[5], "Thread | 10,0,10,1s")
+    T.eq("a reagent without a price is last of those to buy", t[6], "Dust | 10,0,10,?")
+    T.eq("then what the character makes", t[7], "Bolt | 20,0,-,")
+    T.eq("with what it is made from beneath", t[8], "Cloth | 60,,,")
+    T.eq("then what is already owned", t[9], "Dye | 10,25,-,-")
+    T.eq("the reagents total under the table", t[10], "Reagents to buy | ,,,1g 57s")
+    T.eq("a rule, then the recipes", t[11] .. " " .. t[12], "--- Recipes to learn")
+    T.eq("a recipe to learn: where from and its price", t[13], "Belt - trainer | ,,,4s")
+    T.eq("by name", t[14], "Hat - auction house | ,,,85s")
+    T.eq("the recipes total", t[15], "Recipes | ,,,89s")
+    T.eq("nothing else", #t, 15)
+
+    -- The two totals are the receipt's two parts.
+    T.eq("reagents total is the account's reagents", rows[10].cols[4], LazyProf.Utils.FormatMoneyShort(view.account.reagents))
+    T.eq("recipes total is the account's recipes", rows[15].cols[4], LazyProf.Utils.FormatMoneyShort(view.account.recipes))
+    T.eq("and the receipt says the same", Views.Receipt(view)[1].note, "reagents 1g 57s + recipes 89s")
+    local costs = 0
+    for _, r in ipairs(rows) do
+        if r.item then costs = costs + (r.item.cost or 0) end
+    end
+    T.eq("the Cost column adds up to the reagents total", costs, view.account.reagents)
+
+    -- Colours: nothing red; Have is green when it covers Need; owned rows dimmed.
+    local silk, dye, dust, bolt = rows[4], rows[9], rows[6], rows[7]
+    T.check("the Buy number is white", silk.colColors[3][1] == 1 and silk.colColors[3][2] == 1 and silk.colColors[3][3] == 1)
+    T.check("Have is white while it does not cover Need", silk.colColors[2][1] == 1)
+    T.check("Have is green when it does", dye.colColors[2][1] < 1 and dye.colColors[2][2] == 1)
+    T.eq("a fully owned row is dimmed", dye.alpha, 0.55)
+    T.check("rows to buy are not", silk.alpha == nil or silk.alpha == 1)
+    T.check("a missing price is orange", dust.colColors[4][1] == 1 and dust.colColors[4][2] == 0.5)
+    T.eq("the child row is indented", rows[8].indent, 14)
+
+    -- The craft / buy button and "Hide what I have" belong to More options.
+    T.check("more options off: no craft / buy button", bolt.button == nil)
+    rows = shopping({ hideOwned = true })
+    T.check("more options off: hide-owned does not act (its checkbox is hidden)", texts(rows)[9] == "Dye | 10,25,-,-")
+    rows = shopping({ advanced = true })
+    t = texts(rows)
+    T.eq("more options on: the button, on a reagent the character can make", t[7], "Bolt | 20,0,-, [I craft it]")
+    T.check("and on no other row", rows[2].button == nil and rows[9].button == nil)
+    rows[7].button.onClick("LeftButton")
+    T.check("its click switches the choice", chosen[#chosen][1] == BOLT and chosen[#chosen][2] == "buy")
+    rows = shopping({ advanced = true, hideOwned = true })
+    t = texts(rows)
+    T.eq("more options on, hide-owned: owned rows go", t[9], "Reagents to buy | ,,,1g 57s")
+    T.eq("crafted rows stay", t[7], "Bolt | 20,0,-, [I craft it]")
+
+    -- A recipe row opens the recipe; its tooltip says how to learn it.
+    rows = shopping()
+    rows[14].onClick()
+    T.eq("a click on a recipe row opens the recipe", shown[#shown], "Hat")
+    T.eq("recipe row tooltip", rows[14].tooltip[2].text, "Listed on the auction house.")
+
+    -- VANILLA: the recipe data's sources are not trusted, so none is named;
+    -- the amounts stay, because the receipt has to add up from these rows.
+    rows = shopping({ profile = "VANILLA" })
+    t = texts(rows)
+    T.eq("VANILLA: recipe and price only", t[13], "Belt | ,,,4s")
+    T.eq("VANILLA: second", t[14], "Hat | ,,,85s")
+    T.eq("VANILLA: the total is unchanged", t[15], "Recipes | ,,,89s")
+    T.eq("VANILLA: the tooltip names no source", rows[14].tooltip[2].text,
+        "Learn the recipe. The recipe details show what is known about it.")
+
+    -- No recipe costs anything: no recipe section.
+    local known = shopPath()
+    known.steps = { step(shirt, 100, 110, 10, 0) }
+    rows = Views.Shopping(shopView(known), ctx)
+    t = texts(rows)
+    T.eq("no recipes to learn: the list ends with the reagents total", t[#t], "Reagents to buy | ,,,61s")
+
+    -- Everything owned.
+    rows = shopping({ inventory = { [BOLT] = 20, [THREAD] = 10, [LEATHER] = 20, [DUST] = 10, [DYE] = 10, [SILK] = 30 } })
+    t = texts(rows)
+    T.eq("nothing to buy says so", t[1], "Nothing left to buy.")
+    T.eq("the owned rows follow, by name", t[3] .. " / " .. t[4], "Bolt | 20,20,-,- / Dust | 10,10,-,-")
+    T.eq("a zero total", t[9], "Reagents to buy | ,,,0c")
+    T.eq("the recipes still cost", t[#t], "Recipes | ,,,89s")
+
+    -- Owned stock that is not in the bags: collect it first, as before.
+    local view2 = shopView(shopPath())
+    view2.account = Pathfinder:Account(Stages.ShoppingSteps(view2.stages), { [SILK] = 30 }, { [SILK] = { bank = 30 } }, prices)
+    view2.missing = view2.account.missing
+    t = texts(Views.Shopping(view2, ctx))
+    T.eq("collect first block", t[1], "Collect first")
+    T.eq("from the bank", t[2], "30x Silk")
+    T.eq("a rule before the table", t[3] .. " " .. t[4], "--- Reagent | Need,Have,Buy,Cost")
+
+    -- No reagents at all, nothing left.
+    T.eq("no reagents needed", texts(Views.Shopping({ path = makePath(), missing = { rows = {} } }, ctx))[1],
+        "No reagents needed in this path.")
+    local done = makePath({ steps = {}, gaps = {}, totalCost = 0, nothingLeft = true, actualSkill = 300, currentSkill = 300 })
+    T.eq("nothing left: the notice", Views.Shopping(shopView(done), ctx)[1].text, "Nothing left: Tailoring is at its cap of 300.")
 end)
 
 T.section("arrow tooltip", function()

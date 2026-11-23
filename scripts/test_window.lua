@@ -426,6 +426,7 @@ T.section("shopping tab", function()
             fromAlts = { { itemId = 101, name = "Wool", icon = "icon", have = 20, missing = 20,
                 characters = { { name = "Bankalt-Realm", count = 20 } } } },
             toCraft = {}, fromAH = {}, recipeCosts = 350,
+            recipeRows = { { recipe = W.CAPE, name = "Cape", cost = 350, sourceInfo = { type = "vendor", cost = 350 } } },
             rows = {
                 row(101, "Wool", 260, 100, 160),
                 row(102, "Bolt", 55, 0, 0, { craftable = true, crafted = true, craftRecipeName = "Bolt of Wool", craftQuantity = 55,
@@ -454,18 +455,36 @@ T.section("shopping tab", function()
     T.eq("from bank, with its purpose", rows[2], "From bank | 40x Wool |cFF888888(for bolts)|r")
     T.eq("from alts, with the character", rows[3], "From alts | 20x Wool |cFF888888(Bankalt:20)|r")
     T.eq("table header", rows[5], "Reagent | Need,Have,Buy,Cost")
-    T.eq("a reagent to buy", rows[6], "Wool | 260,100,160,1g 60s")
-    T.eq("a crafted reagent: nothing to buy", rows[7], "Bolt | 55,0,-,")
-    T.eq("its sub-reagent indented beneath", rows[8], "Wool | 165,,,")
-    T.eq("a vendor reagent", rows[9], "Thread | 96,12,84,84s")
-    T.eq("an owned reagent", rows[10], "Dye | 12,12,-,-")
-    T.eq("a reagent with no price", rows[12], "Dust | 4,0,4,?")
+    T.eq("to buy, the dearest first", rows[6], "Wool | 260,100,160,1g 60s")
+    T.eq("a vendor reagent", rows[7], "Thread | 96,12,84,84s")
+    T.eq("the cheapest of those to buy", rows[8], "Bar | 5,0,5,5s")
+    T.eq("a reagent with no price is last of them", rows[9], "Dust | 4,0,4,?")
+    T.eq("then a crafted reagent: nothing to buy", rows[10], "Bolt | 55,0,-,")
+    T.eq("its sub-reagent indented beneath", rows[11], "Wool | 165,,,")
+    T.eq("then an owned reagent", rows[12], "Dye | 12,12,-,-")
+    T.eq("the reagents total in the list", rows[13], "Reagents to buy | ,,,2g 49s")
+    T.eq("the recipes to learn", rows[15], "Recipes to learn")
+    T.eq("a recipe with where it comes from and its price", rows[16], "Cape - vendor | ,,,3s 50c")
+    T.eq("the recipes total", rows[17], "Recipes | ,,,3s 50c")
     T.eq("vendor mark", W.findRow(window, "Thread").mark.text, "vendor")
+    T.eq("total under the table", window.shopTotal.text, "To buy: 2g 49s  |cFF888888+ 3s 50c recipes|r")
+
+    -- The craft / buy buttons and the hide-owned filter are advanced controls:
+    -- without the setting neither acts.
+    local function hasButton(name)
+        local button = W.findRow(window, name).button
+        return button ~= nil and button.shown ~= false
+    end
+    T.check("no craft / buy button while the advanced controls are off", not hasButton("Bolt") and not hasButton("Bar"))
+    addon.CharStore:Get().hideOwned = true
+    window:Refresh()
+    T.check("hide what I have does not act then", W.findRow(window, "Dye") ~= nil)
+    addon.CharStore:Get().hideOwned = nil
+    addon.db.profile.showAdvanced = true
+    window:Refresh()
     T.eq("crafted: the button says so", W.findRow(window, "Bolt").button.text, "I craft it")
     T.eq("bought by choice: the button says so", W.findRow(window, "Bar").button.text, "I buy it")
-    T.check("no button on a reagent the character cannot make", not W.findRow(window, "Thread").button
-        or W.findRow(window, "Thread").button.shown == false)
-    T.eq("total under the table", window.shopTotal.text, "To buy: 2g 49s  |cFF888888+ 3s 50c recipes|r")
+    T.check("no button on a reagent the character cannot make", not hasButton("Thread"))
 
     -- Craft / buy choice: stored per character, redrawn at once, no new path.
     local recalcs = #env.recalcs

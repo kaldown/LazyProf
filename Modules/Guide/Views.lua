@@ -47,7 +47,6 @@ local GOLD = { 1, 0.82, 0 }
 local GREY = { 0.7, 0.7, 0.7 }
 local DIM = { 0.5, 0.5, 0.5 }
 local GREEN = { 0.4, 1, 0.4 }
-local RED = { 1, 0.4, 0.4 }
 local ORANGE = { 1, 0.5, 0 }
 local GAP_RED = { 1, 0.5, 0.4 }
 
@@ -1294,11 +1293,44 @@ local function ShoppingTooltip(row)
     return lines
 end
 
--- "Collect first", then one row per reagent: need / have / buy / cost, a
--- "vendor" mark, and a craft / buy button on reagents the character can make.
--- view.missing is Pathfinder:CalculateMissingMaterials of the chosen range;
--- view.hideOwned hides rows with nothing left to buy.
--- ctx: onCraftChoice(row, "craft" | "buy" | nil).
+-- Rows to buy: priced ones first, the dearest first; then by name.
+local function DearestFirst(a, b)
+    local unpricedA, unpricedB = a.unpriced and true or false, b.unpriced and true or false
+    if unpricedA ~= unpricedB then return unpricedB end
+    local costA, costB = a.cost or 0, b.cost or 0
+    if costA ~= costB then return costA > costB end
+    if (a.name or "") ~= (b.name or "") then return (a.name or "") < (b.name or "") end
+    return (a.itemId or 0) < (b.itemId or 0)
+end
+
+local function ByName(a, b)
+    if (a.name or "") ~= (b.name or "") then return (a.name or "") < (b.name or "") end
+    return (a.itemId or 0) < (b.itemId or 0)
+end
+
+-- A line of the shopping table that sums a column: the label, and the amount
+-- under the Cost column.
+local function TotalRow(label, copper)
+    return { kind = "cols", total = true, text = label, color = GOLD, cols = { "", "", "", Short(copper or 0) } }
+end
+
+-- The shopping list. view.missing is Pathfinder:CalculateMissingMaterials of
+-- the steps shown. In order:
+--   "Collect first": owned stock that is not in the bags
+--   the table (need / have / buy / cost, a "vendor" mark): reagents with
+--     something left to buy, the dearest first and those without a price
+--     last; then the reagents the character makes, each with what it is made
+--     from beneath it; then the reagents already owned, dimmed, by name
+--   "Reagents to buy": the sum of the Cost column (missing.buyTotal)
+--   "Recipes to learn": a row per recipe that costs something, with where it
+--     comes from (never on the VANILLA profile) and its price, and their sum
+-- The two sums are the two parts of the receipt's "You spend".
+-- With More options (view.advanced) a reagent the character can make has its
+-- craft / buy button, and view.hideOwned hides the owned rows; without it
+-- neither acts, because the checkbox that would undo the filter is hidden.
+-- Row fields beyond the list widget's: `item` (the shopping row), `recipe`
+-- (on recipe rows), `total = true` (on the two sum rows).
+-- ctx: onCraftChoice(row, "craft" | "buy" | nil); onShowRecipe(recipe) (optional).
 function Views.Shopping(view, ctx)
     local path = view.path
     if path and path.nothingLeft then
@@ -1323,14 +1355,28 @@ function Views.Shopping(view, ctx)
     if #items == 0 then
         rows[#rows + 1] = { kind = "line", height = 26, color = DIM,
             text = "No reagents needed in " .. (view.bracket and view.bracket.name or "this path") .. "." }
-        return rows
-    end
+    else
+        local toBuy, crafted, owned = {}, {}, {}
+        local toBuyRows = 0
+        for _, row in ipairs(items) do
+            if row.toBuy > 0 then toBuyRows = toBuyRows + 1 end
+            if row.crafted then
+                crafted[#crafted + 1] = row
+            elseif row.toBuy > 0 then
+                toBuy[#toBuy + 1] = row
+            else
+                owned[#owned + 1] = row
+            end
+        end
+        table.sort(toBuy, DearestFirst)
+        table.sort(crafted, DearestFirst)
+        table.sort(owned, ByName)
+        if view.advanced and view.hideOwned then
+            owned = {}
+        end
 
-    local table_ = {}
-    local toBuyRows = 0
-    for _, row in ipairs(items) do
-        if row.toBuy > 0 then toBuyRows = toBuyRows + 1 end
-        if not (view.hideOwned and row.toBuy <= 0 and not row.crafted) then
+        local table_ = {}
+        local function addItem(row, alpha)
             local buy = row.toBuy > 0 and tostring(row.toBuy) or "-"
             local cost
             if row.toBuy <= 0 then
@@ -1338,21 +1384,21 @@ function Views.Shopping(view, ctx)
             elseif row.unpriced then
                 cost = "?"
             else
-                cost = Utils.FormatMoneyShort(row.cost)
+                cost = Short(row.cost)
             end
             local desc = {
                 kind = "cols", item = row, icon = row.icon, text = row.name,
                 cols = { tostring(row.need), tostring(row.have), buy, cost },
                 colColors = {
                     [2] = row.have >= row.need and GREEN or WHITE,
-                    [3] = row.toBuy > 0 and RED or DIM,
+                    [3] = row.toBuy > 0 and WHITE or DIM,
                     [4] = row.unpriced and ORANGE or WHITE,
                 },
                 mark = row.isVendor and "vendor" or nil,
-                bg = BG_SUB, hoverBg = BG_ROW_HOVER,
+                bg = BG_SUB, hoverBg = BG_ROW_HOVER, alpha = alpha,
                 itemId = row.itemId, link = row.link, tooltip = ShoppingTooltip(row),
             }
-            if row.craftable then
+            if row.craftable and view.advanced then
                 desc.button = ChoiceButton(row, ctx)
             end
             table_[#table_ + 1] = desc
@@ -1366,15 +1412,40 @@ function Views.Shopping(view, ctx)
                 }
             end
         end
+        for _, row in ipairs(toBuy) do addItem(row) end
+        for _, row in ipairs(crafted) do addItem(row) end
+        for _, row in ipairs(owned) do addItem(row, 0.55) end
+
+        if toBuyRows == 0 then
+            rows[#rows + 1] = { kind = "line", color = GREEN, text = "Nothing left to buy"
+                .. (view.bracket and (" for " .. view.bracket.name) or "") .. "." }
+        end
+        if #table_ > 0 then
+            rows[#rows + 1] = Views.ReagentHeader()
+            for _, desc in ipairs(table_) do rows[#rows + 1] = desc end
+            rows[#rows + 1] = TotalRow("Reagents to buy", missing.buyTotal)
+        end
     end
 
-    if toBuyRows == 0 then
-        rows[#rows + 1] = { kind = "line", color = GREEN, text = "Nothing left to buy"
-            .. (view.bracket and (" for " .. view.bracket.name) or "") .. "." }
-    end
-    if #table_ > 0 then
-        rows[#rows + 1] = Views.ReagentHeader()
-        for _, desc in ipairs(table_) do rows[#rows + 1] = desc end
+    local recipeRows = missing.recipeRows or {}
+    if #recipeRows > 0 then
+        rows[#rows + 1] = { kind = "sep" }
+        rows[#rows + 1] = { kind = "line", font = "GameFontNormalSmall", color = GOLD, text = "Recipes to learn" }
+        for _, entry in ipairs(recipeRows) do
+            local learn = { recipe = entry.recipe, sourceInfo = entry.sourceInfo }
+            local where = Text.LearnShort(learn, view.profile)
+            local tooltip = { { text = "Learn " .. tostring(entry.name), r = 1, g = 1, b = 1 } }
+            for _, line in ipairs(Text.LearnLines(learn, view.profile, path and path.profession)) do
+                tooltip[#tooltip + 1] = { text = line.text, r = 0.7, g = 0.7, b = 0.7 }
+            end
+            rows[#rows + 1] = {
+                kind = "cols", recipe = entry.recipe, text = tostring(entry.name) .. (where and (" - " .. where) or ""),
+                cols = { "", "", "", Short(entry.cost) },
+                bg = BG_SUB, hoverBg = BG_ROW_HOVER, tooltip = tooltip,
+                onClick = ctx.onShowRecipe and function() ctx.onShowRecipe(entry.recipe) end or nil,
+            }
+        end
+        rows[#rows + 1] = TotalRow("Recipes", missing.recipeCosts)
     end
     return rows
 end
