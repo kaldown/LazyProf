@@ -11,6 +11,7 @@ ignore:
   - docs
   - scripts
   - releases
+  - exchange
   - Makefile
   - "*.md"
   - Libs/Ace3/tests

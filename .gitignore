@@ -8,6 +8,7 @@ docs/agents/
 **/*-design.md
 **/*-impl.md
 **/*-brainstorm.md
+exchange/
 
 # macOS
 .DS_Store
