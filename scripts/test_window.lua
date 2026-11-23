@@ -208,6 +208,23 @@ T.section("receipt", function()
         right(rows[1].amount) - left(rows[1].label) >= rows[2].label:GetStringWidth() + 84)
     T.eq("a note is as wide as what is left of the window", rows[1].note.width, 420 - 12 - left(rows[1].note))
 
+    -- An amount wider than the column makes the column wider: it is never
+    -- drawn over the label, and the notes move right with it.
+    local noteLeft, amountRight = left(rows[1].note), right(rows[1].amount)
+    env.account.spend = 123456789012
+    window:Refresh()
+    T.eq("fixture: an amount wider than 84", rows[1].amount.text, "12345678g 90s 12c")
+    local wide = rows[1].amount:GetStringWidth()
+    T.check("fixture: by the test's measure", wide > 84, wide)
+    T.eq("a wide amount: the column grows to hold it", right(rows[1].amount), amountRight + (wide - 84))
+    T.check("a wide amount: it starts right of the widest label",
+        right(rows[1].amount) - wide >= left(rows[2].label) + rows[2].label:GetStringWidth())
+    T.eq("a wide amount: the notes move right with it", left(rows[1].note), noteLeft + (wide - 84))
+    T.check("a wide amount: every amount still shares the right edge", right(rows[2].amount) == right(rows[1].amount))
+    env.account.spend = 143000
+    window:Refresh()
+    T.eq("back to an ordinary amount: the column is 84 again", right(rows[1].amount), amountRight)
+
     -- A note that does not fit wraps under the note column: the block grows
     -- and the list moves down with it.
     local height, listTop = window.receipt.height, top(window.list.frame)
@@ -678,6 +695,108 @@ T.section("more options", function()
     env2.window:Update(W.path())
     T.check("a new window opens with the options it was left with",
         env2.window.strip.shown and env2.window.moreBtn.text == "Fewer options")
+end)
+
+-- What More options shows depends on where the window is and what it has to
+-- show; the boxes say what is saved.
+T.section("more options: what shows where, and what is ticked", function()
+    local env = W.load("forever")
+    local window, ui, addon = env.window, env.ui, env.addon
+    local profile = addon.db.profile
+    profile.showAdvanced = true
+
+    -- Docked: no "Plan from skill 1", which is a what-if of planning.
+    window:Update(W.path())
+    T.check("docked, More options on: the strip is there", window.strip.shown and window.strategyGroup.frame:IsVisible())
+    T.check("docked: no \"Plan from skill 1\"", not window.fromOneBox.frame:IsVisible())
+
+    -- A profession without recipe data: its notice, and nothing of the
+    -- options, although they are switched on.
+    window:ShowNotice("No recipe data for Engineering yet.")
+    T.eq("notice with More options on: the notice", W.rowTexts(window)[1], "No recipe data for Engineering yet.")
+    T.check("notice with More options on: no strip, no search, no hide-owned box, no switch",
+        not window.strip.shown and not window.searchRow.shown and not window.shopRow.shown and not window.moreBtn.shown)
+    T.eq("notice with More options on: no header block at all", stacked(window), "")
+    ui.fire(window.tabs.buttons[2], "OnClick")
+    T.check("notice on the Shopping tab: the same", not window.strip.shown and not window.shopRow.shown)
+    ui.fire(window.tabs.buttons[1], "OnClick")
+
+    -- The boxes are ticked from what is saved, each time the window is drawn.
+    profile.useMargin = true
+    addon.CharStore:Get().hideOwned = true
+    window:Update(W.path())
+    T.check("spare crafts: ticked from the setting", window.marginBox:GetChecked() == true)
+    T.check("hide what I have: ticked from the character's choice", window.hideOwnedBox:GetChecked() == true)
+    profile.useMargin = false
+    addon.CharStore:Get().hideOwned = nil
+    window:Refresh()
+    T.check("spare crafts: unticked when the setting is off", window.marginBox:GetChecked() == false)
+    T.check("hide what I have: unticked when the choice is gone", window.hideOwnedBox:GetChecked() == false)
+
+    -- Planning: the what-if is offered, ticked from the plan it shows.
+    env.open = false
+    env.playerSkill, env.playerCap = 143, 150
+    addon.CharStore:Get().planFromOne = { tailoring = true }
+    window:OpenPlanning("tailoring")
+    T.check("planning a profession the character has: \"Plan from skill 1\" is there", window.fromOneBox.frame:IsVisible())
+    T.check("ticked, as that plan is from skill 1", window.fromOneBox:GetChecked() == true)
+    addon.CharStore:Get().planFromOne = nil
+    window:OpenPlanning("tailoring")
+    T.check("unticked for a plan from the real skill", window.fromOneBox:GetChecked() == false)
+    window:OpenPlanning("mining")
+    T.eq("planning without recipe data, More options on: only the profession picker", stacked(window), "planRow")
+    T.check("and no switch", not window.moreBtn.shown)
+
+    -- A setting that is one for every path, changed in planning while a
+    -- profession window is open: that profession is planned again as well.
+    env.open = true
+    addon.Professions.active = "tailoring"
+    window:Update(W.path())             -- the open profession's path: kept, planning stays
+    window:OpenPlanning("alchemy")
+    local recalcs, plans = #env.recalcs, #env.planCalls
+    ui.fire(window.strategyGroup.buttons.fastest, "OnClick")
+    T.eq("strategy in planning, a profession window open: the open profession is planned again", #env.recalcs, recalcs + 1)
+    T.eq("with the reason", env.recalcs[#env.recalcs], "strategy change")
+    fakeui.openMenu(window.sellingDropdown.button).radios[3].setSelected()
+    T.eq("selling in planning, a profession window open: the same", #env.recalcs, recalcs + 2)
+    T.eq("with its reason", env.recalcs[#env.recalcs], "sale value change")
+    T.eq("planning itself is left to that recalculation", #env.planCalls, plans)
+    -- No profession window: only planning is planned again.
+    env.open = false
+    recalcs, plans = #env.recalcs, #env.planCalls
+    ui.fire(window.strategyGroup.buttons.cheapest, "OnClick")
+    fakeui.openMenu(window.sellingDropdown.button).radios[1].setSelected()
+    T.eq("no profession window: the live planner is not asked", #env.recalcs, recalcs)
+    T.eq("no profession window: planning is planned again, once each", #env.planCalls, plans + 2)
+end)
+
+-- The window is laid out again when it is shown: what was measured while it
+-- was hidden may not hold on screen.
+T.section("shown again: laid out and drawn again", function()
+    local env = W.load("forever")
+    local window, ui = env.window, env.ui
+    env.account = { missing = { rows = {}, recipeRows = {}, buyTotal = 100, recipeCosts = 50 },
+        reagents = 100, recipes = 50, spend = 150, sale = 0, net = 150 }
+    window:Update(W.path({ complete = true, gaps = {} }))
+    local frame = window.frame
+    local height, listTop = window.receipt.height, top(window.list.frame)
+    local draws = 0
+    local render = window.list.Render
+    window.list.Render = function(...)
+        draws = draws + 1
+        return render(...)
+    end
+    frame:Hide()
+    -- On screen the note turns out to need three lines.
+    window.receiptRows[1].note.stringHeight = 40
+    T.eq("hidden: nothing is laid out", window.receipt.height, height)
+    frame:Show()
+    T.eq("shown: the receipt is measured again", window.receipt.height, height + 26)
+    T.eq("shown: the list starts where the header now ends", top(window.list.frame), listTop + 26)
+    T.eq("shown: the list is drawn again", draws, 1)
+    frame:Show()
+    T.eq("already shown: nothing is done twice", draws, 1)
+    window.list.Render = render
 end)
 
 T.section("path tab", function()

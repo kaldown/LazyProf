@@ -780,6 +780,90 @@ T.section("sub-lines", function()
     T.eq("rows stack under the sub-lines", after.points[1][5], -(20 + 16 + 16 + 22))
 end)
 
+-- Rows are pooled: the frame that drew one row draws another on the next
+-- render. Nothing of what it showed before may be left on it.
+T.section("a reused row shows nothing of its previous use", function()
+    local ui, W = load("forever")
+    local list = W.CreateRowList(CreateFrame("Frame", nil, UIParent), "TestReuse")
+    list:SetWidth(376)
+    local function nothing() end
+
+    -- A line with everything on it, then a bare one.
+    list:Render({ { kind = "line", sub = true, alpha = 0.5, icon = "icon", lead = "143-165", leadColor = { 0.2, 0.8, 0.8 },
+        text = "rich", color = { 1, 0.5, 0.25 }, font = "GameFontNormalLarge", right = "4g 97s", rightColor = { 0.4, 1, 0.4 },
+        wrap = true, bg = { 0.2, 0.2, 0.1, 0.5 }, hoverBg = { 0.3, 0.3, 0.2, 0.6 }, onClick = nothing,
+        tooltip = { { text = "tip" } }, itemId = 2592,
+        button = { text = "Use", width = 40, onClick = nothing }, button2 = { text = "Other", width = 50, onClick = nothing } } })
+    local line = list.rows[1]
+    T.check("fixture: the rich line shows all of it", line.icon.shown and line.lead.shown and line.bg.shown
+        and line.button.shown and line.button2.shown and line.alpha == 0.5 and line.height == 16 and line.points[1][4] == 18)
+    list:Render({ { kind = "line", text = "bare" } })
+    T.check("line: the same frame", list.rows[1] == line)
+    T.eq("line: text", line.text.text, "bare")
+    T.eq("line: full strength again", line.alpha, 1)
+    T.check("line: no icon", line.icon.shown == false)
+    T.check("line: no lead text", line.lead.shown == false)
+    T.check("line: no background", line.bg.shown == false)
+    T.eq("line: no right-hand text", line.right.text, "")
+    T.check("line: no button", line.button.shown == false)
+    T.check("line: no second button", line.button2.shown == false)
+    T.eq("line: an ordinary row's height again, not a sub-line's", line.height, 20)
+    T.eq("line: not indented any more", line.points[1][4], 0)
+    T.eq("line: as wide as the list again", line.width, 376)
+    T.eq("line: white again, not the sub-line's grey or the old colour", table.concat(line.text.color, ","), "1,1,1")
+    T.eq("line: the small font again", line.text.font, "GameFontHighlightSmall")
+    T.check("line: not wrapping any more", line.text.wordWrap == false)
+    T.check("line: no click left over", (function()
+        local clicked = false
+        list:Render({ { kind = "line", text = "clickable", onClick = function() clicked = true end } })
+        list:Render({ { kind = "line", text = "bare" } })
+        ui.fire(line, "OnClick", "LeftButton")
+        return clicked == false
+    end)())
+    ui.fire(line, "OnEnter")
+    T.check("line: no tooltip and no hover colour left over", ui.tooltip.itemId ~= 2592 and line.bg.shown == false)
+
+    -- A reagent row with everything on it, then a path row in the same frame.
+    list:Render({ { kind = "cols", alpha = 0.55, icon = "icon", text = "Wool Cloth", color = { 0.7, 0.7, 0.7 },
+        cols = { "123", "40", "83", "4g 15s" }, colColors = { [2] = { 0.4, 1, 0.4 }, [4] = { 1, 0.5, 0 } },
+        bg = { 0.12, 0.12, 0.12, 0.5 }, indent = 14, itemId = 2592,
+        button = { text = "I craft it", onClick = nothing } } })
+    local cols = list.rows[1]
+    T.check("fixture: the rich reagent row shows all of it", cols.icon.shown and cols.bg.shown and cols.button.shown
+        and cols.alpha == 0.55 and cols.cols[4].text == "4g 15s")
+    list:Render({ { kind = "cols", layout = "path", text = "Gloves", cols = { "143-160", "19", "19s" } } })
+    T.check("cols: the same frame", list.rows[1] == cols)
+    T.eq("cols: full strength again", cols.alpha, 1)
+    T.check("cols: no icon", cols.icon.shown == false)
+    T.check("cols: no background", cols.bg.shown == false)
+    T.check("cols: no button", cols.button.shown == false)
+    T.check("cols: the column it does not use is empty and hidden", cols.cols[4].text == "" and cols.cols[4].shown == false)
+    T.eq("cols: its columns are white again", table.concat(cols.cols[2].color, ","), "1,1,1")
+    T.eq("cols: its name is white again", table.concat(cols.text.color, ","), "1,1,1")
+    T.eq("cols: not indented any more", cols.points[1][4], 0)
+    -- ...and a marked reagent row, then a path row.
+    list:Render({ { kind = "cols", text = "Thread", cols = { "9", "0", "9", "9s" }, mark = "vendor" } })
+    T.eq("fixture: the mark", cols.mark.text, "vendor")
+    list:Render({ { kind = "cols", layout = "path", text = "Gloves", cols = { "143-160", "19", "19s" } } })
+    T.eq("cols: no mark left over on a path row", cols.mark.text, "")
+    list:Render({ { kind = "cols", text = "Thread", cols = { "9", "0", "9", "9s" }, mark = "vendor" } })
+    list:Render({ { kind = "cols", layout = "nomark", text = "Thread", cols = { "9", "0", "9", "9s" } } })
+    T.eq("cols: nor on a row of the table without a mark column", cols.mark.text, "")
+    list:Render({ { kind = "cols", text = "Bolt", cols = { "5", "0", "-", "" }, button = { text = "I craft it", onClick = nothing } } })
+    list:Render({ { kind = "cols", layout = "nomark", text = "Thread", cols = { "9", "0", "9", "9s" } } })
+    T.check("cols: no button left over there either", cols.button.shown == false)
+    -- A header, then a plain row: the header's font and gold are gone.
+    list:Render({ { kind = "cols", header = true, text = "Reagent", cols = { "Need", "Have", "Buy", "Cost" } } })
+    list:Render({ { kind = "cols", text = "Thread", cols = { "9", "0", "9", "9s" } } })
+    T.eq("cols: a header's font is not left on a row", cols.text.font .. "," .. cols.cols[1].font, "GameFontHighlightSmall,GameFontHighlightSmall")
+    T.eq("cols: nor its gold", table.concat(cols.cols[1].color, ","), "1,1,1")
+
+    -- Only a line can be a sub-line: on a column row the mark changes nothing.
+    list:Render({ { kind = "cols", sub = true, text = "Thread", cols = { "9", "0", "9", "9s" } } })
+    T.eq("a column row marked as a sub-line keeps its height", cols.height, 18)
+    T.eq("and is not indented", cols.points[1][4], 0)
+end)
+
 T.section("scroll bar only when something scrolls", function()
     local function rows(n)
         local out = {}
