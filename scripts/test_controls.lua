@@ -123,9 +123,24 @@ for _, family in ipairs({ "forever", "classic" }) do
         ui.fire(frame, "OnMouseUp", "LeftButton")
         T.eq(p .. "a click that moves nothing calls nothing", calls(), "200,160 / ")
 
-        -- The other mouse button is not a drag.
+        -- Any mouse button holds the handle and lets it go.
+        reset()
         ui.fire(frame, "OnMouseDown", "RightButton")
-        T.check(p .. "the right button does not hold it", slider:IsHeld() == false)
+        T.check(p .. "another mouse button holds it too", slider:IsHeld() == true)
+        ui.slide(frame, 150)
+        ui.slide(frame, 140)
+        T.eq(p .. "a drag with another button: values reported, nothing released", calls(), "150,140 / ")
+        ui.fire(frame, "OnMouseUp", "RightButton")
+        T.eq(p .. "and its release commits once", calls(), "150,140 / 140")
+        T.check(p .. "after which it is not held", slider:IsHeld() == false)
+        -- ...also while the client calls the handle dragged.
+        reset()
+        ui.fire(frame, "OnMouseDown", "MiddleButton")
+        frame.draggingThumb = true
+        ui.slide(frame, 160)
+        frame.draggingThumb = false
+        ui.fire(frame, "OnMouseUp", "MiddleButton")
+        T.eq(p .. "another button's release is not lost while the handle counts as dragged", calls(), "160 / 160")
 
         -- A value from the player with no button held commits at once.
         reset()
@@ -142,6 +157,79 @@ for _, family in ipairs({ "forever", "classic" }) do
         frame.draggingThumb = false
         ui.fire(frame, "OnMouseUp", "LeftButton")
         T.eq(p .. "and its release commits", calls(), "190 / 190")
+
+        -- The button is let go where the slider hears nothing of it (no
+        -- mouse-up script): once no mouse button is down the hold is over,
+        -- and it ends like a release.
+        reset()
+        slider:SetRange(117, 300, 225)
+        ui.fire(frame, "OnMouseDown", "LeftButton")
+        ui.slide(frame, 200)
+        slider:SetRange(120, 300, 225)
+        T.eq(p .. "button still down: a redraw is ignored", frame.min .. ":" .. slider:GetValue(), "117:200")
+        ui.release("LeftButton")
+        T.eq(p .. "let go unheard: nothing happens by itself", calls(), "200 / ")
+        slider:SetRange(120, 300, 225)
+        T.eq(p .. "let go unheard, then a redraw: committed once", calls(), "200 / 200")
+        T.check(p .. "let go unheard: no longer held", slider:IsHeld() == false)
+        T.eq(p .. "let go unheard: the redraw is taken", frame.min .. ":" .. slider:GetValue(), "120:225")
+        slider:SetRange(117, 300, 225)
+        T.eq(p .. "let go unheard: a second redraw commits nothing more", #released, 1)
+        ui.fire(frame, "OnMouseUp", "LeftButton")
+        T.eq(p .. "let go unheard: nor does a mouse-up that comes late", #released, 1)
+        -- Asking whether it is held finds it as well.
+        reset()
+        ui.fire(frame, "OnMouseDown", "LeftButton")
+        ui.slide(frame, 190)
+        ui.release()
+        T.check(p .. "let go unheard: asking finds the hold over", slider:IsHeld() == false)
+        T.eq(p .. "and commits", calls(), "190 / 190")
+        -- So does a value set from code.
+        reset()
+        ui.fire(frame, "OnMouseDown", "LeftButton")
+        ui.slide(frame, 180)
+        ui.release()
+        slider:SetValue(250)
+        T.eq(p .. "let go unheard, then a value from code: committed once, then set", calls() .. " " .. slider:GetValue(), "180 / 180 250")
+        -- When the mouse-up does arrive, nothing is committed twice.
+        reset()
+        ui.fire(frame, "OnMouseDown", "LeftButton")
+        ui.slide(frame, 210)
+        ui.fire(frame, "OnMouseUp", "LeftButton")
+        slider:SetRange(117, 300, 210)
+        T.check(p .. "mouse-up heard: not held", slider:IsHeld() == false)
+        T.eq(p .. "mouse-up heard: one commit, also after a redraw", calls(), "210 / 210")
+        -- While the client still calls the handle dragged the hold is not over.
+        reset()
+        ui.fire(frame, "OnMouseDown", "LeftButton")
+        frame.draggingThumb = true
+        ui.slide(frame, 170)
+        ui.release()
+        T.check(p .. "no button down but the handle still counts as dragged: held", slider:IsHeld() == true)
+        T.eq(p .. "and nothing is committed yet", #released, 0)
+        frame.draggingThumb = false
+        T.check(p .. "once it no longer does: over", slider:IsHeld() == false)
+        T.eq(p .. "and committed once", calls(), "170 / 170")
+        -- A press that moved nothing and was let go unheard commits nothing.
+        reset()
+        ui.fire(frame, "OnMouseDown", "LeftButton")
+        ui.release()
+        T.check(p .. "a press let go unheard without a move: over", slider:IsHeld() == false)
+        T.eq(p .. "and nothing to commit", calls(), " / ")
+        -- A client that cannot say which buttons are down keeps the hold
+        -- until the mouse-up (or until the slider goes out of sight).
+        reset()
+        local buttonDown = _G.IsMouseButtonDown
+        _G.IsMouseButtonDown = nil
+        ui.fire(frame, "OnMouseDown", "LeftButton")
+        ui.slide(frame, 130)
+        ui.release()
+        slider:SetRange(120, 300, 225)
+        T.check(p .. "no way to ask for the buttons: still held", slider:IsHeld() == true)
+        T.eq(p .. "no way to ask: the redraw is ignored, nothing committed", calls() .. " " .. slider:GetValue(), "130 /  130")
+        ui.fire(frame, "OnMouseUp", "LeftButton")
+        T.eq(p .. "no way to ask: the mouse-up commits", calls(), "130 / 130")
+        _G.IsMouseButtonDown = buttonDown
 
         -- The owner redraws from inside the release (a new path arrives):
         -- that range is taken, even if the client still calls the handle
@@ -331,17 +419,48 @@ T.section("controls", function()
     T.eq("input: losing focus after Enter does not commit twice", #commits, 1)
     input.frame.focused = true
     input.frame.text = "999"
-    ui.fire(input.frame, "OnEditFocusLost")
-    T.eq("input: focus lost commits", commits[2], 999)
+    ui.fire(input.frame, "OnEnterPressed")
+    T.eq("input: Enter commits again", commits[2], 999)
     T.eq("input: the corrected value is shown", input.frame.text, "300")
+    -- Only Enter commits: half-typed digits are not a number the player chose.
+    input.frame.focused = true
+    input.frame.text = "12"
+    ui.fire(input.frame, "OnEditFocusLost")
+    T.eq("input: losing the keyboard commits nothing", #commits, 2)
+    T.eq("input: and puts the value back", input.frame.text, "300")
     input.frame.focused = true
     input.frame.text = "12"
     ui.fire(input.frame, "OnEscapePressed")
     T.eq("input: Escape puts the value back", input.frame.text, "300")
     T.eq("input: and commits nothing", #commits, 2)
+    T.check("input: and gives the keyboard up", input.frame.focused == false)
     input.frame.text = ""
     ui.fire(input.frame, "OnEnterPressed")
     T.eq("input: empty text restores the value", input.frame.text, "300")
+    T.eq("input: and commits nothing either", #commits, 2)
+    -- A value that arrives while the player types: the digits stay when asked
+    -- for, the value is known all the same.
+    input.frame.focused = true
+    input.frame.text = "4"
+    input:SetValue(250, true)
+    T.eq("input: a value given while typing leaves the digits", input.frame.text, "4")
+    T.eq("input: but it is the value", input:GetValue(), 250)
+    input.frame.text = "250"
+    ui.fire(input.frame, "OnEnterPressed")
+    T.eq("input: typing that value changes nothing", #commits, 2)
+    input.frame.focused = true
+    input.frame.text = "4"
+    input:SetValue(260, true)
+    ui.fire(input.frame, "OnEditFocusLost")
+    T.eq("input: leaving the box shows the value given meanwhile", input.frame.text, "260")
+    input.frame.focused = false
+    input:SetValue(270, true)
+    T.eq("input: not typing: the value is shown at once", input.frame.text, "270")
+    input.frame.focused = true
+    input.frame.text = "4"
+    input:SetValue(280)
+    T.eq("input: a plain SetValue replaces what is typed", input.frame.text, "280")
+    input.frame.focused = false
 
     -- Checkbox
     local changes = {}

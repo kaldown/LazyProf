@@ -10,6 +10,7 @@
 --   ui.count(pred)       how many frames match
 --   ui.fire(frame, "OnClick", ...)   run a script as the client would
 --   ui.slide(slider, value)          the player moves a slider's handle
+--   ui.release(button)               a mouse button is let go with no frame hearing of it
 --   ui.combat = true     what InCombatLockdown() reports
 --   ui.event("PLAYER_REGEN_DISABLED")   deliver an event to registered frames
 --
@@ -203,7 +204,7 @@ function M.install(opts)
             -- A value set by code runs OnValueChanged like the client does,
             -- flagged as not coming from the player; ui.slide is the player.
             -- Every range given is kept in rangeCalls.
-            f.min, f.max, f.value, f.step, f.rangeCalls = 0, 0, 0, 1, {}
+            f.min, f.max, f.value, f.step, f.rangeCalls = 0, 0, 0, 0, {}
             function f:SetMinMaxValues(a, b)
                 self.min, self.max = a, b
                 self.rangeCalls[#self.rangeCalls + 1] = { a, b }
@@ -283,10 +284,33 @@ function M.install(opts)
         end
     end
 
+    -- Which mouse buttons are down, as IsMouseButtonDown reports it. Firing a
+    -- frame's OnMouseDown / OnMouseUp presses and lets go of the button (the
+    -- left one when none is named), as the click that runs them would.
+    ui.buttons = {}
     function ui.fire(frame, script, ...)
         local fn = frame.scripts[script]
         assert(fn, "no script " .. script .. " on " .. tostring(frame.name or frame.ftype))
+        if script == "OnMouseDown" then
+            ui.buttons[(...) or "LeftButton"] = true
+        elseif script == "OnMouseUp" then
+            ui.buttons[(...) or "LeftButton"] = nil
+        end
         return fn(frame, ...)
+    end
+
+    -- A mouse button is let go where no frame runs a script for it (every
+    -- button when none is named).
+    function ui.release(button)
+        if button then
+            ui.buttons[button] = nil
+        else
+            ui.buttons = {}
+        end
+    end
+    _G.IsMouseButtonDown = function(button)
+        if button then return ui.buttons[button] == true end
+        return next(ui.buttons) ~= nil
     end
 
     -- The player moves a slider's handle to `value`: the frame reports it as

@@ -161,14 +161,21 @@ function Widgets.CreateButtonGroup(parent, options, onSelect)
     return group
 end
 
--- A small number box. onCommit(number) runs on Enter or when the box loses
--- focus with a changed number; what it returns (a corrected value) is shown.
--- Escape puts the last value back.
+-- A small number box. onCommit(number) runs on Enter with a changed number;
+-- what it returns (a corrected value) is shown. Only Enter commits: digits
+-- half typed when the box loses the keyboard (a click elsewhere, the window
+-- hiding) are not a number the player chose, so losing it, like Escape, puts
+-- the value back.
+--   input:SetValue(value)         the value, shown at once
+--   input:SetValue(value, true)   the value; while the player is typing in
+--                                 the box the digits stay and the value is
+--                                 shown when the box is left
 local NumericInput = {}
 NumericInput.__index = NumericInput
 
-function NumericInput:SetValue(value)
+function NumericInput:SetValue(value, keepTyping)
     self.value = value
+    if keepTyping and self.frame:HasFocus() then return end
     self.frame:SetText(value ~= nil and tostring(value) or "")
 end
 
@@ -208,7 +215,7 @@ function Widgets.CreateNumericInput(parent, name, width, maxLetters, onCommit)
         self:ClearFocus()
     end)
     box:SetScript("OnEditFocusLost", function()
-        commit()
+        input:SetValue(input.value)
     end)
     return input
 end

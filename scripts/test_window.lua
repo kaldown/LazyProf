@@ -352,9 +352,11 @@ T.section("target", function()
     box.text = "22"
     window:Refresh()
     T.eq("typing: a redraw leaves the typed digits", box.text, "22")
-    box.focused = false
-    window:Refresh()
-    T.eq("typing: shown again once the box is left", box.text, "300")
+    recalcs, stored = #env.recalcs, count(env.calls, "target")
+    box:ClearFocus()
+    T.eq("typing: leaving the box puts the planned target back", box.text, "300")
+    T.eq("typing: and stores nothing", count(env.calls, "target"), stored)
+    T.eq("typing: and plans nothing", #env.recalcs, recalcs)
 
     -- Hidden while the handle is held (combat): the hold is gone, nothing is
     -- planned, and the next redraw puts the handle back.
@@ -386,6 +388,149 @@ T.section("target", function()
     T.eq("at the cap: the list says so", W.rowTexts(window)[1], "Nothing left: Tailoring is at its cap of 300.")
     window:Update(W.path())
     T.check("room again: the slider is on", handle.enabled == true)
+end)
+
+-- The target when things do not go by the book: a release the slider does
+-- not hear, the window hidden and shown in the middle of a drag, half-typed
+-- digits. The planner answers each stored target with its path at once, as
+-- it does in the game.
+T.section("target: unheard releases, shown again, half-typed", function()
+    local env = W.load("forever")
+    local window, ui, addon = env.window, env.ui, env.addon
+    local stored = {}
+    local setTarget = addon.Pathfinder.SetTargetSkill
+    addon.Pathfinder.SetTargetSkill = function(self, key, value, ...)
+        local target = setTarget(self, key, value, ...)
+        stored[#stored + 1] = target
+        return target
+    end
+    -- Each plan brings a path with the stored target and a cost of its own.
+    addon.Recalculate = function(_, reason)
+        env.recalcs[#env.recalcs + 1] = reason
+        local target = addon.CharStore:Profession("tailoring").target or 300
+        env.account = { missing = { rows = {}, recipeRows = {}, buyTotal = target * 100, recipeCosts = 0 },
+            reagents = target * 100, recipes = 0, spend = target * 100, sale = 0, net = target * 100 }
+        window:Update(W.path({ targetSkill = target, complete = true, gaps = {} }))
+    end
+    local function fresh()
+        addon.CharStore:Profession("tailoring").target = nil
+        env.account = nil
+        stored, env.recalcs = {}, {}
+        ui.release()
+        window:Update(W.path({ complete = true, gaps = {} }))
+    end
+    fresh()
+    local box, slider = window.targetInput.frame, window.slider
+    local handle = slider.frame
+    local function shown()
+        return slider:GetValue() .. " " .. box.text .. " " .. tostring(W.receiptTexts(window)[1])
+    end
+
+    -- The button is let go outside the slider, which hears no mouse-up: the
+    -- next redraw finds the hold over and commits it, once.
+    ui.fire(handle, "OnMouseDown", "LeftButton")
+    ui.slide(handle, 200)
+    window:Refresh()
+    T.eq("button down: a redraw leaves the drag alone", slider:GetValue() .. " " .. box.text .. " " .. #stored, "200 200 0")
+    ui.release("LeftButton")
+    T.eq("let go unheard: nothing yet", #stored, 0)
+    window:Refresh()
+    T.eq("let go unheard, then a redraw: stored once", table.concat(stored, ","), "200")
+    T.eq("let go unheard: planned once", #env.recalcs, 1)
+    T.check("let go unheard: no longer held", slider:IsHeld() == false)
+    -- The redraw that found it draws the path the commit brought, not the
+    -- one it started with.
+    T.eq("let go unheard: handle, box and receipt show the new path", shown(), "200 200 You spend | 2g")
+    T.eq("let go unheard: the slider's range is the new path's", window.target.value, 200)
+    window:Refresh()
+    ui.fire(handle, "OnMouseUp", "LeftButton")
+    T.eq("let go unheard: nothing more on a second redraw or a late mouse-up", #stored .. " " .. #env.recalcs, "1 1")
+
+    -- The mouse-up does arrive: one commit, a redraw adds none.
+    fresh()
+    ui.fire(handle, "OnMouseDown", "LeftButton")
+    ui.slide(handle, 210)
+    ui.fire(handle, "OnMouseUp", "LeftButton")
+    window:Refresh()
+    T.eq("mouse-up heard: stored once", table.concat(stored, ","), "210")
+    T.eq("mouse-up heard: planned once", #env.recalcs, 1)
+    T.eq("mouse-up heard: shown", shown(), "210 210 You spend | 2g 10s")
+
+    -- A target typed after an unheard release wins: the drag came first and
+    -- is committed first.
+    fresh()
+    ui.fire(handle, "OnMouseDown", "LeftButton")
+    ui.slide(handle, 200)
+    ui.release()
+    box.focused = true
+    box.text = "250"
+    ui.fire(box, "OnEnterPressed")
+    T.eq("unheard release, then a typed target: the drag first, then the typed one", table.concat(stored, ","), "200,250")
+    T.eq("the typed target is the one in force", addon.CharStore:Profession("tailoring").target, 250)
+    T.eq("and the one shown", shown(), "250 250 You spend | 2g 50s")
+    T.check("the slider is free again", slider:IsHeld() == false)
+
+    -- Hidden in the middle of a drag while the client still calls the handle
+    -- dragged (so nothing can be put back yet); shown again: the handle and
+    -- the box are at the planned target.
+    fresh()
+    ui.fire(handle, "OnMouseDown", "LeftButton")
+    handle.draggingThumb = true
+    ui.slide(handle, 180)
+    ui.event("PLAYER_REGEN_DISABLED")
+    ui.combat = true
+    T.check("hidden mid-drag", not window.frame.shown)
+    handle.draggingThumb = false
+    ui.release()
+    ui.combat = false
+    ui.event("PLAYER_REGEN_ENABLED")
+    T.check("shown again", window.frame.shown)
+    T.eq("shown again: the handle and the box are back at the planned target", slider:GetValue() .. " " .. box.text, "300 300")
+    T.eq("shown again: nothing was stored or planned", #stored .. " " .. #env.recalcs, "0 0")
+
+    -- Half-typed digits are never a target: only Enter commits.
+    fresh()
+    box.focused = true
+    box.text = "2"
+    ui.event("PLAYER_REGEN_DISABLED")
+    ui.combat = true
+    box:ClearFocus()   -- a hidden box loses the keyboard
+    ui.combat = false
+    ui.event("PLAYER_REGEN_ENABLED")
+    T.eq("half-typed, then combat: nothing stored", #stored, 0)
+    T.eq("half-typed, then combat: the box shows the planned target again", box.text, "300")
+    box.focused = true
+    box.text = "25"
+    ui.fire(box, "OnEscapePressed")
+    T.eq("Escape: nothing stored, the planned target back", #stored .. " " .. box.text, "0 300")
+    box.focused = true
+    box.text = "250"
+    ui.fire(box, "OnEnterPressed")
+    T.eq("Enter: stored", table.concat(stored, ","), "250")
+    T.eq("Enter: shown", shown(), "250 250 You spend | 2g 50s")
+
+    -- A new path arrives while the box has the keyboard: the digits being
+    -- typed stay, but the box knows the target that is now planned.
+    fresh()
+    box.focused = true
+    box.text = "30"
+    addon.CharStore:Profession("tailoring").target = 200
+    window:Update(W.path({ targetSkill = 200, complete = true, gaps = {} }))
+    T.eq("typing over a new path: the digits stay", box.text, "30")
+    box.text = "200"
+    ui.fire(box, "OnEnterPressed")
+    T.eq("typing the target already planned stores nothing", #stored, 0)
+    T.eq("and shows it", box.text, "200")
+    box.focused = true
+    box.text = "300"
+    ui.fire(box, "OnEnterPressed")
+    T.eq("typing the old target after that is a change", table.concat(stored, ","), "300")
+    box.focused = true
+    box.text = "31"
+    addon.CharStore:Profession("tailoring").target = 220
+    window:Update(W.path({ targetSkill = 220, complete = true, gaps = {} }))
+    box:ClearFocus()
+    T.eq("leaving the box after a new path: that path's target", box.text, "220")
 end)
 
 T.section("more options", function()

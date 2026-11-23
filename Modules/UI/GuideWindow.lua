@@ -365,9 +365,11 @@ function GuideWindow:Build()
         end
     end)
     -- Shown (again): wrapped lines are measured once more on a frame that is
-    -- on screen, and the list follows.
+    -- on screen, and the list follows. The handle and the box show the
+    -- planned target, whatever a drag left there when the window went away.
     frame:HookScript("OnShow", function()
         if self.view then
+            self:ShowTarget()
             self:Layout()
             self:RenderTab()
         end
@@ -470,6 +472,9 @@ function GuideWindow:Build()
     self.targetLabel:SetText("Level to")
 
     self.targetInput = Widgets.CreateNumericInput(targetRow, "LazyProfGuideTarget", 40, 3, function(value)
+        -- A drag of the slider that ended unnoticed came first: asking ends
+        -- it and commits it before the typed target, which then wins.
+        self.slider:IsHeld()
         local target = self:OnTargetCommit(value)
         if target then
             self.slider:SetValue(target)
@@ -956,23 +961,29 @@ end
 
 -- Put the target the shown path was planned for on the slider and in the
 -- box. Not while the player has the handle (a bag update redraws the window
--- in the middle of a drag) and, for the box, not while the player types in
--- it. `value`: a target in force that differs from the path's (a commit that
--- needed no new path).
+-- in the middle of a drag); in the box the digits the player is typing stay,
+-- and the target is what the box goes back to when it is left. `value`: a
+-- target in force that differs from the path's (a commit that needed no new
+-- path).
 function GuideWindow:ShowTarget(value)
+    -- (Asking can end a hold and plan again: the target is read after it.)
+    if not self.frame or self.slider:IsHeld() then return end
     local target = self.target
-    if not (self.frame and target) or self.slider:IsHeld() then return end
+    if not target then return end
     self.slider:SetRange(target.min, target.max, value or target.value)
     self.slider:SetEnabled(target.enabled)
     self.sliderMin:SetText(target.leftLabel)
     self.sliderMax:SetText(target.rightLabel)
-    if not self.targetInput.frame:HasFocus() then
-        self.targetInput:SetValue(self.slider:GetValue())
-    end
+    self.targetInput:SetValue(self.slider:GetValue(), true)
 end
 
 function GuideWindow:Render()
     if not self.frame then return end
+    -- Asked before anything is worked out: a drag of the slider whose release
+    -- was not heard ends here and commits like a release, which plans and
+    -- draws again. What follows then draws the path that brought, not the
+    -- one this redraw started with.
+    self.slider:IsHeld()
     local Views = LazyProf.GuideViews
     local profile = LazyProf.db.profile
     local view = self:ComputeView()

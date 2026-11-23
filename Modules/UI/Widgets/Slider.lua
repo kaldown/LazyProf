@@ -19,10 +19,15 @@
 -- (max <= min) disables the slider; the frame is then given a one-point range
 -- ending at the larger number, never an empty or an inverted one.
 --
--- "Held" is the left button pressed on the slider and not yet let go, or the
--- client saying the handle is being dragged. A hold ends on mouse-up; it is
--- dropped, with nothing committed, when the slider goes out of sight. A value
--- that arrives from the player with nothing held is committed at once.
+-- "Held" is a mouse button pressed on the slider and not yet let go, or the
+-- client saying the handle is being dragged. A hold ends on mouse-up. It also
+-- ends, like a release, once no mouse button is down any more: the button may
+-- be let go where the slider runs no script for it. That is noticed the next
+-- time the slider is asked or told something (IsHeld, SetRange, SetValue), so
+-- an owner that redraws asks first (IsHeld) and draws what the commit brings.
+-- A hold is dropped, with nothing committed, when the slider goes out of
+-- sight. A value that arrives from the player with nothing held is committed
+-- at once.
 --
 -- forever - the bare MinimalSliderTemplate: a Slider frame, 200 x 19, its
 --   handle under the key Thumb, whole steps obeyed while dragging (Blizzard
@@ -41,6 +46,11 @@
 --   :118); IsVisible: SimpleScriptRegionAPIDocumentation.lua:582; SetAlpha:
 --   SimpleRegionAPIDocumentation.lua:123. The scripts are in the client's
 --   list of frame scripts (Blizzard_SharedXML/UI.xsd:403, 406, 407, 420).
+--   IsMouseButtonDown() without a button asks for any button
+--   (Blizzard_APIDocumentationGenerated/InputDocumentation.lua:185-198);
+--   Blizzard polls it to end a press whose release it did not hear
+--   (Blizzard_SharedXML/HybridScrollFrame.lua:76,
+--   Blizzard_Console/Blizzard_Console.lua:308).
 --   Whether the value-changed script tells a player's change from one made
 --   by code is not relied on: this widget marks its own changes itself.
 -- classic - a plain Slider frame with a track texture of its own and the
@@ -65,6 +75,12 @@ local function Dragging(frame)
     return frame.IsDraggingThumb ~= nil and frame:IsDraggingThumb() and true or false
 end
 
+-- No mouse button is down. (Looked up first: a client without the call
+-- cannot say, and a hold then lasts until its mouse-up.)
+local function NoButtonDown()
+    return type(IsMouseButtonDown) == "function" and not IsMouseButtonDown()
+end
+
 function Slider:SetPoint(...)
     self.frame:SetPoint(...)
 end
@@ -73,17 +89,39 @@ function Slider:GetValue()
     return self.value
 end
 
+-- Tell the owner the value the handle was let go at, once per value.
+local function Commit(slider)
+    if slider.value == slider.committed then return end
+    slider.committed = slider.value
+    if slider.onReleased then slider.onReleased(slider.value) end
+end
+
+-- The hold is over: commit where the handle is. While the owner is told, the
+-- slider does not count as held, whatever the client still says about the
+-- handle: the owner redraws from inside the release.
+local function Release(slider)
+    slider.held = false
+    slider.releasing = true
+    Commit(slider)
+    slider.releasing = false
+end
+
 -- The player has the handle. A hold only counts while the slider can be
 -- seen: hidden mid-drag (combat, the window closing), no mouse-up may follow.
--- It is over as soon as the mouse-up script runs, whatever the client still
--- says about the handle then: the owner redraws from inside the release.
+-- And it is over once no mouse button is down and the client no longer calls
+-- the handle dragged, although no mouse-up was heard: it then ends here, like
+-- a release.
 function Slider:IsHeld()
     local frame = self.frame
     if self.held and not frame:IsVisible() then
         self.held = false
     end
     if self.releasing then return false end
-    return self.held or Dragging(frame)
+    local dragging = Dragging(frame)
+    if self.held and not dragging and NoButtonDown() then
+        Release(self)
+    end
+    return self.held or dragging
 end
 
 local function ApplyEnabled(slider)
@@ -128,13 +166,6 @@ function Slider:SetValue(value)
     SetSilently(self, math.max(self.min, math.min(self.max, Round(value))))
 end
 
--- Tell the owner the value the handle was let go at, once per value.
-local function Commit(slider)
-    if slider.value == slider.committed then return end
-    slider.committed = slider.value
-    if slider.onReleased then slider.onReleased(slider.value) end
-end
-
 -- The scripts both families share. Anything the frame reports while this
 -- widget is not setting a value itself comes from the player.
 local function Wire(slider)
@@ -151,18 +182,15 @@ local function Wire(slider)
             Commit(slider)
         end
     end)
-    frame:SetScript("OnMouseDown", function(self, button)
-        if button and button ~= "LeftButton" then return end
+    -- Any mouse button: whichever one the client moves the handle for, its
+    -- press holds and its release commits.
+    frame:SetScript("OnMouseDown", function(self)
         if self:IsEnabled() then
             slider.held = true
         end
     end)
-    frame:SetScript("OnMouseUp", function(_, button)
-        if button and button ~= "LeftButton" then return end
-        slider.held = false
-        slider.releasing = true
-        Commit(slider)
-        slider.releasing = false
+    frame:SetScript("OnMouseUp", function()
+        Release(slider)
     end)
     -- Out of sight mid-drag: the hold is over and the value it reached is
     -- dropped (the next SetRange puts the handle back).
