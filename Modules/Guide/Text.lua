@@ -56,6 +56,13 @@ function Text.ColorChanges(stage)
     return table.concat(parts, ", ") .. ", then " .. color
 end
 
+-- An amount to the copper ("1g 2s 3c"). Every amount that is added to
+-- another, or is the sum of amounts shown, is written this way: the short
+-- format drops the smallest unit, and then what is shown does not add up.
+function Text.Money(copper)
+    return LazyProf.Utils.FormatMoney(math.floor((copper or 0) + 0.5))
+end
+
 -- Sale value ----------------------------------------------------------------------
 
 local function CutPercent()
@@ -70,10 +77,11 @@ function Text.SoldNote(mode)
     return "crafts sold to a vendor"
 end
 
--- One craft's sale value: "Sells for 45s each (vendor)". `source` is where
--- the value comes from ("vendor" | "auction"); unknown: no bracket.
+-- One craft's sale value, to the copper: "Sells for 45s each (vendor)".
+-- `source` is where the value comes from ("vendor" | "auction"); unknown: no
+-- bracket.
 function Text.SellsFor(saleEach, source)
-    local text = "Sells for " .. LazyProf.Utils.FormatMoneyShort(saleEach) .. " each"
+    local text = "Sells for " .. Text.Money(saleEach) .. " each"
     if source == "auction" then
         return text .. string.format(" (auction, after the %d%% cut)", CutPercent())
     elseif source == "vendor" then
@@ -116,7 +124,8 @@ function Text.LearnShort(stage, profile)
 end
 
 -- The line under a recipe run whose recipe is still to learn: "Learn first:
--- trainer, 4s" - where it comes from and the fee when it is known. Where
+-- trainer, 4s" - where it comes from and the fee (to the copper: it is part
+-- of what is spent) when it is known. Where
 -- nothing may be said about the source (the VANILLA profile, or a source kind
 -- there are no words for) it says only to learn it, without a fee.
 function Text.LearnFirst(stage, profile)
@@ -126,7 +135,7 @@ function Text.LearnFirst(stage, profile)
     end
     local text = "Learn first: " .. short
     if (stage.fee or 0) > 0 then
-        text = text .. ", " .. LazyProf.Utils.FormatMoneyShort(stage.fee)
+        text = text .. ", " .. Text.Money(stage.fee)
     end
     return text
 end

@@ -361,6 +361,33 @@ T.section("craft or buy does not count stock twice", function()
     LazyProf.db.char.learnedRecipes = { tailoring = { [500] = true } }
 end)
 
+-- Every cost is whole copper and the total adds up the rounded costs, so
+-- the Cost column of the shopping table adds up to the total shown under it.
+T.section("whole copper", function()
+    local prices = { [BOLT] = 500, [CLOTH] = 0.4, [THREAD] = 33.3, [BAR] = 300.5, [ORE] = 200 }
+    choose(BOLT, "buy")
+    local m = calc({ prices = prices, inventory = {}, breakdown = {}, bags = {} })
+    local cloth, thread, bar = rowOf(m, CLOTH), rowOf(m, THREAD), rowOf(m, BAR)
+    T.eq("5 cloth at 0.4", cloth.cost, 2)
+    T.eq("10 thread at 33.3", thread.cost, 333)
+    T.eq("5 bars at 300.5", bar.cost, 1503)
+    local sum = 0
+    for _, row in ipairs(m.rows) do
+        sum = sum + row.cost
+        T.eq(tostring(row.name) .. ": a whole amount", row.cost, math.floor(row.cost))
+    end
+    T.eq("the total is the sum of the rows", m.buyTotal, sum)
+    T.eq("to the copper", m.buyTotal, 10000 + 2 + 333 + 1503)
+    T.eq("the old per-source list carries the same amount", listHas(m.fromAH, BAR).estimatedCost, 1503)
+    choose(BOLT, nil)
+
+    local hat = { id = 40, name = "Hat", learned = false, _sourceInfo = { type = "ah", price = 250.5 },
+        reagents = { { itemId = THREAD, count = 1, name = "Thread" } } }
+    m = PF:CalculateMissingMaterials({ { recipe = hat, quantity = 1, skillStart = 1 } }, {}, {}, PRICES)
+    T.eq("a recipe's price is whole copper", m.recipeRows[1].cost, 251)
+    T.eq("and so is their sum", m.recipeCosts, 251)
+end)
+
 T.section("recipes to learn", function()
     local function unlearned(id, name, info)
         return { id = id, name = name, learned = false, _sourceInfo = info,

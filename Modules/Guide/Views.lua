@@ -58,9 +58,11 @@ local BG_GAP = { 0.35, 0.1, 0.1, 0.35 }
 local BG_GAP_HOVER = { 0.45, 0.15, 0.15, 0.6 }
 local BG_SUB = { 0.12, 0.12, 0.12, 0.5 }
 
--- Whole copper only: a price per item of a bundle can be a fraction.
+-- An amount to the copper (whole copper only: a price per item of a bundle
+-- can be a fraction). Every amount that is added to another, or is the sum
+-- of amounts shown, is written with this.
 local function Money(copper)
-    return Utils.FormatMoney(math.floor((copper or 0) + 0.5))
+    return Text.Money(copper)
 end
 
 local function Green(text)
@@ -119,6 +121,8 @@ end
 
 -- Receipt ----------------------------------------------------------------------
 
+-- The two largest units only ("12g 34s"): for comparisons - an alternative's
+-- difference, a cost per craft - never for an amount that is added up.
 local function Short(copper)
     return Utils.FormatMoneyShort(copper)
 end
@@ -146,9 +150,13 @@ end
 --   stock    what the owned stock saves, when there is no net line to say it on
 --   making   the list makes reagents instead of buying them, so the path's
 --            cost column (each run's direct reagents at buy prices) adds up
---            to more or less than the reagents amount: by how much
+--            to more or less than the reagents amount: by how much (not said
+--            while something that has to be bought has no price)
 --   margin   the amounts include spare crafts
---   problem  a price is missing, still loading or too old
+--   problem  a price is missing, still loading or too old: the price
+--            summary's first problem line, else how many rows of the list
+--            have something to buy and no price
+-- Every amount is written to the copper, so the lines add up as shown.
 function Views.Receipt(view)
     local lines = {}
     local path, account = view.path, view.account
@@ -159,36 +167,40 @@ function Views.Receipt(view)
     end
 
     local spent = Round(account.spend)
-    local spend = { key = "spend", label = "You spend", amount = Short(spent), amountColor = WHITE }
+    local spend = { key = "spend", label = "You spend", amount = Money(spent), amountColor = WHITE }
     if path.complete == false then
         spend.label = spend.label .. " (excluding gaps)"
     end
     if (account.recipes or 0) > 0 then
-        spend.note = "reagents " .. Short(account.reagents) .. " + recipes " .. Short(account.recipes)
+        spend.note = "reagents " .. Money(account.reagents) .. " + recipes " .. Money(account.recipes)
     end
     add(spend)
 
     local saves = Round(account.stockSaves)
-    local saved = saves > 0 and Short(saves) or nil
+    local saved = saves > 0 and Money(saves) or nil
     local mode = view.sale and view.sale.mode or SALE_MODE.NONE
     local loading = (view.saleLoading or 0) > 0
     local back = Round(account.sale)
     if mode ~= SALE_MODE.NONE and (back > 0 or loading) then
-        add({ key = "back", label = "Back from selling", amount = back > 0 and ("-" .. Short(back)) or Short(0),
+        add({ key = "back", label = "Back from selling", amount = back > 0 and ("-" .. Money(back)) or Money(0),
               amountColor = GREEN, note = Text.SoldNote(mode) .. (loading and ", still loading" or "") })
         local net = spent - back
-        add({ key = "net", label = net < 0 and "Net gain" or "Net cost", amount = Short(math.abs(net)),
+        add({ key = "net", label = net < 0 and "Net gain" or "Net cost", amount = Money(math.abs(net)),
               amountColor = net < 0 and GREEN or WHITE, note = saved and ("your own stock saves " .. saved) or nil })
     elseif saved then
         add({ key = "stock", note = "Your own stock saves " .. saved })
     end
 
-    local crafted = {}
+    -- Rows with something to buy and no price: the amounts leave them out.
+    local crafted, unpriced = {}, 0
     for _, row in ipairs(account.missing and account.missing.rows or {}) do
         if row.crafted then crafted[#crafted + 1] = row end
+        if (row.toBuy or 0) > 0 and row.unpriced then unpriced = unpriced + 1 end
     end
+    -- What making reagents saves is only known when everything bought for
+    -- them has a price.
     local columnPay = view.summary and view.summary.columnPay
-    if #crafted > 0 and columnPay then
+    if #crafted > 0 and columnPay and unpriced == 0 then
         local saving = Round(columnPay - account.reagents)
         if saving ~= 0 then
             local what = string.format("%d reagents", #crafted)
@@ -196,9 +208,9 @@ function Views.Receipt(view)
                 what = string.format("%d %s", crafted[1].craftQuantity or 0, crafted[1].name or "Unknown")
             end
             if saving > 0 then
-                add({ key = "making", note = "Making " .. what .. " yourself saves " .. Short(saving) })
+                add({ key = "making", note = "Making " .. what .. " yourself saves " .. Money(saving) })
             else
-                add({ key = "making", note = "Making " .. what .. " yourself costs " .. Short(-saving) .. " more than buying" })
+                add({ key = "making", note = "Making " .. what .. " yourself costs " .. Money(-saving) .. " more than buying" })
             end
         end
     end
@@ -207,11 +219,21 @@ function Views.Receipt(view)
         add({ key = "margin", note = string.format("Includes %d%% spare crafts", view.marginPercent) })
     end
 
+    -- The price summary looks at the path's own reagents; what the list buys
+    -- to make reagents can lack a price as well.
+    local problem
     for _, line in ipairs(view.priceLines or {}) do
         if line.problem then
-            add({ key = "problem", note = line.text, color = ORANGE })
+            problem = line.text
             break
         end
+    end
+    if not problem and unpriced > 0 then
+        problem = unpriced == 1 and "1 reagent on the list has no price - the amounts leave it out."
+            or (tostring(unpriced) .. " reagents on the list have no price - the amounts leave them out.")
+    end
+    if problem then
+        add({ key = "problem", note = problem, color = ORANGE })
     end
     return lines
 end
@@ -324,7 +346,7 @@ function Views.ReagentRow(mat, indent)
     elseif not mat.price then
         cost = "?"
     else
-        cost = Utils.FormatMoneyShort(mat.estimatedCost)
+        cost = Money(mat.estimatedCost)
     end
     local tooltip = {}
     local pm = LazyProf.PriceManager
@@ -669,17 +691,17 @@ local function AlternativeTooltip(alt, stage)
         -- The same figures the row's difference is made of: what it costs
         -- over the run, what its crafts sell for, and the net of the two.
         local cost, sale = Round(alt.projectedCost), Round(alt.projectedSale)
-        local text = string.format("About %d crafts for this run: %s", alt.projectedCrafts, Short(cost))
+        local text = string.format("About %d crafts for this run: %s", alt.projectedCrafts, Money(cost))
         if sale > 0 then
-            text = text .. ", sells for " .. Short(sale)
+            text = text .. ", sells for " .. Money(sale)
         end
         lines[#lines + 1] = { text = text, r = 1, g = 1, b = 1 }
         if sale > 0 then
             local net = cost - sale
-            lines[#lines + 1] = { text = (net < 0 and "Net gain: " or "Net cost: ") .. Short(math.abs(net)), r = 1, g = 1, b = 1 }
+            lines[#lines + 1] = { text = (net < 0 and "Net gain: " or "Net cost: ") .. Money(math.abs(net)), r = 1, g = 1, b = 1 }
         end
         if alt.fee > 0 then
-            lines[#lines + 1] = { text = "Includes " .. Short(alt.fee) .. " to learn the recipe", r = 0.7, g = 0.7, b = 0.7 }
+            lines[#lines + 1] = { text = "Includes " .. Money(alt.fee) .. " to learn the recipe", r = 0.7, g = 0.7, b = 0.7 }
         end
     else
         lines[#lines + 1] = { text = "Missing price data", r = 1, g = 0.4, b = 0.4 }
@@ -976,7 +998,7 @@ local function AlternativeName(alt, profile)
     local name = alt.recipe.name or "Unknown"
     if alt.recipe.learned then return name end
     if alt.fee > 0 and profile ~= "VANILLA" then
-        return name .. " (learn " .. Short(alt.fee) .. ")"
+        return name .. " (learn " .. Money(alt.fee) .. ")"
     end
     return name .. " (to learn)"
 end
@@ -1040,7 +1062,7 @@ local function AddOpenedRun(rows, stage, learn, view, ctx)
                 parts[#parts + 1] = Short(stage.outOfPocketCost / stage.quantity) .. " per craft"
             end
             if stage.outOfPocketCost < stage.cost then
-                parts[#parts + 1] = "market price " .. Short(stage.cost)
+                parts[#parts + 1] = "market price " .. Money(stage.cost)
             end
         end
         add({ kind = "line", height = 16, wrap = true, color = GREY, text = table.concat(parts, "; ") })
@@ -1112,10 +1134,10 @@ end
 local function AddRun(rows, stage, learn, isCurrent, view, ctx)
     local recipe = stage.recipe
     local unpriced = UnpricedToBuy(stage)
-    local cost, costColor = Short(stage.outOfPocketCost), nil
-    if stage.done then
-        cost, costColor = "done", DIM
-    elseif unpriced then
+    -- A finished run (the what-if from skill 1 has them) keeps its cost: the
+    -- account still counts it. It is dimmed instead.
+    local cost, costColor = Money(stage.outOfPocketCost), nil
+    if unpriced then
         cost, costColor = "?", ORANGE
     elseif stage.outOfPocketCost < stage.cost then
         costColor = GREEN
@@ -1139,7 +1161,7 @@ local function AddRun(rows, stage, learn, isCurrent, view, ctx)
             learnTip[#learnTip + 1] = { text = line.text, r = 0.7, g = 0.7, b = 0.7 }
         end
         rows[#rows + 1] = { kind = "line", sub = true, stage = learn, text = Text.LearnFirst(learn, view.profile),
-                            color = LEARN_COLOR, tooltip = learnTip, onClick = toggle }
+                            color = LEARN_COLOR, alpha = learn.done and 0.5 or 1, tooltip = learnTip, onClick = toggle }
     end
 
     -- Open when the player opened it; the run the player is on is open until
@@ -1147,7 +1169,7 @@ local function AddRun(rows, stage, learn, isCurrent, view, ctx)
     local open = view.expanded and view.expanded[stage.key]
     if open == nil then open = isCurrent end
     if open then
-        AddOpenedRun(rows, stage, learn, view, ctx)
+        AddOpenedRun(rows, stage, (learn and not learn.done) and learn or nil, view, ctx)
         return
     end
     local alt = CloseAlternative(stage)
@@ -1218,9 +1240,9 @@ function Views.Path(view, ctx)
         if stage.kind == "learn" then
             learn = stage
         elseif stage.kind == "craft" then
-            local toLearn = (learn and not learn.done and learn.recipe.id == stage.recipe.id) and learn or nil
+            local itsLearn = (learn and learn.recipe.id == stage.recipe.id) and learn or nil
             learn = nil
-            AddRun(rows, stage, toLearn, stage == current, view, ctx)
+            AddRun(rows, stage, itsLearn, stage == current, view, ctx)
         elseif stage.kind == "rank" then
             rows[#rows + 1] = RankRow(stage, view)
         elseif stage.kind == "gap" then
@@ -1361,7 +1383,7 @@ end
 -- A line of the shopping table that sums a column: the label, and the amount
 -- under the Cost column.
 local function TotalRow(label, copper)
-    return { kind = "cols", total = true, text = label, color = GOLD, cols = { "", "", "", Short(copper or 0) } }
+    return { kind = "cols", total = true, text = label, color = GOLD, cols = { "", "", "", Money(copper or 0) } }
 end
 
 -- The shopping list. view.missing is Pathfinder:CalculateMissingMaterials of
@@ -1434,7 +1456,7 @@ function Views.Shopping(view, ctx)
             elseif row.unpriced then
                 cost = "?"
             else
-                cost = Short(row.cost)
+                cost = Money(row.cost)
             end
             local desc = {
                 kind = "cols", item = row, icon = row.icon, text = row.name,
@@ -1490,7 +1512,7 @@ function Views.Shopping(view, ctx)
             end
             rows[#rows + 1] = {
                 kind = "cols", recipe = entry.recipe, text = tostring(entry.name) .. (where and (" - " .. where) or ""),
-                cols = { "", "", "", Short(entry.cost) },
+                cols = { "", "", "", Money(entry.cost) },
                 bg = BG_SUB, hoverBg = BG_ROW_HOVER, tooltip = tooltip,
                 onClick = ctx.onShowRecipe and function() ctx.onShowRecipe(entry.recipe) end or nil,
             }

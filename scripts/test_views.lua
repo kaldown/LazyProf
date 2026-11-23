@@ -10,6 +10,8 @@
 package.path = "./?.lua;" .. package.path
 local harness = require("scripts.lib.harness")
 local T = require("scripts.lib.check").new()
+local Shown = require("scripts.lib.shown")
+local copper = Shown.copper
 
 harness.stubWow({ interface = 11508 })
 local LazyProf = harness.loadLazyProf({
@@ -125,6 +127,12 @@ local function shopView(path, opts)
     }
 end
 
+-- What the receipt, the Shopping tab and the Path tab SHOW for a view, read
+-- back from their texts as copper: the amounts a player would add up.
+local function shown(view)
+    return Shown.amounts(Views, view)
+end
+
 T.section("header", function()
     local h = Views.Header(makeView(makePath(), { cap = 150 }))
     T.eq("title names the profession", h.title, "LazyProf - Tailoring")
@@ -166,15 +174,28 @@ T.section("receipt", function()
         return { mode = mode, values = values, sources = sources, rank = {}, loading = 0, loadingItems = {} }
     end
 
+    -- The fixture path's last run needs a reagent that has no price; most
+    -- checks here are about a path whose prices are all known.
+    local function priced(extra)
+        local path = makePath(extra)
+        table.remove(path.steps)
+        return path
+    end
+
     -- Nothing sells, nothing owned, every recipe known: one line.
-    -- Gloves 19 x 1s + Shirt 20 x 2s; the Mystery reagent has no price.
-    local r, keys = receipt(shopView(makePath()))
+    -- Gloves 19 x 1s + Shirt 20 x 2s.
+    local r, keys = receipt(shopView(priced()))
     T.eq("no sale value, no stock: one line", keys, "spend")
     T.eq("spend: label, with the gaps flagged", r.spend.label, "You spend (excluding gaps)")
-    T.eq("spend: a reagent without a price adds nothing", r.spend.amount, "59s")
+    T.eq("spend: the amount", r.spend.amount, "59s")
     T.check("spend: no note when no recipe costs anything", r.spend.note == nil, r.spend.note)
-    r = receipt(shopView(makePath({ complete = true })))
+    r = receipt(shopView(priced({ complete = true })))
     T.eq("spend: label of a path without gaps", r.spend.label, "You spend")
+    -- A reagent to buy without a price: left out of the amount, and said.
+    r, keys = receipt(shopView(makePath()))
+    T.eq("a reagent without a price adds nothing", r.spend.amount, "59s")
+    T.eq("a reagent without a price: the receipt says so", keys, "spend,problem")
+    T.eq("a reagent without a price: wording", r.problem.note, "1 reagent on the list has no price - the amounts leave it out.")
 
     -- A recipe to learn: the note splits the amount.
     local boots = recipe(4, "Boots", 143, 200, 210, 220, { unlearned = true, sourceInfo = { type = "vendor", cost = 2000 } })
@@ -186,7 +207,7 @@ T.section("receipt", function()
     T.eq("recipes: still one line", keys, "spend")
 
     -- Sold to a vendor: three lines.
-    local view = shopView(makePath({ complete = true, sale = sold("vendor", { [1] = 30 }) }))
+    local view = shopView(priced({ complete = true, sale = sold("vendor", { [1] = 30 }) }))
     r, keys = receipt(view)
     T.eq("vendor: three lines", keys, "spend,back,net")
     T.eq("vendor: back label", r.back.label, "Back from selling")
@@ -198,49 +219,55 @@ T.section("receipt", function()
     T.check("vendor: no stock note without stock", r.net.note == nil, r.net.note)
     T.eq("the lines add up", view.account.spend - view.account.sale, view.account.net)
 
-    r = receipt(shopView(makePath({ complete = true, sale = sold("auction", { [1] = 30 }) })))
+    r = receipt(shopView(priced({ complete = true, sale = sold("auction", { [1] = 30 }) })))
     T.eq("auction: note", r.back.note, "crafts sold at auction, after the 5% cut")
 
     -- Sale values still loading: the amount known so far, and a note.
-    r, keys = receipt(shopView(makePath({ complete = true, sale = sold("vendor", { [1] = 30 }) }), { saleLoading = 2 }))
+    r, keys = receipt(shopView(priced({ complete = true, sale = sold("vendor", { [1] = 30 }) }), { saleLoading = 2 }))
     T.eq("loading: note", r.back.note, "crafts sold to a vendor, still loading")
     T.eq("loading: the amount known so far", r.back.amount, "-5s 70c")
-    r, keys = receipt(shopView(makePath({ complete = true, sale = sold("vendor", {}) }), { saleLoading = 1 }))
+    r, keys = receipt(shopView(priced({ complete = true, sale = sold("vendor", {}) }), { saleLoading = 1 }))
     T.eq("loading, nothing known yet: the lines are there", keys, "spend,back,net")
     T.eq("loading, nothing known yet: zero without a minus", r.back.amount, "0c")
     T.eq("loading, nothing known yet: net is the spend", r.net.amount, "59s")
     -- The count frozen on the path is not what is read.
     local frozen = sold("vendor", {})
     frozen.loading = 3
-    r, keys = receipt(shopView(makePath({ complete = true, sale = frozen })))
+    r, keys = receipt(shopView(priced({ complete = true, sale = frozen })))
     T.eq("the path's own loading count is ignored", keys, "spend")
 
-    r, keys = receipt(shopView(makePath({ complete = true, sale = sold("vendor", {}) })))
+    r, keys = receipt(shopView(priced({ complete = true, sale = sold("vendor", {}) })))
     T.eq("nothing sells and nothing is loading: one line", keys, "spend")
-    r, keys = receipt(shopView(makePath({ complete = true, sale = sold("none", {}) }), { saleLoading = 2 }))
+    r, keys = receipt(shopView(priced({ complete = true, sale = sold("none", {}) }), { saleLoading = 2 }))
     T.eq("sale values not counted: one line", keys, "spend")
 
     -- The crafts sell for more than is spent: a gain, never a negative cost.
-    r = receipt(shopView(makePath({ complete = true, sale = sold("auction", { [1] = 400 }) })))
+    r = receipt(shopView(priced({ complete = true, sale = sold("auction", { [1] = 400 }) })))
     T.eq("gain: label", r.net.label, "Net gain")
     T.eq("gain: a positive amount", r.net.amount, "17s")
     T.check("gain: green", r.net.amountColor[1] < 1 and r.net.amountColor[2] == 1)
-    r = receipt(shopView(makePath({ complete = true, sale = sold("vendor", { [1] = 30 }) })))
+    r = receipt(shopView(priced({ complete = true, sale = sold("vendor", { [1] = 30 }) })))
     T.check("a cost is not green", r.net.amountColor[1] == 1)
 
+    -- The crafts sell for exactly what is spent: a cost of nothing, not a gain.
+    r = receipt(shopView(priced({ complete = true, sale = sold("vendor", { [2] = 295 }) })))
+    T.eq("net of exactly zero: worded as a cost", r.net.label, "Net cost")
+    T.eq("net of exactly zero: 0c", r.net.amount, "0c")
+    T.check("net of exactly zero: not green", r.net.amountColor[1] == 1)
+
     -- Owned stock: the note sits on the net line, or on a line of its own.
-    r, keys = receipt(shopView(makePath({ complete = true, sale = sold("vendor", { [1] = 30 }) }), { inventory = { [101] = 19 } }))
+    r, keys = receipt(shopView(priced({ complete = true, sale = sold("vendor", { [1] = 30 }) }), { inventory = { [101] = 19 } }))
     T.eq("stock: spend is what is left to buy", r.spend.amount, "40s")
     T.eq("stock: note on the net line", r.net.note, "your own stock saves 19s")
     T.eq("stock: no extra line then", keys, "spend,back,net")
-    r, keys = receipt(shopView(makePath({ complete = true }), { inventory = { [101] = 19 } }))
+    r, keys = receipt(shopView(priced({ complete = true }), { inventory = { [101] = 19 } }))
     T.eq("stock, no net line: a line of its own", keys, "spend,stock")
     T.eq("stock line text", r.stock.note, "Your own stock saves 19s")
     T.check("stock line has no amount", r.stock.amount == nil and r.stock.label == nil)
     T.eq("stock line is grey", r.stock.color[1], 0.7)
 
     -- Margin
-    r, keys = receipt(shopView(makePath({ complete = true }), { margin = 15 }))
+    r, keys = receipt(shopView(priced({ complete = true }), { margin = 15 }))
     T.eq("margin: a line says so", keys, "spend,margin")
     T.eq("margin: text", r.margin.note, "Includes 15% spare crafts")
     T.eq("margin: the amount covers the larger counts (22 and 23 crafts)", r.spend.amount, "68s")
@@ -253,7 +280,7 @@ T.section("receipt", function()
         { text = "Auctionator prices up to 6 days old - rescan the auction house.", r = 1, g = 0.5, b = 0, problem = true },
         { text = "/lp diag prices lists every price and its source.", r = 0.5, g = 0.5, b = 0.5 },
     }
-    view = shopView(makePath({ complete = true }))
+    view = shopView(priced({ complete = true }))
     view.priceLines = priceLines
     r, keys = receipt(view)
     T.eq("problem: one more line", keys, "spend,problem")
@@ -265,7 +292,7 @@ T.section("receipt", function()
     T.eq("no problem line when the prices are fine", keys, "spend")
 
     -- Everything at once, in order.
-    view = shopView(makePath({ sale = sold("vendor", { [1] = 30 }) }), { inventory = { [101] = 5 }, margin = 15 })
+    view = shopView(priced({ sale = sold("vendor", { [1] = 30 }) }), { inventory = { [101] = 5 }, margin = 15 })
     view.priceLines = priceLines
     r, keys = receipt(view)
     T.eq("order of the lines", keys, "spend,back,net,margin,problem")
@@ -312,6 +339,36 @@ T.section("receipt", function()
     T.eq("making, same cost: no line", keys, "spend")
     LazyProf.CharStore:Get().craftChoices[BOLT] = nil
 
+    -- The player makes the Bolt, but the Cloth they are made from has no
+    -- price: what making saves is not known, so nothing is claimed, and the
+    -- receipt says a price is missing even though every reagent of the path
+    -- itself (the Bolt) has one.
+    LazyProf.CharStore:Get().craftChoices[BOLT] = "craft"
+    view = shopView(craftPath({ [BOLT] = 500 }))
+    view.priceLines = { { text = "Prices: TSM 1", r = 0.6, g = 0.6, b = 0.6 } }
+    r, keys = receipt(view)
+    T.eq("unpriced source: nothing is spent that is known", r.spend.amount, "0c")
+    T.eq("unpriced source: no making line, and a problem line", keys, "spend,problem")
+    T.eq("unpriced source: the problem line says what is left out", r.problem.note,
+        "1 reagent on the list has no price - the amounts leave it out.")
+    T.check("unpriced source: in orange", r.problem.color[1] == 1 and r.problem.color[2] == 0.5)
+    -- The price summary's own problem line comes first when there is one.
+    view.priceLines = { { text = "Prices: none 1" }, { text = "1 reagent has no price at all - scan.", problem = true } }
+    r = receipt(view)
+    T.eq("unpriced source: the price summary's problem wins", r.problem.note, "1 reagent has no price at all - scan.")
+    -- Two reagents without a price.
+    LazyProf.CharStore:Get().craftChoices[BAR] = "craft"
+    view = shopView(craftPath({ [BOLT] = 500, [BAR] = 300 }, { step(shirt, 100, 110, 10, 0), step(sword, 110, 120, 10, 0) }))
+    r, keys = receipt(view)
+    T.eq("two unpriced sources", r.problem.note, "2 reagents on the list have no price - the amounts leave them out.")
+    T.eq("two unpriced sources: no making line", keys, "spend,problem")
+    LazyProf.CharStore:Get().craftChoices[BOLT] = nil
+    LazyProf.CharStore:Get().craftChoices[BAR] = nil
+    -- An unpriced reagent that is owned in full needs no price.
+    view = shopView(makePath({ complete = true }), { inventory = { [999] = 60 } })
+    r, keys = receipt(view)
+    T.eq("unpriced but owned: no problem line", keys, "spend")
+
     -- Several crafted reagents: counted, not named.
     view = shopView(craftPath({ [BOLT] = 500, [CLOTH] = 100, [BAR] = 300, [ORE] = 100 },
         { step(shirt, 100, 110, 10, 0), step(sword, 110, 120, 10, 0) }))
@@ -329,6 +386,107 @@ T.section("receipt", function()
             if text:find("[\128-\255]") then T.check("receipt text is plain ASCII", false, text) end
         end
     end
+end)
+
+-- Amounts that are added up, or are the sum of something visible, are shown
+-- to the copper: the short money format drops the smallest unit ("108g"
+-- beside "107g + 68s").
+T.section("amounts add up as shown", function()
+    T.eq("the reader of money text: three units", copper("1g 2s 3c"), 10203)
+    T.eq("the reader of money text: a minus", copper("-5s 70c"), -570)
+    T.check("the reader of money text: not an amount", copper("?") == nil and copper("-") == nil and copper("") == nil and copper("done") == nil)
+
+    -- Awkward amounts on purpose: three units, and more than a hundred gold.
+    -- Ten Big (3 Gem each), ten Huge (a Pearl and two Bolt each; pattern at
+    -- auction). The Bolt are made from Cloth.
+    local GEM, PEARL = 171, 172
+    local big = recipe(50, "Big", 100, 150, 160, 170, { reagents = { { itemId = GEM, count = 3, name = "Gem" } } })
+    local huge = recipe(51, "Huge", 110, 150, 160, 170, { unlearned = true, sourceInfo = { type = "ah", price = 6789, source = "TSM" },
+        reagents = { { itemId = PEARL, count = 1, name = "Pearl" }, { itemId = BOLT, count = 2, name = "Bolt" } } })
+    local prices = { [GEM] = 12345, [PEARL] = 1070103, [BOLT] = 500, [CLOTH] = 133 }
+    local function pricey(extra)
+        local path = makePath({ complete = true, gaps = {}, currentSkill = 100, actualSkill = 100, prices = prices,
+            sale = { mode = "vendor", values = { [50] = 2444 }, sources = { [50] = "vendor" }, rank = {}, loading = 0, loadingItems = {} },
+            steps = { step(big, 100, 110, 10, 0), step(huge, 110, 120, 10, 0) } })
+        for k, v in pairs(extra or {}) do path[k] = v end
+        return path
+    end
+    local function check(label, view)
+        local s, account = shown(view), view.account
+        T.eq(label .. ": You spend is what is spent", s.spend, account.spend)
+        T.eq(label .. ": its note adds up to it", s.noteReagents + s.noteRecipes, s.spend)
+        T.eq(label .. ": net is spend less back", s.net, s.spend + s.back)
+        T.eq(label .. ": Reagents to buy is the Cost cells added up", s.reagentsTotal, s.cells)
+        T.eq(label .. ": and the receipt's reagents part", s.reagentsTotal, s.noteReagents)
+        T.eq(label .. ": Recipes is the recipe rows added up", s.recipesTotal, s.recipeRows)
+        T.eq(label .. ": and the receipt's recipes part", s.recipesTotal, s.noteRecipes)
+        T.eq(label .. ": cost column + learn fees - what making saves = You spend", s.column + s.fees - s.making, s.spend)
+        return s
+    end
+
+    local view = shopView(pricey())
+    local r = {}
+    for _, line in ipairs(Views.Receipt(view)) do r[line.key] = line end
+    T.eq("to the copper: spend", r.spend.amount, "1108g 61s 49c")
+    T.eq("to the copper: its parts", r.spend.note, "reagents 1107g 93s 60c + recipes 67s 89c")
+    T.eq("to the copper: back", r.back.amount, "-2g 44s 40c")
+    T.eq("to the copper: net", r.net.amount, "1106g 17s 9c")
+    T.eq("to the copper: making", r.making.note, "Making 20 Bolt yourself saves 20s 20c")
+    local s = check("nothing owned", view)
+    T.eq("fixture: the making line is in the sums", s.making, 2020)
+    T.eq("fixture: a recipe fee is in the sums", s.fees, 6789)
+
+    local closedRuns = { ["craft:50:100"] = false, ["craft:51:110"] = false }
+    local rows = Views.Path(shopView(pricey(), { expanded = closedRuns }), {})
+    T.eq("to the copper: a run's cost", rows[2].cols[3], "37g 3s 50c")
+    T.eq("to the copper: the fee of a learn sub-line", rows[4].text, "Learn first: auction house, 67s 89c")
+    rows = Views.Shopping(view, {})
+    T.eq("to the copper: a Cost cell", rows[2].text .. " " .. rows[2].cols[4], "Pearl 1070g 10s 30c")
+    T.eq("to the copper: Reagents to buy", rows[#rows - 4].cols[4], "1107g 93s 60c")
+    T.eq("to the copper: a recipe row", rows[#rows - 1].cols[4], "67s 89c")
+
+    -- With stock, spare crafts and both.
+    view = shopView(pricey(), { inventory = { [GEM] = 7, [CLOTH] = 11 } })
+    s = check("stock", view)
+    T.eq("stock: what it saves, to the copper", s.stock, view.account.stockSaves)
+    T.eq("stock: 7 Gem and 11 Cloth", s.stock, 7 * 12345 + 11 * 133)
+    check("spare crafts", shopView(pricey(), { margin = 15 }))
+    check("stock and spare crafts", shopView(pricey(), { margin = 15, inventory = { [GEM] = 40, [PEARL] = 3 } }))
+
+    -- The what-if from skill 1 keeps the runs below the real skill in the
+    -- account, so they stay in the cost column and keep their learn line.
+    view = shopView(pricey({ planFromOne = true, actualSkill = 125 }), { expanded = closedRuns })
+    s = check("what-if with finished runs", view)
+    rows = Views.Path(view, {})
+    T.eq("a finished run keeps its cost", rows[2].cols[3], "37g 3s 50c")
+    T.eq("and is dimmed", rows[2].alpha, 0.5)
+    T.eq("its learn sub-line stays", rows[4].text, "Learn first: auction house, 67s 89c")
+    T.eq("dimmed too", rows[4].alpha, 0.5)
+
+    -- Opened runs: the reagent table's Cost cells add up to the run's cost.
+    view = shopView(pricey(), { inventory = { [GEM] = 7 }, expanded = { ["craft:50:100"] = true, ["craft:51:110"] = true } })
+    local run, cells
+    for _, row in ipairs(Views.Path(view, {})) do
+        if row.layout == "path" and row.stage then
+            if run then T.eq(run.text .. ": the reagent cells add up to the run's cost", cells, copper(run.cols[3])) end
+            run, cells = row, 0
+        elseif row.itemId and row.cols and not row.header then
+            cells = cells + (copper(row.cols[4]) or 0)
+        end
+    end
+    T.eq(run.text .. ": the reagent cells add up to the run's cost", cells, copper(run.cols[3]))
+
+    -- Differences and the per-craft figure are comparisons, not addends: short.
+    local pants = recipe(52, "Pants", 100, 150, 160, 170, { reagents = { { itemId = 173, count = 1, name = "Hide" } } })
+    local altPath = pricey()
+    altPath.prices = { [GEM] = 12345, [PEARL] = 1070103, [BOLT] = 500, [CLOTH] = 133, [173] = 40000 }
+    altPath.sale = nil
+    altPath.steps[1].alternatives = { { recipe = big, score = 1, color = "orange", expectedSkillups = 1 },
+        { recipe = pants, score = 2, color = "orange", expectedSkillups = 1 } }
+    rows = Views.Path(shopView(altPath, { expanded = { ["craft:50:100"] = false, ["craft:51:110"] = false }, advanced = true }), {})
+    T.eq("an alternative's difference stays short", rows[3].text, "or: Pants, +2g 96s")
+    rows = Views.Path(shopView(altPath, { expanded = { ["craft:50:100"] = true }, advanced = true }), {})
+    T.check("the per-craft figure stays short", rows[3].text:find("; 3g 70s per craft", 1, true) ~= nil, rows[3].text)
 end)
 
 -- A bare pipe wrapped in a colour ("|cFF888888||r") is read by the client as
@@ -744,7 +902,8 @@ T.section("learn and rank text", function()
 
     -- What one craft sells for, by where the value comes from.
     T.eq("sells for: vendor", Text.SellsFor(4500, "vendor"), "Sells for 45s each (vendor)")
-    T.eq("sells for: auction", Text.SellsFor(12345, "auction"), "Sells for 1g 23s each (auction, after the 5% cut)")
+    T.eq("sells for: auction, to the copper", Text.SellsFor(12345, "auction"), "Sells for 1g 23s 45c each (auction, after the 5% cut)")
+    T.eq("learn first: the fee to the copper", first({ type = "ah", price = 10203 }, 10203), "Learn first: auction house, 1g 2s 3c")
     T.eq("sells for: source unknown", Text.SellsFor(45, nil), "Sells for 45c each")
     T.eq("sold note: vendor", Text.SoldNote("vendor"), "crafts sold to a vendor")
     T.eq("sold note: auction", Text.SoldNote("auction"), "crafts sold at auction, after the 5% cut")
@@ -916,13 +1075,17 @@ T.section("path list", function()
     T.eq("a run with an unpriced reagent shows a question mark", rows[6].cols[3], "?")
     T.check("in orange", rows[6].colColors[3][1] == 1 and rows[6].colColors[3][2] == 0.5)
 
-    -- Finished runs: dimmed, "done", their learn step gone, no alternative.
+    -- Finished runs (the what-if from skill 1 has them): dimmed, with their
+    -- cost and their learn sub-line - the account still counts them - and no
+    -- alternative.
     rows = list({ skill = 141, pantsPrice = 60 })
     t = texts(rows)
-    T.eq("done: says so in the cost column", t[2], "Dark Boots | 117-125,10,done")
+    T.eq("done: the cost stays", t[2], "Dark Boots | 117-125,10,10s")
     T.eq("done: dimmed", rows[2].alpha, 0.5)
-    T.eq("done: no learn sub-line, no alternative; the next run follows", t[3], "Shoulders | 125-140,15,done")
-    T.eq("the run the skill is in is the current one", t[4], "> Armor Kit | 140-150,12,9s 60c")
+    T.eq("done: the learn sub-line stays", t[3], "  Learn first: trainer, 4s")
+    T.eq("done: dimmed as well", rows[3].alpha, 0.5)
+    T.eq("done: no alternative; the next run follows", t[4] .. " / " .. t[5],
+        "Shoulders | 125-140,15,15s / > Armor Kit | 140-150,12,9s 60c")
     -- The skill is inside the gap: the gap is where the player is.
     rows = list({ skill = 175 })
     T.eq("in a gap: the gap row is marked", texts(rows)[#rows], "> No recipe for 170-190: train elsewhere or missing data")
@@ -936,8 +1099,8 @@ T.section("path list", function()
     -- The rank step is next: the run after it is still the one to craft.
     rows = list({ skill = 150 })
     t = texts(rows)
-    T.eq("rank step next: it is not marked", t[5], "Train the next rank before 150")
-    T.eq("rank step next: the run after it is the current one", t[6], "> Barbaric Gloves | 150-170,24,25s 20c")
+    T.eq("rank step next: it is not marked", t[6], "Train the next rank before 150")
+    T.eq("rank step next: the run after it is the current one", t[7], "> Barbaric Gloves | 150-170,24,25s 20c")
 
     -- The closest alternative: shown within a tenth of what the run costs
     -- the player, and always when it is cheaper.

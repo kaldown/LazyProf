@@ -12,6 +12,7 @@
 package.path = "./?.lua;" .. package.path
 local harness = require("scripts.lib.harness")
 local T = require("scripts.lib.check").new()
+local Shown = require("scripts.lib.shown")
 
 harness.stubWow({ interface = 11508 })
 local LazyProf = harness.loadLazyProf({
@@ -24,6 +25,9 @@ local LazyProf = harness.loadLazyProf({
     "Modules/Pathfinder/Pins.lua",
     "Modules/Pathfinder/MaterialResolver.lua",
     "Modules/Pathfinder/Pathfinder.lua",
+    "Modules/Guide/Text.lua",
+    "Modules/Guide/Stages.lua",
+    "Modules/Guide/Views.lua",
 })
 local PF = LazyProf.Pathfinder
 
@@ -37,7 +41,8 @@ local PRODUCERS = {
 _G.CraftLib = { GetRecipeByProduct = function(_, itemId) return PRODUCERS[itemId] end }
 LazyProf.Client.PlayerSkill = function() return 0 end
 LazyProf.Client.GetItemInfo = function(_, itemId) return NAMES[itemId] end
-LazyProf.PriceManager = { PeekPriceInfo = function() return { price = 1, source = "TSM" } end }
+LazyProf.PriceManager = { PeekPriceInfo = function() return { price = 1, source = "TSM" } end,
+    PriceLine = function() return "Price: test" end }
 LazyProf.db.profile.strategy = "cheapest"
 LazyProf.db.profile.materialResolution = "cost"
 LazyProf.db.char.learnedRecipes = { tailoring = { [500] = true } }
@@ -86,6 +91,36 @@ T.section("what the owned stock saves", function()
     T.eq("never below zero", PF:StockSaving(STEPS, PRICES, 999999), 0)
 end)
 
+-- A made reagent and a recipe to pay for together: what making saves is
+-- measured against the reagents the list buys, not against everything spent.
+-- Ten Shirts (two Bolt and a Thread each), five Hats (a Cloth each, pattern
+-- 2s 50c): the cost column prices 20 Bolt at 5s, the list makes them from
+-- 60 Cloth at 1s.
+T.section("making, with a recipe to pay for", function()
+    local Stages, Views = LazyProf.Stages, LazyProf.GuideViews
+    local range = { orange = 1, yellow = 400, green = 410, gray = 420 }
+    SHIRT.skillRange, HAT.skillRange = range, range
+    local path = { profession = "Tailoring", professionKey = "tailoring", targetSkill = 75, actualSkill = 1, racialBonus = 0,
+        prices = PRICES, gaps = {}, complete = true, milestones = { 75 },
+        steps = { { recipe = SHIRT, quantity = 10, skillStart = 1, skillEnd = 11, alternatives = {} },
+                  { recipe = HAT, quantity = 5, skillStart = 11, skillEnd = 16, alternatives = {} } } }
+    local stages, totals = Stages.Build(path, { prices = PRICES, includeLearn = true })
+    local account = PF:Account(Stages.ShoppingSteps(stages), {}, {}, PRICES)
+    account.stockSaves = 0
+    local view = { path = path, stages = stages, summary = totals, account = account, missing = account.missing,
+        profile = "FOREVER", expanded = {}, showAllAlts = {}, saleLoading = 0 }
+    local shown = Shown.amounts(Views, view)
+    T.eq("fixture: the cost column", totals.columnPay, 20 * 500 + 10 * 10 + 5 * 100)
+    T.eq("fixture: the reagents the list buys", account.reagents, 65 * 100 + 10 * 10)
+    T.eq("fixture: the pattern", account.recipes, 250)
+    T.eq("the making line shows the cost column less the reagents", shown.making, totals.columnPay - account.reagents)
+    T.eq("which is not the cost column less everything spent", shown.making, 4000)
+    T.eq("shown: cost column + the learn fee - what making saves = You spend",
+        shown.column + shown.fees - shown.making, shown.spend)
+    T.eq("shown: the note's two parts add up to You spend", shown.noteReagents + shown.noteRecipes, shown.spend)
+    SHIRT.skillRange, HAT.skillRange = nil, nil
+end)
+
 -- The receipt's sums on real recipe data: every case the path snapshots use
 -- (scripts/test_paths.lua), planned by the Cheapest strategy as that file
 -- does, then folded into stages with learn steps and accounted over the
@@ -106,7 +141,9 @@ local STRATEGY_FILES = {
     "Modules/Pathfinder/Strategies/Cheapest.lua",
     "Modules/Pathfinder/MaterialResolver.lua",
     "Modules/Pathfinder/Pathfinder.lua",
+    "Modules/Guide/Text.lua",
     "Modules/Guide/Stages.lua",
+    "Modules/Guide/Views.lua",
 }
 local CASES = {
     { name = "tbc_leatherworking_300_375", interface = 20505, prof = "leatherworking", from = 300, to = 375 },
@@ -121,6 +158,7 @@ local CASES = {
 
 T.section("receipt invariants on the snapshot fixtures", function()
     local withCrafted, withoutCrafted, withFees, withSale, withStock = 0, 0, 0, 0, 0
+    local withMaking, withMakingAndFees = 0, 0
     for _, case in ipairs(CASES) do
         local CraftLib = harness.loadCraftLib(case.interface, { sod = case.sod, camelot = case.camelot })
         local LP = harness.loadLazyProf(STRATEGY_FILES)
@@ -129,7 +167,8 @@ T.section("receipt invariants on the snapshot fixtures", function()
         LP.Client = LP.Client or {}
         LP.Client.PlayerSkill = function() return skill end
         LP.Client.GetItemInfo = function() return nil end
-        LP.PriceManager = { PeekPriceInfo = function() return { price = 1, source = "TSM" } end }
+        LP.PriceManager = { PeekPriceInfo = function() return { price = 1, source = "TSM" } end,
+            PriceLine = function() return "Price: test" end }
         LP.db.profile.strategy = "cheapest"
         local prof = CraftLib:GetProfession(case.prof)
         assert(prof, case.name .. ": no profession data")
@@ -145,7 +184,7 @@ T.section("receipt invariants on the snapshot fixtures", function()
         LP.RecipeAvailability:EndRecalc()
         local path = { steps = steps, gaps = meta.gaps, complete = meta.complete, prices = prices,
             currentSkill = case.from, actualSkill = case.from, targetSkill = case.to, racialBonus = 0,
-            milestones = prof.milestones }
+            milestones = prof.milestones, profession = prof.name, professionKey = case.prof }
 
         -- Synthetic sale values on every third recipe, synthetic stock of
         -- every fourth reagent (in the bags).
@@ -188,25 +227,48 @@ T.section("receipt invariants on the snapshot fixtures", function()
                 T.eq(label .. "recipes are the recipe rows", account.recipes, sum(recipeRows, "cost"))
                 T.eq(label .. "and the learn steps' fees", account.recipes, fees)
                 T.eq(label .. "spend less back is the net", account.spend - account.sale, account.net)
-                local saving = totals.columnPay - account.reagents
-                T.eq(label .. "cost column + recipes - the saving of making reagents = You spend",
-                    totals.columnPay + account.recipes - saving, account.spend)
+                T.eq(label .. "back from selling is what the stages' crafts sell for", account.sale, totals.shownSale)
+
+                -- What the window shows for it, read back from the texts
+                -- (the FOREVER wording: fees are named on the Path tab).
+                account.stockSaves = LP.Pathfinder:StockSaving(LP.Stages.ShoppingSteps(stages), prices, account.spend)
+                local view = { path = path, stages = stages, summary = totals, account = account, missing = account.missing,
+                    sale = { mode = "vendor", values = values, sources = {} }, saleLoading = 0, profile = "FOREVER",
+                    expanded = {}, showAllAlts = {}, marginPercent = margin > 0 and margin or nil, skill = case.from }
+                local shown = Shown.amounts(LP.GuideViews, view)
                 if not crafted then
                     T.eq(label .. "nothing made: the cost column is the reagents amount", totals.columnPay, account.reagents)
+                    T.eq(label .. "nothing made: no making line", shown.making, 0)
+                else
+                    T.eq(label .. "the making line shows the cost column less the reagents",
+                        shown.making, totals.columnPay - account.reagents)
                 end
-                T.eq(label .. "back from selling is what the stages' crafts sell for", account.sale, totals.shownSale)
+                T.eq(label .. "shown: You spend", shown.spend, account.spend)
+                T.eq(label .. "shown: the note's parts add up to You spend",
+                    (shown.noteReagents or shown.spend) + (shown.noteRecipes or 0), shown.spend)
+                T.eq(label .. "shown: net is spend less back", shown.net, shown.spend + shown.back)
+                T.eq(label .. "shown: Reagents to buy is the Cost cells added up", shown.reagentsTotal, shown.cells)
+                T.eq(label .. "shown: Recipes is the recipe rows added up", shown.recipesTotal or 0, shown.recipeRows)
+                T.eq(label .. "shown: the learn sub-lines' fees are the recipes amount", shown.fees, account.recipes)
+                T.eq(label .. "shown: cost column + learn fees - what making saves = You spend",
+                    shown.column + shown.fees - shown.making, shown.spend)
+                T.eq(label .. "shown: every run has a cost", shown.unknown, 0)
 
                 if crafted then withCrafted = withCrafted + 1 else withoutCrafted = withoutCrafted + 1 end
                 if fees > 0 then withFees = withFees + 1 end
                 if account.sale > 0 then withSale = withSale + 1 end
-                if LP.Pathfinder:StockSaving(LP.Stages.ShoppingSteps(stages), prices, account.spend) > 0 then
-                    withStock = withStock + 1
+                if account.stockSaves > 0 then withStock = withStock + 1 end
+                if shown.making ~= 0 then
+                    withMaking = withMaking + 1
+                    if fees > 0 then withMakingAndFees = withMakingAndFees + 1 end
                 end
             end
         end
     end
     -- The fixtures really exercise what the equalities are about.
     T.check("some lists make reagents", withCrafted > 0, withCrafted)
+    T.check("and that changes what is spent", withMaking > 0, withMaking)
+    T.check("on paths with recipes to pay for as well", withMakingAndFees > 0, withMakingAndFees)
     T.check("some lists make none", withoutCrafted >= #CASES * 2, withoutCrafted)
     T.check("some paths have recipes to pay for", withFees > 0, withFees)
     T.check("crafts sell for something in every case", withSale == #CASES * 4, withSale)

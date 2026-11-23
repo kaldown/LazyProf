@@ -24,14 +24,21 @@ LazyProf.Stages = Stages
 
 local QUESTION_MARK = "Interface\\Icons\\INV_Misc_QuestionMark"
 
+-- Whole copper. A price can be a fraction of a copper; every cost is rounded
+-- where it is produced and sums add up the rounded costs, so what the window
+-- shows can be added up to the copper.
+local function Round(copper)
+    return math.floor(copper + 0.5)
+end
+
 -- One-time cost of getting an unlearned recipe (0 when learned, free or unknown).
 function Stages.RecipeFee(recipe)
     local info = recipe and not recipe.learned and recipe._sourceInfo
     if not info then return 0 end
     if info.type == "trainer" or info.type == "vendor" then
-        return info.cost or 0
+        return Round(info.cost or 0)
     elseif info.type == "ah" then
-        return info.price or 0
+        return Round(info.price or 0)
     end
     return 0
 end
@@ -51,7 +58,8 @@ end
 
 -- Reagent rows for `quantity` crafts against `remaining` (owned counts left
 -- after earlier stages), consuming what is used. Returns the rows, the market
--- cost of all reagents and the cost of what is missing.
+-- cost of all reagents and the cost of what is missing (each reagent's cost
+-- in whole copper, the sums of those).
 local function Materials(recipe, quantity, remaining, prices)
     local rows, cost, pay = {}, 0, 0
     for _, reagent in ipairs(recipe.reagents or {}) do
@@ -61,6 +69,7 @@ local function Materials(recipe, quantity, remaining, prices)
         local missing = need - used
         remaining[reagent.itemId] = have - used
         local price = prices[reagent.itemId]
+        local missingCost = Round((price or 0) * missing)
         local name, link, icon = Utils.GetItemInfo(reagent.itemId)
         rows[#rows + 1] = {
             itemId = reagent.itemId,
@@ -71,10 +80,10 @@ local function Materials(recipe, quantity, remaining, prices)
             have = have,
             missing = missing,
             price = price,
-            estimatedCost = (price or 0) * missing,
+            estimatedCost = missingCost,
         }
-        cost = cost + (price or 0) * need
-        pay = pay + (price or 0) * missing
+        cost = cost + Round((price or 0) * need)
+        pay = pay + missingCost
     end
     return rows, cost, pay
 end
@@ -170,7 +179,7 @@ local function Alternatives(stage, inventoryBefore, prices, stagePay, saleValues
                 local reagentCost = 0
                 for _, reagent in ipairs(alt.recipe.reagents or {}) do
                     local missing = math.max(0, reagent.count * crafts - (inventoryBefore[reagent.itemId] or 0))
-                    reagentCost = reagentCost + (prices[reagent.itemId] or 0) * missing
+                    reagentCost = reagentCost + Round((prices[reagent.itemId] or 0) * missing)
                 end
                 entry.projectedCrafts = crafts
                 entry.projectedCost = reagentCost + fee

@@ -545,6 +545,38 @@ T.section("what crafts sell for", function()
     T.eq("fee inside the stage: the cost column does not", feeSum.columnPay, 1000)
 end)
 
+-- Costs are whole copper where they are produced, and sums add up the
+-- rounded values: what is shown can then be added up to the copper.
+T.section("whole copper", function()
+    local A = recipe(1, "A", 1, 400, 410, 420, { reagents = {
+        { itemId = 201, count = 3, name = "Grain" }, { itemId = 202, count = 1, name = "Oil" } } })
+    local B = recipe(2, "B", 1, 400, 410, 420, { unlearned = true, sourceInfo = { type = "ah", price = 12.5 },
+        reagents = { { itemId = 201, count = 1, name = "Grain" } } })
+    local prices = { [201] = 0.4, [202] = 33.3 }
+    local alts = { { recipe = A, score = 1, color = "orange", expectedSkillups = 1 }, { recipe = B, score = 2, color = "orange", expectedSkillups = 1 } }
+    local path = { targetSkill = 75, gaps = {}, totalCost = 0,
+        steps = { step(A, 1, 4, 3, 0, { alternatives = alts }), step(B, 4, 11, 7, 0) } }
+    local stages, summary = Stages.Build(path, { prices = prices, milestones = MILESTONES, includeLearn = true })
+    local a, learn, b = stages[1], stages[2], stages[3]
+    -- 9 Grain at 0.4 is 3.6, 3 Oil at 33.3 is 99.9.
+    T.eq("a reagent's cost is whole copper", a.materials[1].estimatedCost, 4)
+    T.eq("the other", a.materials[2].estimatedCost, 100)
+    T.eq("the run's cost is the sum of its reagents' costs", a.outOfPocketCost, 104)
+    T.eq("so is its market cost", a.cost, 104)
+    T.eq("a recipe's price is whole copper", learn.fee, 13)
+    T.eq("7 Grain at 0.4 is 2.8", b.outOfPocketCost, 3)
+    T.eq("the cost column is the sum of the runs", summary.columnPay, 107)
+    T.eq("the totals add up the same whole amounts", summary.pay, 107 + 13)
+    local alt = a.alternatives[1]
+    T.eq("an alternative's cost is whole copper too (3 Grain: 1.2, and the recipe)", alt.projectedCost, 1 + 13)
+
+    -- With stock: 4 Grain owned, 5 to buy at 0.4.
+    stages = Stages.Build(path, { prices = prices, milestones = MILESTONES, includeLearn = true, inventory = { [201] = 4 } })
+    T.eq("stock: what is left to buy, rounded", stages[1].materials[1].estimatedCost, 2)
+    T.eq("stock: the run", stages[1].outOfPocketCost, 102)
+    T.eq("stock: its market cost is unchanged", stages[1].cost, 104)
+end)
+
 T.section("range filter", function()
     local brackets = LazyProf.Utils.BuildSkillBrackets(MILESTONES)
     T.eq("current range from the real skill", Range.Effective(nil, brackets, 143).name, "75-150")
