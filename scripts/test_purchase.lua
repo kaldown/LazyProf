@@ -45,6 +45,13 @@ T.section("plan", function()
         item(9, 9, "Bolt", 10),
         item(10, 10, "Locked", 10, { purchasable = false }),
     }
+    -- A crafted reagent can still have a part to buy (what other crafted
+    -- reagents are made from): that part is bought like any other.
+    local partly = Queue.Plan({ row(11, "Bar", 6, { crafted = true }) }, { item(1, 11, "Bar", 300) })
+    T.eq("a crafted row's part to buy is planned", #partly.entries, 1)
+    T.eq("with its quantity", partly.entries[1].quantity, 6)
+    T.eq("and cost", partly.total, 1800)
+
     local plan = Queue.Plan(rows, items)
     T.eq("entries: what this merchant sells for gold, without limit", #plan.entries, 3)
     local thread, dye, vial = plan.entries[1], plan.entries[2], plan.entries[3]

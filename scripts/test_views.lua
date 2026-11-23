@@ -487,6 +487,60 @@ T.section("learn and rank text", function()
     T.eq("learn row elsewhere", row.text, "|cFF888888learn|r  Boots - trainer")
 end)
 
+T.section("shopping rows", function()
+    local chosen = {}
+    local ctx = { onCraftChoice = function(row, choice) chosen[#chosen + 1] = { row.itemId, choice == nil and "auto" or choice } end }
+    local function shop(rows)
+        return Views.Shopping({ path = makePath(), missing = { rows = rows } }, ctx)
+    end
+    local function find(rows, name)
+        for _, r in ipairs(rows) do
+            if r.text == name then return r end
+        end
+    end
+    local function item(id, name, extra)
+        local row = { itemId = id, name = name, need = 10, have = 0, toBuy = 0, cost = 0, sources = {}, craftable = true, crafted = false }
+        for k, v in pairs(extra or {}) do row[k] = v end
+        return row
+    end
+
+    -- A crafted reagent can have a part to buy (what other crafted reagents
+    -- are made from): the row says how many and what they cost.
+    local rows = shop({
+        item(1, "Bar", { crafted = true, need = 9, toBuy = 6, cost = 1800, unitPrice = 300, craftQuantity = 3, craftRecipeName = "Smelt Bar", children = {} }),
+        item(2, "Bolt", { crafted = true, craftQuantity = 10, craftRecipeName = "Bolt of Cloth", children = {} }),
+    })
+    T.eq("crafted with a part to buy: the buy count", find(rows, "Bar").cols[3], "6")
+    T.eq("crafted with a part to buy: its cost is shown", find(rows, "Bar").cols[4], "18s")
+    T.eq("crafted, nothing to buy: no cost", find(rows, "Bolt").cols[4], "")
+    T.eq("crafted, nothing to buy: no count", find(rows, "Bolt").cols[3], "-")
+
+    -- The craft / buy button says the choice in force, also when the stock
+    -- covers the need and nothing is crafted right now.
+    rows = shop({
+        item(3, "Chosen craft, covered", { choice = "craft", have = 20 }),
+        item(4, "Chosen buy", { choice = "buy", toBuy = 10, cost = 100 }),
+        item(5, "Automatic craft", { crafted = true, craftQuantity = 10, children = {} }),
+        item(6, "Automatic buy", { toBuy = 10, cost = 100 }),
+    })
+    local covered = find(rows, "Chosen craft, covered").button
+    T.eq("chosen craft, stock covers it: still says craft", covered.text, "I craft it")
+    T.check("its tooltip says it was chosen", covered.tooltip[1].text:find("You chose to craft", 1, true) ~= nil, covered.tooltip[1].text)
+    T.check("and that nothing needs making now", covered.tooltip[2].text:find("covers", 1, true) ~= nil, covered.tooltip[2].text)
+    covered.onClick("LeftButton")
+    T.check("a click switches it to buy", chosen[#chosen][1] == 3 and chosen[#chosen][2] == "buy")
+    local buy = find(rows, "Chosen buy").button
+    T.eq("chosen buy", buy.text, "I buy it")
+    T.check("its tooltip", buy.tooltip[1].text:find("You chose to buy", 1, true) ~= nil)
+    buy.onClick("LeftButton")
+    T.check("a click switches it to craft", chosen[#chosen][2] == "craft")
+    buy.onClick("RightButton")
+    T.check("a right-click goes back to automatic", chosen[#chosen][2] == "auto")
+    T.eq("automatic craft", find(rows, "Automatic craft").button.text, "I craft it")
+    T.check("automatic craft: tooltip", find(rows, "Automatic craft").button.tooltip[1].text:find("automatically", 1, true) ~= nil)
+    T.eq("automatic buy", find(rows, "Automatic buy").button.text, "I buy it")
+end)
+
 T.section("arrow tooltip", function()
     local function lines(view)
         local out = {}

@@ -50,7 +50,8 @@ function Queue.Plan(rows, items)
     end
     for _, row in ipairs(rows or {}) do
         local item = byItem[row.itemId]
-        if item and not row.crafted and (row.toBuy or 0) > 0 then
+        -- (A crafted reagent's row can still have a part to buy.)
+        if item and (row.toBuy or 0) > 0 then
             local reason
             if item.extendedCost or not item.price or item.price <= 0 then
                 reason = "not sold for gold"
