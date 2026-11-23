@@ -449,8 +449,28 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
         return bd[sourceKey] or 0
     end
 
-    -- Process each needed material through MaterialResolver
+    -- What the craft-or-buy comparison may count on as stock for making
+    -- other reagents: what is owned, less what the steps use of it directly;
+    -- every crafted reagent then takes its share off, so no unit is counted
+    -- twice. Items are decided in a fixed order (first use, then id).
+    local available = {}
+    for itemId, count in pairs(inventory) do
+        available[itemId] = count
+    end
+    local order = {}
     for itemId, data in pairs(needed) do
+        available[itemId] = math.max(0, (available[itemId] or 0) - data.count)
+        order[#order + 1] = itemId
+    end
+    table.sort(order, function(a, b)
+        local skillA, skillB = needed[a].firstUsedAtSkill, needed[b].firstUsedAtSkill
+        if skillA ~= skillB then return skillA < skillB end
+        return a < b
+    end)
+
+    -- Process each needed material through MaterialResolver
+    for _, itemId in ipairs(order) do
+        local data = needed[itemId]
         local need = data.count
         local inBags = getSourceCount(itemId, "bags")
         -- Owned stock of the item itself (every enabled source) is used
@@ -463,7 +483,7 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
             -- Asked for at least one so "can the character craft it" is known
             -- even when the stock already covers the need.
             resolution = LazyProf.MaterialResolver:ResolveMaterial(
-                itemId, math.max(toMake, 1), inventory, prices, {}, resolutionMode, choice
+                itemId, math.max(toMake, 1), available, prices, {}, resolutionMode, choice
             )
         end
         local craftable = resolution and resolution.craftable or false
@@ -485,6 +505,7 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
                 sourceFromBank = sourceFromBank + source.fromInventory
                 sourceFromAH = sourceFromAH + source.toBuy
                 sourceMaterialName = source.name or "Unknown"
+                available[source.itemId] = math.max(0, (available[source.itemId] or 0) - source.fromInventory)
 
                 addResolved(source.itemId, source.totalNeeded, source.name, data.firstUsedAtSkill)
                 children[#children + 1] = { itemId = source.itemId, name = source.name or "Unknown", need = source.totalNeeded }

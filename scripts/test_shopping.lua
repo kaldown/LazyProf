@@ -302,6 +302,65 @@ T.section("a crafted reagent that is also the source of another", function()
     LazyProf.db.char.learnedRecipes = { tailoring = { [500] = true } }
 end)
 
+T.section("craft or buy does not count stock twice", function()
+    -- Bars are used directly and plates are made from bars. Bars smelt from
+    -- ore (156 a bar against 465), plates cost 289 to buy against 930 of bars.
+    local PLATE = 15
+    NAMES[PLATE] = "Plate"
+    PRODUCERS[PLATE] = { { professionKey = "tailoring", recipe = { id = 700, name = "Make Plate", source = { type = "trainer" },
+        reagents = { { itemId = BAR, count = 2, name = "Bar" } } } } }
+    local savedBar = PRODUCERS[BAR]
+    PRODUCERS[BAR] = { { professionKey = "tailoring", recipe = { id = 600, name = "Smelt Bar", source = { type = "trainer" },
+        reagents = { { itemId = ORE, count = 3, name = "Ore" } } } } }
+    LazyProf.db.char.learnedRecipes = { tailoring = { [500] = true, [600] = true, [700] = true } }
+    local steps = {
+        { recipe = { id = 1, name = "A", learned = true, reagents = { { itemId = BAR, count = 4, name = "Bar" } } }, quantity = 5, skillStart = 1 },
+        { recipe = { id = 2, name = "B", learned = true, reagents = { { itemId = PLATE, count = 4, name = "Plate" } } }, quantity = 6, skillStart = 10 },
+    }
+    local prices = { [ORE] = 52, [BAR] = 465, [PLATE] = 289 }
+
+    local none = PF:CalculateMissingMaterials(steps, {}, {}, prices)
+    T.check("nothing owned: bars are smelted, plates bought", rowOf(none, BAR).crafted == true and rowOf(none, PLATE).crafted == false)
+    T.eq("nothing owned: the total", none.buyTotal, 60 * 52 + 24 * 289)
+
+    -- 35 bars owned: 20 go to the direct use, 15 are left - not enough to
+    -- make plates cheaper than buying them.
+    local with = PF:CalculateMissingMaterials(steps, { [BAR] = 35 }, { [BAR] = { bags = 35 } }, prices)
+    T.check("with 35 bars: plates are still bought", rowOf(with, PLATE).crafted == false)
+    T.eq("with 35 bars: no bars to buy", rowOf(with, BAR).toBuy, 0)
+    T.eq("with 35 bars: only the plates are paid for", with.buyTotal, 24 * 289)
+    T.check("owning stock never makes the list dearer", with.buyTotal <= none.buyTotal)
+    T.eq("and the saving is what the smelting would have cost", PF:StockSaving(steps, prices, with.buyTotal), 60 * 52)
+
+    -- Enough bars left over after the direct use: now the plates are made.
+    local plenty = PF:CalculateMissingMaterials(steps, { [BAR] = 68 }, { [BAR] = { bags = 68 } }, prices)
+    T.check("with 68 bars: plates are made from the 48 left over", rowOf(plenty, PLATE).crafted == true)
+    T.eq("with 68 bars: nothing to buy", plenty.buyTotal, 0)
+
+    -- Two crafted reagents share a source: the stock goes to the first one only.
+    local X1, X2, S = 21, 22, 23
+    NAMES[X1], NAMES[X2], NAMES[S] = "X1", "X2", "S"
+    PRODUCERS[X1] = { { professionKey = "tailoring", recipe = { id = 801, name = "Make X1", source = { type = "trainer" },
+        reagents = { { itemId = S, count = 1, name = "S" } } } } }
+    PRODUCERS[X2] = { { professionKey = "tailoring", recipe = { id = 802, name = "Make X2", source = { type = "trainer" },
+        reagents = { { itemId = S, count = 1, name = "S" } } } } }
+    LazyProf.db.char.learnedRecipes.tailoring[801] = true
+    LazyProf.db.char.learnedRecipes.tailoring[802] = true
+    local shared = {
+        { recipe = { id = 3, name = "C", learned = true, reagents = {
+            { itemId = X1, count = 1, name = "X1" }, { itemId = X2, count = 1, name = "X2" } } }, quantity = 10, skillStart = 1 },
+    }
+    local sharedPrices = { [X1] = 80, [X2] = 90, [S] = 100 }
+    local m = PF:CalculateMissingMaterials(shared, { [S] = 10 }, { [S] = { bags = 10 } }, sharedPrices)
+    T.check("shared source: the first reagent is made from the stock", rowOf(m, X1).crafted == true)
+    T.check("shared source: the second is bought (the stock is spoken for)", rowOf(m, X2).crafted == false)
+    T.eq("shared source: the total", m.buyTotal, 900)
+
+    PRODUCERS[PLATE], PRODUCERS[X1], PRODUCERS[X2] = nil, nil, nil
+    PRODUCERS[BAR] = savedBar
+    LazyProf.db.char.learnedRecipes = { tailoring = { [500] = true } }
+end)
+
 T.section("recipes to learn", function()
     local function unlearned(id, name, info)
         return { id = id, name = name, learned = false, _sourceInfo = info,
