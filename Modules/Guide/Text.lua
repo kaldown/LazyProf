@@ -56,6 +56,20 @@ function Text.ColorChanges(stage)
     return table.concat(parts, ", ") .. ", then " .. color
 end
 
+-- Sale value ----------------------------------------------------------------------
+
+local function CutPercent()
+    return math.floor(LazyProf.Constants.AUCTION_CUT * 100 + 0.5)
+end
+
+-- How the crafts are counted as sold (the sale mode), for the receipt's note.
+function Text.SoldNote(mode)
+    if mode == LazyProf.Constants.SALE_MODE.AUCTION then
+        return string.format("crafts sold at auction, after the %d%% cut", CutPercent())
+    end
+    return "crafts sold to a vendor"
+end
+
 -- Learn and rank steps -----------------------------------------------------------
 
 -- On the VANILLA profile the recipe data types every recipe as trainer-taught,

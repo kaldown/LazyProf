@@ -323,9 +323,10 @@ end
 
 -- Tooltip lines for a path summary: { text, r, g, b } each. A breakdown of
 -- where the prices came from, then a line for each problem (prices still
--- loading, reagents with no price at all, Auctionator prices too old,
--- reagents priced by the sell estimate). The /lp diag prices hint is added
--- only for problems the player can act on.
+-- loading, reagents with no price at all, Auctionator prices too old), each
+-- marked `problem = true`, then a note about reagents priced by the sell
+-- estimate. The /lp diag prices hint is added only for problems the player
+-- can act on.
 function PriceManager.SummaryLines(s)
     local lines = {}
     if not s or s.total == 0 then return lines end
@@ -343,17 +344,17 @@ function PriceManager.SummaryLines(s)
     if s.loading > 0 then
         problem = true
         lines[#lines + 1] = { text = Reagents(s.loading, "reagent has", "reagents have")
-            .. " no price yet - it updates by itself; /reload if it stays.", r = 1, g = 0.5, b = 0 }
+            .. " no price yet - it updates by itself; /reload if it stays.", r = 1, g = 0.5, b = 0, problem = true }
     end
     if s.unpriced > 0 then
         problem = true
         lines[#lines + 1] = { text = Reagents(s.unpriced, "reagent has", "reagents have")
-            .. " no price at all - scan the auction house (needs TSM or Auctionator).", r = 1, g = 0.5, b = 0 }
+            .. " no price at all - scan the auction house (needs TSM or Auctionator).", r = 1, g = 0.5, b = 0, problem = true }
     end
     if s.stale > 0 then
         problem = true
         lines[#lines + 1] = { text = "Auctionator prices up to " .. tostring(s.oldestAuctionatorDays)
-            .. " days old - rescan the auction house.", r = 1, g = 0.5, b = 0 }
+            .. " days old - rescan the auction house.", r = 1, g = 0.5, b = 0, problem = true }
     end
     if s.estimate > 0 then
         lines[#lines + 1] = { text = Reagents(s.estimate, "reagent has", "reagents have")

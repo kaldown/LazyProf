@@ -1,8 +1,8 @@
 -- scripts/test_views.lua
 --
 -- What the LazyProf window shows, checked as data: the header lines, the
--- footer totals, the Steps tab's rows, the "nothing left" states and the
--- recipe search. No frames are involved.
+-- receipt, the footer totals, the Steps tab's rows, the "nothing left" states
+-- and the recipe search. No frames are involved.
 --
 -- Run from the addon root:  lua5.1 scripts/test_views.lua
 
@@ -19,12 +19,15 @@ local LazyProf = harness.loadLazyProf({
     "Core/Config.lua",
     "Core/CharStore.lua",
     "Modules/Pathfinder/Pins.lua",
+    "Modules/Pathfinder/MaterialResolver.lua",
+    "Modules/Pathfinder/Pathfinder.lua",
     "Modules/Guide/Text.lua",
     "Modules/Guide/Range.lua",
     "Modules/Guide/Stages.lua",
     "Modules/Guide/Views.lua",
 })
 local Stages, Views, Range = LazyProf.Stages, LazyProf.GuideViews, LazyProf.GuideRange
+local Pathfinder = LazyProf.Pathfinder
 local MILESTONES = { 75, 150, 225, 300 }
 local BRACKETS = LazyProf.Utils.BuildSkillBrackets(MILESTONES)
 local PRICES = { [101] = 100, [102] = 200, [103] = 300 }
@@ -81,6 +84,46 @@ local function makeView(path, opts)
     }
 end
 
+-- Craft or buy in the shopping list: Bolt (150) is made from 3 Cloth (151)
+-- and Bar (152) from 2 Ore (153), by recipes the character knows.
+local BOLT, CLOTH, BAR, ORE = 150, 151, 152, 153
+local PRODUCERS = {
+    [BOLT] = { { professionKey = "tailoring", recipe = { id = 500, name = "Bolt of Cloth", source = { type = "trainer" },
+        reagents = { { itemId = CLOTH, count = 3, name = "Cloth" } } } } },
+    [BAR] = { { professionKey = "mining", recipe = { id = 501, name = "Smelt Bar", source = { type = "trainer" },
+        reagents = { { itemId = ORE, count = 2, name = "Ore" } } } } },
+}
+_G.CraftLib = { GetRecipeByProduct = function(_, itemId) return PRODUCERS[itemId] end }
+LazyProf.Client.PlayerSkill = function() return 0 end
+LazyProf.db.char.learnedRecipes = { tailoring = { [500] = true }, mining = { [501] = true } }
+
+-- The view as the window builds it for the receipt and the reworked tabs:
+-- stages with learn steps, and the account of the whole path (the shopping
+-- list of its stages, less what the crafts sell for).
+local function shopView(path, opts)
+    opts = opts or {}
+    local inventory = opts.inventory or {}
+    -- In the bags unless opts.breakdown says where the stock is.
+    local breakdown = opts.breakdown
+    if not breakdown then
+        breakdown = {}
+        for itemId, count in pairs(inventory) do breakdown[itemId] = { bags = count } end
+    end
+    local stages, summary = Stages.Build(path, { inventory = inventory, marginPercent = opts.margin,
+        includeLearn = true, liveCap = opts.liveCap, pins = opts.pins })
+    local steps = Stages.ShoppingSteps(stages)
+    local account = Pathfinder:Account(steps, inventory, breakdown, path.prices, path.sale and path.sale.values)
+    account.stockSaves = Pathfinder:StockSaving(steps, path.prices, account.spend)
+    return {
+        path = path, stages = stages, summary = summary, account = account, missing = account.missing,
+        sale = path.sale, saleLoading = opts.saleLoading or 0,
+        skill = path.actualSkill, cap = opts.cap, liveCap = opts.liveCap, profile = opts.profile or "FOREVER",
+        priceSummary = opts.priceSummary, priceLines = opts.priceLines,
+        marginPercent = opts.margin, expanded = opts.expanded or {}, showAllAlts = opts.showAllAlts or {},
+        advanced = opts.advanced or false, hideOwned = opts.hideOwned or false,
+    }
+end
+
 T.section("header", function()
     local h = Views.Header(makeView(makePath(), { cap = 150 }))
     T.eq("title names the profession", h.title, "LazyProf - Tailoring")
@@ -106,11 +149,216 @@ T.section("header", function()
     T.eq("no path: bare title", Views.Header({}).title, "LazyProf")
 end)
 
+T.section("receipt", function()
+    -- Lines by key, and the keys in order.
+    local function receipt(view)
+        local byKey, keys = {}, {}
+        for _, line in ipairs(Views.Receipt(view)) do
+            byKey[line.key] = line
+            keys[#keys + 1] = line.key
+        end
+        return byKey, table.concat(keys, ",")
+    end
+    local function sold(mode, values)
+        local sources = {}
+        for id in pairs(values) do sources[id] = mode end
+        return { mode = mode, values = values, sources = sources, rank = {}, loading = 0, loadingItems = {} }
+    end
+
+    -- Nothing sells, nothing owned, every recipe known: one line.
+    -- Gloves 19 x 1s + Shirt 20 x 2s; the Mystery reagent has no price.
+    local r, keys = receipt(shopView(makePath()))
+    T.eq("no sale value, no stock: one line", keys, "spend")
+    T.eq("spend: label, with the gaps flagged", r.spend.label, "You spend (excluding gaps)")
+    T.eq("spend: a reagent without a price adds nothing", r.spend.amount, "59s")
+    T.check("spend: no note when no recipe costs anything", r.spend.note == nil, r.spend.note)
+    r = receipt(shopView(makePath({ complete = true })))
+    T.eq("spend: label of a path without gaps", r.spend.label, "You spend")
+
+    -- A recipe to learn: the note splits the amount.
+    local boots = recipe(4, "Boots", 143, 200, 210, 220, { unlearned = true, sourceInfo = { type = "vendor", cost = 2000 } })
+    local learnPath = makePath({ complete = true, gaps = {}, prices = { [104] = 100 },
+        steps = { step(boots, 143, 150, 7, 2700), step(boots, 150, 160, 10, 1000) } })
+    r, keys = receipt(shopView(learnPath))
+    T.eq("recipes: amount is reagents plus recipes", r.spend.amount, "37s")
+    T.eq("recipes: the note says both parts", r.spend.note, "reagents 17s + recipes 20s")
+    T.eq("recipes: still one line", keys, "spend")
+
+    -- Sold to a vendor: three lines.
+    local view = shopView(makePath({ complete = true, sale = sold("vendor", { [1] = 30 }) }))
+    r, keys = receipt(view)
+    T.eq("vendor: three lines", keys, "spend,back,net")
+    T.eq("vendor: back label", r.back.label, "Back from selling")
+    T.eq("vendor: 19 gloves at 30c come back, shown as a minus", r.back.amount, "-5s 70c")
+    T.check("vendor: the amount is green", r.back.amountColor[1] < 1 and r.back.amountColor[2] == 1)
+    T.eq("vendor: note", r.back.note, "crafts sold to a vendor")
+    T.eq("vendor: net label", r.net.label, "Net cost")
+    T.eq("vendor: net is spend less back", r.net.amount, "53s 30c")
+    T.check("vendor: no stock note without stock", r.net.note == nil, r.net.note)
+    T.eq("the lines add up", view.account.spend - view.account.sale, view.account.net)
+
+    r = receipt(shopView(makePath({ complete = true, sale = sold("auction", { [1] = 30 }) })))
+    T.eq("auction: note", r.back.note, "crafts sold at auction, after the 5% cut")
+
+    -- Sale values still loading: the amount known so far, and a note.
+    r, keys = receipt(shopView(makePath({ complete = true, sale = sold("vendor", { [1] = 30 }) }), { saleLoading = 2 }))
+    T.eq("loading: note", r.back.note, "crafts sold to a vendor, still loading")
+    T.eq("loading: the amount known so far", r.back.amount, "-5s 70c")
+    r, keys = receipt(shopView(makePath({ complete = true, sale = sold("vendor", {}) }), { saleLoading = 1 }))
+    T.eq("loading, nothing known yet: the lines are there", keys, "spend,back,net")
+    T.eq("loading, nothing known yet: zero without a minus", r.back.amount, "0c")
+    T.eq("loading, nothing known yet: net is the spend", r.net.amount, "59s")
+    -- The count frozen on the path is not what is read.
+    local frozen = sold("vendor", {})
+    frozen.loading = 3
+    r, keys = receipt(shopView(makePath({ complete = true, sale = frozen })))
+    T.eq("the path's own loading count is ignored", keys, "spend")
+
+    r, keys = receipt(shopView(makePath({ complete = true, sale = sold("vendor", {}) })))
+    T.eq("nothing sells and nothing is loading: one line", keys, "spend")
+    r, keys = receipt(shopView(makePath({ complete = true, sale = sold("none", {}) }), { saleLoading = 2 }))
+    T.eq("sale values not counted: one line", keys, "spend")
+
+    -- The crafts sell for more than is spent: a gain, never a negative cost.
+    r = receipt(shopView(makePath({ complete = true, sale = sold("auction", { [1] = 400 }) })))
+    T.eq("gain: label", r.net.label, "Net gain")
+    T.eq("gain: a positive amount", r.net.amount, "17s")
+    T.check("gain: green", r.net.amountColor[1] < 1 and r.net.amountColor[2] == 1)
+    r = receipt(shopView(makePath({ complete = true, sale = sold("vendor", { [1] = 30 }) })))
+    T.check("a cost is not green", r.net.amountColor[1] == 1)
+
+    -- Owned stock: the note sits on the net line, or on a line of its own.
+    r, keys = receipt(shopView(makePath({ complete = true, sale = sold("vendor", { [1] = 30 }) }), { inventory = { [101] = 19 } }))
+    T.eq("stock: spend is what is left to buy", r.spend.amount, "40s")
+    T.eq("stock: note on the net line", r.net.note, "your own stock saves 19s")
+    T.eq("stock: no extra line then", keys, "spend,back,net")
+    r, keys = receipt(shopView(makePath({ complete = true }), { inventory = { [101] = 19 } }))
+    T.eq("stock, no net line: a line of its own", keys, "spend,stock")
+    T.eq("stock line text", r.stock.note, "Your own stock saves 19s")
+    T.check("stock line has no amount", r.stock.amount == nil and r.stock.label == nil)
+    T.eq("stock line is grey", r.stock.color[1], 0.7)
+
+    -- Margin
+    r, keys = receipt(shopView(makePath({ complete = true }), { margin = 15 }))
+    T.eq("margin: a line says so", keys, "spend,margin")
+    T.eq("margin: text", r.margin.note, "Includes 15% spare crafts")
+    T.eq("margin: the amount covers the larger counts (22 and 23 crafts)", r.spend.amount, "68s")
+    T.check("margin: note-only", r.margin.amount == nil)
+
+    -- Prices missing, loading or too old: the first problem line, in orange.
+    local priceLines = {
+        { text = "Prices: TSM 2, none 1", r = 0.6, g = 0.6, b = 0.6 },
+        { text = "1 reagent has no price at all - scan the auction house (needs TSM or Auctionator).", r = 1, g = 0.5, b = 0, problem = true },
+        { text = "Auctionator prices up to 6 days old - rescan the auction house.", r = 1, g = 0.5, b = 0, problem = true },
+        { text = "/lp diag prices lists every price and its source.", r = 0.5, g = 0.5, b = 0.5 },
+    }
+    view = shopView(makePath({ complete = true }))
+    view.priceLines = priceLines
+    r, keys = receipt(view)
+    T.eq("problem: one more line", keys, "spend,problem")
+    T.eq("problem: the first problem line of the price summary", r.problem.note, priceLines[2].text)
+    T.check("problem: orange", r.problem.color[1] == 1 and r.problem.color[2] == 0.5 and r.problem.color[3] == 0)
+    T.check("problem: note-only", r.problem.amount == nil)
+    view.priceLines = { priceLines[1] }
+    r, keys = receipt(view)
+    T.eq("no problem line when the prices are fine", keys, "spend")
+
+    -- Everything at once, in order.
+    view = shopView(makePath({ sale = sold("vendor", { [1] = 30 }) }), { inventory = { [101] = 5 }, margin = 15 })
+    view.priceLines = priceLines
+    r, keys = receipt(view)
+    T.eq("order of the lines", keys, "spend,back,net,margin,problem")
+
+    -- The list makes a reagent instead of buying it: the Path tab's cost
+    -- column prices the run's direct reagents, so the receipt names the
+    -- difference. 10 Shirts need 20 Bolt (5s each) or 60 Cloth (1s each).
+    local shirt = recipe(20, "Shirt", 100, 150, 160, 170, { reagents = { { itemId = BOLT, count = 2, name = "Bolt" } } })
+    local sword = recipe(21, "Sword", 110, 150, 160, 170, { reagents = { { itemId = BAR, count = 1, name = "Bar" } } })
+    local function craftPath(prices, steps)
+        return makePath({ complete = true, gaps = {}, currentSkill = 100, actualSkill = 100, prices = prices,
+            steps = steps or { step(shirt, 100, 110, 10, 0) } })
+    end
+    view = shopView(craftPath({ [BOLT] = 500, [CLOTH] = 100 }))
+    r, keys = receipt(view)
+    T.eq("making: spend is the cloth", r.spend.amount, "60s")
+    T.eq("making: the line names the reagent and the saving", r.making.note, "Making 20 Bolt yourself saves 40s")
+    T.eq("making: after the amounts", keys, "spend,making")
+    T.check("making: grey, note-only", r.making.amount == nil and r.making.color[1] == 0.7)
+    T.eq("cost column total + recipes - the saving = You spend",
+        view.summary.columnPay + view.account.recipes - 4000, view.account.spend)
+
+    -- The bank holds some of the reagent the list makes: that stock is used
+    -- before any is made, and the sums still add up. 8 Bolt owned, 12 made
+    -- from 36 Cloth; the run's cost column prices the 12 at 5s each.
+    view = shopView(craftPath({ [BOLT] = 500, [CLOTH] = 100 }), { inventory = { [BOLT] = 8 }, breakdown = { [BOLT] = { bank = 8 } } })
+    r, keys = receipt(view)
+    T.eq("made reagent partly in the bank: only the rest is made", r.making.note, "Making 12 Bolt yourself saves 24s")
+    T.eq("made reagent partly in the bank: spend", r.spend.amount, "36s")
+    T.eq("made reagent partly in the bank: what the stock saves", r.stock.note, "Your own stock saves 24s")
+    T.eq("made reagent partly in the bank: order", keys, "spend,stock,making")
+    T.eq("made reagent partly in the bank: cost column + recipes - the saving = You spend",
+        view.summary.columnPay + view.account.recipes - 2400, view.account.spend)
+    T.eq("the bank stock is under Collect first", view.account.missing.fromBank[1] and view.account.missing.fromBank[1].missing, 8)
+
+    -- "I craft it" although buying is cheaper: said as it is.
+    LazyProf.CharStore:Get().craftChoices[BOLT] = "craft"
+    view = shopView(craftPath({ [BOLT] = 500, [CLOTH] = 200 }))
+    r = receipt(view)
+    T.eq("making, dearer: the line says so", r.making.note, "Making 20 Bolt yourself costs 20s more than buying")
+    T.eq("making, dearer: the sums still hold", view.summary.columnPay + view.account.recipes + 2000, view.account.spend)
+    view = shopView(craftPath({ [BOLT] = 300, [CLOTH] = 100 }))
+    r, keys = receipt(view)
+    T.eq("making, same cost: no line", keys, "spend")
+    LazyProf.CharStore:Get().craftChoices[BOLT] = nil
+
+    -- Several crafted reagents: counted, not named.
+    view = shopView(craftPath({ [BOLT] = 500, [CLOTH] = 100, [BAR] = 300, [ORE] = 100 },
+        { step(shirt, 100, 110, 10, 0), step(sword, 110, 120, 10, 0) }))
+    r = receipt(view)
+    T.eq("making, several: a count", r.making.note, "Making 2 reagents yourself saves 50s")
+
+    -- No lines without a path, without an account, or with nothing left.
+    T.eq("no path: empty", #Views.Receipt({}), 0)
+    T.eq("no account: empty", #Views.Receipt({ path = makePath() }), 0)
+    local done = makePath({ steps = {}, gaps = {}, totalCost = 0, nothingLeft = true, actualSkill = 300, currentSkill = 300 })
+    T.eq("nothing left: empty", #Views.Receipt(shopView(done)), 0)
+
+    for _, line in ipairs(Views.Receipt(view)) do
+        for _, text in ipairs({ line.label or "", line.amount or "", line.note or "" }) do
+            if text:find("[\128-\255]") then T.check("receipt text is plain ASCII", false, text) end
+        end
+    end
+end)
+
+-- A bare pipe wrapped in a colour ("|cFF888888||r") is read by the client as
+-- a colour, an escaped pipe and a stray "r". Nothing in the views may build one.
+T.section("no pipe inside a colour code", function()
+    local f = assert(io.open("Modules/Guide/Views.lua", "r"))
+    local source = f:read("*a")
+    f:close()
+    T.check("no literal colour code closes right after a pipe", source:find("||r", 1, true) == nil)
+    local found
+    for _, helper in ipairs({ "Grey", "Green" }) do
+        found = found or source:match(helper .. '%(%s*"[^"\n]*|[^"\n]*"')
+    end
+    T.check("no colour helper is handed a text with a pipe", found == nil, found)
+    -- And what the views build: a pipe is only ever the start of a colour
+    -- code or its end.
+    local function scan(text)
+        local rest = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+        return rest:find("|", 1, true) == nil
+    end
+    local view = makeView(makePath())
+    for _, text in ipairs({ Views.Footer(view) }) do
+        T.check("footer: pipes only in colour codes", scan(text), text)
+    end
+end)
+
 T.section("footer", function()
     local line1, line2 = Views.Footer(makeView(makePath()))
     -- Range 75-150 holds the Gloves stage (19 crafts, 1900).
     T.eq("range and whole path, gaps flagged",
-        line1, "This range: 19s   |cFF888888||r   Whole path (excluding gaps): 59s (you pay 59s)")
+        line1, "This range: 19s     Whole path (excluding gaps): 59s (you pay 59s)")
     T.check("no margin line when the margin is off", line2 == nil)
 
     line1 = Views.Footer(makeView(makePath({ complete = true }), { range = "all" }))
@@ -122,7 +370,7 @@ T.section("footer", function()
     line1, line2 = Views.Footer(makeView(makePath({ complete = true }), { margin = 15 }))
     -- 19 -> 22 crafts, 20 -> 23, 30 -> 35 (no price): 2200 + 4600
     T.eq("margin line: range and whole path", line2, "With 15% margin: range 22s, whole path 68s (you pay 68s)")
-    T.eq("the first line keeps the expected figures", line1, "This range: 19s   |cFF888888||r   Whole path: 59s (you pay 59s)")
+    T.eq("the first line keeps the expected figures", line1, "This range: 19s     Whole path: 59s (you pay 59s)")
     T.eq("no path: empty", (Views.Footer({})), "")
 end)
 

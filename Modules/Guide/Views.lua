@@ -7,6 +7,13 @@
 --
 -- `view` is built by the window (GuideWindow:ComputeView):
 --   path, stages, summary        the path, all its stages, Stages.Totals of them
+--   account                      Pathfinder:Account of the whole path's stages (the
+--                                shopping list, what is spent, what the crafts sell
+--                                for, the net) plus stockSaves, what the owned
+--                                stock takes off the amount spent
+--   sale, saleLoading            the path's sale values (mode, sources) and how
+--                                many crafted items still wait for their data now
+--   advanced                     "More options" is on
 --   rangeStages, rangeTotals     the stages of the chosen range and their totals
 --   bracket, rangeLabel          the chosen range (nil = full path) and its label
 --   skill, cap                   the real skill and the live cap (nil when unknown)
@@ -16,6 +23,7 @@
 local ADDON_NAME, LazyProf = ...
 local Utils = LazyProf.Utils
 local Text = LazyProf.GuideText
+local SALE_MODE = LazyProf.Constants.SALE_MODE
 
 local Views = {}
 LazyProf.GuideViews = Views
@@ -104,6 +112,105 @@ function Views.Header(view)
     return header
 end
 
+-- Receipt ----------------------------------------------------------------------
+
+local function Short(copper)
+    return Utils.FormatMoneyShort(copper)
+end
+
+local function Round(copper)
+    return math.floor((copper or 0) + 0.5)
+end
+
+-- What the path costs, as the lines of a receipt. Built from the account of
+-- the whole path (view.account: the shopping list of the stages' quantities,
+-- less what the crafts sell for), so "You spend" is the Shopping tab added up.
+-- Returns { { key, label, amount, note, amountColor, color }, ... }:
+--   key          "spend" | "back" | "net" | "stock" | "making" | "margin" | "problem"
+--   label        "You spend", ...; nil on a line that is only a note
+--   amount       money text for the right-aligned column; nil: a note-only line
+--   note         the text after the amount (may be nil), or the whole of a
+--                note-only line
+--   amountColor  { r, g, b } of the amount (green: money that comes back)
+--   color        { r, g, b } of the note
+-- Lines, in order:
+--   spend    reagents still to buy plus recipes to buy or learn
+--   back     what the crafts sell for (not when sale values are not counted,
+--            or nothing sells and nothing is still loading)
+--   net      spend less back, a gain when the crafts sell for more (only with back)
+--   stock    what the owned stock saves, when there is no net line to say it on
+--   making   the list makes reagents instead of buying them, so the path's
+--            cost column (each run's direct reagents at buy prices) adds up
+--            to more or less than the reagents amount: by how much
+--   margin   the amounts include spare crafts
+--   problem  a price is missing, still loading or too old
+function Views.Receipt(view)
+    local lines = {}
+    local path, account = view.path, view.account
+    if not path or not account or path.nothingLeft then return lines end
+    local function add(line)
+        line.color = line.color or GREY
+        lines[#lines + 1] = line
+    end
+
+    local spent = Round(account.spend)
+    local spend = { key = "spend", label = "You spend", amount = Short(spent), amountColor = WHITE }
+    if path.complete == false then
+        spend.label = spend.label .. " (excluding gaps)"
+    end
+    if (account.recipes or 0) > 0 then
+        spend.note = "reagents " .. Short(account.reagents) .. " + recipes " .. Short(account.recipes)
+    end
+    add(spend)
+
+    local saves = Round(account.stockSaves)
+    local saved = saves > 0 and Short(saves) or nil
+    local mode = view.sale and view.sale.mode or SALE_MODE.NONE
+    local loading = (view.saleLoading or 0) > 0
+    local back = Round(account.sale)
+    if mode ~= SALE_MODE.NONE and (back > 0 or loading) then
+        add({ key = "back", label = "Back from selling", amount = back > 0 and ("-" .. Short(back)) or Short(0),
+              amountColor = GREEN, note = Text.SoldNote(mode) .. (loading and ", still loading" or "") })
+        local net = spent - back
+        add({ key = "net", label = net < 0 and "Net gain" or "Net cost", amount = Short(math.abs(net)),
+              amountColor = net < 0 and GREEN or WHITE, note = saved and ("your own stock saves " .. saved) or nil })
+    elseif saved then
+        add({ key = "stock", note = "Your own stock saves " .. saved })
+    end
+
+    local crafted = {}
+    for _, row in ipairs(account.missing and account.missing.rows or {}) do
+        if row.crafted then crafted[#crafted + 1] = row end
+    end
+    local columnPay = view.summary and view.summary.columnPay
+    if #crafted > 0 and columnPay then
+        local saving = Round(columnPay - account.reagents)
+        if saving ~= 0 then
+            local what = string.format("%d reagents", #crafted)
+            if #crafted == 1 then
+                what = string.format("%d %s", crafted[1].craftQuantity or 0, crafted[1].name or "Unknown")
+            end
+            if saving > 0 then
+                add({ key = "making", note = "Making " .. what .. " yourself saves " .. Short(saving) })
+            else
+                add({ key = "making", note = "Making " .. what .. " yourself costs " .. Short(-saving) .. " more than buying" })
+            end
+        end
+    end
+
+    if view.marginPercent then
+        add({ key = "margin", note = string.format("Includes %d%% spare crafts", view.marginPercent) })
+    end
+
+    for _, line in ipairs(view.priceLines or {}) do
+        if line.problem then
+            add({ key = "problem", note = line.text, color = ORANGE })
+            break
+        end
+    end
+    return lines
+end
+
 -- Footer ---------------------------------------------------------------------
 
 local function PayText(totals, marginSide)
@@ -124,7 +231,7 @@ function Views.Footer(view)
         .. " (you pay " .. PayText(all) .. ")"
     local line1 = whole
     if view.bracket and range then
-        line1 = "This range: " .. PayText(range) .. "   " .. Grey("|") .. "   " .. whole
+        line1 = "This range: " .. PayText(range) .. "     " .. whole
     end
 
     local line2

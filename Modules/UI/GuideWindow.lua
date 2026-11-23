@@ -155,7 +155,21 @@ function GuideWindow:BuildView(path, mode, plain)
     view.selectedStage = LazyProf.GuideViews.SelectedStage(stages, summary, (not plain) and self.selection or nil)
     view.showAllAlts = (not plain) and self.showAllAlts or false
     view.hideOwned = LazyProf.CharStore:Get().hideOwned and true or false
+    view.advanced = LazyProf.db.profile.showAdvanced and true or false
     view.planning = (mode == "planning") or nil
+
+    -- The account of the whole path: its shopping list from the stages'
+    -- quantities (so the margin is in it), less what the crafts sell for,
+    -- and what the owned stock saves. The receipt is built from it, so every
+    -- view has it. Sale values still waiting for item data are counted now,
+    -- not when the path was built.
+    local shoppingSteps = LazyProf.Stages.ShoppingSteps(stages)
+    view.sale = path.sale
+    view.saleLoading = LazyProf.SaleValue and LazyProf.SaleValue:LoadingCount(path.sale) or 0
+    view.account = LazyProf.Pathfinder:Account(shoppingSteps, path.inventory, path.sourceBreakdown,
+        path.prices, path.sale and path.sale.values)
+    view.account.stockSaves = LazyProf.Pathfinder:StockSaving(shoppingSteps, path.prices, view.account.spend)
+
     -- The shopping list of the chosen range, from the stages' quantities (so
     -- the margin is in it). Only worked out for the tab that shows it.
     if self.tab == "shopping" and not plain then

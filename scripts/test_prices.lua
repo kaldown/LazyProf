@@ -423,6 +423,30 @@ section("warnings", function()
     check(p .. "plain ASCII", not t:find("[\128-\255]"))
     check(p .. "nothing for no reagents", #W({ total = 0, tsm = 0, auctionator = 0, vendor = 0, estimate = 0,
         loading = 0, unpriced = 0, stale = 0 }) == 0)
+
+    -- The lines that say something is wrong are marked, so the window can
+    -- pick the first of them (the breakdown, the estimate note and the
+    -- diagnostic hint are not problems).
+    local function problems(s)
+        local out = {}
+        for _, l in ipairs(W(s)) do
+            if l.problem then out[#out + 1] = l.text:match("^%d* ?%a+ %a+ %a+") or l.text end
+        end
+        return table.concat(out, " | ")
+    end
+    t = problems(bad)
+    check(p .. "problem lines are marked, in order",
+        t == "1 reagent has no | 2 reagents have no | Auctionator prices up", t)
+    local marked = 0
+    for _, l in ipairs(W(bad)) do
+        if l.problem then
+            marked = marked + 1
+            check(p .. "a marked line is orange", l.r == 1 and l.g == 0.5 and l.b == 0, l.text)
+        end
+    end
+    check(p .. "three problem lines of six", marked == 3 and #W(bad) == 6, marked)
+    check(p .. "no problem when all prices are real", problems(clean) == "")
+    check(p .. "an estimate is not a problem", problems(estimateOnly) == "")
 end)
 
 -- ===========================================================================

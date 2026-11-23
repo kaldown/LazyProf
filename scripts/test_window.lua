@@ -48,7 +48,7 @@ for _, family in ipairs({ "forever", "classic" }) do
         local rangeText = family == "forever" and window.rangeDropdown.button.overrideText or window.rangeDropdown.frame.ddText
         T.eq(p .. "range shows the current range", rangeText, "Current (75-150)")
         T.eq(p .. "footer totals", window.footer1.text,
-            "This range: 19s   |cFF888888||r   Whole path (excluding gaps): 99s (you pay 99s)")
+            "This range: 19s     Whole path (excluding gaps): 99s (you pay 99s)")
         T.eq(p .. "no margin line", window.footer2.text, "")
 
         -- Tabs: opens on Guide; Steps is the second tab
@@ -440,7 +440,7 @@ T.section("shopping tab", function()
     end
     fresh()
     window:Update(W.path())
-    T.eq("the shopping list is not worked out for other tabs", #asked, 0)
+    T.eq("the chosen range's list is not worked out for other tabs", #asked, 0)
     ui.fire(window.tabs.buttons[3], "OnClick")
     T.eq("shopping tab selected", window.tab, "shopping")
     T.eq("worked out for the shopping tab", #asked, 1)
@@ -514,6 +514,65 @@ T.section("shopping tab", function()
     window.path.inventory = { [101] = 1 }
     window:Refresh()
     T.eq("stock refresh works the list out again", #asked, before + 1)
+end)
+
+-- The receipt is built from the shopping list of the whole path, so every
+-- view carries the account of it (what is spent, what comes back, the net).
+T.section("the view carries the account", function()
+    local env = W.load("forever")
+    local window, addon = env.window, env.addon
+    env.account = { missing = { rows = {}, recipeRows = {}, buyTotal = 5000, recipeCosts = 300 },
+        reagents = 5000, recipes = 300, spend = 5300, sale = 450, net = 4850 }
+    env.stockSaves = 1200
+    env.saleLoading = 2
+    local sale = { mode = "vendor", values = { [1] = 45 }, sources = { [1] = "vendor" }, rank = {}, loading = 5, loadingItems = {} }
+    local path = W.path({ sale = sale, inventory = { [101] = 3 }, sourceBreakdown = { [101] = { bags = 3 } } })
+    window:Update(path)
+
+    local before, savings = #env.accountCalls, #env.savingCalls
+    window:Refresh()
+    T.eq("worked out once per redraw", #env.accountCalls, before + 1)
+    T.eq("and what the stock saves once", #env.savingCalls, savings + 1)
+    local view, call, saving = window.view, env.accountCalls[#env.accountCalls], env.savingCalls[#env.savingCalls]
+    T.eq("from every craft stage of the path, not only the chosen range", #call.steps, 2)
+    T.eq("with the stages' quantities", call.steps[1].quantity, 19)
+    T.check("with the path's stock, where it is, its prices and what its crafts sell for",
+        call.inventory == path.inventory and call.breakdown == path.sourceBreakdown
+        and call.prices == path.prices and call.saleValues == sale.values)
+    T.eq("the view carries it", view.account.spend, 5300)
+    T.eq("the net with it", view.account.net, 4850)
+    T.eq("and what the owned stock saves", view.account.stockSaves, 1200)
+    T.check("the saving is asked for the same steps, prices and amount",
+        saving.steps == call.steps and saving.prices == path.prices and saving.spend == 5300)
+    T.check("the path's sale values are on the view", view.sale == sale)
+    T.eq("with how many are still loading now, not when the path was built", view.saleLoading, 2)
+    T.eq("more options are off by default", view.advanced, false)
+    addon.db.profile.showAdvanced = true
+    window:Refresh()
+    T.eq("more options follow the setting", window.view.advanced, true)
+    addon.db.profile.showAdvanced = false
+
+    addon.db.profile.useMargin = true
+    window:Refresh()
+    T.eq("margin: the larger counts are accounted", env.accountCalls[#env.accountCalls].steps[1].quantity, 22)
+    addon.db.profile.useMargin = false
+
+    -- The arrow tooltip's view of the open profession has it too.
+    addon.Pathfinder.currentPath = path
+    before = #env.accountCalls
+    local live = window:LiveView()
+    T.eq("the arrow tooltip's view: worked out once", #env.accountCalls, before + 1)
+    T.check("and carried, with the sale values", live.account.net == 4850 and live.account.stockSaves == 1200
+        and live.sale == sale and live.saleLoading == 2)
+
+    -- A path planned without sale values: none are handed on.
+    window:Update(W.path())
+    T.check("no sale values: nothing counted as sold",
+        env.accountCalls[#env.accountCalls].saleValues == nil and window.view.sale == nil)
+    T.eq("nothing waited for", window.view.saleLoading, 2)
+
+    -- No path, no account.
+    T.check("no path: no account", window:BuildView(nil, "live").account == nil)
 end)
 
 T.section("learn and rank steps", function()
