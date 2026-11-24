@@ -10,7 +10,7 @@ The pure logic (path, candidate routes, sale value, stages, shopping rows, purch
 bash scripts/run_tests.sh
 ```
 
-The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks every Lua file under `Core`, `Modules` and `Professions` with `luac5.1`. It must end with `OK: 37 suites passed, ...` before every commit; the same command runs on every push. A single suite runs from the repo root, for example `lua5.1 scripts/test_views.lua`.
+The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks every Lua file under `Core`, `Modules` and `Professions` with `luac5.1`. It must end with `OK: 38 suites passed, ...` before every commit; the same command runs on every push. A single suite runs from the repo root, for example `lua5.1 scripts/test_views.lua`.
 
 | Suite | What it covers |
 |-------|----------------|
@@ -33,6 +33,7 @@ The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks ever
 | `test_trainers.lua` | Remembered trainers and fees |
 | `test_stockmemory.lua` | Remembered bags and bank per character and the account bank per world: saving, alts of the same world and faction, soulbound items, the 180-day limit, the age wording |
 | `test_stockflow.lua` | Stock through whole sessions on the real WoW Forever adapter, scanner and memory together: saved stock that is not what the addon wrote, a client call that fails (shown once, counted, reported by the dump), a Self-Found alt, the newest record of a name, the world read again after login, and the bank - when it is read and how often, which read is kept, a move in the frame the window closes or reported after it, a bank marked in doubt until the next visit - with the rule that a scan never counts more of an item than is owned; two characters of one account |
+| `test_stockfuzz.lua` | A seeded random walk through bank visits on the real WoW Forever adapter, scanner and memory, checked against a model of what the character really owns: a simulated client whose unknown behaviours are switches (what the bank reads inside the close notice, the order and spread of a move's bag updates, latency, late or partial contents at the opening, the batch notice, idle updates), a random player (moves, sorts, loot, crafts, closes, logouts, a second character), and the rules that no scan counts more than is owned, no bank is left out or short without a word, an unhurried visit leaves no doubt mark and nothing raises. The same walks on every machine; a few seconds. Failures it still shows are listed in the file as known and printed with every run. `STOCKFUZZ_MODE=campaign` runs many more walks, `shrink` cuts a failing walk down to a script (the header of the file says how) |
 | `test_stockreset.lua` | "Reset All Settings" and `/lp reset` against the real database library: the remembered stock is kept, counted by the next scan and still saved after logout |
 | `test_scanner.lua` | Which owned stock counts and how the stock memory is kept: Syndicator's stock unchanged, bank and alts from memory without it, a bank in doubt left out, bags saved a moment after a change and at logout, the bank's reading rules as the scanner applies them (spacing, the batch notice, the close, the second after it, the first moments after opening), a scan never reading the bank, every entry point with its client call failing, the frame cache and the alts' part kept between scans, Self-Found, the stock options, `/lp diag stock` |
 | `test_views.lua` | What the window shows, as data: header, receipt, target model, Path list, Shopping list (with the age of remembered bank and alt stock, and the line for a bank that is not counted), recipe search, arrow tooltip |
@@ -248,7 +249,7 @@ See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for the diagnostic commands (`/lp d
 
 ## Test Checklist for PRs
 
-- [ ] `bash scripts/run_tests.sh` ends with `OK: 37 suites passed`
+- [ ] `bash scripts/run_tests.sh` ends with `OK: 38 suites passed`
 - [ ] Opens without errors on each supported profession
 - [ ] Path and Shopping tabs display correctly
 - [ ] The receipt adds up to the Shopping tab
