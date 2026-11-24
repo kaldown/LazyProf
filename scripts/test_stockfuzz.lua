@@ -188,20 +188,18 @@ local HABITS = { logoutMidMove = true, closeMidMove = true, afterCloseChange = t
 -- shows any more fails the run, so the list cannot outlive what it describes.
 -- ===========================================================================
 local KNOWN = {
-    { "I1.settled.own", "A stack that left a bank is still counted in it after the visit: the bank's last stack went into the"
-        .. " other bank and the window closed within 0.2 s, a move between the two banks was answered after the close,"
-        .. " or the session ended before the answer of a move was heard." },
+    { "I1.settled.own", "A stack that left a bank is still counted in it after the visit: a move between the two banks was"
+        .. " answered after the close, or the session ended before the answer of a move was heard." },
     { "I1.settled.alt", "After a logout before the answer of a move was heard, the other character counts the moved stack in"
         .. " the bags and in the remembered bank of the first." },
     { "I1.latent.character", "The character's bank stays remembered with a stack that has left it (the cases of I1.settled.own)." },
     { "I1.latent.account", "The account bank stays remembered with a stack that has left it (the cases of I1.settled.own)." },
-    { "I1.multi.own", "A stack is counted in a bank and where it went for several frames: until the second look at an emptied"
-        .. " bank, or for good after the cases of I1.settled.own." },
+    { "I1.multi.own", "A stack is counted in a bank and where it went for several frames (the cases of I1.settled.own)." },
     { "I1.multi.alt", "The other character counts a stack twice for as long as it is logged in (the case of I1.settled.alt)." },
-    { "I1.frame.own", "At the end of the frame in which a bank's last stack is moved out, the stack is counted where it went"
-        .. " and in the emptied bank, whose empty read is not believed yet." },
-    { "I1.mid.own", "Between the two bag updates of the move that empties a bank a scan counts the stack in the carried bags"
-        .. " and in the remembered bank." },
+    { "I1.frame.own", "After a logout before the answer of a move was heard, the stack is counted twice until the bank is"
+        .. " opened again." },
+    { "I1.mid.own", "After a logout before the answer of a withdrawal was heard, the stack is counted in the carried bags and"
+        .. " in the remembered bank." },
     { "I2.stale.character", "The character's bank is remembered without a stack that is in it and nothing says so: a deposit"
         .. " answered after the session ended, or a bank that was shown only partly when its window opened." },
     { "I2.stale.account", "The account bank is remembered without a stack that is in it and nothing says so (the cases of"
@@ -210,10 +208,8 @@ local KNOWN = {
         .. " return or on the Shopping tab." },
     { "I3.stuck.account", "The account bank is in doubt for a character that may not view it, so no visit of its own takes"
         .. " the mark away. The mark is another character's, set after a visit of its own that left the bank uncertain." },
-    { "I4.nuisance", "A visit that ended half a second or more after its last move leaves a doubt mark: an empty bank that"
-        .. " is remembered as empty is marked whenever the carried bags changed in a visit shorter than two seconds." },
-    { "I4.glance", "A visit in which nothing was moved leaves a doubt mark on an empty bank when the client sends a bag"
-        .. " update that changes nothing." },
+    { "I4.glance", "A visit in which nothing was moved leaves a doubt mark when, in the second after its close, a stack is"
+        .. " moved between two carried bags and a scan comes between the two bag updates of that move." },
     { "I4.afterclose", "Any change of the carried bags in the second after the close marks both banks in doubt, whatever"
         .. " changed." },
 }
@@ -1276,12 +1272,14 @@ function OPS.zone()
 end
 
 -- A tab is bought at the banker: the character bank's second, or the account
--- bank's first.
+-- bank's first. That changes the bank (its slot count), so for judging the
+-- visit it counts like a move: a visit closed right after it was hurried.
 function OPS.buytab(a)
     if not S.bankOpen then return end
     local me = Me()
     if a.kind == "character" then
         if me.bank[TAB2] then return end
+        NoteChange()
         me.bank[TAB2] = { slots = 4 }
         S.shown[TAB2] = { slots = 4 }
         PushBank()
@@ -1289,6 +1287,7 @@ function OPS.buytab(a)
         Fire("BANK_TABS_CHANGED", 0)
     else
         if S.account[ACCOUNT_TAB] or not me.view then return end
+        NoteChange()
         S.account[ACCOUNT_TAB] = { slots = 5 }
         S.shown[ACCOUNT_TAB] = { slots = 5 }
         PushBank()

@@ -974,7 +974,7 @@ end)
 -- ===========================================================================
 T.section("the close", function()
     -- Withdraw 60 and close in the same frame, the updates before the close.
-    for _, move in ipairs(WITHDRAWALS) do
+    for index, move in ipairs(WITHDRAWALS) do
         for _, notice in ipairs({ false, true }) do
             for _, refused in ipairs({ false, true }) do
                 local label = "withdraw and close in one frame, " .. move[1] .. (notice and ", batch notice" or "")
@@ -989,16 +989,20 @@ T.section("the close", function()
                 World.advance(5)
                 local total, bags, bank, meta = linen(addon)
                 notOver(label, addon)
-                if not refused or notice then
-                    -- The bank could be read after the move: at the close, or at the batch notice.
+                -- The bank was read after its own update: in that update's
+                -- handler when it came first (the read then owed is for the
+                -- carried bag), else at the batch notice or at the close.
+                local bankUpdateFirst = index == 1 or index == 4
+                if not refused or notice or bankUpdateFirst then
                     T.check(label .. ": 65 carried, 40 in the bank", total == 105 and bags == 65 and bank == 40,
                         tostring(total) .. " = " .. tostring(bags) .. " + " .. tostring(bank))
                     T.check(label .. ": nothing in doubt", meta.bankInDoubt == nil and meta.accountInDoubt == nil)
                 else
-                    -- It could not: what is remembered may be behind, so it is not counted.
+                    -- It was not: the bank is unsettled, so it is not counted.
                     T.check(label .. ": only the 65 carried, the bank in doubt", total == 65 and bags == 65 and bank == nil
                         and meta.bankInDoubt == true, tostring(total) .. " = " .. tostring(bags) .. " + " .. tostring(bank))
                     T.check(label .. ": the bank is still remembered", bankOf(addon) ~= nil and select(2, bankOf(addon)) == true)
+                    T.check(label .. ": the account bank, which no update named, is not in doubt", meta.accountInDoubt == nil)
                 end
             end
         end
@@ -1036,10 +1040,13 @@ T.section("the close", function()
     T.eq("of which 60 in the account bank", (addon.StockMemory:AccountBank("eu-pvp"))[LINEN], 60)
 
     -- The read taken at the close is kept only when it looks like the reads
-    -- of the visit: not refused, at least one item, the same slot count.
+    -- of the visit: not refused, at least one item, the same slot count. The
+    -- bank's own update is still without a kept read here (the read taken
+    -- for the carried bag's update came before it), so a closing read that
+    -- is not kept leaves the bank in doubt.
     local function closeWith(letGo)
         addon = bankVisit()
-        WITHDRAWALS[1][2](addon)                 -- read at once (40), one more owed
+        WITHDRAWALS[3][2](addon)                 -- the bank still read as 100; its own update came after
         letGo()
         World.event(addon, "BANKFRAME_CLOSED")
         World.advance(5)
@@ -1047,18 +1054,32 @@ T.section("the close", function()
         return items[LINEN], doubt, notOver("a closing read that is not kept", addon)
     end
     local kept, doubt, counted = closeWith(function() World.containers[6] = { slots = 28 } end)
-    T.check("the bank reads as empty at the close: not kept, and in doubt (the bags changed)", kept == 40 and doubt == true and counted == 65,
+    T.check("the bank reads as empty at the close: not kept, and in doubt", kept == 100 and doubt == true and counted == 65,
         tostring(kept) .. "/" .. tostring(doubt) .. "/" .. tostring(counted))
     kept, doubt = closeWith(function() World.containers[6] = { slots = 12, slot(LINEN, 7) } end)
-    T.check("the bank reads with fewer slots at the close: not kept", kept == 40 and doubt == true, kept)
+    T.check("the bank reads with fewer slots at the close: not kept", kept == 100 and doubt == true, kept)
     kept, doubt = closeWith(function() World.bank[0].canView = false; World.containers[6][1] = slot(LINEN, 7) end)
-    T.check("the bank may not be viewed at the close: not kept", kept == 40 and doubt == true, kept)
+    T.check("the bank may not be viewed at the close: not kept", kept == 100 and doubt == true, kept)
     kept, doubt = closeWith(function() World.bank[0].locked = 2; World.containers[6][1] = slot(LINEN, 7) end)
-    T.check("the bank is locked at the close: not kept", kept == 40 and doubt == true, kept)
+    T.check("the bank is locked at the close: not kept", kept == 100 and doubt == true, kept)
     kept, doubt = closeWith(function() World.bank[0].tabs = {}; World.containers[6][1] = slot(LINEN, 7) end)
-    T.check("the bank has no tabs at the close: not kept", kept == 40 and doubt == true, kept)
+    T.check("the bank has no tabs at the close: not kept", kept == 100 and doubt == true, kept)
     kept, doubt = closeWith(function() World.containers[6][1] = slot(LINEN, 7) end)
     T.check("(a further change with everything in place is kept, and nothing is in doubt)", kept == 7 and doubt == false, kept)
+    -- The bank's own update read in its handler: the read that is then owed
+    -- is for the carried bag's update. Refused at the close, it marks
+    -- nothing - what is remembered of the bank is what was read after its
+    -- update.
+    addon = bankVisit()
+    WITHDRAWALS[1][2](addon)                     -- the bank's update first: read at once (40), one more owed
+    refuseBank()
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(5)
+    local items
+    items, doubt = bankOf(addon)
+    T.check("a read owed for the carried bag's update alone, refused at the close: nothing is marked",
+        items[LINEN] == 40 and doubt == false, items[LINEN])
+    T.eq("and the withdrawal is counted once", notOver("a read owed for the carried bag's update", addon), 105)
     -- Each bank is judged alone: here only the character bank is refused.
     addon = bankVisit()
     WITHDRAWALS[3][2](addon)                     -- the bank still read as 100 when its read was taken
@@ -1093,8 +1114,8 @@ T.section("the close", function()
             T.check(label .. ": in doubt", total == 65 and bank == nil and meta.bankInDoubt == true, total)
         end
     end
-    -- The same without any carried-bag update: nothing can be counted twice,
-    -- and nothing is put in doubt.
+    -- The same without any carried-bag update: the bank's own update is
+    -- enough. An item may have gone into the other bank.
     addon = bankVisit()
     World.containers[6][1] = slot(LINEN, 100)
     World.bagUpdate(addon, 6)
@@ -1103,7 +1124,9 @@ T.section("the close", function()
     refuseBank()
     World.advance(0.3)
     World.event(addon, "BANKFRAME_CLOSED")
-    T.check("refused reads without a change of the bags: no doubt", select(2, bankOf(addon)) == false and (linen(addon)) == 105)
+    T.check("an update of the bank's own container that no read could follow: in doubt, whatever the carried bags did",
+        select(2, bankOf(addon)) == true and (linen(addon)) == 5, (linen(addon)))
+    T.check("the account bank, which no update named, is not", select(3, addon.StockMemory:AccountBank("eu-pvp")) == false)
 
     -- A bank this character cannot view at all (here the account bank, known
     -- from another character) is not put in doubt by what it moves in its own.
@@ -1210,6 +1233,113 @@ T.section("the close", function()
         end
     end
 
+    -- The last stack of one bank is dragged into the other bank: no carried
+    -- bag changes. Both updates in one frame, both containers changed, the
+    -- batch notice in that frame, the bank readable inside the close notice.
+    local function lastStack(from, to, closeAfter)
+        World.reset()
+        World.containers = {
+            [0] = { slots = 16, slot(HEARTHSTONE, 1, true) },
+            [6] = { slots = 28, slot(SILK, 5) },
+            [15] = { slots = 98, slot(SILK, 5) },
+        }
+        World.containers[from] = { slots = World.containers[from].slots, [2] = slot(LINEN, 20) }
+        World.bank = { [0] = { tabs = { { ID = 6 } } }, [2] = { tabs = { { ID = 15 } } } }
+        addon = World.login({})
+        World.advance(3)
+        World.event(addon, "BANKFRAME_OPENED")
+        World.advance(5)
+        World.containers[to][3] = World.containers[from][2]
+        World.containers[from][2] = nil
+        World.bagUpdate(addon, from)
+        local between = linen(addon)                 -- between the two updates of the move
+        World.bagUpdate(addon, to)
+        World.bagUpdateDelayed(addon)
+        local inFrame = linen(addon)
+        if closeAfter > 0 then World.advance(closeAfter) end
+        World.event(addon, "BANKFRAME_CLOSED")
+        World.advance(10)
+        local total, _, _, meta = linen(addon)
+        return between, inFrame, total, meta
+    end
+    for _, way in ipairs({ { "the bank's last stack into the account bank", 6, 15, "bankInDoubt", "accountInDoubt" },
+                           { "the account bank's last stack into the bank", 15, 6, "accountInDoubt", "bankInDoubt" } }) do
+        for _, closeAfter in ipairs({ 0, 0.1, 0.3 }) do
+            local label = way[1] .. ", Escape " .. (closeAfter == 0 and "in the same frame" or (closeAfter .. " s later"))
+            local between, inFrame, total, meta = lastStack(way[2], way[3], closeAfter)
+            T.check(label .. ": counted once between its two updates and in its frame", between == 20 and inFrame == 20,
+                tostring(between) .. "/" .. tostring(inFrame))
+            T.eq(label .. ": counted once ten seconds after the close", total, 20)
+            if closeAfter < 0.2 then
+                -- Before the second look at the emptied bank: it cannot be
+                -- told from a bank the client let go of.
+                T.check(label .. ": the emptied bank is in doubt, the other is not", meta[way[4]] == true and meta[way[5]] == nil)
+            else
+                T.check(label .. ": after the second look nothing is in doubt", meta.bankInDoubt == nil and meta.accountInDoubt == nil)
+            end
+        end
+    end
+
+    -- The bank's last stack is taken out, both containers changed, the
+    -- bank's update first: a scan between the two updates of that frame.
+    addon = bankVisit(30)
+    World.containers[6] = { slots = 28 }
+    World.containers[0][3] = slot(LINEN, 100)
+    World.bagUpdate(addon, 6)
+    T.eq("a scan between the two updates of the move that empties the bank counts the stack once",
+        notOver("between the two updates", addon), 105)
+    World.bagUpdate(addon, 0)
+    World.bagUpdateDelayed(addon)
+    T.eq("and so does one after them", notOver("after the two updates", addon), 105)
+
+    -- An empty bank that is remembered as empty is not put in doubt by an
+    -- ordinary visit: an empty read is believed only two seconds after the
+    -- opening and never at the close, and that alone marks nothing.
+    local function emptyBankVisit(play)
+        World.reset()
+        World.containers = { [0] = { slots = 16, slot(HEARTHSTONE, 1, true), slot(LINEN, 5) }, [6] = { slots = 28 },
+                             [15] = { slots = 98, slot(BAR, 50) } }
+        World.bank = { [0] = { tabs = { { ID = 6 } } }, [2] = { tabs = { { ID = 15 } } } }
+        addon = World.login({})
+        World.advance(3)
+        World.event(addon, "BANKFRAME_OPENED")
+        World.advance(3)
+        World.event(addon, "BANKFRAME_CLOSED")       -- remembered as empty
+        World.advance(5)
+        World.event(addon, "BANKFRAME_OPENED")
+        play()
+        World.event(addon, "BANKFRAME_CLOSED")
+        World.advance(5)
+        local _, _, _, meta = linen(addon)
+        return meta.bankInDoubt, meta.accountInDoubt, firstShoppingRow(addon)
+    end
+    local function deposit()
+        World.containers[15][2] = slot(LINEN, 5)
+        World.containers[0][2] = nil
+        World.bagUpdate(addon, 0, 15)
+    end
+    local bankDoubt, accountDoubt, row = emptyBankVisit(function()
+        World.advance(1)
+        deposit()                                    -- into the other bank
+        World.advance(0.5)
+    end)
+    T.check("an empty bank, a deposit into the other bank in a visit of 1.5 s: nothing in doubt",
+        bankDoubt == nil and accountDoubt == nil and not tostring(row):find("not counted", 1, true), tostring(row))
+    bankDoubt, accountDoubt, row = emptyBankVisit(function()
+        World.advance(3)
+        World.bagUpdate(addon, 0)                    -- an update that changes nothing, read at once
+        World.nextFrame()
+        deposit()                                    -- owed; Escape before the trailing read
+    end)
+    T.check("an empty bank, a deposit into the other bank and Escape before the next read: nothing in doubt",
+        bankDoubt == nil and accountDoubt == nil and not tostring(row):find("not counted", 1, true), tostring(row))
+    bankDoubt, accountDoubt, row = emptyBankVisit(function()
+        World.advance(0.1)
+        World.bagUpdate(addon, 0)                    -- an update that changes nothing
+    end)
+    T.check("an empty bank, a glance with a bag update that changes nothing: nothing in doubt",
+        bankDoubt == nil and accountDoubt == nil and not tostring(row):find("not counted", 1, true), tostring(row))
+
     -- A long visit. The client lets go of the bank before it reports the
     -- close: the containers keep their slots but read as empty, and a bank
     -- container's update says so. The carried bags are untouched.
@@ -1224,14 +1354,19 @@ T.section("the close", function()
         local account, _, accountDoubt = addon.StockMemory:AccountBank("eu-pvp")
         return items[LINEN], inDoubt, account[BAR], accountDoubt
     end
+    -- Nothing tells that from the bank's last stacks having been moved out,
+    -- so the bank whose container reported it is not replaced by nothing -
+    -- and it is in doubt: on such a client every visit ends so.
     local linenLeft, inDoubt, barsLeft, accountDoubt = letGoThen("BANKFRAME_CLOSED")
     T.check("the client empties the bank before the close: the remembered bank is unchanged", linenLeft == 100 and barsLeft == 50,
         tostring(linenLeft) .. "/" .. tostring(barsLeft))
-    T.check("and not in doubt", inDoubt == false and accountDoubt == false)
-    T.eq("so it counts", (linen(addon)), 105)
+    T.check("the bank whose container reported it is in doubt, the other is not", inDoubt == true and accountDoubt == false)
+    T.eq("so it is not counted", (linen(addon)), 5)
+    T.eq("and the Shopping tab says so", firstShoppingRow(addon),
+        "Your bank is not counted: it changed after LazyProf last read it. Open the bank to count it again.")
     linenLeft, inDoubt, barsLeft, accountDoubt = letGoThen("BANKFRAME_CLOSED", 15)
-    T.check("the same told by an account bank container's update", linenLeft == 100 and barsLeft == 50
-        and inDoubt == false and accountDoubt == false, tostring(linenLeft) .. "/" .. tostring(barsLeft))
+    T.check("the same told by an account bank container's update: the account bank is in doubt", linenLeft == 100 and barsLeft == 50
+        and inDoubt == false and accountDoubt == true, tostring(linenLeft) .. "/" .. tostring(barsLeft))
     -- Several updates and the batch notice in that frame: the bank is read
     -- twice in it, and two reads of one frame are not a second look.
     addon = bankVisit(30)
@@ -1243,11 +1378,12 @@ T.section("the close", function()
         and (addon.StockMemory:AccountBank("eu-pvp"))[BAR] == 50, (bankOf(addon))[LINEN])
     World.event(addon, "BANKFRAME_CLOSED")
     World.advance(5)
-    T.check("nor after the close", (bankOf(addon))[LINEN] == 100 and select(2, bankOf(addon)) == false)
+    T.check("nor after the close: both banks unchanged, both in doubt", (bankOf(addon))[LINEN] == 100
+        and select(2, bankOf(addon)) == true and select(3, addon.StockMemory:AccountBank("eu-pvp")) == true)
     linenLeft, inDoubt, barsLeft, accountDoubt = letGoThen("PLAYER_LOGOUT")
     T.check("the same at logout with the bank open: unchanged", linenLeft == 100 and barsLeft == 50,
         tostring(linenLeft) .. "/" .. tostring(barsLeft))
-    T.check("and not in doubt", inDoubt == false and accountDoubt == false)
+    T.check("and the bank whose container reported it in doubt", inDoubt == true and accountDoubt == false)
     -- A move in the last frame before a logout with the bank open is judged like one before a close.
     addon = bankVisit(30)
     WITHDRAWALS[3][2](addon)

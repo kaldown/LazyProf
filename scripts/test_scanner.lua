@@ -965,11 +965,13 @@ T.section("the bank is read only while its window is open", function()
     T.check("emptied: the first empty read is not believed", (bankOf())[2589] == 61 and refreshes == 0, refreshes)
     local emptyLines = {}
     Inventory:RunDiagnostic(emptyLines)
-    T.check("the dump: the bank was seen, empty, and that is not believed yet", table.concat(emptyLines, "\n"):find(
-        "lastRead=empty, not believed slots=28 unresolvedEmpty=true unansweredUpdate=false", 1, true) ~= nil,
+    T.check("the dump: the bank read empty after its own update, that is not believed yet and the bank is unsettled",
+        table.concat(emptyLines, "\n"):find(
+        "lastRead=empty, not believed slots=28 unresolvedEmpty=true unsettled=true", 1, true) ~= nil,
         table.concat(emptyLines, "\n"))
-    T.check("the dump: the bank that was refused has the update unanswered", table.concat(emptyLines, "\n"):find(
-        "lastRead=refused slots=28 unresolvedEmpty=false unansweredUpdate=true", 1, true) ~= nil,
+    T.check("the dump: the bank that was refused had no update of its own and is not unsettled",
+        table.concat(emptyLines, "\n"):find(
+        "lastRead=refused slots=28 unresolvedEmpty=false unsettled=false", 1, true) ~= nil,
         table.concat(emptyLines, "\n"))
     advance(0.25)
     items = bankOf()
@@ -988,10 +990,165 @@ T.section("the bank is read only while its window is open", function()
 end)
 
 -- ===========================================================================
+-- A bank is unsettled from the moment an update of one of its own containers
+-- arrives (or its tabs change) until a read of that bank taken after that
+-- update is kept. While its window is open a scan leaves an unsettled bank
+-- out, and both banks while a read is owed, and says so.
+T.section("unsettled", function()
+    local function bankOf() return Memory:OwnBank(MAIN.guid) end
+    -- 5 linen carried, 100 in the bank, 9 silk in the account bank; the
+    -- window has been open for three seconds.
+    local function visit()
+        fresh()
+        Inventory:Initialize()
+        advance(2.1)
+        client.bankOpen = true
+        client.bank.character = { items = { [2589] = 100 }, slots = 28 }
+        client.bank.account = { items = { [4306] = 9 }, slots = 98 }
+        client.started.onBankOpened()
+        advance(3)
+    end
+    local function visitLine(kind)
+        local lines = {}
+        Inventory:RunDiagnostic(lines)
+        return (("\n" .. table.concat(lines, "\n") .. "\n"):match("\n(bank visit " .. kind .. ": [^\n]*)\n"))
+    end
+
+    -- An update of a carried bag unsettles no bank. Read at once it leaves
+    -- nothing open; while its read is owed, both banks are left out.
+    visit()
+    Inventory:OnBagUpdate(0)                               -- read at once
+    local combined, _, meta = scan()
+    T.check("an update of a carried bag, read at once: both banks count", combined[2589] == 105 and combined[4306] == 9
+        and meta.bankPending == nil and meta.accountPending == nil, combined[2589])
+    nextFrame()
+    Inventory:OnBagUpdate(0)                               -- within 0.2 s of that read: owed
+    combined, _, meta = scan()
+    T.check("while a read is owed both banks are left out", combined[2589] == 5 and combined[4306] == nil, combined[2589])
+    T.check("and the scan says a read is on its way, not that they are in doubt", meta.bankPending == true
+        and meta.accountPending == true and meta.bankInDoubt == nil and meta.accountInDoubt == nil and meta.bankSeenAt == nil)
+    T.eq("neither bank is unsettled by it", visitLine("character"),
+        "bank visit character: usable=true kept=4 lastRead=items slots=28 unresolvedEmpty=false unsettled=false")
+    advance(0.3)                                           -- the trailing read
+    combined, _, meta = scan()
+    T.check("the read brings them back", combined[2589] == 105 and combined[4306] == 9 and meta.bankPending == nil
+        and meta.accountPending == nil, combined[2589])
+
+    -- An update of a bank's own container unsettles that bank and not the
+    -- other, until a read of it is kept.
+    visit()
+    client.bank.character = nil                            -- cannot be read just now
+    Inventory:OnBagUpdate(6)                               -- read at once: refused
+    combined, _, meta = scan()
+    T.check("its own update and a refused read: that bank is left out, the other counts",
+        combined[2589] == 5 and combined[4306] == 9 and meta.bankPending == true and meta.accountPending == nil, combined[2589])
+    T.eq("the dump says so", visitLine("character"),
+        "bank visit character: usable=true kept=3 lastRead=refused slots=28 unresolvedEmpty=false unsettled=true")
+    advance(1)
+    combined, _, meta = scan()
+    T.check("it stays out while no read of it is kept", combined[2589] == 5 and meta.bankPending == true, combined[2589])
+    client.bank.character = { items = { [2589] = 90 }, slots = 28 }
+    Inventory:OnBagUpdate(0)                               -- any update reads the bank: kept
+    combined, _, meta = scan()
+    T.check("a kept read settles it", combined[2589] == 95 and meta.bankPending == nil, combined[2589])
+
+    -- An empty read that is not believed is not kept: it settles nothing.
+    -- Here the bank's last stack goes into the account bank; no carried bag
+    -- changes.
+    visit()
+    client.bank.character = { items = {}, slots = 28 }
+    client.bank.account = { items = { [4306] = 9, [2589] = 100 }, slots = 98 }
+    Inventory:OnBagUpdate(6)                               -- read at once: empty, not believed; the account bank is kept
+    Inventory:OnBagUpdate(15)
+    Inventory:OnBagUpdateDelayed()
+    combined, _, meta = scan()
+    T.check("the bank's last stack moved into the account bank: counted once", combined[2589] == 105
+        and meta.bankPending == true and meta.accountPending == nil, combined[2589])
+    advance(0.25)                                          -- the second look believes it
+    combined, _, meta = scan()
+    T.check("after the second look the bank is remembered as empty and settled", combined[2589] == 105
+        and meta.bankPending == nil and next((bankOf())) == nil, combined[2589])
+
+    -- The same move told the other way round: the account bank's update
+    -- comes first. Its read finds the bank empty, which is not believed,
+    -- while the bank's own update is still to come: a scan between the two
+    -- updates leaves the bank out all the same.
+    visit()
+    client.bank.character = { items = {}, slots = 28 }
+    client.bank.account = { items = { [4306] = 9, [2589] = 100 }, slots = 98 }
+    Inventory:OnBagUpdate(15)                              -- read at once
+    combined, _, meta = scan()
+    T.check("an empty read that is not believed, before the bank's own update: the bank is left out",
+        combined[2589] == 105 and meta.bankPending == true and meta.accountPending == nil, combined[2589])
+    T.eq("it is not unsettled: no update of its own has come", visitLine("character"),
+        "bank visit character: usable=true kept=3 lastRead=empty, not believed slots=28 unresolvedEmpty=true unsettled=false")
+    Inventory:OnBagUpdate(6)
+    Inventory:OnBagUpdateDelayed()
+    T.eq("nor is it counted after its own update", (scan())[2589], 105)
+
+    -- A matter of order, not of frames. A read taken in the handler of the
+    -- update comes after it ...
+    visit()
+    client.bank.character = { items = { [2589] = 40 }, slots = 28 }
+    client.bags = { [2589] = 65 }
+    Inventory:OnBagUpdate(6)                               -- read in its handler: kept
+    T.eq("a read taken in the handler of the bank's own update settles it", visitLine("character"),
+        "bank visit character: usable=true kept=4 lastRead=items slots=28 unresolvedEmpty=false unsettled=false")
+    T.eq("and the scan counts the bank", (scan())[2589], 105)
+    -- ... a read taken earlier in the same frame does not.
+    visit()
+    client.bags = { [2589] = 65 }
+    Inventory:OnBagUpdate(0)                               -- read at once: the bank has not changed yet
+    client.bank.character = { items = { [2589] = 40 }, slots = 28 }
+    Inventory:OnBagUpdate(6)                               -- the same frame: owed
+    T.eq("a read taken earlier in the frame of the bank's update does not", visitLine("character"),
+        "bank visit character: usable=true kept=4 lastRead=items slots=28 unresolvedEmpty=false unsettled=true")
+    combined, _, meta = scan()
+    T.check("the bank is left out until the next read", combined[2589] == 65 and meta.bankPending == true, combined[2589])
+    Inventory:OnBagUpdateDelayed()
+    T.eq("which the batch notice takes in that frame", (scan())[2589], 105)
+
+    -- A change of a bank's tabs unsettles that bank.
+    visit()
+    client.usable.account = true                           -- viewable, with its tabs
+    client.bank.account = nil                              -- but no slot reads just now
+    client.started.onBankChanged("account")                -- read at once: refused
+    combined, _, meta = scan()
+    T.check("a change of the account bank's tabs unsettles the account bank alone", combined[4306] == nil
+        and meta.accountPending == true and meta.bankPending == nil and combined[2589] == 105, combined[2589])
+
+    -- A bank that was never usable in the visit is not left out, whatever
+    -- updates name its containers.
+    fresh()
+    Inventory:Initialize()
+    advance(2.1)
+    Memory:SaveAccountBank("eu-pvp", { [4306] = 9 }, NOW - DAY)
+    client.bankOpen = true
+    client.bank.character = { items = { [2589] = 100 }, slots = 28 }
+    client.bank.account = nil
+    client.started.onBankOpened()
+    advance(3)
+    Inventory:OnBagUpdate(15)
+    advance(3)
+    combined, _, meta = scan()
+    T.check("an update for a bank that was never usable: it goes on counting", combined[4306] == 9 and meta.accountPending == nil,
+        combined[4306])
+
+    -- Bank items switched off: nothing of the bank, and nothing said of it.
+    visit()
+    LazyProf.db.profile.includeBankItems = false
+    Inventory:OnBagUpdate(0)
+    nextFrame()
+    Inventory:OnBagUpdate(6)
+    combined, _, meta = scan()
+    T.check("bank items off: no word of a read on its way", combined[2589] == 5 and meta.bankPending == nil and meta.accountPending == nil)
+end)
+
+-- ===========================================================================
 -- The adapter reports a close in two steps. During the first the bank still
--- counts as open: a read that is owed, or an empty read that is unresolved,
--- has the bank read once more - kept only when it looks like the reads
--- before it. A bank that is still behind then is marked in doubt.
+-- counts as open: when a read is owed or a bank is unsettled, the bank is
+-- read once more - kept only when it looks like the reads before it. A bank
+-- that is still unsettled then is marked in doubt, and nothing else is.
 T.section("the close", function()
     local function bankOf() return Memory:OwnBank(MAIN.guid) end
     local function inDoubt() return (select(3, Memory:OwnBank(MAIN.guid))) end
@@ -1046,13 +1203,14 @@ T.section("the close", function()
     advance(3)
     T.eq("the trailing read that was waiting does not run after the close", client.reads.character, 2)
 
-    -- The owed read is not kept when it does not look like a normal read.
-    -- The carried bags changed in that frame, so the bank is in doubt then.
+    -- The read at the close is not kept when it does not look like a normal
+    -- read. The bank's own update came after the last kept read, so the bank
+    -- is unsettled: in doubt then.
     local function owed(closingState, onlyBank)
         visit()
         client.bank.character = { items = { [2589] = 70 }, slots = 28 }
-        Inventory:OnBagUpdate(onlyBank and 6 or 0)
-        Inventory:OnBagUpdate(6)
+        Inventory:OnBagUpdate(onlyBank and 6 or 0)         -- read at once: 70
+        Inventory:OnBagUpdate(6)                           -- the bank's own update: unsettled, the read owed
         client.bank.character = closingState
         close()
         return (bankOf())[2589], inDoubt()
@@ -1067,12 +1225,88 @@ T.section("the close", function()
     T.check("a closing read the adapter refuses is not kept; in doubt", kept == 70 and doubt == true, kept)
     kept, doubt = owed({ items = { [2589] = 3 }, slots = 28 })
     T.check("(the same read with the same slots is kept, and nothing is in doubt)", kept == 3 and doubt == false, kept)
-    -- Without an update of a carried bag nothing says the bags changed: not
-    -- kept, but not in doubt either.
+    -- No carried bag needs to have been updated for that: a move between the
+    -- two banks changes none.
     kept, doubt = owed({ items = {}, slots = 28 }, true)
-    T.check("only bank containers were updated: an empty closing read changes nothing", kept == 70 and doubt == false, kept)
+    T.check("only bank containers were updated: an empty closing read leaves the bank in doubt", kept == 70 and doubt == true, kept)
     kept, doubt = owed(nil, true)
-    T.check("only bank containers were updated: a refused closing read changes nothing", kept == 70 and doubt == false, kept)
+    T.check("only bank containers were updated: a refused closing read leaves it in doubt", kept == 70 and doubt == true, kept)
+    -- A read that is owed for an update of a carried bag marks nothing by
+    -- itself: the bank's own update was read in its handler, the bank is
+    -- settled, and what is remembered of it is right.
+    local function owedForBags(closingState)
+        visit()
+        client.bank.character = { items = { [2589] = 70 }, slots = 28 }
+        Inventory:OnBagUpdate(6)                           -- read at once: 70, kept
+        Inventory:OnBagUpdate(0)                           -- owed
+        client.reads.character = 0
+        client.bank.character = closingState
+        close()
+        return (bankOf())[2589], inDoubt(), client.reads.character
+    end
+    local readAgain
+    kept, doubt, readAgain = owedForBags(nil)
+    T.check("a read owed for a carried bag's update: the close reads once more", readAgain == 1, readAgain)
+    T.check("refused: nothing is kept and nothing is marked", kept == 70 and doubt == false, kept)
+    kept, doubt = owedForBags({ items = {}, slots = 28 })
+    T.check("empty: nothing is kept and nothing is marked", kept == 70 and doubt == false, kept)
+    kept, doubt = owedForBags({ items = { [2589] = 60 }, slots = 28 })
+    T.check("readable: kept", kept == 60 and doubt == false, kept)
+
+    -- The last stack of the bank goes into the account bank and the window
+    -- is closed before the second look at the emptied bank: no carried bag
+    -- changed. The stack must not stay counted in both banks.
+    local function lastStackAcross(closeAfter)
+        visit()
+        client.bank.character = { items = {}, slots = 28 }
+        client.bank.account = { items = { [4306] = 9, [2589] = 100 }, slots = 98 }
+        Inventory:OnBagUpdate(6)                           -- read at once: the bank empty (not believed), the account bank kept
+        Inventory:OnBagUpdate(15)
+        Inventory:OnBagUpdateDelayed()
+        local during = (scan())[2589]
+        if closeAfter > 0 then advance(closeAfter) end
+        close()
+        return during, (scan())[2589], inDoubt(), select(3, Memory:AccountBank("eu-pvp"))
+    end
+    local during, after, accountDoubt
+    during, after, doubt, accountDoubt = lastStackAcross(0)
+    T.check("the bank's last stack into the account bank: counted once in the frame of the move", during == 105, during)
+    T.check("closed in that frame: counted once, the emptied bank in doubt, the other not",
+        after == 105 and doubt == true and accountDoubt == false, tostring(after) .. "/" .. tostring(doubt))
+    during, after, doubt, accountDoubt = lastStackAcross(0.1)
+    T.check("closed 0.1 s later: the same", after == 105 and doubt == true and accountDoubt == false,
+        tostring(after) .. "/" .. tostring(doubt))
+    during, after, doubt, accountDoubt = lastStackAcross(0.3)
+    T.check("closed 0.3 s later, after the second look: remembered as empty, nothing in doubt",
+        after == 105 and doubt == false and accountDoubt == false and next((bankOf())) == nil, tostring(after) .. "/" .. tostring(doubt))
+
+    -- An empty bank that is remembered as empty: an empty read of it that is
+    -- not believed yet is no reason for a mark.
+    local function emptyBank(openFor, during_)
+        fresh()
+        Inventory:Initialize()
+        advance(2.1)
+        Memory:SaveBank(MAIN, {}, {}, NOW - DAY)
+        client.bankOpen = true
+        client.bank.character = { items = {}, slots = 28 }
+        client.bank.account = { items = { [4306] = 9 }, slots = 98 }
+        client.started.onBankOpened()
+        advance(openFor)
+        during_()
+        close()
+        return inDoubt(), select(3, Memory:AccountBank("eu-pvp"))
+    end
+    doubt, accountDoubt = emptyBank(1, function()
+        client.bags = {}
+        client.bank.account = { items = { [4306] = 9, [2589] = 5 }, slots = 98 }
+        Inventory:OnBagUpdate(0)                           -- a deposit into the other bank, read at once
+        Inventory:OnBagUpdate(15)
+        advance(0.5)
+    end)
+    T.check("an empty bank, a deposit into the other one in a visit of 1.5 s: neither is in doubt", doubt == false and accountDoubt == false)
+    doubt, accountDoubt = emptyBank(0.1, function() Inventory:OnBagUpdate(0) end)
+    T.check("an empty bank, a glance with one bag update that changes nothing: neither is in doubt",
+        doubt == false and accountDoubt == false)
 
     -- A read that was owed is taken and refused: the update is still
     -- unanswered. The close reads once more and settles it.
@@ -1174,7 +1408,7 @@ T.section("the close", function()
     client.bank.character = { items = { [2589] = 3 }, slots = 28 }
     close()
     T.eq("a bank never read in this visit is not saved from the closing read", (bankOf())[2589], 500)
-    T.check("the bags changed while it could not be read: in doubt", inDoubt() == true)
+    T.check("its own update came while it could not be read: in doubt", inDoubt() == true)
 
     -- Each bank is judged alone at the close.
     visit()
@@ -1193,7 +1427,7 @@ T.section("the close", function()
     Inventory:RunDiagnostic(lines)
     local text = table.concat(lines, "\n")
     T.check("the dump: what the close did",
-        text:find("bank visit close: owed=true unansweredUpdate=true unresolvedEmpty=false readAgain=true kept=account markedInDoubt=character", 1, true) ~= nil, text)
+        text:find("bank visit close: owed=true unsettled=character readAgain=true kept=account markedInDoubt=character", 1, true) ~= nil, text)
     T.check("the dump: the bank marked in doubt",
         text:find("bank=1 items (less than an hour ago, in doubt: not counted)", 1, true) ~= nil, text)
 
@@ -1214,13 +1448,14 @@ T.section("the close", function()
     -- Also when the read at the first notice could not settle anything.
     visit()
     client.bank.character = { items = {}, slots = 28 }
-    Inventory:OnBagUpdate(6)           -- read at once: empty, not believed
+    Inventory:OnBagUpdate(6)           -- read at once: empty, not believed; the bank is unsettled
     client.started.onLogout()
-    T.eq("logout with an unresolved empty read: the bank is read once more", client.reads.character, 2)
+    T.eq("logout with an unsettled bank: the bank is read once more", client.reads.character, 2)
     client.started.onLogout()
     close()
     T.eq("and only once, whatever notices follow", client.reads.character, 2)
-    T.check("the remembered bank is unchanged and not in doubt", (bankOf())[2589] == 100 and inDoubt() == false)
+    T.check("the remembered bank is unchanged, and in doubt: its update was never followed by a read that could be kept",
+        (bankOf())[2589] == 100 and inDoubt() == true)
 
     -- After the close nothing is read, and a bank-container update that still
     -- arrives is counted for the dump (the count runs for the whole session).
@@ -1561,11 +1796,19 @@ T.section("the first moments after opening", function()
     T.check("the bank that has items is saved, the empty one waits",
         (bankOf())[2589] == 75 and (Memory:AccountBank("eu-pvp"))[4306] == 9)
 
-    -- A scan in that first moment counts what is remembered.
+    -- A scan in that first moment leaves a bank out whose empty read is not
+    -- believed yet: what is remembered of it is contradicted by the latest
+    -- read, and its stock may be in the other bank by now.
     start()
     client.started.onBankOpened()
-    local combined = scan()
-    T.eq("a scan right after opening counts the remembered bank", combined[2589], 5 + 40)
+    local combined, _, meta = scan()
+    T.check("a scan right after an opening that found the bank empty leaves it out, as being read",
+        combined[2589] == 5 and meta.bankPending == true and meta.bankInDoubt == nil, combined[2589])
+    client.bank.character = { items = { [2589] = 40 } }
+    client.bank.account = { items = { [4306] = 9 } }
+    advance(0.6)                          -- the look at half a second finds the items
+    combined, _, meta = scan()
+    T.check("when its items have arrived it counts again", combined[2589] == 5 + 40 and meta.bankPending == nil, combined[2589])
 
     -- Each look has one timer, however often it is asked for.
     start()
@@ -1614,8 +1857,8 @@ T.section("a scan never reads the bank", function()
     T.eq("with the age of that", meta.bankSeenAt, NOW - 3 * DAY)
     T.eq("and asks for no redraw", refreshes, 0)
 
-    -- The open bank while it is behind: a read is owed and the bags have
-    -- changed since the last kept read. A scan leaves it out until that read.
+    -- The open bank while a read is owed: a scan leaves both banks out until
+    -- that read.
     Inventory:Initialize()
     client.bank.account = { items = { [4306] = 9 } }
     client.started.onBankOpened()
@@ -1629,7 +1872,7 @@ T.section("a scan never reads the bank", function()
     Inventory:OnBagUpdate(6)                               -- owed
     client.reads.character = 0
     combined, breakdown, meta = Inventory:ScanAll()        -- the update dropped the frame's scan
-    T.check("behind: the bank is left out, not counted beside the bags that changed",
+    T.check("a read is owed: the bank is left out, not counted beside the bags that changed",
         combined[2589] == 65 and breakdown[2589].bank == nil, combined[2589])
     T.check("the scan says a read is on its way, not that the bank is in doubt",
         meta.bankPending == true and meta.accountPending == true and meta.bankInDoubt == nil and meta.bankSeenAt == nil)
@@ -1638,15 +1881,18 @@ T.section("a scan never reads the bank", function()
     combined, breakdown, meta = Inventory:ScanAll()
     T.check("after the read the bank counts again, in the same frame", combined[2589] == 95 and meta.bankPending == nil
         and meta.accountPending == nil, combined[2589])
-    -- Owed, but no carried bag was updated since the last kept read: nothing
-    -- can be counted twice, the bank stays in.
+    -- The same without any update of a carried bag: an item may have gone
+    -- into the other bank.
     advance(1)
     Inventory:OnBagUpdate(6)
     nextFrame()
     Inventory:OnBagUpdate(6)
     combined, breakdown, meta = scan()
-    T.check("owed without a change of the bags: still counted", combined[2589] == 95 and meta.bankPending == nil, combined[2589])
+    T.check("an update of the bank's own container while the read is owed: left out too",
+        combined[2589] == 65 and meta.bankPending == true, combined[2589])
     advance(1)
+    combined, breakdown, meta = scan()
+    T.check("until the trailing read", combined[2589] == 95 and meta.bankPending == nil, combined[2589])
     LazyProf.db.profile.includeBankItems = false
     Inventory:OnBagUpdate(0)
     Inventory:OnBagUpdate(6)
@@ -2017,12 +2263,12 @@ T.section("diagnostic lines", function()
         Inventory:RunDiagnostic(out)
         local visitText = table.concat(out, "\n")
         T.check("the visit: how long it is open, how often it was read",
-            visitText:find("bank visit: open for 2.4 s; reads=5 owed=false carriedBagsUpdated=true", 1, true) ~= nil, visitText)
+            visitText:find("bank visit: open for 2.4 s; reads=5 owed=false\n", 1, true) ~= nil, visitText)
         T.check("the visit: what was kept of the character bank",
-            visitText:find("bank visit character: usable=true kept=5 lastRead=items slots=28 unresolvedEmpty=false unansweredUpdate=false bagsChangedSinceKept=true", 1, true) ~= nil,
+            visitText:find("bank visit character: usable=true kept=5 lastRead=items slots=28 unresolvedEmpty=false unsettled=false\n", 1, true) ~= nil,
             visitText)
         T.check("the visit: a bank that was refused all along",
-            visitText:find("bank visit account: usable=false kept=0 lastRead=refused slots=nil unresolvedEmpty=false unansweredUpdate=false bagsChangedSinceKept=true", 1, true) ~= nil,
+            visitText:find("bank visit account: usable=false kept=0 lastRead=refused slots=nil unresolvedEmpty=false unsettled=false\n", 1, true) ~= nil,
             visitText)
         advance(3)
     end
