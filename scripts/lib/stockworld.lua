@@ -23,6 +23,7 @@
 local World = {}
 
 World.time = 0                -- GetTime()
+World.FRAME = 0.016           -- seconds from one frame to the next
 World.serverTime = 20000 * 86400 + 3600
 World.timers = {}
 World.containers = {}
@@ -74,9 +75,11 @@ function World.install()
     _G.WOW_PROJECT_ID, _G.WOW_PROJECT_CAMELOT = 18, 18
     _G.GetTime = function() return World.time end
     _G.GetServerTime = function() return World.serverTime end
-    -- Like the client's, returns nothing (no handle to keep).
+    -- Like the client's: returns nothing (no handle to keep), and never runs
+    -- a timer in the frame that asked for it - at the earliest one frame
+    -- later, whoever asked (an event or another timer).
     _G.C_Timer = { After = function(delay, fn)
-        World.timers[#World.timers + 1] = { due = World.time + math.max(0, delay), fn = fn }
+        World.timers[#World.timers + 1] = { due = World.time + math.max(World.FRAME, delay), fn = fn }
     end }
     _G.C_Container = {
         GetContainerNumSlots = function(bag)
@@ -119,26 +122,49 @@ function World.install()
 end
 
 -- Move the clock on by dt seconds, running the timers that come due on the
--- way, earliest first and, among equals, in the order they were asked for.
+-- way. The clock stops at each moment something is due and runs one pass
+-- there: every timer due by then, in the order they were asked for. What a
+-- timer asks for in turn is due a frame later at the earliest (see
+-- C_Timer.After above), so it runs in a later pass, at a later time - as on
+-- the client, where a zero-delay timer runs on the next frame.
 function World.advance(dt)
     local target = World.time + dt
     while true do
-        local best, index
-        for i, timer in ipairs(World.timers) do
-            if timer.due <= target + 1e-9 and (not best or timer.due < best.due) then
-                best, index = timer, i
+        local due
+        for _, timer in ipairs(World.timers) do
+            if timer.due <= target + 1e-9 and (not due or timer.due < due) then
+                due = timer.due
             end
         end
-        if not best then break end
-        table.remove(World.timers, index)
-        if best.due > World.time then World.time = best.due end
-        best.fn()
+        if not due then break end
+        if due > World.time then World.time = due end
+        local pass, rest = {}, {}
+        for _, timer in ipairs(World.timers) do
+            if timer.due <= World.time + 1e-9 then
+                pass[#pass + 1] = timer
+            else
+                rest[#rest + 1] = timer
+            end
+        end
+        World.timers = rest
+        for i, timer in ipairs(pass) do
+            local ok, err = pcall(timer.fn)
+            if not ok then
+                -- The timers of this pass that have not run stay waiting.
+                for j = #pass, i + 1, -1 do
+                    table.insert(World.timers, 1, pass[j])
+                end
+                error(err, 0)
+            end
+        end
     end
     World.time = target
 end
 
+-- The next frame: the clock moves by one frame, and what was asked for "as
+-- soon as possible" during this one runs.
 function World.nextFrame()
-    World.advance(0.016)
+    World.advance(World.FRAME)
 end
 
 -- One character's session on the saved table `saved` (LazyProfDB.global).

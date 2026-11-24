@@ -21,30 +21,38 @@ local T = require("scripts.lib.check").new()
 
 harness.stubWow({ interface = 16001, camelot = true })
 
--- A clock and timers the test moves by hand (C_Timer.After returns nothing).
+-- A clock and timers the test moves by hand. Like the client's, C_Timer.After
+-- returns nothing and never runs a timer in the frame that asked for it: at
+-- the earliest one frame later, whoever asked (an event or another timer).
+local FRAME = 0.01
 local fakeNow = 100
 local timers = {}
 _G.GetTime = function() return fakeNow end
 _G.C_Timer = { After = function(delay, fn)
-    timers[#timers + 1] = { due = fakeNow + math.max(0, delay), fn = fn }
+    timers[#timers + 1] = { due = fakeNow + math.max(FRAME, delay), fn = fn }
 end }
+-- Move the clock on, stopping at each moment something is due to run one
+-- pass there: every timer due by then, in the order they were asked for.
 local function advance(dt)
-    fakeNow = fakeNow + dt
-    local progressed = true
-    while progressed do
-        progressed = false
-        for i, t in ipairs(timers) do
-            if t.due <= fakeNow + 1e-9 then
-                table.remove(timers, i)
-                t.fn()
-                progressed = true
-                break
-            end
+    local target = fakeNow + dt
+    while true do
+        local due
+        for _, t in ipairs(timers) do
+            if t.due <= target + 1e-9 and (not due or t.due < due) then due = t.due end
         end
+        if not due then break end
+        if due > fakeNow then fakeNow = due end
+        local pass, rest = {}, {}
+        for _, t in ipairs(timers) do
+            if t.due <= fakeNow + 1e-9 then pass[#pass + 1] = t else rest[#rest + 1] = t end
+        end
+        timers = rest
+        for _, t in ipairs(pass) do t.fn() end
     end
+    fakeNow = target
 end
 -- The next frame: timers asked for "as soon as possible" run, the scan cache is stale.
-local function nextFrame() advance(0.01) end
+local function nextFrame() advance(FRAME) end
 
 -- No container, bank or clock call may be made from the scanner itself.
 local function forbidden(name)
@@ -141,6 +149,31 @@ local function count(t)
     for _ in pairs(t or {}) do n = n + 1 end
     return n
 end
+
+-- ===========================================================================
+-- The test's own clock behaves like the game's.
+T.section("the clock", function()
+    local ran = {}
+    local start = fakeNow
+    C_Timer.After(0, function()
+        ran[#ran + 1] = fakeNow > start
+        C_Timer.After(0, function() ran[#ran + 1] = fakeNow end)
+    end)
+    advance(0)
+    T.eq("a zero-delay timer does not run in the frame that asked for it", #ran, 0)
+    nextFrame()
+    T.check("it runs on the next frame, at a later time", #ran == 1 and ran[1] == true, #ran)
+    local after = fakeNow
+    nextFrame()
+    T.check("one asked for by a timer runs a frame later still", #ran == 2 and fakeNow > after, #ran)
+    local seen = {}
+    start = fakeNow
+    C_Timer.After(0.5, function() seen[#seen + 1] = fakeNow - start end)
+    C_Timer.After(2, function() seen[#seen + 1] = fakeNow - start end)
+    advance(3)
+    T.check("a long step runs each timer at the moment it is due",
+        #seen == 2 and math.abs(seen[1] - 0.5) < 1e-6 and math.abs(seen[2] - 2) < 1e-6, tostring(seen[1]) .. "," .. tostring(seen[2]))
+end)
 
 -- ===========================================================================
 T.section("bags", function()

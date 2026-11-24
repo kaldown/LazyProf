@@ -24,6 +24,37 @@ local function count(t)
 end
 
 -- ===========================================================================
+-- The clock of this client is the game's: a timer never runs in the frame
+-- that asked for it, so what the addon counts per frame here is what it
+-- counts in game.
+-- ===========================================================================
+T.section("the clock", function()
+    World.reset()
+    local ran = {}
+    World.time = 5
+    C_Timer.After(0, function()
+        ran[#ran + 1] = "first at " .. tostring(World.time > 5)
+        C_Timer.After(0, function() ran[#ran + 1] = "second at " .. tostring(World.time) end)
+    end)
+    World.advance(0)
+    T.eq("a zero-delay timer does not run in the frame that asked for it", #ran, 0)
+    World.nextFrame()
+    T.eq("it runs on the next frame, at a later time", table.concat(ran, ","), "first at true")
+    local after = World.time
+    World.nextFrame()
+    T.check("a zero-delay timer asked for by a timer runs one frame later still, not in the same pass",
+        #ran == 2 and World.time > after, table.concat(ran, ","))
+    -- Timers due at different moments each run at their own moment.
+    World.reset()
+    local seen = {}
+    C_Timer.After(0.5, function() seen[#seen + 1] = World.time end)
+    C_Timer.After(2, function() seen[#seen + 1] = World.time end)
+    World.advance(3)
+    T.check("a long step runs each timer at the moment it is due", seen[1] == 0.5 and seen[2] == 2 and World.time == 3,
+        tostring(seen[1]) .. "," .. tostring(seen[2]))
+end)
+
+-- ===========================================================================
 -- Saved stock that is not what the addon wrote must not stop the addon, and
 -- must not put anything but real counts into a scan.
 -- ===========================================================================
