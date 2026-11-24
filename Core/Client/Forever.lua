@@ -769,30 +769,33 @@ end
 -- name its number stands in, "region3-pvp": GetCurrentRegion() returns a
 -- number (LocaleDocumentation.lua:39-47; dump, GlobalAPI.lua:5382). nil when
 -- there is neither: then nothing is taken for a character of the same world.
+-- The second return is the region alone ("eu", "region3"), the key of what
+-- a whole region shares (the account bank is remembered per region).
 local function WorldKey()
     local region = GetCurrentRegionName()
     if type(region) == "string" and region ~= "" then
         region = region:lower()
     else
         local number = GetCurrentRegion()
-        if type(number) ~= "number" then return nil end
+        if type(number) ~= "number" then return nil, nil end
         region = "region" .. tostring(number)
     end
     local on, rule = C_GameRules.IsGameRuleActive, Enum.GameRule
     local ruleset = (on(rule.RPRuleset) and "rp" or "") .. (on(rule.PvPRuleset) and "pvp" or "")
     if ruleset == "" then ruleset = "normal" end
     if on(rule.HardcoreRuleset) then ruleset = "hc-" .. ruleset end
-    return region .. "-" .. ruleset
+    return region .. "-" .. ruleset, region
 end
 
--- Who the character is: { guid, name, world, faction }. A part that cannot
--- be read is nil (the caller saves nothing without a guid and counts no
--- alts without a world and a faction).
+-- Who the character is: { guid, name, world, faction, region }. A part that
+-- cannot be read is nil (the caller saves nothing without a guid and counts
+-- no alts without a world and a faction).
 --   guid     UnitGUID("player") (UnitDocumentation.lua:1241-1255)
 --   name     first name and surname, the way the client writes a full name
 --            (NameUtil.GetUnmodifiedUnitFullName,
 --            Blizzard_FrameXMLUtil/Camelot/NameUtil.lua:14-21)
 --   world    WorldKey() above
+--   region   the region part of it, WorldKey()'s second return
 --   faction  UnitFactionGroup("player"), its first return
 --            (UnitDocumentation.lua:1207-1222)
 -- Guid, name and faction do not change during a session, so a complete read
@@ -817,7 +820,8 @@ function Client:CharacterIdentity()
             who = known
         end
     end
-    return { guid = known.guid, name = known.name, world = WorldKey(), faction = known.faction }
+    local world, region = WorldKey()
+    return { guid = known.guid, name = known.name, world = world, faction = known.faction, region = region }
 end
 
 -- Whether the game itself marks the character Self-Found: such a character

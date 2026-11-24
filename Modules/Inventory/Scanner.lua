@@ -9,7 +9,10 @@
 --   - otherwise LazyProf's own memory (StockMemory.lua): the character's bank
 --     and the account bank as last read with the bank window open, and the
 --     bags and banks of the other characters of the same world and faction.
---     This file keeps that memory up to date.
+--     The account bank is remembered once per region and counts only for
+--     the characters of the world and faction whose read it is: whether the
+--     game shares it across worlds or factions is not known, and a copy read
+--     elsewhere may be another bank. This file keeps that memory up to date.
 -- A Self-Found character cannot be sent anything, so nothing that belongs to
 -- other characters is counted for it, from either place (alts, the account
 -- bank, the guild bank); and it cannot send anything, so the memory does not
@@ -474,6 +477,16 @@ local SettleAfterClose  -- the comparison due after a carried bag's update that 
 local AwaitsLastSession -- is that bank left out until the bags are compared with the last session's note (rule 5c)?
 local HeldAfterClose    -- is that bank left out for the second after its close (rule 4)?
 
+-- The account bank as it counts for the character `identity`: its items,
+-- when it was seen and whether it is in doubt - nil when nothing is
+-- remembered of it, or the copy remembered is of another world or faction's
+-- read (it is then not counted for this character at all).
+local function AccountBankOf(identity)
+    local items, seenAt, doubt, world, faction = LazyProf.StockMemory:AccountBank(identity.region)
+    if not items or identity.world == nil or world ~= identity.world or faction ~= identity.faction then return nil end
+    return items, seenAt, doubt
+end
+
 -- Frame-level cache: ScanAll is called many times per frame (once per recipe in
 -- GetCandidates). Cache results so only the first call per frame does real work.
 local scanCache = { time = 0, combined = nil, breakdown = nil, meta = nil }
@@ -622,9 +635,11 @@ end
 -- Stock from LazyProf's own memory. Returns how old each part is:
 --   { remembered = true,
 --     bankSeenAt     when the character's bank was seen (nil: never, or not counted)
---     accountSeenAt  when the account bank of its world was seen
+--     accountSeenAt  when the account bank was seen (counted only when that
+--                    read was one of this world and faction)
 --     bankInDoubt    true when the character's bank is remembered but in doubt
---     accountInDoubt true when the account bank of its world is
+--     accountInDoubt true when the account bank is (of a read of this world
+--                    and faction: one read elsewhere is not counted at all)
 --     bankPending    true when the character's bank is left out because it
 --                    is open and unsettled, a read is owed or its empty read
 --                    is not believed yet: a read is on its way; or because
@@ -669,7 +684,7 @@ local function AddRememberedStock(self, combined, breakdown, countAlts, selfFoun
             meta.bankSeenAt = seenAt
         end
         if not selfFound then
-            items, seenAt, doubt = Memory:AccountBank(identity.world)
+            items, seenAt, doubt = AccountBankOf(identity)
             if items and doubt then
                 meta.accountInDoubt = true
             elseif items and (BankPending("account") or HeldAfterClose("account") or (leaveOut and leaveOut.account)
@@ -838,7 +853,7 @@ local bankClosedAt = nil        -- GetTime() of the last close
 -- Bank containers' updates that arrived while the bank was closed.
 local closedBankUpdates = { count = 0, lastAfter = nil }
 -- The watch after a close (rule 5):
---   at, guid, world   when the window closed, and whose banks the visit read
+--   at, guid, region  when the window closed, and whose banks the visit read
 --   usable[kind]      the bank was usable in the visit: it can be marked
 --   held[kind]        the bank could not be read back at the close: left out
 --                     of the scans for CLOSE_WATCH (rule 4)
@@ -872,14 +887,16 @@ local lastSession = { looked = false, marked = {} }
 -- changed what is remembered (there is such a bank, and it was not marked),
 -- and whether the remembered bank carries the mark now (false when nothing
 -- is remembered of it: there is nothing to mark then).
-local function MarkDoubt(kind, guid, world)
+-- The account bank is the copy of the character's region, whoever's read it
+-- is (region).
+local function MarkDoubt(kind, guid, region)
     local Memory = LazyProf.StockMemory
     if kind == "character" then
         if Memory:MarkBankDoubt(guid) then return true, true end
         return false, select(3, Memory:OwnBank(guid)) == true
     end
-    if Memory:MarkAccountBankDoubt(world) then return true, true end
-    return false, select(3, Memory:AccountBank(world)) == true
+    if Memory:MarkAccountBankDoubt(region) then return true, true end
+    return false, select(3, Memory:AccountBank(region)) == true
 end
 
 -- Rule 5c: the note the character's last session left, looked up once.
@@ -928,12 +945,12 @@ local function CompareLastSession(items)
         ls.state = "different"
     end
     if ls.state ~= "equal" then
-        -- The world is asked for now: it may not have been readable when
+        -- The region is asked for now: it may not have been readable when
         -- the note was looked up.
         local identity = LazyProf.Client:CharacterIdentity() or {}
         for _, kind in ipairs(BANK_KINDS) do
             if note[kind] then
-                local _, marked = MarkDoubt(kind, ls.guid, identity.world)
+                local _, marked = MarkDoubt(kind, ls.guid, identity.region)
                 ls.marked[kind] = marked or nil
             end
         end
@@ -1044,14 +1061,15 @@ BankPending = function(kind)
     return state.usable and (state.unsettled or v.owed or state.emptyAt ~= nil) and true or false
 end
 
--- Does the memory hold items for that bank?
+-- Does the memory hold items for that bank (the account bank: the copy of
+-- the region, whoever's read it is)?
 local function RemembersItems(kind, identity)
     local Memory = LazyProf.StockMemory
     local items
     if kind == "character" then
         items = Memory:OwnBank(identity.guid)
     else
-        items = Memory:AccountBank(identity.world)
+        items = Memory:AccountBank(identity.region)
     end
     return items ~= nil and next(items) ~= nil
 end
@@ -1060,7 +1078,7 @@ local function SaveBank(kind, identity, items, bound, now)
     if kind == "character" then
         return LazyProf.StockMemory:SaveBank(identity, items, bound, now, CanSend())
     end
-    return LazyProf.StockMemory:SaveAccountBank(identity.world, items, now)
+    return LazyProf.StockMemory:SaveAccountBank(identity, items, now)
 end
 
 -- One read of the open bank, both kinds, keeping what rule 2 allows (rule 4
@@ -1280,7 +1298,7 @@ local function CloseVisit(self)
     for _, kind in ipairs(BANK_KINDS) do
         local state = v[kind]
         if state.unsettled and state.usable then
-            local new, marked = MarkDoubt(kind, identity.guid, identity.world)
+            local new, marked = MarkDoubt(kind, identity.guid, identity.region)
             if marked then
                 done.doubt[kind] = true
             end
@@ -1303,7 +1321,7 @@ local function CloseVisit(self)
     end
     local items, _, backpackSlots = Client:BagContents()
     local w = {
-        at = GetTime(), guid = identity.guid, world = identity.world,
+        at = GetTime(), guid = identity.guid, region = identity.region,
         usable = { character = v.character.usable, account = v.account.usable },
         held = done.held,
         note = nil,
@@ -1356,7 +1374,7 @@ local function WatchedBank(w, kind)
     if kind == "character" then
         return LazyProf.StockMemory:OwnBank(w.guid)
     end
-    return LazyProf.StockMemory:AccountBank(w.world)
+    return LazyProf.StockMemory:AccountBank(w.region)
 end
 
 -- Rule 5: mark a bank of the visit in doubt, for `reason`. Only a bank that
@@ -1364,7 +1382,7 @@ end
 -- whether the mark is new.
 local function WatchMark(w, kind, reason)
     if w.done[kind] or not w.usable[kind] then return false end
-    local new, marked = MarkDoubt(kind, w.guid, w.world)
+    local new, marked = MarkDoubt(kind, w.guid, w.region)
     if marked then
         w.done[kind] = true
     end
@@ -1720,7 +1738,11 @@ local function AddClientCounts(add, identity)
         return
     end
     table.sort(ids)
-    local account = Memory:AccountBank(identity.world)
+    local account = AccountBankOf(identity)
+    local accountText = "never seen"
+    if not account and Memory:AccountBank(identity.region) then
+        accountText = "read in another world or by the other faction"
+    end
     local carriedNow = Client:BagContents()
     for i = 1, math.min(CLIENT_COUNT_ITEMS, #ids) do
         local itemId = ids[i]
@@ -1728,7 +1750,7 @@ local function AddClientCounts(add, identity)
         add("client count " .. tostring(itemId) .. ": carried=" .. tostring(carried) .. " withBank=" .. tostring(withBank)
             .. " withAccountBank=" .. tostring(withAccountBank)
             .. "; remembered: bags now=" .. tostring(carriedNow[itemId] or 0) .. " bank=" .. tostring(bank[itemId])
-            .. " accountBank=" .. (account and tostring(account[itemId] or 0) or "never seen"))
+            .. " accountBank=" .. (account and tostring(account[itemId] or 0) or accountText))
     end
 end
 
@@ -1784,7 +1806,8 @@ function Inventory:RunDiagnostic(lines)
     identity = identity or {}
     local now = Client:Now()
     add("identity: guid=" .. tostring(identity.guid) .. " name=" .. tostring(identity.name)
-        .. " world=" .. tostring(identity.world) .. " faction=" .. tostring(identity.faction))
+        .. " world=" .. tostring(identity.world) .. " faction=" .. tostring(identity.faction)
+        .. " region=" .. tostring(identity.region))
     if not identity.world then
         add("world: unknown - alts and the account bank are not counted")
     end
@@ -1937,9 +1960,25 @@ function Inventory:RunDiagnostic(lines)
             .. " faction=" .. tostring(c.faction) .. " " .. part("bags", c.bagItems, c.bagsAt)
             .. " " .. part("bank", c.bankItems, c.bankAt, c.bankDoubt) .. " guid=" .. tostring(c.guid))
     end
+    -- The account bank of each region: whose read it is, and whether it
+    -- counts for this character (only for the world and faction of that read).
     for _, bank in ipairs(summary.account) do
-        add("account bank: world=" .. tostring(bank.world) .. " items=" .. tostring(bank.items)
-            .. " (" .. tostring(Memory.AgeText(now, bank.at) or "no time") .. (bank.doubt and ", in doubt: not counted" or "") .. ")")
+        local here = bank.region == identity.region and identity.world ~= nil and bank.world == identity.world
+            and bank.faction == identity.faction
+        local counts
+        if bank.region ~= identity.region then
+            counts = "not counted (another region)"
+        elseif not here then
+            counts = "not counted (read in another world or by the other faction)"
+        elseif bank.doubt then
+            counts = "not counted (in doubt)"
+        else
+            counts = "counted"
+        end
+        add("account bank: region=" .. tostring(bank.region) .. " read by world=" .. tostring(bank.world)
+            .. " faction=" .. tostring(bank.faction) .. " items=" .. tostring(bank.items)
+            .. " (" .. tostring(Memory.AgeText(now, bank.at) or "no time") .. (bank.doubt and ", in doubt: not counted" or "") .. ")"
+            .. " - " .. counts)
     end
 end
 

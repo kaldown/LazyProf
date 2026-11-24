@@ -161,7 +161,7 @@ T.section("/lp reset keeps the remembered stock", function()
     T.check("after logout the saved file still holds the stock",
         type(_G.LazyProfDB.global) == "table" and type(_G.LazyProfDB.global.stock) == "table"
         and _G.LazyProfDB.global.stock.characters[MAIN_GUID] ~= nil and _G.LazyProfDB.global.stock.characters.ALT ~= nil
-        and _G.LazyProfDB.global.stock.account["eu-pvp"] ~= nil)
+        and _G.LazyProfDB.global.stock.account.eu ~= nil)
     addon = session()
     World.advance(3)
     total, bars = linen(addon)

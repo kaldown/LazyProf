@@ -528,10 +528,19 @@ section("stock", function()
     _G.GetRealmName = function() return "Nightslayer" end
     -- The key first, then the name in the client's language (never a key).
     _G.UnitFactionGroup = function() return "Horde", "Die Horde" end
+    local savedRegionName = _G.GetCurrentRegionName
+    _G.GetCurrentRegionName = function() return "EU" end
     local id = Client:CharacterIdentity()
-    check(p .. "identity: guid, name, realm as the world, faction",
-        id.guid == "Player-5555-00ABCDEF" and id.name == "Thrag" and id.world == "Nightslayer" and id.faction == "Horde",
-        tostring(id.guid) .. "," .. tostring(id.name) .. "," .. tostring(id.world) .. "," .. tostring(id.faction))
+    check(p .. "identity: guid, name, realm as the world, faction, region",
+        id.guid == "Player-5555-00ABCDEF" and id.name == "Thrag" and id.world == "Nightslayer" and id.faction == "Horde"
+            and id.region == "eu",
+        tostring(id.guid) .. "," .. tostring(id.name) .. "," .. tostring(id.world) .. "," .. tostring(id.faction) .. "," .. tostring(id.region))
+    _G.GetCurrentRegionName = nil
+    check(p .. "identity: a client without the region call has no region, and no error", Client:CharacterIdentity().region == nil
+        and Client:CharacterIdentity().world == "Nightslayer")
+    _G.GetCurrentRegionName = function() return "" end
+    check(p .. "identity: nor does an empty region name give one", Client:CharacterIdentity().region == nil)
+    _G.GetCurrentRegionName = savedRegionName
     _G.UnitGUID = nil
     check(p .. "identity: no GUID call, no guid, no error", Client:CharacterIdentity().guid == nil)
     _G.UnitGUID = function() return "Player-5555-00ABCDEF" end

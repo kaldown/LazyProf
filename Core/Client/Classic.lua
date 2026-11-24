@@ -464,15 +464,19 @@ function Client:BankKindOfBag(bagId)
     return nil
 end
 
--- Who the character is: { guid, name, world, faction }. Realms are real on
--- these clients, so the realm name is the world. A part the client cannot
--- give is nil.
+-- Who the character is: { guid, name, world, faction, region }. Realms are
+-- real on these clients, so the realm name is the world; the region is the
+-- region's short name in lower case, where the client has the call. A part
+-- the client cannot give is nil. (No bank is read here, so nothing is
+-- remembered per region on these clients.)
 function Client:CharacterIdentity()
+    local region = GetCurrentRegionName and GetCurrentRegionName() or nil
     return {
         guid = UnitGUID and UnitGUID("player") or nil,
         name = UnitName and (UnitName("player")) or nil,
         world = GetRealmName and GetRealmName() or nil,
         faction = UnitFactionGroup and (UnitFactionGroup("player")) or nil,
+        region = (type(region) == "string" and region ~= "") and region:lower() or nil,
     }
 end
 

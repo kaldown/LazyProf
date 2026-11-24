@@ -944,6 +944,7 @@ section("stock", function()
     check(p .. "identity: the full name", id.name == "Thrag Ironhide", id.name)
     check(p .. "identity: the faction", id.faction == "Horde", id.faction)
     check(p .. "identity: the world is region and ruleset", id.world == "eu-pvp", id.world)
+    check(p .. "identity: and the region alone", id.region == "eu", id.region)
 
     rules = {}
     check(p .. "world: no ruleset flag -> normal", identityOf().world == "eu-normal", identityOf().world)
@@ -951,7 +952,7 @@ section("stock", function()
     check(p .. "world: roleplay", identityOf().world == "eu-rp", identityOf().world)
     rules = { [213] = true, [214] = true }
     region = "US"
-    check(p .. "world: roleplay PvP, another region", identityOf().world == "us-rppvp", identityOf().world)
+    check(p .. "world: roleplay PvP, another region", identityOf().world == "us-rppvp" and identityOf().region == "us", identityOf().world)
     rules = { [10] = true, [213] = true }
     check(p .. "world: hardcore PvP", identityOf().world == "us-hc-pvp", identityOf().world)
     rules = { [10] = true }
@@ -960,7 +961,7 @@ section("stock", function()
     -- A region without a name (test realms): its number stands in for it.
     region = ""
     id = identityOf()
-    check(p .. "world: no region name -> the region's number", id.world == "region3-pvp" and id.guid ~= nil, id.world)
+    check(p .. "world: no region name -> the region's number", id.world == "region3-pvp" and id.region == "region3" and id.guid ~= nil, id.world)
     region = nil
     check(p .. "world: nil region name -> the region's number too", identityOf().world == "region3-pvp", identityOf().world)
     regionNumber = 1
@@ -970,7 +971,7 @@ section("stock", function()
     -- Neither a name nor a number: no world (nothing is then taken for the same world).
     regionNumber = nil
     id = identityOf()
-    check(p .. "world: no name and no number -> no world, the rest still read", id.world == nil and id.guid ~= nil, id.world)
+    check(p .. "world: no name and no number -> no world, the rest still read", id.world == nil and id.region == nil and id.guid ~= nil, id.world)
     regionNumber = "3"
     check(p .. "world: a number that is not one -> no world", identityOf().world == nil)
     regionNumber = 3

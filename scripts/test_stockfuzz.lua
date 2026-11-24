@@ -278,7 +278,7 @@ local MAX_STACK = 20
 local BACKPACK, BAG, TAB1, TAB2, ACCOUNT_TAB = 0, 1, 6, 7, 15
 local GUID = { A = "Player-4444-000000AA", B = "Player-4444-000000BB" }
 local NAME = { A = "Main Goldtooth", B = "Alt Goldtooth" }
-local WORLD_KEY = "eu-pvp"
+local WORLD_KEY, REGION = "eu-pvp", "eu"
 local SETTLE = 2000                       -- ms without an event: settled
 
 local function KindOf(container)
@@ -523,10 +523,15 @@ local function BankTruth(kind, who)
     return truth
 end
 
+-- What is remembered of a bank as it counts for the character being played:
+-- the account bank only when the copy of the region is of this character's
+-- world and faction (a copy read elsewhere is not counted here).
 local function Remembered(kind, who)
     local memory = S.addon.StockMemory
     if kind == "character" then return memory:OwnBank(GUID[who or S.cur]) end
-    return memory:AccountBank(WORLD_KEY)
+    local items, at, doubt, world, faction = memory:AccountBank(REGION)
+    if world ~= WORLD_KEY or faction ~= "Horde" then return nil end
+    return items, at, doubt
 end
 
 -- For a shrunk script: what the two banks really hold now, as literals.
@@ -2121,7 +2126,7 @@ end
 -- whether it carries the doubt mark.
 local function bank(kind, guid, truth)
     local items, _, doubt
-    if kind == "character" then items, _, doubt = addon.StockMemory:OwnBank(guid) else items, _, doubt = addon.StockMemory:AccountBank("eu-pvp") end
+    if kind == "character" then items, _, doubt = addon.StockMemory:OwnBank(guid) else items, _, doubt = addon.StockMemory:AccountBank("eu") end
     local verdict = "right"
     if not items then
         verdict = "nothing remembered"

@@ -1,7 +1,7 @@
 -- scripts/test_stockmemory.lua
 --
 -- The stock memory: what each character had in its bags and bank when LazyProf
--- last saw them, and the account-wide bank per world. It is what lets bank and
+-- last saw them, and the account-wide bank per region. It is what lets bank and
 -- alt stock count when no inventory addon is installed. Pure: the character,
 -- the items and the time are all passed in.
 --
@@ -27,8 +27,8 @@ local function fresh()
     LazyProf.db.global = { characters = {} }
 end
 
-local function who(guid, name, world, faction)
-    return { guid = guid, name = name, world = world or "eu-pvp", faction = faction or "Alliance" }
+local function who(guid, name, world, faction, region)
+    return { guid = guid, name = name, world = world or "eu-pvp", faction = faction or "Alliance", region = region or "eu" }
 end
 
 local function count(t)
@@ -55,14 +55,14 @@ T.section("store", function()
     -- Reading changes nothing. A saved table without a format number yet is
     -- read as this format, and no reader writes the number into it: that is
     -- for the first save.
-    local bare = { account = { ["eu-pvp"] = { items = { [2770] = 5 }, at = NOW } }, characters = {
+    local bare = { account = { eu = { items = { [2770] = 5 }, at = NOW, world = "eu-pvp", faction = "Alliance" } }, characters = {
         [MAIN.guid] = { name = "Main Character", world = "eu-pvp", faction = "Alliance", seen = NOW,
             bank = { items = { [2589] = 40 }, at = NOW }, bagsAtBank = { items = {}, banks = { character = true }, at = NOW } },
         ["Player-1-ALT"] = { name = "Alt", world = "eu-pvp", faction = "Alliance", seen = NOW,
             bags = { items = { [2589] = 20 }, at = NOW } } } }
     LazyProf.db.global = { stock = bare }
     T.check("a table without a format number is read", (Memory:OwnBank(MAIN.guid))[2589] == 40
-        and (Memory:AccountBank("eu-pvp"))[2770] == 5 and #Memory:Alts(MAIN) == 1 and Memory:Standing(MAIN)[MAIN.guid] == "self"
+        and (Memory:AccountBank("eu"))[2770] == 5 and #Memory:Alts(MAIN) == 1 and Memory:Standing(MAIN)[MAIN.guid] == "self"
         and #Memory:Summary().characters == 2 and Memory:BagsAtBank(MAIN.guid) ~= nil and Memory:Token() == bare.characters)
     T.check("and no reader writes the format number", bare.schema == nil, bare.schema)
     Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW)
@@ -114,15 +114,19 @@ T.section("nothing is saved without a character or a time", function()
     T.check("no guid: bank", Memory:SaveBank({ name = "X" }, { [1] = 1 }, {}, NOW) == false)
     T.check("no time", Memory:SaveBags(MAIN, { [1] = 1 }, {}, nil) == false)
     T.check("no items table", Memory:SaveBank(MAIN, nil, {}, NOW) == false)
-    T.check("account bank without a world", Memory:SaveAccountBank(nil, { [1] = 1 }, NOW) == false)
-    T.check("account bank without items", Memory:SaveAccountBank("eu-pvp", nil, NOW) == false)
+    T.check("account bank without a character", Memory:SaveAccountBank(nil, { [1] = 1 }, NOW) == false)
+    T.check("account bank without a region", Memory:SaveAccountBank({ guid = "P-1", world = "eu-pvp", faction = "Alliance" }, { [1] = 1 }, NOW) == false)
+    T.check("account bank without a world", Memory:SaveAccountBank({ guid = "P-1", region = "eu", faction = "Alliance" }, { [1] = 1 }, NOW) == false)
+    T.check("account bank without a faction", Memory:SaveAccountBank({ guid = "P-1", region = "eu", world = "eu-pvp" }, { [1] = 1 }, NOW) == false)
+    T.check("account bank without items", Memory:SaveAccountBank(MAIN, nil, NOW) == false)
+    T.check("account bank without a time", Memory:SaveAccountBank(MAIN, { [1] = 1 }, nil) == false)
     T.eq("no record was made", count(LazyProf.db.global.stock and LazyProf.db.global.stock.characters), 0)
 
     local saved = LazyProf.db
     LazyProf.db = nil
     T.check("no database: a save does nothing", Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW) == false)
     T.check("no database: nothing to read", Memory:OwnBank(MAIN.guid) == nil and #Memory:Alts(MAIN) == 0
-        and Memory:AccountBank("eu-pvp") == nil)
+        and Memory:AccountBank("eu") == nil)
     T.check("no database: prune and forget do not fail", pcall(Memory.Prune, Memory, NOW) and pcall(Memory.Forget, Memory))
     LazyProf.db = saved
 end)
@@ -346,27 +350,65 @@ end)
 
 T.section("account bank", function()
     fresh()
-    T.check("none at first", Memory:AccountBank("eu-pvp") == nil)
-    T.check("a save reports success", Memory:SaveAccountBank("eu-pvp", { [2589] = 60 }, NOW) == true)
-    local items, at = Memory:AccountBank("eu-pvp")
-    T.check("read back per world", items ~= nil and items[2589] == 60 and at == NOW)
-    T.check("another world has its own", Memory:AccountBank("eu-normal") == nil)
-    Memory:SaveAccountBank("eu-pvp", { [4306] = 2 }, NOW + 5)
-    items, at = Memory:AccountBank("eu-pvp")
+    T.check("none at first", Memory:AccountBank("eu") == nil)
+    T.check("a save reports success", Memory:SaveAccountBank(MAIN, { [2589] = 60 }, NOW) == true)
+    local items, at, doubt, world, faction = Memory:AccountBank("eu")
+    T.check("read back per region", items ~= nil and items[2589] == 60 and at == NOW and doubt == false, at)
+    T.check("with the world and faction of the character whose read it is", world == "eu-pvp" and faction == "Alliance",
+        tostring(world) .. "," .. tostring(faction))
+    T.check("another region has its own", Memory:AccountBank("us") == nil)
+    T.check("a world is no region", Memory:AccountBank("eu-pvp") == nil)
+    Memory:SaveAccountBank(MAIN, { [4306] = 2 }, NOW + 5)
+    items, at = Memory:AccountBank("eu")
     T.check("a second save replaces", items[4306] == 2 and items[2589] == nil and at == NOW + 5)
-    T.check("no world asked: nothing", Memory:AccountBank(nil) == nil)
+    T.check("no region asked: nothing", Memory:AccountBank(nil) == nil)
+    -- One copy per region: a character of another world or of the other
+    -- faction that reads it makes the copy its own.
+    Memory:SaveAccountBank(who("Player-1-HORDE", "Other Side", "eu-pvp", "Horde"), { [774] = 3 }, NOW + 6)
+    items, at, doubt, world, faction = Memory:AccountBank("eu")
+    T.check("a read by the other faction replaces the copy and makes it that faction's",
+        items[774] == 3 and items[4306] == nil and world == "eu-pvp" and faction == "Horde")
+    Memory:SaveAccountBank(who("Player-1-NORMAL", "Elsewhere", "eu-normal", "Alliance"), { [765] = 1 }, NOW + 7)
+    items, at, doubt, world, faction = Memory:AccountBank("eu")
+    T.check("so does a read in another world of the region", items[765] == 1 and world == "eu-normal" and faction == "Alliance")
+    Memory:SaveAccountBank(who("Player-1-US", "Far Away", "us-pvp", "Alliance", "us"), { [1] = 1 }, NOW + 8)
+    T.check("a read in another region is that region's", (Memory:AccountBank("us"))[1] == 1 and (Memory:AccountBank("eu"))[765] == 1)
+    T.check("the summary lists one per region, with whose read it is", (function()
+        local list = Memory:Summary().account
+        return #list == 2 and list[1].region == "eu" and list[1].world == "eu-normal" and list[1].faction == "Alliance"
+            and list[1].items == 1 and list[2].region == "us" and list[2].world == "us-pvp"
+    end)())
+
+    -- An entry without the world and faction of its read (the older shape,
+    -- one per world) is not read, and the next save removes it.
+    fresh()
+    LazyProf.db.global.stock = { schema = 1, characters = {}, account = {
+        ["eu-pvp"] = { items = { [2589] = 50 }, at = NOW }, eu = { items = { [2589] = 40 }, at = NOW } } }
+    T.check("an entry of the older shape is not read", Memory:AccountBank("eu-pvp") == nil and Memory:AccountBank("eu") == nil)
+    T.check("nor can it be marked", Memory:MarkAccountBankDoubt("eu") == false and Memory:MarkAccountBankDoubt("eu-pvp") == false)
+    T.check("the summary counts it as unreadable", #Memory:Summary().account == 0 and Memory:Summary().unreadable == 2)
+    for label, entry in pairs({ ["a world that is a number"] = { items = {}, at = NOW, world = 5, faction = "Horde" },
+                                ["a faction that is a table"] = { items = {}, at = NOW, world = "eu-pvp", faction = {} } }) do
+        LazyProf.db.global.stock.account.eu = entry
+        T.check(label .. ": not read", Memory:AccountBank("eu") == nil)
+    end
+    Memory:SaveAccountBank(who("Player-1-US", "Far Away", "us-pvp", "Alliance", "us"), { [1] = 1 }, NOW)
+    T.check("the next save of an account bank removes what could not be read",
+        LazyProf.db.global.stock.account["eu-pvp"] == nil and LazyProf.db.global.stock.account.eu == nil
+        and (Memory:AccountBank("us"))[1] == 1)
 
     -- The memory keeps a copy of its own, holding only what can be counted.
+    fresh()
     local mine = { [2589] = 60, [4306] = -3, [774] = 2.5, [765] = "x", name = 7 }
-    Memory:SaveAccountBank("eu-pvp", mine, NOW + 10)
-    local kept = LazyProf.db.global.stock.account["eu-pvp"].items
+    Memory:SaveAccountBank(MAIN, mine, NOW + 10)
+    local kept = LazyProf.db.global.stock.account.eu.items
     T.check("what is saved is not the caller's table", kept ~= mine)
     T.check("and holds only positive whole counts under numeric ids", kept[2589] == 60 and count(kept) == 1, count(kept))
     mine[2589] = 1
-    T.eq("changing the caller's table afterwards changes nothing", (Memory:AccountBank("eu-pvp"))[2589], 60)
-    items = Memory:AccountBank("eu-pvp")
+    T.eq("changing the caller's table afterwards changes nothing", (Memory:AccountBank("eu"))[2589], 60)
+    items = Memory:AccountBank("eu")
     items[2589] = 9999
-    T.eq("and what is handed out is a copy too", (Memory:AccountBank("eu-pvp"))[2589], 60)
+    T.eq("and what is handed out is a copy too", (Memory:AccountBank("eu"))[2589], 60)
 end)
 
 -- A remembered bank can be marked "in doubt": the addon has reason to think
@@ -376,7 +418,7 @@ T.section("a bank in doubt", function()
     fresh()
     local zed = who("Player-1-ZED", "Zed Alt")
     T.check("nothing remembered: nothing to mark", Memory:MarkBankDoubt(MAIN.guid) == false
-        and Memory:MarkAccountBankDoubt("eu-pvp") == false)
+        and Memory:MarkAccountBankDoubt("eu") == false)
     T.check("marking makes nothing", LazyProf.db.global.stock == nil)
     Memory:SaveBags(MAIN, { [2589] = 9 }, {}, NOW)
     T.check("bags only: no bank to mark", Memory:MarkBankDoubt(MAIN.guid) == false
@@ -412,18 +454,18 @@ T.section("a bank in doubt", function()
     T.check("after its next bank save it is handed out again", alts[1].bank ~= nil and alts[1].bank[2589] == 100
         and alts[1].bankDoubt == nil)
 
-    -- The account bank of a world.
-    Memory:SaveAccountBank("eu-pvp", { [2770] = 50 }, NOW - DAY)
-    items, at, doubt = Memory:AccountBank("eu-pvp")
+    -- The account bank of a region.
+    Memory:SaveAccountBank(MAIN, { [2770] = 50 }, NOW - DAY)
+    items, at, doubt = Memory:AccountBank("eu")
     T.check("a saved account bank is not in doubt", items[2770] == 50 and doubt == false, doubt)
-    T.check("another world's cannot be marked", Memory:MarkAccountBankDoubt("eu-normal") == false)
-    T.check("marking says that the mark is new", Memory:MarkAccountBankDoubt("eu-pvp") == true)
-    T.check("marking it again changes nothing", Memory:MarkAccountBankDoubt("eu-pvp") == false)
-    items, at, doubt = Memory:AccountBank("eu-pvp")
+    T.check("another region's cannot be marked", Memory:MarkAccountBankDoubt("us") == false)
+    T.check("marking says that the mark is new", Memory:MarkAccountBankDoubt("eu") == true)
+    T.check("marking it again changes nothing", Memory:MarkAccountBankDoubt("eu") == false)
+    items, at, doubt = Memory:AccountBank("eu")
     T.check("the account bank stays remembered and says it is in doubt", items[2770] == 50 and at == NOW - DAY and doubt == true)
     T.check("the summary names it", Memory:Summary().account[1].doubt == true)
-    Memory:SaveAccountBank("eu-pvp", { [2770] = 51 }, NOW)
-    items, at, doubt = Memory:AccountBank("eu-pvp")
+    Memory:SaveAccountBank(MAIN, { [2770] = 51 }, NOW)
+    items, at, doubt = Memory:AccountBank("eu")
     T.check("its next save takes the mark away", items[2770] == 51 and doubt == false and Memory:Summary().account[1].doubt == false)
 
     -- A mark that is not what this file writes (a saved table that was
@@ -434,9 +476,9 @@ T.section("a bank in doubt", function()
         local what = "a mark that is " .. (type(value) == "table" and "a table" or tostring(value))
         records.characters[MAIN.guid].bank.doubt = value
         records.characters[zed.guid].bank.doubt = value
-        records.account["eu-pvp"].doubt = value
+        records.account.eu.doubt = value
         T.check(what .. ": the own bank and the account bank are in doubt", select(3, Memory:OwnBank(MAIN.guid)) == true
-            and select(3, Memory:AccountBank("eu-pvp")) == true)
+            and select(3, Memory:AccountBank("eu")) == true)
         local list = Memory:Alts(MAIN)
         T.check(what .. ": an alt's bank is not handed out", #list == 1 and list[1].bank == nil and list[1].bankDoubt == true
             and list[1].bags[2589] == 20)
@@ -444,17 +486,17 @@ T.section("a bank in doubt", function()
         T.check(what .. ": the summary names all three", sum.characters[1].bankDoubt == true and sum.characters[2].bankDoubt == true
             and sum.account[1].doubt == true)
         T.check(what .. ": marking again is not new", Memory:MarkBankDoubt(MAIN.guid) == false
-            and Memory:MarkAccountBankDoubt("eu-pvp") == false)
+            and Memory:MarkAccountBankDoubt("eu") == false)
     end
     records.characters[MAIN.guid].bank.doubt = false
     records.characters[zed.guid].bank.doubt = false
-    records.account["eu-pvp"].doubt = false
-    T.check("false is no mark", select(3, Memory:OwnBank(MAIN.guid)) == false and select(3, Memory:AccountBank("eu-pvp")) == false
+    records.account.eu.doubt = false
+    T.check("false is no mark", select(3, Memory:OwnBank(MAIN.guid)) == false and select(3, Memory:AccountBank("eu")) == false
         and Memory:Alts(MAIN)[1].bank ~= nil and Memory:Summary().characters[1].bankDoubt == false)
     records.characters[MAIN.guid].bank.doubt = "yes"
     Memory:SaveBank(MAIN, { [2589] = 41 }, {}, NOW)
     T.check("the next save takes a damaged mark away too", select(3, Memory:OwnBank(MAIN.guid)) == false)
-    T.check("nothing to mark without a character or a world", Memory:MarkBankDoubt(nil) == false
+    T.check("nothing to mark without a character or a region", Memory:MarkBankDoubt(nil) == false
         and Memory:MarkAccountBankDoubt(nil) == false)
     LazyProf.db.global.stock.characters["Player-1-JUNK"] = true
     LazyProf.db.global.stock.account["eu-rp"] = "x"
@@ -463,11 +505,12 @@ T.section("a bank in doubt", function()
 
     -- Another format is not marked either.
     fresh()
-    local theirs = { schema = 2, characters = { [MAIN.guid] = { bank = { items = { [1] = 1 } } } }, account = { ["eu-pvp"] = { items = {} } } }
+    local theirs = { schema = 2, characters = { [MAIN.guid] = { bank = { items = { [1] = 1 } } } },
+                     account = { eu = { items = {}, world = "eu-pvp", faction = "Alliance" } } }
     LazyProf.db.global.stock = theirs
     T.check("another format: nothing is marked", Memory:MarkBankDoubt(MAIN.guid) == false
-        and Memory:MarkAccountBankDoubt("eu-pvp") == false and theirs.characters[MAIN.guid].bank.doubt == nil
-        and theirs.account["eu-pvp"].doubt == nil)
+        and Memory:MarkAccountBankDoubt("eu") == false and theirs.characters[MAIN.guid].bank.doubt == nil
+        and theirs.account.eu.doubt == nil)
 end)
 
 -- A session that ends at the bank leaves a note with the character's record:
@@ -567,20 +610,20 @@ T.section("prune", function()
     local old = who("Player-1-OLD", "Old Alt")
     local kept = who("Player-1-KEPT", "Kept Alt")
     local edge = who("Player-1-EDGE", "Edge Alt")
-    local away = who("Player-1-AWAY", "Away Alt", "us-normal")
+    local away = who("Player-1-AWAY", "Away Alt", "us-normal", "Alliance", "us")
     Memory:SaveBags(old, { [1] = 1 }, {}, NOW - 181 * DAY)
     Memory:SaveBags(kept, { [1] = 1 }, {}, NOW - 179 * DAY)
     Memory:SaveBags(edge, { [1] = 1 }, {}, NOW - 180 * DAY)
     Memory:SaveBags(away, { [1] = 1 }, {}, NOW - 200 * DAY)
-    Memory:SaveAccountBank("eu-pvp", { [1] = 1 }, NOW - 300 * DAY)
-    Memory:SaveAccountBank("us-normal", { [1] = 1 }, NOW - 200 * DAY)
+    Memory:SaveAccountBank(MAIN, { [1] = 1 }, NOW - 300 * DAY)
+    Memory:SaveAccountBank(away, { [1] = 1 }, NOW - 200 * DAY)
     T.eq("two characters are dropped", Memory:Prune(NOW), 2)
     local chars = LazyProf.db.global.stock.characters
     T.check("not seen for 181 days: dropped", chars[old.guid] == nil)
     T.check("seen 179 days ago: kept", chars[kept.guid] ~= nil)
     T.check("seen exactly 180 days ago: kept", chars[edge.guid] ~= nil)
-    T.check("the account bank stays while a character of its world is remembered", Memory:AccountBank("eu-pvp") ~= nil)
-    T.check("and goes with the last character of its world", Memory:AccountBank("us-normal") == nil)
+    T.check("the account bank stays while a character of its region is remembered", Memory:AccountBank("eu") ~= nil)
+    T.check("and goes with the last character of its region", Memory:AccountBank("us") == nil)
 
     -- "Seen" is the last save of either kind.
     fresh()
@@ -597,31 +640,40 @@ T.section("prune", function()
     -- The character being played is here, however long ago it was saved.
     fresh()
     Memory:SaveBank(MAIN, { [2589] = 8 }, {}, NOW - 500 * DAY)
-    Memory:SaveAccountBank("eu-pvp", { [1] = 1 }, NOW - 500 * DAY)
+    Memory:SaveAccountBank(MAIN, { [1] = 1 }, NOW - 500 * DAY)
     T.eq("the character being played is never dropped", Memory:Prune(NOW, MAIN.guid), 0)
     T.check("its bank is still remembered", (Memory:OwnBank(MAIN.guid))[2589] == 8)
-    T.check("and its world's account bank", Memory:AccountBank("eu-pvp") ~= nil)
+    T.check("and its region's account bank", Memory:AccountBank("eu") ~= nil)
     T.check("prune without a time does nothing", Memory:Prune(nil) == 0 and Memory:OwnBank(MAIN.guid) ~= nil)
 
-    -- An account bank is dropped only when it is known that no character
-    -- lives in its world. Characters that cannot be read prove nothing.
+    -- An account bank is dropped only when it is known that no character is
+    -- of its region. Characters that cannot be read prove nothing.
     local function accountAfter(characters)
         fresh()
         LazyProf.db.global.stock = { schema = 1, characters = characters,
-            account = { ["eu-pvp"] = { items = { [2770] = 50 }, at = NOW - DAY } } }
+            account = { eu = { items = { [2770] = 50 }, at = NOW - DAY, world = "eu-pvp", faction = "Alliance" } } }
         Memory:Prune(NOW, MAIN.guid)
-        return Memory:AccountBank("eu-pvp")
+        return Memory:AccountBank("eu")
     end
     T.check("the characters are not a table: the account bank stays", accountAfter("cut off") ~= nil)
     T.check("the characters are missing: the account bank stays", accountAfter(nil) ~= nil)
-    T.check("the played character's record has no world: the account bank stays",
-        accountAfter({ [MAIN.guid] = { name = "Main Character", faction = "Alliance", seen = NOW - DAY } }) ~= nil)
+    T.check("the played character's record has no region: the account bank stays",
+        accountAfter({ [MAIN.guid] = { name = "Main Character", world = "us-pvp", faction = "Alliance", seen = NOW - DAY } }) ~= nil)
     T.check("the played character's record is not a record: the account bank stays", accountAfter({ [MAIN.guid] = 7 }) ~= nil)
-    T.check("a record with a world that is not text: the account bank stays",
-        accountAfter({ ["Player-1-ODD"] = { name = "Odd", world = 12, faction = "Alliance", seen = NOW - DAY } }) ~= nil)
-    T.check("(every character read, none of them in that world: it goes)",
-        accountAfter({ [MAIN.guid] = { name = "Main Character", world = "eu-normal", faction = "Alliance", seen = NOW - DAY } }) == nil)
+    T.check("a record with a region that is not text: the account bank stays",
+        accountAfter({ ["Player-1-ODD"] = { name = "Odd", world = "us-pvp", region = 12, faction = "Alliance", seen = NOW - DAY } }) ~= nil)
+    T.check("(every character read, none of them of that region: it goes)",
+        accountAfter({ [MAIN.guid] = { name = "Main Character", world = "us-normal", region = "us", faction = "Alliance", seen = NOW - DAY } }) == nil)
+    T.check("(a character of the region in another world keeps it)",
+        accountAfter({ [MAIN.guid] = { name = "Main Character", world = "eu-normal", region = "eu", faction = "Horde", seen = NOW - DAY } }) ~= nil)
     T.check("(no character at all, and the table is one: it goes)", accountAfter({}) == nil)
+    T.check("a save notes the region on the character's record", (function()
+        fresh()
+        Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW)
+        local record = LazyProf.db.global.stock.characters[MAIN.guid]
+        Memory:SaveBags({ guid = MAIN.guid }, { [1] = 1 }, {}, NOW)
+        return record.region == "eu"
+    end)())
 end)
 
 T.section("forget", function()
@@ -629,11 +681,11 @@ T.section("forget", function()
     Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW)
     Memory:SaveBank(MAIN, { [1] = 1 }, {}, NOW)
     Memory:SaveBags(who("Player-1-ALT", "Alt"), { [1] = 1 }, {}, NOW)
-    Memory:SaveAccountBank("eu-pvp", { [1] = 1 }, NOW)
+    Memory:SaveAccountBank(MAIN, { [1] = 1 }, NOW)
     Memory:Forget()
     T.check("no bank", Memory:OwnBank(MAIN.guid) == nil)
     T.eq("no alts", #Memory:Alts(MAIN), 0)
-    T.check("no account bank", Memory:AccountBank("eu-pvp") == nil)
+    T.check("no account bank", Memory:AccountBank("eu") == nil)
     T.eq("no records", count(LazyProf.db.global.stock.characters), 0)
     T.check("saving works again afterwards", Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW) == true)
 end)
@@ -647,7 +699,7 @@ T.section("another format is left alone", function()
     T.check("nothing is read from it", Memory:OwnBank(MAIN.guid) == nil and #Memory:Alts(MAIN) == 0)
     T.check("nothing is saved into it", Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW) == false
         and Memory:SaveBank(MAIN, { [1] = 1 }, {}, NOW) == false
-        and Memory:SaveAccountBank("eu-pvp", { [1] = 1 }, NOW) == false)
+        and Memory:SaveAccountBank(MAIN, { [1] = 1 }, NOW) == false)
     Memory:Prune(NOW + 1000 * DAY)
     Memory:Forget()
     T.check("it is untouched", LazyProf.db.global.stock == theirs and theirs.schema == 2
@@ -675,7 +727,7 @@ T.section("saved data that is not what the addon wrote", function()
         local out = {}
         local ok, err = pcall(function()
             out.bank = Memory:OwnBank(MAIN.guid)
-            out.account = Memory:AccountBank("eu-pvp")
+            out.account = Memory:AccountBank("eu")
             out.alts = Memory:Alts(MAIN)
             out.summary = Memory:Summary()
         end)
@@ -720,9 +772,9 @@ T.section("saved data that is not what the addon wrote", function()
         { "own bank with a negative count", { schema = 1, characters = { [MAIN.guid] = own({ [2589] = -30 }) }, account = {} }, 0 },
         { "own bank with a string count", { schema = 1, characters = { [MAIN.guid] = own({ [2589] = "x", [4306] = 2 }) }, account = {} }, 0 },
         { "own bank is true", { schema = 1, characters = { [MAIN.guid] = { seen = 1, bank = true } }, account = {} }, 0 },
-        { "an account bank that is true", { schema = 1, characters = {}, account = { ["eu-pvp"] = true } }, 0 },
-        { "an account bank without items", { schema = 1, characters = {}, account = { ["eu-pvp"] = { at = 5 } } }, 0 },
-        { "an account bank with a negative count", { schema = 1, characters = {}, account = { ["eu-pvp"] = { items = { [2589] = -4, [4306] = 1 }, at = 5 } } }, 0 },
+        { "an account bank that is true", { schema = 1, characters = {}, account = { eu = true } }, 0 },
+        { "an account bank without items", { schema = 1, characters = {}, account = { eu = { at = 5, world = "eu-pvp", faction = "Alliance" } } }, 0 },
+        { "an account bank with a negative count", { schema = 1, characters = {}, account = { eu = { items = { [2589] = -4, [4306] = 1 }, at = 5, world = "eu-pvp", faction = "Alliance" } } }, 0 },
         { "a name that is a number", { schema = 1, characters = { X = (function() local r = goodAlt(); r.name = 12; return r end)(), [ALT.guid] = goodAlt() }, account = {} }, 20 },
         { "a world that is a table", { schema = 1, characters = { X = (function() local r = goodAlt(); r.world = {}; return r end)() }, account = {} }, 0 },
         { "seen is a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.seen = "yesterday"; return r end)() }, account = {} }, 0 },
@@ -762,7 +814,7 @@ T.section("saved data that is not what the addon wrote", function()
     local out = read({ schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.at = "noon"; return r end)() }, account = {} })
     T.check("a part without a usable time has no time", out.alts[1] ~= nil and out.alts[1].bagsAt == nil)
     -- The summary says how many records it could not read.
-    out = read({ schema = 1, characters = { X = true, Y = "gone", [ALT.guid] = goodAlt() }, account = { ["eu-pvp"] = true } })
+    out = read({ schema = 1, characters = { X = true, Y = "gone", [ALT.guid] = goodAlt() }, account = { eu = true } })
     T.check("the summary lists what it can read and counts the rest",
         #out.summary.characters == 1 and out.summary.unreadable == 3, out.summary.unreadable)
 
@@ -773,7 +825,7 @@ T.section("saved data that is not what the addon wrote", function()
     -- ... a save does.
     LazyProf.db.global = { stock = broken }
     T.check("a save into it works", Memory:SaveBags(MAIN, { [2589] = 3 }, {}, NOW) == true
-        and Memory:SaveAccountBank("eu-pvp", { [2589] = 4 }, NOW) == true)
+        and Memory:SaveAccountBank(MAIN, { [2589] = 4 }, NOW) == true)
     T.check("and replaces what was not a table", type(broken.characters) == "table" and type(broken.account) == "table"
         and broken.characters[MAIN.guid].bags.items[2589] == 3)
     LazyProf.db.global = { stock = "broken" }
@@ -791,7 +843,7 @@ T.section("saved data that is not what the addon wrote", function()
 
     -- Prune and Forget cope, and Forget repairs.
     LazyProf.db.global = { stock = { schema = 1, characters = { X = true, Y = "gone", Z = { seen = "x" }, [MAIN.guid] = 7,
-        [ALT.guid] = goodAlt() }, account = { ["eu-pvp"] = true, ["us-pvp"] = { items = {}, at = 1 } } } }
+        [ALT.guid] = goodAlt() }, account = { eu = true, us = { items = {}, at = 1, world = "us-pvp", faction = "Alliance" } } } }
     local ok, dropped = pcall(Memory.Prune, Memory, NOW, MAIN.guid)
     T.check("prune does not fail on them", ok, dropped)
     local characters = LazyProf.db.global.stock.characters
@@ -799,7 +851,7 @@ T.section("saved data that is not what the addon wrote", function()
         characters.X == nil and characters.Y == nil and characters.Z == nil and characters[ALT.guid] ~= nil
         and characters[MAIN.guid] ~= nil)
     for _, stock in ipairs({ "broken", { schema = 1, characters = "x", account = 5 },
-            { schema = 1, characters = { X = true }, account = { ["eu-pvp"] = true } } }) do
+            { schema = 1, characters = { X = true }, account = { eu = true } } }) do
         LazyProf.db.global = { stock = stock }
         T.check("forget does not fail", pcall(Memory.Forget, Memory))
         local after = LazyProf.db.global.stock
@@ -926,7 +978,7 @@ T.section("summary", function()
     Memory:SaveBags(MAIN, { [1] = 1, [2] = 2 }, {}, NOW)
     Memory:SaveBank(MAIN, { [3] = 3 }, {}, NOW - DAY)
     Memory:SaveBags(who("Player-1-ALT", "Alt", "eu-normal", "Horde"), { [1] = 1 }, {}, NOW - 2 * DAY)
-    Memory:SaveAccountBank("eu-pvp", { [1] = 1, [2] = 1, [3] = 1 }, NOW - 4 * DAY)
+    Memory:SaveAccountBank(MAIN, { [1] = 1, [2] = 1, [3] = 1 }, NOW - 4 * DAY)
     local s = Memory:Summary()
     T.check("usable, format 1", s.usable == true and s.schema == 1)
     T.eq("every character, whatever its world", #s.characters, 2)
@@ -937,8 +989,8 @@ T.section("summary", function()
     T.check("bank: distinct items and when", main.bankItems == 1 and main.bankAt == NOW - DAY)
     T.check("a bank never seen", alt.bankItems == nil and alt.bankAt == nil)
     T.eq("last seen", main.seen, NOW)
-    T.check("account banks", #s.account == 1 and s.account[1].world == "eu-pvp" and s.account[1].items == 3
-        and s.account[1].at == NOW - 4 * DAY)
+    T.check("account banks", #s.account == 1 and s.account[1].region == "eu" and s.account[1].world == "eu-pvp"
+        and s.account[1].faction == "Alliance" and s.account[1].items == 3 and s.account[1].at == NOW - 4 * DAY)
 end)
 
 T.finish()

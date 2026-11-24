@@ -1,6 +1,6 @@
 -- Modules/Inventory/StockMemory.lua
 -- What each character had in its bags and its bank when LazyProf last saw
--- them, and the account-wide bank of each world. With it, bank and alt stock
+-- them, and the account-wide bank of each region. With it, bank and alt stock
 -- count when no inventory addon is installed (Modules/Inventory/Scanner.lua
 -- decides when it is used).
 --
@@ -8,7 +8,7 @@
 --   stock.schema                 format number of this table (1)
 --   stock.characters[guid] = {
 --       name, world, faction,    who it is; alts are the characters of the
---                                same world and faction
+--       region                   same world and faction
 --       seen,                    time of its last save of either kind
 --       noSend,                  true when it cannot send anything to other
 --                                characters (Self-Found); absent otherwise
@@ -16,7 +16,16 @@
 --       bank = { items = ..., bound = ..., at, doubt },
 --       bagsAtBank = { items = { [itemId] = count }, banks = { character, account }, at },
 --   }
---   stock.account[world] = { items = { [itemId] = count }, at, doubt }
+--   stock.account[region] = { items = { [itemId] = count }, at, doubt, world, faction }
+-- The account bank is remembered once per region (the region part of the
+-- world: a world is a region and a ruleset). Whether the game's account bank
+-- is shared by the whole account, per world or per faction is not known, so
+-- the record keeps the world and the faction of the character whose read it
+-- is, and it counts only for the characters of that world and faction (the
+-- caller decides that by them); a read by a character of another world or
+-- faction makes the copy that character's. That way it is never counted
+-- where it may be another bank. An entry without its world and faction (an
+-- older shape) is not read, and the next save of an account bank removes it.
 -- `bound` holds how many of an item's count are soulbound (left out when
 -- there are none): they stay in the owner's own bank, but another character
 -- cannot be sent them. Times are server time in seconds. A save replaces the
@@ -60,7 +69,7 @@
 --
 -- This file is pure: who the character is, what it holds and what time it is
 -- are passed in (the client adapter supplies them).
---   identity = { guid, name, world, faction }
+--   identity = { guid, name, world, faction, region }
 local ADDON_NAME, LazyProf = ...
 
 local StockMemory = {}
@@ -71,7 +80,7 @@ local HOUR = 3600
 local DAY = 86400
 StockMemory.KEEP_DAYS = 180
 
--- The two saved tables - characters by GUID and account banks by world - and
+-- The two saved tables - characters by GUID and account banks by region - and
 -- the format number found. nil tables when there is no database yet or the
 -- saved table is in another format.
 -- repair: a save is coming, so whatever is not a table is replaced now;
@@ -204,6 +213,7 @@ local function Record(characters, identity, now)
     record.name = Text(identity.name) or Text(record.name)
     record.world = Text(identity.world) or Text(record.world)
     record.faction = Text(identity.faction) or Text(record.faction)
+    record.region = Text(identity.region) or Text(record.region)
     if not Time(record.seen) or now > record.seen then
         record.seen = now
     end
@@ -246,14 +256,31 @@ function StockMemory:SetCanSend(guid, canSend)
     return true
 end
 
--- Remember the account-wide bank of a world.
-function StockMemory:SaveAccountBank(world, items, now)
-    if not (type(world) == "string" and type(items) == "table" and type(now) == "number") then
+-- The account bank remembered for a region, when it can be read: a table
+-- with an items table and the world and faction of its reader. nil otherwise.
+local function AccountEntry(account, region)
+    local bank = region ~= nil and account[region] or nil
+    if type(bank) ~= "table" or type(bank.items) ~= "table" or not Text(bank.world) or not Text(bank.faction) then
+        return nil
+    end
+    return bank
+end
+
+-- Remember the account-wide bank as the character `identity` read it: under
+-- its region, with its world and faction. Nothing is saved without all three.
+-- Whatever could not be read among the account banks (an entry of an older
+-- shape too) is removed with it.
+function StockMemory:SaveAccountBank(identity, items, now)
+    if not (type(identity) == "table" and Text(identity.region) and Text(identity.world) and Text(identity.faction)
+            and type(items) == "table" and type(now) == "number") then
         return false
     end
     local _, account = Store(true)
     if not account then return false end
-    account[world] = { items = Counts(items), at = now }
+    for region in pairs(account) do
+        if not AccountEntry(account, region) then account[region] = nil end
+    end
+    account[identity.region] = { items = Counts(items), at = now, world = identity.world, faction = identity.faction }
     return true
 end
 
@@ -267,13 +294,15 @@ function StockMemory:OwnBank(guid)
     return Counts(bank.items), Time(bank.at), InDoubt(bank)
 end
 
--- The account-wide bank of a world as last seen: a copy of its items, the
--- time, and whether it is in doubt. nil when it was never seen.
-function StockMemory:AccountBank(world)
+-- The account-wide bank of a region as last seen: a copy of its items, the
+-- time, whether it is in doubt, and the world and faction of the character
+-- whose read it is (it counts only for that world and faction). nil when it
+-- was never seen.
+function StockMemory:AccountBank(region)
     local _, account = Store()
-    local bank = account and world ~= nil and account[world]
-    if type(bank) ~= "table" or type(bank.items) ~= "table" then return nil end
-    return Counts(bank.items), Time(bank.at), InDoubt(bank)
+    local bank = account and AccountEntry(account, region)
+    if not bank then return nil end
+    return Counts(bank.items), Time(bank.at), InDoubt(bank), bank.world, bank.faction
 end
 
 -- Mark a character's remembered bank as in doubt: it is behind what is
@@ -288,11 +317,11 @@ function StockMemory:MarkBankDoubt(guid)
     return true
 end
 
--- The same for the account-wide bank of a world.
-function StockMemory:MarkAccountBankDoubt(world)
+-- The same for the account-wide bank of a region, whoever's read it is.
+function StockMemory:MarkAccountBankDoubt(region)
     local _, account = Store()
-    local bank = account and world ~= nil and account[world]
-    if type(bank) ~= "table" or type(bank.items) ~= "table" or InDoubt(bank) then return false end
+    local bank = account and AccountEntry(account, region)
+    if not bank or InDoubt(bank) then return false end
     bank.doubt = true
     return true
 end
@@ -473,12 +502,12 @@ end
 
 -- Drop the characters not seen for KEEP_DAYS days (a deleted character must
 -- not supply stock for ever) and whatever is saved in a record's place
--- without being one, and the account banks of worlds no remembered character
--- is left in. keepGuid: the character being played, whose entry is never
--- dropped. Returns how many entries were dropped.
--- An account bank goes only when it is known that nobody lives in its world:
+-- without being one, and the account banks of regions no remembered
+-- character is of. keepGuid: the character being played, whose entry is
+-- never dropped. Returns how many entries were dropped.
+-- An account bank goes only when it is known that nobody is of its region:
 -- when the characters could not be read (they are not a table, or what is
--- left of them holds an entry without a readable world) none is dropped.
+-- left of them holds an entry without a readable region) none is dropped.
 function StockMemory:Prune(now, keepGuid)
     local characters, account, _, charactersFound = Store()
     if not characters or type(now) ~= "number" then return 0 end
@@ -492,35 +521,36 @@ function StockMemory:Prune(now, keepGuid)
         end
     end
     if not charactersFound then return dropped end
-    local worlds = {}
+    local regions = {}
     for _, record in pairs(characters) do
-        local world = type(record) == "table" and Text(record.world) or nil
-        if not world then return dropped end
-        worlds[world] = true
+        local region = type(record) == "table" and Text(record.region) or nil
+        if not region then return dropped end
+        regions[region] = true
     end
-    for world in pairs(account) do
-        if not worlds[world] then
-            account[world] = nil
+    for region in pairs(account) do
+        if not regions[region] then
+            account[region] = nil
         end
     end
     return dropped
 end
 
--- Forget everything remembered, for every character and world. Also what
+-- Forget everything remembered, for every character and region. Also what
 -- puts a damaged saved table right again.
 function StockMemory:Forget()
     local characters, account = Store(true)
     if not characters then return end
     for guid in pairs(characters) do characters[guid] = nil end
-    for world in pairs(account) do account[world] = nil end
+    for region in pairs(account) do account[region] = nil end
 end
 
 -- What is remembered, for the diagnostic:
 --   { usable, schema, unreadable,
 --     characters = { { guid, name, world, faction, seen, canSend, bagItems, bagsAt, bankItems, bankAt, bankDoubt }, ... },
---     account = { { world, items, at, doubt }, ... } }
+--     account = { { region, world, faction, items, at, doubt }, ... } }
 -- bagItems / bankItems count distinct items (nil for a part never seen);
--- bankDoubt / doubt say whether that bank is marked in doubt.
+-- bankDoubt / doubt say whether that bank is marked in doubt; an account
+-- bank's world and faction are those of the character whose read it is.
 -- usable is false when there is no database or the saved table is in another
 -- format (schema then says which). unreadable counts the entries that are
 -- not what this file writes and are skipped.
@@ -549,15 +579,16 @@ function StockMemory:Summary()
         if nameA ~= nameB then return nameA < nameB end
         return tostring(a.guid) < tostring(b.guid)
     end)
-    for world, bank in pairs(account) do
-        if type(bank) == "table" and type(bank.items) == "table" then
-            summary.account[#summary.account + 1] = { world = world, items = Size(Counts(bank.items)), at = Time(bank.at),
-                                                      doubt = InDoubt(bank) }
+    for region in pairs(account) do
+        local bank = AccountEntry(account, region)
+        if bank then
+            summary.account[#summary.account + 1] = { region = region, world = bank.world, faction = bank.faction,
+                                                      items = Size(Counts(bank.items)), at = Time(bank.at), doubt = InDoubt(bank) }
         else
             summary.unreadable = summary.unreadable + 1
         end
     end
-    table.sort(summary.account, function(a, b) return tostring(a.world) < tostring(b.world) end)
+    table.sort(summary.account, function(a, b) return tostring(a.region) < tostring(b.region) end)
     return summary
 end
 

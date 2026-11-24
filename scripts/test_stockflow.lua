@@ -89,7 +89,7 @@ T.section("damaged saved stock", function()
             world = "eu-pvp", faction = "Horde", seen = 1, bank = { items = { [LINEN] = -30 }, at = 1 } } }, account = {} } end, 5 },
         { "own bank with a string count", function() return { schema = 1, characters = { [MAIN_GUID] = { name = "Main Goldtooth",
             world = "eu-pvp", faction = "Horde", seen = 1, bank = { items = { [LINEN] = "x" }, at = 1 } } }, account = {} } end, 5 },
-        { "an account bank that is true", function() return { schema = 1, characters = {}, account = { ["eu-pvp"] = true } } end, 5 },
+        { "an account bank that is true", function() return { schema = 1, characters = {}, account = { eu = true } } end, 5 },
         { "a name that is a number", function() return { schema = 1, characters = { X = (function() local r = goodAlt(); r.name = 12; return r end)(),
             Y = goodAlt() }, account = {} } end, 25 },
         { "seen is a string", function() return with(function(r) r.seen = "yesterday" end) end, 5 },
@@ -147,16 +147,16 @@ T.section("damaged characters beside a good account bank", function()
         World.reset()
         World.containers = { [0] = { slots = 16, slot(LINEN, 5) } }
         local saved = { stock = { schema = 1, characters = characters,
-            account = { ["eu-pvp"] = { items = { [BAR] = 50 }, at = World.serverTime - 100 } } } }
+            account = { eu = { items = { [BAR] = 50 }, at = World.serverTime - 100, world = "eu-pvp", faction = "Horde" } } } }
         local addon = World.login(saved)
         return addon, saved
     end
     local addon, saved = login("cut off")
-    T.check("right after login the account bank is still there", type(saved.stock.account["eu-pvp"]) == "table")
+    T.check("right after login the account bank is still there", type(saved.stock.account.eu) == "table")
     World.advance(3)
     T.eq("and it counts once the character is remembered again", (World.scan(addon))[BAR], 50)
     addon, saved = login({ [MAIN_GUID] = { name = "Main Goldtooth", faction = "Horde", seen = World.serverTime - 100 } })
-    T.check("a record without a world: the account bank is kept", type(saved.stock.account["eu-pvp"]) == "table")
+    T.check("a record without a region: the account bank is kept", type(saved.stock.account.eu) == "table")
     World.advance(3)
     T.eq("and counts", (World.scan(addon))[BAR], 50)
 end)
@@ -314,7 +314,7 @@ T.section("a scan that fails half way", function()
     World.reset()
     World.containers = { [0] = { slots = 16, slot(LINEN, 5) } }
     local now = World.serverTime
-    local addon = World.login({ stock = { schema = 1, account = { ["eu-pvp"] = { items = { [BAR] = 50 }, at = now } },
+    local addon = World.login({ stock = { schema = 1, account = { eu = { items = { [BAR] = 50 }, at = now, world = "eu-pvp", faction = "Horde" } },
         characters = {
             [MAIN_GUID] = { name = "Main Goldtooth", world = "eu-pvp", faction = "Horde", seen = now,
                 bank = { items = { [LINEN] = 100, [SILK] = 30 }, at = now } },
@@ -437,7 +437,7 @@ T.section("a character the game itself marks Self-Found", function()
         dump(main):find("character: Solo Goldtooth [not counted (Self-Found)]", 1, true) ~= nil, dump(main))
     World.event(main, "PLAYER_LOGOUT")
 
-    saved.stock.account["eu-pvp"] = { items = { [BAR] = 50 }, at = World.serverTime }
+    saved.stock.accounteu = { items = { [BAR] = 50 }, at = World.serverTime, world = "eu-pvp", faction = "Horde" }
     solo = session(saved, SOLO_GUID, "Solo Goldtooth", 20, true)
     local meta
     combined, breakdown, meta = World.scan(solo)
@@ -543,7 +543,7 @@ T.section("the stock dump: what the client itself counts", function()
     T.check("and what is remembered is still listed",
         text:find("\nmemory: format=1 characters=1 accountBanks=1 ", 1, true) ~= nil
         and text:find("\ncharacter: Main Goldtooth [this character] ", 1, true) ~= nil
-        and text:find("\naccount bank: world=eu-pvp items=1 ", 1, true) ~= nil, shown)
+        and text:find("\naccount bank: region=eu read by world=eu-pvp faction=Horde items=1 ", 1, true) ~= nil, shown)
     T.eq("the dump's own failure is no failure of the memory: nothing is handed to the game's error handler", #World.errors, 0)
 end)
 
@@ -593,7 +593,7 @@ T.section("the world is read again, not kept from login", function()
     World.reset()
     World.rules = {}                               -- not there yet: the world reads as eu-normal
     World.containers = { [0] = { slots = 16, slot(LINEN, 5) } }
-    local saved = { stock = { schema = 1, account = { ["eu-pvp"] = { items = { [BAR] = 50 }, at = now - 100 } },
+    local saved = { stock = { schema = 1, account = { eu = { items = { [BAR] = 50 }, at = now - 100, world = "eu-pvp", faction = "Horde" } },
         characters = { ALT = { name = "Alt Goldtooth", world = "eu-pvp", faction = "Horde", seen = now - 100,
             bags = { items = { [LINEN] = 20 }, at = now - 100 } } } } }
     local addon = World.login(saved)
@@ -601,7 +601,7 @@ T.section("the world is read again, not kept from login", function()
     T.check("while the rules read false nothing of eu-pvp counts", combined[LINEN] == 5 and combined[BAR] == nil, combined[LINEN])
     World.advance(3)
     T.eq("the first save files the character under what was read", saved.stock.characters[MAIN_GUID].world, "eu-normal")
-    T.check("the start-up cleaning left the real world's account bank alone", saved.stock.account["eu-pvp"] ~= nil)
+    T.check("the start-up cleaning left the real world's account bank alone", saved.stock.account.eu ~= nil)
 
     World.rules = { [213] = true }                 -- the rules are there
     World.nextFrame()
@@ -785,10 +785,10 @@ T.section("when the open bank is read", function()
     World.bank[2].canView = true
     World.advance(1.3)
     T.check("just before two seconds: no further read, the refused bank not remembered",
-        reads.n == 2 and addon.StockMemory:AccountBank("eu-pvp") == nil, reads.n)
+        reads.n == 2 and addon.StockMemory:AccountBank("eu") == nil, reads.n)
     World.advance(0.2)
     T.eq("a refused read asks for the look two seconds after the opening", reads.n, 3)
-    T.check("which remembers the bank that can be read by then", (addon.StockMemory:AccountBank("eu-pvp") or {})[BAR] == 50)
+    T.check("which remembers the bank that can be read by then", (addon.StockMemory:AccountBank("eu") or {})[BAR] == 50)
     World.advance(5)
     T.eq("and then no more", reads.n, 3)
 
@@ -1189,7 +1189,7 @@ T.section("the close", function()
     World.advance(5)
     total, bags, bank = linen(addon)
     T.check("bank to account bank and close in one frame", total == 105 and bags == 5 and bank == 100, total)
-    T.eq("of which 60 in the account bank", (addon.StockMemory:AccountBank("eu-pvp"))[LINEN], 60)
+    T.eq("of which 60 in the account bank", (addon.StockMemory:AccountBank("eu"))[LINEN], 60)
 
     -- The read taken at the close is kept only when it looks like the reads
     -- of the visit: not refused, at least one item, the same slot count. The
@@ -1278,7 +1278,7 @@ T.section("the close", function()
     World.event(addon, "BANKFRAME_CLOSED")
     T.check("an update of the bank's own container that no read could follow: in doubt, whatever the carried bags did",
         select(2, bankOf(addon)) == true and (linen(addon)) == 5, (linen(addon)))
-    T.check("the account bank, which no update named, is not", select(3, addon.StockMemory:AccountBank("eu-pvp")) == false)
+    T.check("the account bank, which no update named, is not", select(3, addon.StockMemory:AccountBank("eu")) == false)
 
     -- A bank this character cannot view at all (here the account bank, known
     -- from another character) is not put in doubt by what it moves in its own.
@@ -1286,7 +1286,7 @@ T.section("the close", function()
         local saved = { stock = { schema = 1,
             characters = { OTHER = { name = "Other Goldtooth", world = "eu-pvp", faction = "Horde", seen = World.serverTime - 100,
                 bags = { items = { [SILK] = 1 }, at = World.serverTime - 100 } } },
-            account = { ["eu-pvp"] = { items = { [BAR] = 50 }, at = World.serverTime - 100 } } } }
+            account = { eu = { items = { [BAR] = 50 }, at = World.serverTime - 100, world = "eu-pvp", faction = "Horde" } } } }
         World.reset()
         World.containers = { [0] = { slots = 16, slot(HEARTHSTONE, 1, true), slot(LINEN, 5) }, [6] = { slots = 28, slot(LINEN, 100) } }
         World.bank = { [0] = { tabs = { { ID = 6 } } }, [2] = { tabs = { { ID = 15 } }, canView = false } }
@@ -1503,7 +1503,7 @@ T.section("the close", function()
         World.event(addon, ending)
         World.advance(5)
         local items, inDoubt = bankOf(addon)
-        local account, _, accountDoubt = addon.StockMemory:AccountBank("eu-pvp")
+        local account, _, accountDoubt = addon.StockMemory:AccountBank("eu")
         return items[LINEN], inDoubt, account[BAR], accountDoubt
     end
     -- Nothing tells that from the bank's last stacks having been moved out,
@@ -1552,11 +1552,11 @@ T.section("the close", function()
     World.bagUpdate(addon, 6, 15, 6)
     World.bagUpdateDelayed(addon)
     T.check("read twice in the frame the client let go: nothing is believed", (bankOf(addon))[LINEN] == 100
-        and (addon.StockMemory:AccountBank("eu-pvp"))[BAR] == 50, (bankOf(addon))[LINEN])
+        and (addon.StockMemory:AccountBank("eu"))[BAR] == 50, (bankOf(addon))[LINEN])
     World.event(addon, "BANKFRAME_CLOSED")
     World.advance(5)
     T.check("nor after the close: both banks unchanged, both in doubt", (bankOf(addon))[LINEN] == 100
-        and select(2, bankOf(addon)) == true and select(3, addon.StockMemory:AccountBank("eu-pvp")) == true)
+        and select(2, bankOf(addon)) == true and select(3, addon.StockMemory:AccountBank("eu")) == true)
     linenLeft, inDoubt, barsLeft, accountDoubt = letGoThen("PLAYER_LOGOUT")
     T.check("the same at logout with the bank open: unchanged", linenLeft == 100 and barsLeft == 50,
         tostring(linenLeft) .. "/" .. tostring(barsLeft))
@@ -2133,7 +2133,7 @@ T.section("the answer of a last move arrives after the session ended", function(
     saved = { stock = { schema = 1,
         characters = { OTHER = { name = "Other Goldtooth", world = "eu-pvp", faction = "Horde", seen = World.serverTime - 100,
             bags = { items = { [SILK] = 1 }, at = World.serverTime - 100 } } },
-        account = { ["eu-pvp"] = { items = { [BAR] = 50 }, at = World.serverTime - 100 } } } }
+        account = { eu = { items = { [BAR] = 50 }, at = World.serverTime - 100, world = "eu-pvp", faction = "Horde" } } } }
     World.reset()
     World.containers = { [0] = { slots = 16, slot(HEARTHSTONE, 1, true), slot(LINEN, 5) }, [6] = { slots = 28, slot(LINEN, 100) } }
     World.bank = { [0] = { tabs = { { ID = 6 } } }, [2] = { tabs = { { ID = 15 } }, canView = false } }
@@ -2386,7 +2386,7 @@ T.section("two characters", function()
     T.check("saved: format 1, two characters, one account bank", saved.stock.schema == 1
         and saved.stock.characters["Player-4444-000000AA"] ~= nil
         and saved.stock.characters["Player-4444-000000BB"] ~= nil
-        and saved.stock.account["eu-pvp"] ~= nil)
+        and saved.stock.account.eu ~= nil)
 end)
 
 T.finish()

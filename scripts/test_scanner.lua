@@ -77,10 +77,10 @@ local Inventory, Memory = LazyProf.Inventory, LazyProf.StockMemory
 local DAY = 86400
 local NOW = 20000 * DAY + 3600
 
-local MAIN = { guid = "Player-1-MAIN", name = "Main Character", world = "eu-pvp", faction = "Alliance" }
-local ALT = { guid = "Player-1-ALT", name = "Bank Alt", world = "eu-pvp", faction = "Alliance" }
-local FARMER = { guid = "Player-1-FARM", name = "Farmer", world = "eu-pvp", faction = "Alliance" }
-local HORDE = { guid = "Player-1-HORDE", name = "Other Side", world = "eu-pvp", faction = "Horde" }
+local MAIN = { guid = "Player-1-MAIN", name = "Main Character", world = "eu-pvp", faction = "Alliance", region = "eu" }
+local ALT = { guid = "Player-1-ALT", name = "Bank Alt", world = "eu-pvp", faction = "Alliance", region = "eu" }
+local FARMER = { guid = "Player-1-FARM", name = "Farmer", world = "eu-pvp", faction = "Alliance", region = "eu" }
+local HORDE = { guid = "Player-1-HORDE", name = "Other Side", world = "eu-pvp", faction = "Horde", region = "eu" }
 
 -- The client adapter as the scanner sees it; every read is counted.
 local client
@@ -227,8 +227,8 @@ end)
 T.section("no inventory addon: bank and alts from memory", function()
     fresh()
     Memory:SaveBank(MAIN, { [2589] = 40, [6948] = 1 }, { [6948] = 1 }, NOW - 2 * DAY)
-    Memory:SaveAccountBank("eu-pvp", { [2589] = 10, [4306] = 3 }, NOW - 5 * DAY)
-    Memory:SaveAccountBank("eu-normal", { [2589] = 9000 }, NOW)
+    Memory:SaveAccountBank(MAIN, { [2589] = 10, [4306] = 3 }, NOW - 5 * DAY)
+    Memory:SaveAccountBank({ guid = "Player-2-US", world = "us-normal", faction = "Alliance", region = "us" }, { [2589] = 9000 }, NOW)
     Memory:SaveBags(ALT, { [2589] = 20, [2592] = 6 }, { [2592] = 2 }, NOW - DAY)
     Memory:SaveBank(ALT, { [2589] = 100 }, {}, NOW - 30 * DAY)
     Memory:SaveBags(FARMER, { [765] = 12 }, {}, NOW)
@@ -245,7 +245,7 @@ T.section("no inventory addon: bank and alts from memory", function()
     T.eq("an alt's soulbound items are taken off", breakdown[2592].alts["Bank Alt"].bags, 4)
     T.eq("another alt", breakdown[765].alts["Farmer"].bags, 12)
     T.check("the other faction is no alt", breakdown[2589].alts["Other Side"] == nil)
-    T.eq("the account bank of this world only", breakdown[4306].bank, 3)
+    T.eq("the account bank of this region only", breakdown[4306].bank, 3)
 
     T.eq("age of the own bank", meta.bankSeenAt, NOW - 2 * DAY)
     T.eq("age of the account bank", meta.accountSeenAt, NOW - 5 * DAY)
@@ -282,7 +282,7 @@ end)
 T.section("no inventory addon: a bank in doubt is not counted", function()
     fresh()
     Memory:SaveBank(MAIN, { [2589] = 40, [6948] = 1 }, {}, NOW - 2 * DAY)
-    Memory:SaveAccountBank("eu-pvp", { [2589] = 10, [4306] = 3 }, NOW - 5 * DAY)
+    Memory:SaveAccountBank(MAIN, { [2589] = 10, [4306] = 3 }, NOW - 5 * DAY)
     Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW - DAY)
     Memory:SaveBank(ALT, { [2589] = 100 }, {}, NOW - 30 * DAY)
     local combined, breakdown, meta = scan()
@@ -296,7 +296,7 @@ T.section("no inventory addon: a bank in doubt is not counted", function()
     T.check("the scan says that the own bank is in doubt", meta.bankInDoubt == true and meta.accountInDoubt == nil)
     T.check("and gives it no age, the account bank keeps its own", meta.bankSeenAt == nil and meta.accountSeenAt == NOW - 5 * DAY)
 
-    Memory:MarkAccountBankDoubt("eu-pvp")
+    Memory:MarkAccountBankDoubt("eu")
     combined, breakdown, meta = scan()
     T.eq("account bank in doubt too: neither is counted", combined[2589], 5 + 20 + 100)
     T.check("no bank stock at all", breakdown[2589].bank == nil and combined[4306] == nil)
@@ -357,7 +357,7 @@ T.section("no inventory addon: a bank in doubt is not counted", function()
 
     -- The next save of a bank takes its mark away.
     Memory:SaveBank(MAIN, { [2589] = 41 }, {}, NOW)
-    Memory:SaveAccountBank("eu-pvp", { [2589] = 11 }, NOW)
+    Memory:SaveAccountBank(MAIN, { [2589] = 11 }, NOW)
     combined, breakdown, meta = scan()
     T.eq("saved again: both count", combined[2589], 5 + 41 + 11 + 20)
     T.check("and nothing is in doubt", meta.bankInDoubt == nil and meta.accountInDoubt == nil and meta.bankSeenAt == NOW)
@@ -365,10 +365,88 @@ T.section("no inventory addon: a bank in doubt is not counted", function()
     -- A mark that is not what the memory writes (a damaged saved table) is
     -- taken for a mark: such a bank is not counted either.
     LazyProf.db.global.stock.characters[MAIN.guid].bank.doubt = "yes"
-    LazyProf.db.global.stock.account["eu-pvp"].doubt = 1
+    LazyProf.db.global.stock.account.eu.doubt = 1
     combined, breakdown, meta = scan()
     T.eq("a damaged doubt mark: neither bank is counted", combined[2589], 5 + 20)
     T.check("and the scan says that both are in doubt", meta.bankInDoubt == true and meta.accountInDoubt == true)
+end)
+
+-- ===========================================================================
+-- The account bank is remembered once per region and counts only for the
+-- characters of the world and faction whose read it is: whether the game
+-- shares it across worlds or factions is not known, and wherever a copy may
+-- be another bank it is not counted. A read elsewhere makes the copy that
+-- character's.
+T.section("no inventory addon: the account bank counts only where it was read", function()
+    fresh()
+    local NORMAL = { guid = "Player-1-NORMAL", name = "Elsewhere", world = "eu-normal", faction = "Alliance", region = "eu" }
+    local US = { guid = "Player-2-US", name = "Far Away", world = "us-pvp", faction = "Alliance", region = "us" }
+    Memory:SaveAccountBank(MAIN, { [4306] = 10 }, NOW - DAY)
+    local combined, _, meta = scan()
+    T.check("read by this world and faction: counted", combined[4306] == 10 and meta.accountSeenAt == NOW - DAY)
+    for _, other in ipairs({ HORDE, NORMAL, US }) do
+        client.identity = other
+        combined, _, meta = scan()
+        T.check(other.name .. ": not counted, and nothing is said of it", combined[4306] == nil and meta.accountSeenAt == nil
+            and meta.accountInDoubt == nil and meta.accountPending == nil)
+    end
+    -- In doubt: said only where it would count.
+    Memory:MarkAccountBankDoubt("eu")
+    client.identity = HORDE
+    combined, _, meta = scan()
+    T.check("in doubt, read by the other faction: not counted and not named", combined[4306] == nil and meta.accountInDoubt == nil)
+    client.identity = MAIN
+    combined, _, meta = scan()
+    T.check("in doubt, read here: not counted and named", combined[4306] == nil and meta.accountInDoubt == true)
+
+    -- The other faction reads it: the copy is its own from then on.
+    client.identity = HORDE
+    Inventory:Initialize()
+    advance(2.1)
+    client.bankOpen = true
+    client.bank.account = { items = { [4306] = 3 }, slots = 98 }
+    client.started.onBankOpened()
+    advance(3)
+    client.started.onBankClosing(); client.bankOpen = false; client.started.onBankClosed()
+    advance(11)
+    local items, _, doubt, world, faction = Memory:AccountBank("eu")
+    T.check("a read by the other faction makes the copy its own, without the mark", items[4306] == 3 and doubt == false
+        and world == "eu-pvp" and faction == "Horde")
+    T.eq("and counts for it", (scan())[4306], 3)
+    client.identity = MAIN
+    combined, _, meta = scan()
+    T.check("and no longer for this faction", combined[4306] == nil and meta.accountSeenAt == nil and meta.accountInDoubt == nil)
+    local lines = {}
+    Inventory:RunDiagnostic(lines)
+    local text = table.concat(lines, "\n")
+    T.check("the dump says whose read it is and that it does not count here", text:find(
+        "account bank: region=eu read by world=eu-pvp faction=Horde items=1 (less than an hour ago) - not counted (read in another world or by the other faction)",
+        1, true) ~= nil, text)
+    Memory:SaveAccountBank(US, { [1] = 1 }, NOW)
+    lines = {}
+    Inventory:RunDiagnostic(lines)
+    text = table.concat(lines, "\n")
+    T.check("and of another region's that it is that region's", text:find(
+        "account bank: region=us read by world=us-pvp faction=Alliance items=1 (less than an hour ago) - not counted (another region)",
+        1, true) ~= nil, text)
+
+    -- A mark follows the copy of the region, whoever's read it is: a bank
+    -- container update of this character after its close may be about the
+    -- very bank the other faction's read saw.
+    fresh()
+    Memory:SaveBags(HORDE, { [1] = 1 }, {}, NOW)
+    Memory:SaveAccountBank(HORDE, { [4306] = 3 }, NOW)
+    Inventory:Initialize()
+    advance(2.1)
+    client.bankOpen = true
+    client.bank.character = { items = { [2589] = 40 }, slots = 28 }
+    client.usable.account = true                     -- usable, but its reads are refused
+    client.started.onBankOpened()
+    advance(3)
+    Inventory:OnBagUpdate(15)                        -- the account bank's own update: unsettled, never read back
+    advance(1)
+    client.started.onBankClosing(); client.bankOpen = false; client.started.onBankClosed()
+    T.check("the close marks the copy of the region, read by the other faction", select(3, Memory:AccountBank("eu")) == true)
 end)
 
 -- ===========================================================================
@@ -380,7 +458,7 @@ T.section("no inventory addon: a character that cannot be told apart counts noth
     local combined, breakdown, meta = scan()
     T.check("no guid: only the bags", count(combined) == 1 and combined[2589] == 5 and next(meta.alts) == nil)
     client.identity = { guid = MAIN.guid, name = "Main Character", faction = "Alliance" }   -- no world
-    Memory:SaveAccountBank("eu-pvp", { [2589] = 10 }, NOW)
+    Memory:SaveAccountBank(MAIN, { [2589] = 10 }, NOW)
     combined, breakdown, meta = scan()
     T.eq("no world: the own bank still counts, no alts, no account bank", combined[2589], 5 + 40)
     T.check("no world: no alt named", breakdown[2589].alts == nil and meta.accountSeenAt == nil)
@@ -390,7 +468,7 @@ end)
 T.section("Self-Found: nothing from other characters", function()
     fresh()
     Memory:SaveBank(MAIN, { [2589] = 40 }, {}, NOW - DAY)
-    Memory:SaveAccountBank("eu-pvp", { [2589] = 10 }, NOW)
+    Memory:SaveAccountBank(MAIN, { [2589] = 10 }, NOW)
     Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW)
     Memory:SaveBank(ALT, { [2589] = 100 }, {}, NOW)
     LazyProf.db.char.selfFoundMode = true
@@ -475,7 +553,7 @@ T.section("Syndicator present: as before, the memory is not used", function()
     -- Remembered stock that must not be counted beside Syndicator's.
     Memory:SaveBank(MAIN, { [2589] = 7777 }, {}, NOW)
     Memory:SaveBags(ALT, { [2589] = 8888 }, {}, NOW)
-    Memory:SaveAccountBank("eu-pvp", { [2589] = 9999 }, NOW)
+    Memory:SaveAccountBank(MAIN, { [2589] = 9999 }, NOW)
     installSyndicator()
 
     -- Any use of the memory or of the bank reader fails this section. The
@@ -597,12 +675,13 @@ T.section("Syndicator present: as before, the memory is not used", function()
     T.check("and none that failed quietly", not table.concat(lines, "\n"):find("last error", 1, true), table.concat(lines, "\n"))
 
     -- The start-up cleaning writes nothing either: a character that would be
-    -- dropped stays, with the account bank of its world.
-    Memory:SaveBags({ guid = "Player-1-OLD", name = "Old Alt", world = "us-normal", faction = "Alliance" }, { [1] = 1 }, {}, NOW - 400 * DAY)
-    Memory:SaveAccountBank("us-normal", { [1] = 1 }, NOW - 400 * DAY)
+    -- dropped stays, with the account bank of its region.
+    local OLD = { guid = "Player-1-OLD", name = "Old Alt", world = "us-normal", faction = "Alliance", region = "us" }
+    Memory:SaveBags(OLD, { [1] = 1 }, {}, NOW - 400 * DAY)
+    Memory:SaveAccountBank(OLD, { [1] = 1 }, NOW - 400 * DAY)
     Inventory:Initialize()
     T.check("start with Syndicator: nothing is dropped from the memory",
-        LazyProf.db.global.stock.characters["Player-1-OLD"] ~= nil and Memory:AccountBank("us-normal") ~= nil)
+        LazyProf.db.global.stock.characters["Player-1-OLD"] ~= nil and Memory:AccountBank("us") ~= nil)
     -- Forgetting is the memory's too: with Syndicator installed it forgets
     -- nothing, reads no bank and asks for no save.
     client.bankOpen = true
@@ -611,7 +690,7 @@ T.section("Syndicator present: as before, the memory is not used", function()
     timers = {}
     Inventory:ForgetRemembered()
     T.check("Forget with Syndicator: what is remembered stays", (Memory:OwnBank(MAIN.guid))[2589] == 7777
-        and Memory:AccountBank("eu-pvp") ~= nil and LazyProf.db.global.stock.characters[ALT.guid] ~= nil)
+        and Memory:AccountBank("eu") ~= nil and LazyProf.db.global.stock.characters[ALT.guid] ~= nil)
     T.check("Forget with Syndicator: the open bank is not read and no save is asked for",
         client.reads.character == 0 and client.reads.account == 0 and #timers == 0, client.reads.character)
     client.bankOpen = false
@@ -1022,7 +1101,7 @@ T.section("the bank is read only while its window is open", function()
     client.started.onBankOpened()
     local items, at = bankOf()
     T.check("opened: the character bank is saved", items ~= nil and items[2589] == 40 and items[6948] == 1 and at == NOW)
-    local account, accountAt = Memory:AccountBank("eu-pvp")
+    local account, accountAt = Memory:AccountBank("eu")
     T.check("opened: the account bank is saved for the world", account ~= nil and account[4306] == 9 and accountAt == NOW)
     T.check("opened: a shown list is asked to redraw", refreshes >= 1, refreshes)
     advance(3)   -- past the looks that follow an opening (see below)
@@ -1109,7 +1188,7 @@ T.section("the bank is read only while its window is open", function()
     advance(1)
     items, at = bankOf()
     T.check("unreadable: the remembered bank is kept", items ~= nil and items[2589] == 61 and at == NOW + 10)
-    T.check("unreadable: the account bank is kept", (Memory:AccountBank("eu-pvp"))[4306] == 9)
+    T.check("unreadable: the account bank is kept", (Memory:AccountBank("eu"))[4306] == 9)
     T.eq("a look that changed nothing asks for no redraw", refreshes, 0)
 
     -- One bank readable, the other not: each is judged alone.
@@ -1117,7 +1196,7 @@ T.section("the bank is read only while its window is open", function()
     Inventory:OnBagUpdate(15)
     advance(1)
     T.check("only the account bank readable: it is saved, the character bank kept",
-        (Memory:AccountBank("eu-pvp"))[4306] == 1 and (bankOf())[2589] == 61)
+        (Memory:AccountBank("eu"))[4306] == 1 and (bankOf())[2589] == 61)
 
     -- The bank reads without a single item, long into the visit: one such
     -- read is not believed (and asks for no redraw), the second look is.
@@ -1355,7 +1434,7 @@ T.section("unsettled", function()
     fresh()
     Inventory:Initialize()
     advance(2.1)
-    Memory:SaveAccountBank("eu-pvp", { [4306] = 9 }, NOW - DAY)
+    Memory:SaveAccountBank(MAIN, { [4306] = 9 }, NOW - DAY)
     client.bankOpen = true
     client.bank.character = { items = { [2589] = 100 }, slots = 28 }
     client.bank.account = nil
@@ -1499,7 +1578,7 @@ T.section("the close", function()
         local during = (scan())[2589]
         if closeAfter > 0 then advance(closeAfter) end
         close()
-        return during, (scan())[2589], inDoubt(), select(3, Memory:AccountBank("eu-pvp"))
+        return during, (scan())[2589], inDoubt(), select(3, Memory:AccountBank("eu"))
     end
     local during, after, accountDoubt
     during, after, doubt, accountDoubt = lastStackAcross(0)
@@ -1591,7 +1670,7 @@ T.section("the close", function()
     close()
     advance(0.5)
     client.started.onLogout()
-    T.check("a logout while a bank is held marks it", inDoubt() == true and select(3, Memory:AccountBank("eu-pvp")) == false)
+    T.check("a logout while a bank is held marks it", inDoubt() == true and select(3, Memory:AccountBank("eu")) == false)
     local heldLines = {}
     Inventory:RunDiagnostic(heldLines)
     T.check("the dump says why", table.concat(heldLines, "\n"):find(
@@ -1624,7 +1703,7 @@ T.section("the close", function()
         advance(openFor)
         during_()
         close()
-        return inDoubt(), select(3, Memory:AccountBank("eu-pvp"))
+        return inDoubt(), select(3, Memory:AccountBank("eu"))
     end
     doubt, accountDoubt = emptyBank(1, function()
         client.bags = {}
@@ -1668,7 +1747,7 @@ T.section("the close", function()
     fresh()
     Inventory:Initialize()
     advance(2.1)
-    Memory:SaveAccountBank("eu-pvp", { [4306] = 9 }, NOW - DAY)
+    Memory:SaveAccountBank(MAIN, { [4306] = 9 }, NOW - DAY)
     Memory:SaveBags(ALT, { [1] = 1 }, {}, NOW)
     client.bankOpen = true
     client.bank.character = { items = { [2589] = 100 }, slots = 28 }
@@ -1684,7 +1763,7 @@ T.section("the close", function()
     Inventory:OnBagUpdate(0)
     advance(1)
     close()
-    T.check("and is not in doubt after it", select(3, Memory:AccountBank("eu-pvp")) == false)
+    T.check("and is not in doubt after it", select(3, Memory:AccountBank("eu")) == false)
 
     -- Which banks a visit can mark: only one that was usable at some read of
     -- it. The account bank is remembered from another character and this
@@ -1694,7 +1773,7 @@ T.section("the close", function()
         fresh()
         Inventory:Initialize()
         advance(2.1)
-        Memory:SaveAccountBank("eu-pvp", { [4306] = 9 }, NOW - DAY)
+        Memory:SaveAccountBank(MAIN, { [4306] = 9 }, NOW - DAY)
         client.bankOpen = true
         client.bank.character = { items = { [2589] = 100 }, slots = 28 }
         client.bank.account = nil                          -- may not be viewed
@@ -1708,7 +1787,7 @@ T.section("the close", function()
     client.bank.character = nil
     close()
     T.check("a hurried close: the bank that was used is in doubt", inDoubt() == true)
-    T.check("the bank that was never usable in the visit is not", select(3, Memory:AccountBank("eu-pvp")) == false)
+    T.check("the bank that was never usable in the visit is not", select(3, Memory:AccountBank("eu")) == false)
     T.check("it was asked at every read of the visit, the closing one included",
         client.asked.account == client.reads.account and client.reads.account >= 4, client.asked.account)
     local blindLines = {}
@@ -1726,7 +1805,7 @@ T.section("the close", function()
     Inventory:OnBagUpdate(0)
     Inventory:OnBagUpdate(15)
     close()
-    T.check("usable at one read of the visit: it can be marked", select(3, Memory:AccountBank("eu-pvp")) == true)
+    T.check("usable at one read of the visit: it can be marked", select(3, Memory:AccountBank("eu")) == true)
 
     -- No read of this visit was kept for that bank: nothing to compare with, nothing kept.
     fresh()
@@ -1753,8 +1832,8 @@ T.section("the close", function()
     client.bank.account = { items = { [4306] = 4 }, slots = 98 }
     close()
     T.check("at the close: the account bank's read is kept, the character bank's empty one is not",
-        (Memory:AccountBank("eu-pvp"))[4306] == 4 and (bankOf())[2589] == 70)
-    T.check("and only the character bank is in doubt", inDoubt() == true and select(3, Memory:AccountBank("eu-pvp")) == false)
+        (Memory:AccountBank("eu"))[4306] == 4 and (bankOf())[2589] == 70)
+    T.check("and only the character bank is in doubt", inDoubt() == true and select(3, Memory:AccountBank("eu")) == false)
 
     -- The dump says what the close did.
     local lines = {}
@@ -1782,7 +1861,7 @@ T.section("the close", function()
     Inventory:OnBagUpdate(15)                              -- both banks unsettled, the read owed
     client.bank.character = nil
     close()
-    T.check("fixture: nothing is remembered of the account bank", Memory:AccountBank("eu-pvp") == nil)
+    T.check("fixture: nothing is remembered of the account bank", Memory:AccountBank("eu") == nil)
     T.eq("the dump names only the bank that got the mark", closeLine(),
         "bank visit close: owed=true unsettled=character,account readAgain=true kept=none markedInDoubt=character held=none")
 
@@ -1862,7 +1941,7 @@ end)
 T.section("after the close", function()
     local function bankOf() return Memory:OwnBank(MAIN.guid) end
     local function inDoubt() return (select(3, Memory:OwnBank(MAIN.guid))) end
-    local function accountDoubt() return (select(3, Memory:AccountBank("eu-pvp"))) end
+    local function accountDoubt() return (select(3, Memory:AccountBank("eu"))) end
     -- 5 linen carried, 100 in the bank, 9 silk in the account bank; the
     -- window was open for three seconds and has just closed.
     local function closedVisit(atClose)
@@ -1920,7 +1999,7 @@ T.section("after the close", function()
     fresh()
     Inventory:Initialize()
     advance(2.1)
-    Memory:SaveAccountBank("eu-pvp", { [4306] = 9 }, NOW - DAY)
+    Memory:SaveAccountBank(MAIN, { [4306] = 9 }, NOW - DAY)
     client.bankOpen = true
     client.bank.character = { items = { [2589] = 100 }, slots = 28 }
     client.bank.account = nil
@@ -2320,7 +2399,7 @@ T.section("the first moments after opening", function()
         advance(2.1)
         if remembered ~= false then
             Memory:SaveBank(MAIN, { [2589] = 40 }, {}, NOW - DAY)
-            Memory:SaveAccountBank("eu-pvp", { [4306] = 9 }, NOW - DAY)
+            Memory:SaveAccountBank(MAIN, { [4306] = 9 }, NOW - DAY)
         end
         client.bankOpen = true
         client.bank.character = { items = {} }
@@ -2388,7 +2467,7 @@ T.section("the first moments after opening", function()
     start()
     client.started.onBankOpened()
     T.check("empty at opening: the remembered bank is kept", (bankOf())[2589] == 40)
-    T.check("empty at opening: the account bank is kept", (Memory:AccountBank("eu-pvp"))[4306] == 9)
+    T.check("empty at opening: the account bank is kept", (Memory:AccountBank("eu"))[4306] == 9)
     Inventory:OnBagUpdate(6)
     advance(0.3)
     T.check("an update and its trailing read while still nothing is there: kept", (bankOf())[2589] == 40)
@@ -2401,7 +2480,7 @@ T.section("the first moments after opening", function()
     local items, at = bankOf()
     T.check("empty two seconds after opening, and seen empty before: believed, the bank is saved as empty",
         items ~= nil and next(items) == nil and at == NOW + 5)
-    local account = Memory:AccountBank("eu-pvp")
+    local account = Memory:AccountBank("eu")
     T.check("and so is the account bank", account ~= nil and next(account) == nil)
     advance(10)
     T.eq("nothing is left waiting", #timers, 0)
@@ -2453,7 +2532,7 @@ T.section("the first moments after opening", function()
     client.bank.character = { items = { [2589] = 75 } }
     client.started.onBankOpened()
     T.check("the bank that has items is saved, the empty one waits",
-        (bankOf())[2589] == 75 and (Memory:AccountBank("eu-pvp"))[4306] == 9)
+        (bankOf())[2589] == 75 and (Memory:AccountBank("eu"))[4306] == 9)
 
     -- A scan in that first moment leaves a bank out whose empty read is not
     -- believed yet: what is remembered of it is contradicted by the latest
@@ -2813,7 +2892,7 @@ T.section("forget", function()
     advance(2.1)
     Memory:SaveBank(MAIN, { [2589] = 40 }, {}, NOW)
     Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW)
-    Memory:SaveAccountBank("eu-pvp", { [2589] = 10 }, NOW)
+    Memory:SaveAccountBank(MAIN, { [2589] = 10 }, NOW)
     local combined = Inventory:ScanAll()
     T.eq("before", combined[2589], 75)
     Inventory:ForgetRemembered()
@@ -2837,7 +2916,7 @@ T.section("diagnostic lines", function()
     Memory:SaveBank(MAIN, { [2589] = 40 }, {}, NOW - 2 * DAY)
     Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW - DAY)
     Memory:SaveBags(HORDE, { [2589] = 7 }, {}, NOW - 40 * DAY)
-    Memory:SaveAccountBank("eu-pvp", { [2589] = 10 }, NOW - 5 * DAY)
+    Memory:SaveAccountBank(MAIN, { [2589] = 10 }, NOW - 5 * DAY)
     local before = Memory:Summary()
     client.bankOpen = true
     client.bank.character = { items = { [2589] = 999 } }
@@ -2967,11 +3046,12 @@ T.section("diagnostic lines", function()
         1, true) ~= nil, doubtDump)
     LazyProf.db.global.stock.characters[ALT.guid].bank = nil
     -- An account bank in doubt.
-    Memory:MarkAccountBankDoubt("eu-pvp")
+    Memory:MarkAccountBankDoubt("eu")
     local _, accountDump = labels()
-    T.check("the account bank in doubt", accountDump:find("account bank: world=eu-pvp items=1 (5 days ago, in doubt: not counted)", 1, true) ~= nil,
-        accountDump)
-    Memory:SaveAccountBank("eu-pvp", { [2589] = 10 }, NOW - 5 * DAY)
+    T.check("the account bank in doubt", accountDump:find(
+        "account bank: region=eu read by world=eu-pvp faction=Alliance items=1 (5 days ago, in doubt: not counted) - not counted (in doubt)",
+        1, true) ~= nil, accountDump)
+    Memory:SaveAccountBank(MAIN, { [2589] = 10 }, NOW - 5 * DAY)
 
     -- A character whose world or faction cannot be read counts nobody, and the dump says so in words.
     client.identity = { guid = MAIN.guid, name = "Main Character", faction = "Alliance" }
@@ -2986,7 +3066,12 @@ T.section("diagnostic lines", function()
     for _, guid in ipairs({ "Player-1-NORMAL", "Player-1-SOLO", "Player-1-OLDME", "Player-1-OLDALT", "Player-1-NAMELESS" }) do
         LazyProf.db.global.stock.characters[guid] = nil
     end
-    T.check("the account bank", text:find("account bank: world=eu-pvp items=1 (5 days ago)", 1, true) ~= nil, text)
+    T.check("the account bank: whose read it is, and that it counts here",
+        text:find("account bank: region=eu read by world=eu-pvp faction=Alliance items=1 (5 days ago) - counted\n", 1, true) ~= nil
+        or text:sub(-#"account bank: region=eu read by world=eu-pvp faction=Alliance items=1 (5 days ago) - counted")
+            == "account bank: region=eu read by world=eu-pvp faction=Alliance items=1 (5 days ago) - counted", text)
+    T.check("who the character is, with its region", text:find(
+        "identity: guid=Player-1-MAIN name=Main Character world=eu-pvp faction=Alliance region=eu", 1, true) ~= nil, text)
     T.check("plain ASCII", not text:find("[\128-\255]"))
     -- Read-only: an open bank is not saved by the dump.
     local after = Memory:Summary()
@@ -3097,7 +3182,7 @@ T.section("diagnostic lines", function()
         fresh()
         Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW)
         Memory:SaveBank(MAIN, { [2589] = 40, [765] = 3, [2770] = 9, [4306] = 2, [774] = 1, [6948] = 1 }, {}, NOW)
-        Memory:SaveAccountBank("eu-pvp", { [2589] = 10, [774] = 4 }, NOW)
+        Memory:SaveAccountBank(MAIN, { [2589] = 10, [774] = 4 }, NOW)
         client.bags = { [2589] = 5, [774] = 2 }
         -- A client that counts both banks while they are closed.
         local inBank = { [2589] = 40, [765] = 3, [2770] = 9, [4306] = 2, [774] = 1, [6948] = 1 }
@@ -3134,7 +3219,7 @@ T.section("diagnostic lines", function()
         T.eq("client counts: a client that sees only what is carried", countLines(select(2, dumpOf()))[3],
             "client count 2589: carried=5 withBank=5 withAccountBank=5; remembered: bags now=5 bank=40 accountBank=10")
         -- No account bank remembered for this world: said in words, not as a count.
-        LazyProf.db.global.stock.account["eu-pvp"] = nil
+        LazyProf.db.global.stock.account.eu = nil
         T.eq("client counts: no account bank remembered", countLines(select(2, dumpOf()))[1],
             "client count 765: carried=0 withBank=0 withAccountBank=0; remembered: bags now=0 bank=3 accountBank=never seen")
         -- Fewer than five items remembered: a line for each.
