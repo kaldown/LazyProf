@@ -41,10 +41,13 @@
 -- opens.
 --
 -- 1. When the bank is read.
---    - At once when the window opens, again BANK_SETTLE (0.5 s) after the
---      opening whatever the first read gave, and BANK_EMPTY_TRUST (2 s)
---      after the opening when a read before that mark was refused or found a
---      bank empty without being believed.
+--    - At once when the window opens, and again BANK_SETTLE (0.5 s) and
+--      BANK_EMPTY_TRUST (2 s) after the opening, whatever the reads before
+--      gave: a bank that was there only in part at the opening and
+--      completed without a bag update is then read whole while its window
+--      is still open. (A visit that begins without its opening having been
+--      reported gets the look at 2 s when a read before that mark was
+--      refused or found a bank empty without being believed.)
 --    - On a bag update (of any container: an item may have gone into the
 --      bank or come out of it) or a change of the bank's tabs: at once when
 --      the last read is BANK_READ_SPACING (0.2 s) or more ago. Otherwise the
@@ -942,6 +945,7 @@ function Inventory:OnBankOpened()
     visit = NewVisit()
     Protected("bank read", LookAtBank, self)
     ScheduleLook(visit, BANK_SETTLE)
+    ScheduleLook(visit, BANK_EMPTY_TRUST)
 end
 
 local function SameCounts(a, b)

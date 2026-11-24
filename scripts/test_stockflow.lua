@@ -612,8 +612,12 @@ T.section("when the open bank is read", function()
     T.eq("not again before half a second", reads.n, 1)
     World.advance(0.02)
     T.eq("again half a second after the opening, whatever the first read gave", reads.n, 2)
+    World.advance(1.4)
+    T.eq("not again before two seconds", reads.n, 2)
+    World.advance(0.2)
+    T.eq("and once more two seconds after the opening, whatever the reads before it gave", reads.n, 3)
     World.advance(5)
-    T.eq("a bank that read with items both times is not looked at again", reads.n, 2)
+    T.eq("a bank that read with items every time is not looked at again", reads.n, 3)
 
     -- A bank that was refused: looked at once more two seconds after the
     -- opening, also when the other bank read well.
@@ -865,6 +869,20 @@ T.section("which read of the bank is kept", function()
     World.event(addon, "BANKFRAME_CLOSED")
     local items = bankOf(addon)
     T.check("a part that arrives late without an event is remembered", items[LINEN] == 100 and items[SILK] == 30, items[SILK])
+    -- The same with the rest arriving a second after the opening: the look
+    -- at two seconds reads the whole bank while the window is still open -
+    -- also when every read before it found items in both banks.
+    addon = start({ [0] = { slots = 16, slot(LINEN, 5) }, [6] = { slots = 28, slot(LINEN, 100) }, [8] = { slots = 12 },
+                    [15] = { slots = 98, slot(BAR, 50) } },
+        { [0] = { tabs = { { ID = 6 }, { ID = 8 } } }, [2] = { tabs = { { ID = 15 } } } })
+    World.event(addon, "BANKFRAME_OPENED")
+    World.advance(1)
+    World.containers[8][1] = slot(SILK, 30)
+    World.advance(0.9)
+    T.check("a part that arrives a second after the opening, without an event: not seen before two seconds",
+        (bankOf(addon))[SILK] == nil, (bankOf(addon))[SILK])
+    World.advance(0.2)
+    T.eq("the look two seconds after the opening sees it", (bankOf(addon))[SILK], 30)
 
     -- With the bank open, a withdrawal may be reported for the backpack only.
     addon = start({ [0] = { slots = 16, slot(LINEN, 5) }, [6] = { slots = 28, slot(LINEN, 100) } }, { [0] = { tabs = { { ID = 6 } } } })

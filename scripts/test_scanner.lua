@@ -1452,8 +1452,17 @@ T.section("the first moments after opening", function()
     advance(0.2)
     T.eq("looked at again half a second after opening", client.reads.character, 2)
     T.eq("the part that arrived late is remembered", (bankOf())[765], 4)
+    -- And always a third, two seconds after the opening: a bank that was
+    -- there only in part and completed without any bag update is read whole
+    -- while its window is still open.
+    client.bank.character = { items = { [2589] = 70, [765] = 4, [2592] = 9 } }
+    advance(1.3)
+    T.eq("not looked at again before two seconds", client.reads.character, 2)
+    advance(0.2)
+    T.eq("looked at again two seconds after opening, although both reads found items", client.reads.character, 3)
+    T.eq("what arrived after the second look is remembered", (bankOf())[2592], 9)
     advance(5)
-    T.eq("a bank that read well both times is not looked at again", client.reads.character, 2)
+    T.eq("and then no more", client.reads.character, 3)
 
     -- Refused at opening, readable a moment later, no event.
     start()
@@ -1982,17 +1991,19 @@ T.section("diagnostic lines", function()
         client.bank.character = { items = { [2589] = 1 } }
         client.bank.account = { items = { [4306] = 1 } }
         client.started.onBankOpened()
-        T.eq("after the opening the half-second look is waiting", waiting(), "waiting: bagSave=false bankRead=true bankOpen=true")
+        T.eq("after the opening the looks at half a second and at two seconds are waiting", waiting(),
+            "waiting: bagSave=false bankRead=true bankOpen=true")
         advance(0.6)
-        T.eq("after it nothing is", waiting(), "waiting: bagSave=false bankRead=false bankOpen=true")
-        client.bank.account = nil
-        client.started.onBankClosing(); client.bankOpen = false; client.started.onBankClosed()
-        client.bankOpen = true
-        client.started.onBankOpened()                       -- one bank refused: the two-second look will be wanted
-        advance(0.6)
-        T.eq("a look at the two-second mark is waiting", waiting(), "waiting: bagSave=false bankRead=true bankOpen=true")
+        T.eq("after the first the look at the two-second mark is still waiting", waiting(),
+            "waiting: bagSave=false bankRead=true bankOpen=true")
         advance(1.5)
         T.eq("after it nothing is", waiting(), "waiting: bagSave=false bankRead=false bankOpen=true")
+        client.bank.account = nil                           -- refused all through the next visit
+        client.started.onBankClosing(); client.bankOpen = false; client.started.onBankClosed()
+        client.bankOpen = true
+        client.started.onBankOpened()
+        advance(2.1)
+        T.eq("nor after the looks of a second visit", waiting(), "waiting: bagSave=false bankRead=false bankOpen=true")
         Inventory:OnBagUpdate(6)
         nextFrame()
         Inventory:OnBagUpdate(6)
