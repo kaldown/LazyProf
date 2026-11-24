@@ -134,6 +134,7 @@ local function fresh(profile)
     timers = {}
     refreshes = 0
     _G.Syndicator = nil
+    Inventory:OnBankClosed()          -- a bank visit the section before left open is over
     Inventory:InvalidateCache()
     nextFrame()
     timers = {}
@@ -413,13 +414,20 @@ T.section("Syndicator present: as before, the memory is not used", function()
         Inventory:Initialize()
         Inventory:OnBagUpdate(0)
         Inventory:OnBagUpdate(6)
+        Inventory:OnBagUpdateDelayed()
         client.started.onBankOpened()
         client.started.onBankChanged("character")
+        Inventory:OnBankChange()
+        Inventory:OnBagUpdate(0)
+        Inventory:OnBagUpdateDelayed()
+        client.started.onBankClosing()
         client.started.onBankClosed()
+        Inventory:OnBagUpdate(0)
         client.started.onLogout()
+        T.eq("no timer is asked for", #timers, 0)
         advance(5)
         T.check("no save, no bank read, no prune", true)
-        T.check("Forget is not called either", pcall(Inventory.SaveBags, Inventory) and pcall(Inventory.ReadBank, Inventory))
+        T.check("a save asked for directly does nothing either", Inventory:SaveBags(true) == false)
 
         -- A Self-Found character gets nothing from the alts here either.
         LazyProf.db.char.selfFoundMode = true
@@ -432,8 +440,23 @@ T.section("Syndicator present: as before, the memory is not used", function()
     for name, fn in pairs(saved) do Memory[name] = fn end
     LazyProf.Client.BankContents = savedContents
     T.check("no use of the memory with Syndicator installed", ok, err)
+    -- (The memory's entry points run protected: a call that was made and
+    -- failed above would not have raised. It would have been counted.)
+    local lines = {}
+    Inventory:RunDiagnostic(lines)
+    T.check("and none that failed quietly", not table.concat(lines, "\n"):find("last error", 1, true), table.concat(lines, "\n"))
+
+    -- The start-up cleaning writes nothing either: a character that would be
+    -- dropped stays, with the account bank of its world.
+    Memory:SaveBags({ guid = "Player-1-OLD", name = "Old Alt", world = "us-normal", faction = "Alliance" }, { [1] = 1 }, {}, NOW - 400 * DAY)
+    Memory:SaveAccountBank("us-normal", { [1] = 1 }, NOW - 400 * DAY)
+    Inventory:Initialize()
+    T.check("start with Syndicator: nothing is dropped from the memory",
+        LazyProf.db.global.stock.characters["Player-1-OLD"] ~= nil and Memory:AccountBank("us-normal") ~= nil)
     _G.Syndicator = nil
     T.eq("what was remembered before is untouched", (Memory:OwnBank(MAIN.guid))[2589], 7777)
+    Inventory:Initialize()
+    T.check("(without Syndicator the same start drops it)", LazyProf.db.global.stock.characters["Player-1-OLD"] == nil)
 end)
 
 -- ===========================================================================
@@ -771,7 +794,9 @@ T.section("logout writes a pending bag save once", function()
 end)
 
 -- ===========================================================================
-T.section("the bank is remembered only while its window is open", function()
+-- The bank's rules, as the scanner applies them to what the adapter hands
+-- it. (Whole visits on the real adapter are in test_stockflow.lua.)
+T.section("the bank is read only while its window is open", function()
     fresh()
     Inventory:Initialize()
     advance(2.1)
@@ -780,6 +805,7 @@ T.section("the bank is remembered only while its window is open", function()
     -- Closed: nothing is read, whatever arrives.
     client.bank.character = { items = { [2589] = 40 } }
     Inventory:OnBagUpdate(6)
+    Inventory:OnBagUpdateDelayed()
     client.started.onBankChanged("character")
     nextFrame()
     T.check("closed: nothing remembered", bankOf() == nil)
@@ -798,9 +824,9 @@ T.section("the bank is remembered only while its window is open", function()
     T.check("opened: a shown list is asked to redraw", refreshes >= 1, refreshes)
     advance(3)   -- past the looks that follow an opening (see below)
 
-    -- A change. The first bag update of a frame reads the bank in the same
-    -- call, whatever container it names: an item that left for the backpack
-    -- may be reported for the backpack alone.
+    -- A change long after the last read is read in the same call, whatever
+    -- container it names: an item that left for the backpack may be
+    -- reported for the backpack alone.
     client.reads.character = 0
     client.bank.character = { items = { [2589] = 55 } }
     client.now = NOW + 10
@@ -810,54 +836,97 @@ T.section("the bank is remembered only while its window is open", function()
     items, at = bankOf()
     T.check("and it is remembered at once, with the time", items[2589] == 55 and items[6948] == nil and at == NOW + 10)
     T.eq("one redraw request", refreshes, 1)
-    -- The rest of the frame's updates leave one more read, for the next frame.
+    -- More changes within 0.2 s of that read: one trailing read, one timer.
+    local waiting = #timers
     for _ = 1, 20 do
         Inventory:OnBagUpdate(6)
-        Inventory:OnBagUpdate(0)
+        Inventory:OnBagUpdate(7)
     end
     client.started.onBankChanged("character")
-    T.eq("more updates in that frame do not read again", client.reads.character, 1)
+    T.eq("more changes right after it do not read again", client.reads.character, 1)
+    T.eq("they ask for one trailing read, with one timer", #timers, waiting + 1)
     client.bank.character = { items = { [2589] = 56 } }
-    nextFrame()
-    T.eq("they leave one read for the next frame", client.reads.character, 2)
-    T.eq("which sees what the frame ended with", (bankOf())[2589], 56)
-    nextFrame()
-    nextFrame()
+    advance(0.19)
+    T.eq("not before 0.2 s after the last read", client.reads.character, 1)
+    advance(0.02)
+    T.eq("then the trailing read", client.reads.character, 2)
+    T.eq("which sees what the changes left", (bankOf())[2589], 56)
+    advance(1)
     T.eq("and nothing after it", client.reads.character, 2)
-    -- A bank-container update reads at once too, and so does a change of the tabs.
+    -- The pending flag is cleared: a trailing read can be asked for again.
     client.bank.character = { items = { [2589] = 57 } }
     Inventory:OnBagUpdate(6)
-    T.eq("a bank-container update reads at once", (bankOf())[2589], 57)
+    T.eq("a bank-container update long after the last read reads at once", (bankOf())[2589], 57)
     nextFrame()
     client.bank.character = { items = { [2589] = 58 } }
+    Inventory:OnBagUpdate(6)
+    T.eq("one right after it does not", (bankOf())[2589], 57)
+    advance(0.3)
+    T.check("a second trailing read in the same visit takes it", (bankOf())[2589] == 58 and client.reads.character == 4,
+        client.reads.character)
+    advance(1)
+    client.bank.character = { items = { [2589] = 59 } }
     client.started.onBankChanged("character")
-    T.eq("a change of the bank's tabs reads at once", (bankOf())[2589], 58)
-    nextFrame()
+    T.eq("a change of the bank's tabs reads at once", (bankOf())[2589], 59)
+    advance(1)
 
-    -- The adapter cannot read just now: what is remembered stays.
+    -- The client's notice that a batch of updates is complete takes a read
+    -- that is owed for this frame's updates.
+    client.reads.character = 0
+    Inventory:OnBagUpdateDelayed()
+    T.eq("batch complete with nothing owed: no read", client.reads.character, 0)
+    Inventory:OnBagUpdate(0)                              -- read at once; the bank has not changed yet
+    client.bank.character = { items = { [2589] = 60 } }
+    Inventory:OnBagUpdate(6)                              -- owed
+    T.eq("the second update of a frame is owed", (bankOf())[2589], 59)
+    Inventory:OnBagUpdateDelayed()
+    T.check("batch complete: taken in the same frame", (bankOf())[2589] == 60 and client.reads.character == 2, client.reads.character)
+    Inventory:OnBagUpdateDelayed()
+    advance(1)
+    T.eq("nothing more: not by a second notice, not by the trailing read", client.reads.character, 2)
+    -- A frame later, within 0.2 s of a read, the notice leaves it to the trailing read.
+    Inventory:OnBagUpdate(6)
+    nextFrame()
+    client.reads.character = 0
+    client.bank.character = { items = { [2589] = 61 } }
+    Inventory:OnBagUpdate(6)
+    Inventory:OnBagUpdateDelayed()
+    T.eq("a batch one frame after a read is not read by its notice", client.reads.character, 0)
+    advance(0.3)
+    T.check("but by the trailing read", client.reads.character == 1 and (bankOf())[2589] == 61, client.reads.character)
+    advance(1)
+
+    -- The adapter cannot read just now: what is remembered stays, and
+    -- nothing is asked to redraw.
     client.bank.character = nil
     client.bank.account = nil
     client.now = NOW + 20
+    refreshes = 0
     Inventory:OnBagUpdate(6)
-    nextFrame()
+    advance(1)
     items, at = bankOf()
-    T.check("unreadable: the remembered bank is kept", items ~= nil and items[2589] == 58 and at == NOW + 10)
+    T.check("unreadable: the remembered bank is kept", items ~= nil and items[2589] == 61 and at == NOW + 10)
     T.check("unreadable: the account bank is kept", (Memory:AccountBank("eu-pvp"))[4306] == 9)
+    T.eq("a look that changed nothing asks for no redraw", refreshes, 0)
 
     -- One bank readable, the other not: each is judged alone.
     client.bank.account = { items = { [4306] = 1 } }
     Inventory:OnBagUpdate(15)
-    nextFrame()
+    advance(1)
     T.check("only the account bank readable: it is saved, the character bank kept",
-        (Memory:AccountBank("eu-pvp"))[4306] == 1 and (bankOf())[2589] == 58)
+        (Memory:AccountBank("eu-pvp"))[4306] == 1 and (bankOf())[2589] == 61)
 
-    -- An empty bank that can be read is a real state (the window has been
-    -- open for a while: see "the first moments after opening" below).
+    -- The bank reads without a single item, long into the visit: one such
+    -- read is not believed (and asks for no redraw), the second look is.
     client.bank.character = { items = {} }
+    client.bank.account = nil
+    refreshes = 0
     Inventory:OnBagUpdate(6)
-    nextFrame()
+    T.check("emptied: the first empty read is not believed", (bankOf())[2589] == 61 and refreshes == 0, refreshes)
+    advance(0.25)
     items = bankOf()
-    T.check("a readable empty bank is saved as empty", items ~= nil and next(items) == nil)
+    T.check("the second look 0.2 s later is: saved as empty", items ~= nil and next(items) == nil)
+    T.eq("and that asks for a redraw", refreshes, 1)
 
     -- Without a GUID nothing is saved; the account bank needs the world.
     fresh()
@@ -871,12 +940,13 @@ T.section("the bank is remembered only while its window is open", function()
 end)
 
 -- ===========================================================================
--- A change in the very frame the window closes: its second read cannot wait
--- for the next frame. The adapter reports the close in two steps, and the
--- read that is still owed is taken during the first, while the bank still
--- counts as open - but only kept when it looks like the reads before it.
+-- The adapter reports a close in two steps. During the first the bank still
+-- counts as open: a read that is owed, or an empty read that is unresolved,
+-- has the bank read once more - kept only when it looks like the reads
+-- before it. A bank that is still behind then is marked in doubt.
 T.section("the close", function()
     local function bankOf() return Memory:OwnBank(MAIN.guid) end
+    local function inDoubt() return (select(3, Memory:OwnBank(MAIN.guid))) end
     local function visit(first)
         fresh()
         Inventory:Initialize()
@@ -909,40 +979,52 @@ T.section("the close", function()
     T.eq("a single update was read when it came; the close reads nothing", client.reads.character, 1)
     T.eq("the withdrawal is remembered", (bankOf())[2589], 40)
 
-    -- Two updates and the close in one frame: the second read is taken at the close.
+    -- Two updates and the close in one frame: the owed read is taken at the close.
     visit()
     client.bank.character = { items = { [2589] = 70 }, slots = 28 }
     Inventory:OnBagUpdate(0)           -- read at once: 70
     client.bank.character = { items = { [2589] = 40 }, slots = 28 }
-    Inventory:OnBagUpdate(6)           -- owed: would be read on the next frame
+    Inventory:OnBagUpdate(6)           -- owed
     T.eq("before the close the first read stands", (bankOf())[2589], 70)
     refreshes = 0
     close()
     T.eq("the owed read is taken during the closing notice", client.reads.character, 2)
-    T.eq("and kept: it looks like the reads of this visit", (bankOf())[2589], 40)
+    T.check("and kept: it looks like the reads of this visit", (bankOf())[2589] == 40 and inDoubt() == false)
     T.check("a shown list is asked to redraw", refreshes >= 1, refreshes)
     local waitingLines = {}
     Inventory:RunDiagnostic(waitingLines)
-    T.check("after the close no bank read is owed any more",
+    T.check("after the close no bank read is waiting any more",
         table.concat(waitingLines, "\n"):find("bankRead=false bankOpen=false", 1, true) ~= nil, table.concat(waitingLines, "\n"))
     advance(3)
-    T.eq("the read that was waiting for the next frame does not run a second time", client.reads.character, 2)
+    T.eq("the trailing read that was waiting does not run after the close", client.reads.character, 2)
 
     -- The owed read is not kept when it does not look like a normal read.
-    local function owed(closingState)
+    -- The carried bags changed in that frame, so the bank is in doubt then.
+    local function owed(closingState, onlyBank)
         visit()
         client.bank.character = { items = { [2589] = 70 }, slots = 28 }
-        Inventory:OnBagUpdate(0)
+        Inventory:OnBagUpdate(onlyBank and 6 or 0)
         Inventory:OnBagUpdate(6)
         client.bank.character = closingState
         close()
-        return (bankOf())[2589]
+        return (bankOf())[2589], inDoubt()
     end
-    T.eq("a closing read without a single item is not kept", owed({ items = {}, slots = 28 }), 70)
-    T.eq("a closing read with fewer slots is not kept", owed({ items = { [2589] = 3 }, slots = 12 }), 70)
-    T.eq("a closing read with more slots is not kept", owed({ items = { [2589] = 3 }, slots = 40 }), 70)
-    T.eq("a closing read the adapter refuses is not kept", owed(nil), 70)
-    T.eq("(the same read with the same slots is)", owed({ items = { [2589] = 3 }, slots = 28 }), 3)
+    local kept, doubt = owed({ items = {}, slots = 28 })
+    T.check("a closing read without a single item is not kept; the bank is in doubt", kept == 70 and doubt == true, kept)
+    kept, doubt = owed({ items = { [2589] = 3 }, slots = 12 })
+    T.check("a closing read with fewer slots is not kept; in doubt", kept == 70 and doubt == true, kept)
+    kept, doubt = owed({ items = { [2589] = 3 }, slots = 40 })
+    T.check("a closing read with more slots is not kept; in doubt", kept == 70 and doubt == true, kept)
+    kept, doubt = owed(nil)
+    T.check("a closing read the adapter refuses is not kept; in doubt", kept == 70 and doubt == true, kept)
+    kept, doubt = owed({ items = { [2589] = 3 }, slots = 28 })
+    T.check("(the same read with the same slots is kept, and nothing is in doubt)", kept == 3 and doubt == false, kept)
+    -- Without an update of a carried bag nothing says the bags changed: not
+    -- kept, but not in doubt either.
+    kept, doubt = owed({ items = {}, slots = 28 }, true)
+    T.check("only bank containers were updated: an empty closing read changes nothing", kept == 70 and doubt == false, kept)
+    kept, doubt = owed(nil, true)
+    T.check("only bank containers were updated: a refused closing read changes nothing", kept == 70 and doubt == false, kept)
 
     -- No read of this visit was kept for that bank: nothing to compare with, nothing kept.
     fresh()
@@ -958,6 +1040,7 @@ T.section("the close", function()
     client.bank.character = { items = { [2589] = 3 }, slots = 28 }
     close()
     T.eq("a bank never read in this visit is not saved from the closing read", (bankOf())[2589], 500)
+    T.check("the bags changed while it could not be read: in doubt", inDoubt() == true)
 
     -- Each bank is judged alone at the close.
     visit()
@@ -969,13 +1052,38 @@ T.section("the close", function()
     close()
     T.check("at the close: the account bank's read is kept, the character bank's empty one is not",
         (Memory:AccountBank("eu-pvp"))[4306] == 4 and (bankOf())[2589] == 70)
+    T.check("and only the character bank is in doubt", inDoubt() == true and select(3, Memory:AccountBank("eu-pvp")) == false)
+
+    -- The dump says what the close did.
+    local lines = {}
+    Inventory:RunDiagnostic(lines)
+    local text = table.concat(lines, "\n")
+    T.check("the dump: what the close did",
+        text:find("bank visit close: owed=true unresolvedEmpty=false readAgain=true kept=account markedInDoubt=character", 1, true) ~= nil, text)
+    T.check("the dump: the bank marked in doubt",
+        text:find("bank=1 items (less than an hour ago, in doubt: not counted)", 1, true) ~= nil, text)
+
+    -- A logout with the bank open ends the visit the same way, once.
+    visit()
+    client.bank.character = { items = { [2589] = 70 }, slots = 28 }
+    Inventory:OnBagUpdate(0)
+    client.bank.character = { items = { [2589] = 40 }, slots = 28 }
+    Inventory:OnBagUpdate(6)
+    client.started.onLogout()
+    T.check("logout with the bank open: the owed read is taken and kept", (bankOf())[2589] == 40 and client.reads.character == 2,
+        client.reads.character)
+    client.started.onLogout()
+    Inventory:OnLogout()
+    T.eq("a second logout notice does not read again", client.reads.character, 2)
+    close()
+    T.eq("nor does a close notice that still follows", client.reads.character, 2)
 
     -- After the close nothing is read, and a bank-container update that still
     -- arrives is counted for the dump (the count runs for the whole session).
     local function closedUpdates()
-        local lines = {}
-        Inventory:RunDiagnostic(lines)
-        local line = table.concat(lines, "\n"):match("bank updates while closed: [^\n]*") or ""
+        local out = {}
+        Inventory:RunDiagnostic(out)
+        local line = table.concat(out, "\n"):match("bank updates while closed: [^\n]*") or ""
         return tonumber(line:match("closed: (%d+)")), line
     end
     visit()
@@ -1012,10 +1120,119 @@ T.section("the close", function()
 end)
 
 -- ===========================================================================
+-- The second after the close: the carried bags are compared with what they
+-- held at the closing notice.
+T.section("after the close", function()
+    local function bankOf() return Memory:OwnBank(MAIN.guid) end
+    local function inDoubt() return (select(3, Memory:OwnBank(MAIN.guid))) end
+    local function closedVisit()
+        fresh()
+        Inventory:Initialize()
+        advance(2.1)
+        client.bankOpen = true
+        client.bank.character = { items = { [2589] = 100 }, slots = 28 }
+        client.bank.account = { items = { [4306] = 9 }, slots = 98 }
+        client.started.onBankOpened()
+        advance(3)
+        client.started.onBankClosing()
+        client.bankOpen = false
+        client.started.onBankClosed()
+        client.reads.bags = 0
+    end
+
+    -- The answer of a last move: the bags changed.
+    closedVisit()
+    advance(0.08)
+    client.bags = { [2589] = 65 }
+    refreshes = 0
+    Inventory:OnBagUpdate(6)
+    Inventory:OnBagUpdate(0)
+    T.eq("the updates themselves read nothing", client.reads.bags, 0)
+    T.check("nothing is marked before something compared", inDoubt() == false)
+    nextFrame()
+    T.eq("one comparison a frame later, however many updates there were", client.reads.bags, 1)
+    T.check("the bags changed: both remembered banks are in doubt", inDoubt() == true
+        and select(3, Memory:AccountBank("eu-pvp")) == true)
+    T.eq("still remembered", (bankOf())[2589], 100)
+    T.check("a shown list is asked to redraw", refreshes >= 1, refreshes)
+    local combined, breakdown, meta = scan()
+    T.check("a scan counts neither", combined[2589] == 65 and combined[4306] == nil and meta.bankInDoubt == true
+        and meta.accountInDoubt == true, combined[2589])
+    Inventory:OnBagUpdate(0)
+    nextFrame()
+    T.eq("once marked, nothing is compared any more", client.reads.bags, 1 + 1)   -- the scan above read the bags once
+
+    -- A scan that comes before the next frame makes the comparison itself.
+    closedVisit()
+    advance(0.08)
+    client.bags = { [2589] = 65 }
+    Inventory:OnBagUpdate(0)
+    combined, breakdown, meta = Inventory:ScanAll()     -- no InvalidateCache: the update dropped the frame's scan
+    T.check("a scan in the frame of the update does not count the bank", combined[2589] == 65 and meta.bankInDoubt == true,
+        combined[2589])
+    T.eq("with the bags it read anyway: one read", client.reads.bags, 1)
+    nextFrame()
+    T.eq("and the timer has nothing left to compare", client.reads.bags, 1)
+
+    -- Nothing changed in the bags: no doubt, whatever container the update names.
+    closedVisit()
+    advance(0.08)
+    Inventory:OnBagUpdate(6)
+    Inventory:OnBagUpdate(0)
+    nextFrame()
+    T.check("updates that change no count mark nothing", inDoubt() == false and select(3, Memory:AccountBank("eu-pvp")) == false)
+    T.eq("they were compared once", client.reads.bags, 1)
+    -- Bags that cannot be read decide nothing; the next update compares again.
+    client.bags, client.backpackSlots = {}, 0
+    Inventory:OnBagUpdate(0)
+    nextFrame()
+    T.check("bags that cannot be read mark nothing", inDoubt() == false)
+    client.bags, client.backpackSlots = { [2589] = 65 }, 16
+    Inventory:OnBagUpdate(0)
+    nextFrame()
+    T.check("readable again and changed: marked", inDoubt() == true)
+
+    -- Later than a second after the close nothing is watched.
+    closedVisit()
+    advance(1.5)
+    client.bags = { [2589] = 65 }
+    Inventory:OnBagUpdate(0)
+    nextFrame()
+    T.check("a change of the bags 1.5 s after the close marks nothing", inDoubt() == false)
+    T.eq("and nothing is compared", client.reads.bags, 0)
+
+    -- The dump tells it.
+    local lines = {}
+    Inventory:RunDiagnostic(lines)
+    T.check("the dump: nothing came inside the watch",
+        table.concat(lines, "\n"):find("after the close: bagUpdates=0 compared=0 carriedBagsChanged=false", 1, true) ~= nil,
+        table.concat(lines, "\n"))
+    closedVisit()
+    advance(0.08)
+    client.bags = { [2589] = 65 }
+    Inventory:OnBagUpdate(6)
+    Inventory:OnBagUpdate(0)
+    nextFrame()
+    lines = {}
+    Inventory:RunDiagnostic(lines)
+    T.check("the dump: a late answer",
+        table.concat(lines, "\n"):find("after the close: bagUpdates=2 compared=1 carriedBagsChanged=true (the remembered banks were marked in doubt)", 1, true) ~= nil,
+        table.concat(lines, "\n"))
+
+    -- A new visit ends the watch, and its first kept read takes the mark away.
+    client.bankOpen = true
+    client.bank.character = { items = { [2589] = 40 }, slots = 28 }
+    client.started.onBankOpened()
+    T.check("the next visit's kept read clears the doubt", inDoubt() == false and (bankOf())[2589] == 40)
+    T.check("of the account bank too", select(3, Memory:AccountBank("eu-pvp")) == false)
+end)
+
+-- ===========================================================================
 -- Whether a bank's items are there the moment its window opens is not known.
 -- So the bank is always looked at once more half a second after it opened,
--- and a read without a single item is only believed two seconds after the
--- opening (when one came earlier, the bank is looked at again at that mark).
+-- and a read without a single item is not believed in the first two seconds
+-- (when one came earlier, or the bank was refused, it is looked at again at
+-- that mark).
 T.section("the first moments after opening", function()
     local function bankOf() return Memory:OwnBank(MAIN.guid) end
     local function start(remembered)
@@ -1063,35 +1280,39 @@ T.section("the first moments after opening", function()
     T.eq("readable at the second look: remembered", (bankOf())[2589], 71)
 
     -- Still refused at half a second: one more look at the two-second mark.
+    -- The other bank read well all along, so only the refusal asks for it.
     start()
     client.bank.character = nil
+    client.bank.account = { items = { [4306] = 1 } }
     client.started.onBankOpened()
     advance(0.6)
+    T.eq("the two reads of every opening", client.reads.character, 2)
     client.bank.character = { items = { [2589] = 72 } }
     advance(1.2)
     T.eq("still refused at half a second: not yet", (bankOf())[2589], 40)
     advance(0.3)
-    T.eq("looked at once more two seconds after opening", (bankOf())[2589], 72)
-    local reads = client.reads.character
+    T.check("a refused read asks for the look two seconds after opening", (bankOf())[2589] == 72 and client.reads.character == 3,
+        client.reads.character)
     advance(10)
-    T.eq("and then no more", client.reads.character, reads)
+    T.eq("and then no more", client.reads.character, 3)
 
     -- No item at all: not believed at opening, not at half a second.
     start()
     client.started.onBankOpened()
     T.check("empty at opening: the remembered bank is kept", (bankOf())[2589] == 40)
     T.check("empty at opening: the account bank is kept", (Memory:AccountBank("eu-pvp"))[4306] == 9)
-    Inventory:OnBagUpdate(0)
-    nextFrame()
-    T.check("an update while still nothing is there: kept", (bankOf())[2589] == 40)
-    advance(0.6)
+    Inventory:OnBagUpdate(6)
+    advance(0.3)
+    T.check("an update and its trailing read while still nothing is there: kept", (bankOf())[2589] == 40)
+    advance(0.3)
     T.check("empty at half a second: the remembered bank is still kept", (bankOf())[2589] == 40)
     advance(1.3)
     T.check("just before two seconds: still kept", (bankOf())[2589] == 40)
     client.now = NOW + 5
     advance(0.2)
     local items, at = bankOf()
-    T.check("empty two seconds after opening: believed, the bank is saved as empty", items ~= nil and next(items) == nil and at == NOW + 5)
+    T.check("empty two seconds after opening, and seen empty before: believed, the bank is saved as empty",
+        items ~= nil and next(items) == nil and at == NOW + 5)
     local account = Memory:AccountBank("eu-pvp")
     T.check("and so is the account bank", account ~= nil and next(account) == nil)
     advance(10)
@@ -1106,7 +1327,8 @@ T.section("the first moments after opening", function()
     items = bankOf()
     T.check("never remembered, empty: saved as empty at two seconds", items ~= nil and next(items) == nil)
 
-    -- Closed before the two seconds are over: the remembered bank stays.
+    -- Closed before the two seconds are over: the remembered bank stays,
+    -- and nothing is in doubt (the carried bags did not change).
     start()
     client.started.onBankOpened()
     advance(0.7)
@@ -1115,6 +1337,7 @@ T.section("the first moments after opening", function()
     advance(5)
     T.check("closed before it could be believed: kept, and nothing read after the close",
         (bankOf())[2589] == 40 and client.reads.character == 0, client.reads.character)
+    T.check("and not in doubt", select(3, Memory:OwnBank(MAIN.guid)) == false)
 
     -- The items arrive a moment after the window, with an update.
     start()
@@ -1122,19 +1345,20 @@ T.section("the first moments after opening", function()
     nextFrame()
     client.bank.character = { items = { [2589] = 73 } }
     Inventory:OnBagUpdate(6)
-    T.eq("items that arrive with an update are saved at once", (bankOf())[2589], 73)
+    advance(0.2)
+    T.eq("items that arrive with an update are saved by the trailing read", (bankOf())[2589], 73)
 
-    -- The bank is emptied in the first two seconds: the empty read is not
-    -- believed yet, so the bank is looked at again at the two-second mark.
+    -- The bank is emptied in the first two seconds, after it was read with
+    -- items: believed on the second look, without waiting for the mark.
     start()
     client.bank.character = { items = { [2589] = 74 } }
     client.started.onBankOpened()
     advance(1)
     client.bank.character = { items = {} }
     Inventory:OnBagUpdate(6)
-    T.eq("emptied one second after opening: not believed yet", (bankOf())[2589], 74)
-    advance(1.1)
-    T.check("believed at the two-second mark", next((bankOf())) == nil)
+    T.eq("emptied one second after opening: the first empty read is not believed", (bankOf())[2589], 74)
+    advance(0.25)
+    T.check("the second look is", next((bankOf())) == nil)
 
     -- One bank has its items at once, the other not yet: each is judged alone.
     start()
@@ -1152,9 +1376,8 @@ T.section("the first moments after opening", function()
     -- Each look has one timer, however often it is asked for.
     start()
     client.started.onBankOpened()
-    local afterOpen = #timers
     for _ = 1, 5 do
-        Inventory:OnBagUpdate(6)      -- each of these reads would ask for the two-second look again
+        Inventory:OnBagUpdate(6)      -- each read that finds nothing would ask for the two-second look again
         nextFrame()
     end
     advance(0.001)
@@ -1162,8 +1385,7 @@ T.section("the first moments after opening", function()
     for _, t in ipairs(timers) do
         if t.due > fakeNow + 0.05 then looks = looks + 1 end
     end
-    T.eq("the half-second and the two-second look are each waiting once", looks, 2)
-    T.check("(opening asked for both or for the first)", afterOpen >= 1)
+    T.eq("the half-second look, the two-second look and the trailing read are each waiting once", looks, 3)
 
     -- Opened again shortly after: the looks are counted from the new opening.
     start()
@@ -1186,32 +1408,56 @@ T.section("the first moments after opening", function()
 end)
 
 -- ===========================================================================
-T.section("a scan with the bank open counts what is in it now", function()
+T.section("a scan never reads the bank", function()
     fresh()
     Memory:SaveBank(MAIN, { [2589] = 40 }, {}, NOW - 3 * DAY)
     client.bankOpen = true
     client.bank.character = { items = { [2589] = 90 } }
     refreshes = 0
     local combined, breakdown, meta = scan()
-    T.eq("the open bank is read and counted", breakdown[2589].bank, 90)
-    T.eq("and remembered with the time of the read", meta.bankSeenAt, NOW)
-    T.eq("a scan asks for no redraw (it is the redraw)", refreshes, 0)
-    -- A second scan in a frame whose bank read is already done does not read again.
+    T.eq("bank open: the scan does not ask the adapter for it", client.reads.character, 0)
+    T.eq("it counts what is remembered", breakdown[2589].bank, 40)
+    T.eq("with the age of that", meta.bankSeenAt, NOW - 3 * DAY)
+    T.eq("and asks for no redraw", refreshes, 0)
+
+    -- The open bank while it is behind: a read is owed and the bags have
+    -- changed since the last kept read. A scan leaves it out until that read.
+    Inventory:Initialize()
+    client.bank.account = { items = { [4306] = 9 } }
+    client.started.onBankOpened()
+    advance(3)
+    T.eq("fixture: the visit's reads are remembered", (scan())[2589], 5 + 90)
+    nextFrame()
+    Inventory:ScanAll()                                    -- this frame's scan, kept for the frame
+    client.bags = { [2589] = 65 }
+    Inventory:OnBagUpdate(0)                               -- read at once: the bank has not changed yet
+    client.bank.character = { items = { [2589] = 30 } }
+    Inventory:OnBagUpdate(6)                               -- owed
     client.reads.character = 0
-    scan()
-    T.eq("a second scan of the frame does not read the bank again", client.reads.character, 0)
+    combined, breakdown, meta = Inventory:ScanAll()        -- the update dropped the frame's scan
+    T.check("behind: the bank is left out, not counted beside the bags that changed",
+        combined[2589] == 65 and breakdown[2589].bank == nil, combined[2589])
+    T.check("the scan says a read is on its way, not that the bank is in doubt",
+        meta.bankPending == true and meta.accountPending == true and meta.bankInDoubt == nil and meta.bankSeenAt == nil)
+    T.eq("and still reads nothing", client.reads.character, 0)
+    Inventory:OnBagUpdateDelayed()
+    combined, breakdown, meta = Inventory:ScanAll()
+    T.check("after the read the bank counts again, in the same frame", combined[2589] == 95 and meta.bankPending == nil
+        and meta.accountPending == nil, combined[2589])
+    -- Owed, but no carried bag was updated since the last kept read: nothing
+    -- can be counted twice, the bank stays in.
+    advance(1)
+    Inventory:OnBagUpdate(6)
     nextFrame()
-    scan()
-    T.eq("the next frame's scan does", client.reads.character, 1)
-    nextFrame()
-    client.bank.character = nil
+    Inventory:OnBagUpdate(6)
     combined, breakdown, meta = scan()
-    T.eq("open but unreadable: the remembered bank counts", breakdown[2589].bank, 90)
+    T.check("owed without a change of the bags: still counted", combined[2589] == 95 and meta.bankPending == nil, combined[2589])
+    advance(1)
     LazyProf.db.profile.includeBankItems = false
-    client.bank.character = { items = { [2589] = 5 } }
-    client.reads.character = 0
-    scan()
-    T.eq("bank off: the scan does not read the bank", client.reads.character, 0)
+    Inventory:OnBagUpdate(0)
+    Inventory:OnBagUpdate(6)
+    combined, breakdown, meta = scan()
+    T.check("bank items off: nothing of the bank, and nothing said of it", combined[2589] == 65 and meta.bankPending == nil)
 end)
 
 -- ===========================================================================
@@ -1492,6 +1738,29 @@ T.section("init wiring", function()
     LazyProf:OnEnable()
     T.check("OnEnable starts the stock events", type(client.started) == "table")
     T.check("BAG_UPDATE keeps its one handler in Init", events.BAG_UPDATE == "OnBagUpdate")
+    -- The notice that a batch of bag updates is complete has its one handler
+    -- there too, on the client whose bank is read.
+    T.check("the batch notice is registered in Init on WoW Forever", events.BAG_UPDATE_DELAYED == "OnBagUpdateDelayed"
+        and type(LazyProf.OnBagUpdateDelayed) == "function", tostring(events.BAG_UPDATE_DELAYED))
+    local notices = 0
+    local realDelayed = Inventory.OnBagUpdateDelayed
+    Inventory.OnBagUpdateDelayed = function(self)
+        notices = notices + 1
+        return realDelayed(self)
+    end
+    LazyProf:OnBagUpdateDelayed("BAG_UPDATE_DELAYED")
+    T.eq("and passed on to the scanner", notices, 1)
+    Inventory.OnBagUpdateDelayed = realDelayed
+    do
+        local classicEvents = {}
+        LazyProf.RegisterEvent = function(_, event, handler) classicEvents[event] = handler end
+        LazyProf.ClientFamily = "classic"
+        LazyProf:OnEnable()
+        LazyProf.ClientFamily = "forever"
+        LazyProf.RegisterEvent = function(_, event, handler) events[event] = handler end
+        T.check("on the other clients it is not asked for (the bank is not read there)",
+            classicEvents.BAG_UPDATE == "OnBagUpdate" and classicEvents.BAG_UPDATE_DELAYED == nil)
+    end
     advance(2.1)
 
     -- Bag updates: passed on with the container id; never a recalculation.

@@ -89,6 +89,18 @@ function LazyProf:OnEnable()
 
     -- Register events
     self:RegisterEvent("BAG_UPDATE", "OnBagUpdate")
+    -- The client's notice that a batch of bag updates is complete. Only the
+    -- reading of the open bank uses it, and the bank is read on WoW Forever
+    -- only, where the event is known to exist: BAG_UPDATE_DELAYED, without a
+    -- payload (Blizzard_APIDocumentationGenerated/ContainerDocumentation.lua:674-679;
+    -- in the client's event list, Ketho BlizzardInterfaceResources, forever
+    -- branch, Resources/Events.lua:520; Blizzard listens to it beside
+    -- BAG_UPDATE in Blizzard_Professions/Blizzard_ProfessionsCrafting.lua:62, 314).
+    -- Asking a client for an event it does not have is an error, so the
+    -- other clients are not asked.
+    if self.ClientFamily == "forever" then
+        self:RegisterEvent("BAG_UPDATE_DELAYED", "OnBagUpdateDelayed")
+    end
     self:RegisterEvent("GET_ITEM_INFO_RECEIVED", "OnItemInfoReceived")
     self:RegisterEvent("AUCTION_HOUSE_CLOSED", "OnAuctionHouseClosed")
 
@@ -272,11 +284,19 @@ function LazyProf:OnBagUpdate(event, bagId)
     if self.MerchantPanel then
         self.MerchantPanel:OnInventoryChanged()
     end
-    -- What the character carries is remembered for its other characters (and
-    -- the bank while its window is open). This is the one BAG_UPDATE handler
-    -- of the addon, so the update is passed on from here.
+    -- What the character carries is remembered for its other characters, and
+    -- the bank is read again while its window is open. This is the one
+    -- BAG_UPDATE handler of the addon, so the update is passed on from here.
     if self.Inventory then
         self.Inventory:OnBagUpdate(bagId)
+    end
+end
+
+-- A batch of bag updates is complete. Like BAG_UPDATE this event has its one
+-- handler here and is passed on; it plans nothing and redraws nothing itself.
+function LazyProf:OnBagUpdateDelayed()
+    if self.Inventory then
+        self.Inventory:OnBagUpdateDelayed()
     end
 end
 

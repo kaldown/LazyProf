@@ -818,16 +818,21 @@ end
 -- bank window rebuilds itself on it, Blizzard_UIPanels_Game/Mainline/
 -- BankFrameTemplates.lua:778-782); PLAYER_LOGOUT has no payload
 -- (SystemDocumentation.lua:157-161).
+-- The opening is reported after the bank counts as open: the caller reads
+-- it in that very call.
 -- A close is reported in two steps. onBankClosing runs while the bank still
 -- counts as open, so a read that is still owed for a change of this very
 -- frame can be taken; whether the client still holds the bank's contents
 -- when BANKFRAME_CLOSED arrives could not be settled from source, so the
 -- caller must not take such a read for more than it is (the scanner only
--- keeps one that looks like the reads before it). Then the bank counts as
--- closed and onBankClosed runs: from there on nothing is read.
--- Verify in game (/lp diag stock after a visit): "bank updates while closed".
--- BAG_UPDATE is not registered here: the addon object has one handler per
--- event and Core/Init.lua owns that one; it passes bag updates on.
+-- keeps one that looks like the reads before it, and marks the remembered
+-- bank as in doubt when it may be behind). Then the bank counts as closed
+-- and onBankClosed runs: from there on nothing is read.
+-- Verify in game (/lp diag stock after a visit): the "bank visit close",
+-- "after the close" and "bank updates while closed" lines.
+-- BAG_UPDATE and BAG_UPDATE_DELAYED are not registered here: the addon
+-- object has one handler per event and Core/Init.lua owns those two; it
+-- passes them on.
 function Client:StartStock(callbacks)
     LazyProf:RegisterEvent("BANKFRAME_OPENED", function()
         bankOpen = true
@@ -883,6 +888,10 @@ function Client:RunStockDiagnostic(lines)
         add("adapter bags: items=" .. tostring(Count(items)) .. " soulbound=" .. tostring(Count(bound))
             .. " backpackSlots=" .. tostring(backpackSlots))
     end)
+    -- C_Bank.ShouldUsePlayerBagsInBank() returns a boolean
+    -- (BankDocumentation.lua:322-329); the bank window asks it to decide
+    -- how its tabs are laid out (Blizzard_UIPanels_Game/Mainline/
+    -- BankFrameTemplates.lua:687, 793). Only reported here.
     section("bank", function()
         add("bank: open=" .. tostring(bankOpen)
             .. " usesPlayerBags=" .. tostring(C_Bank.ShouldUsePlayerBagsInBank()))

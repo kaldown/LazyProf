@@ -4,18 +4,103 @@
 -- The bags are always read live (through the client adapter). Stock outside
 -- them comes from one of two places:
 --   - the Syndicator addon, when it is installed: bank, mail, own auctions,
---     alts, guild bank. Nothing below changes that, and LazyProf's own memory
---     is then neither read nor written.
+--     alts, guild bank. LazyProf's own memory is then neither read nor
+--     written.
 --   - otherwise LazyProf's own memory (StockMemory.lua): the character's bank
---     and the account bank as last seen with the bank window open, and the
+--     and the account bank as last read with the bank window open, and the
 --     bags and banks of the other characters of the same world and faction.
---     This file keeps that memory up to date (see "Keeping the memory").
+--     This file keeps that memory up to date.
 -- A Self-Found character cannot be sent anything, so nothing that belongs to
 -- other characters is counted for it, from either place; and it cannot send
 -- anything, so the memory does not offer what it holds to the others.
 --
 -- The memory can never stop the addon: everything that touches it runs
 -- protected (see Protected), and a scan that cannot read it counts the bags.
+-- The first failure of a session is handed to the game's error handler.
+--
+-- THE BAGS are remembered BAG_SAVE_DELAY (2 s) after a bag update - one save
+-- for a burst of updates - and, when a save is still waiting, at logout. Bags
+-- that report no backpack slots could not be read and are not saved. Bags
+-- that read as completely empty are saved only when a bag update came before
+-- the read: at login and at logout nothing says the client has the bags'
+-- contents, and slots without items would otherwise replace the snapshot
+-- with nothing.
+--
+-- THE BANK (the character's and the account's; WoW Forever only) is read only
+-- while its window is open, and never by a scan: a scan counts what is
+-- remembered. What is remembered of a bank is either what a read that can be
+-- trusted saw, or it is marked IN DOUBT and not counted until the next
+-- visit. It is never replaced by "nothing" on weak evidence, and never
+-- counted while there is reason to think it is behind.
+-- Not known about the client, and so not assumed either way: whether the bank
+-- can still be read inside the close notice; whether the bag updates of a
+-- last move can arrive after the window closed; whether the client empties
+-- the bank's containers (keeping their slots) and sends bag updates before
+-- the close notice; whether the items are all there the moment the window
+-- opens.
+--
+-- 1. When the bank is read.
+--    - At once when the window opens, again BANK_SETTLE (0.5 s) after the
+--      opening whatever the first read gave, and BANK_EMPTY_TRUST (2 s)
+--      after the opening when a read before that mark was refused or found a
+--      bank empty without being believed.
+--    - On a bag update (of any container: an item may have gone into the
+--      bank or come out of it) or a change of the bank's tabs: at once when
+--      the last read is BANK_READ_SPACING (0.2 s) or more ago. Otherwise the
+--      read is owed, and one trailing read is taken 0.2 s after the last
+--      read.
+--    - When the client says that a batch of bag updates is complete
+--      (BAG_UPDATE_DELAYED): an owed read is taken at once when the last
+--      read was taken in this very frame (it came before the batch was
+--      complete) or is 0.2 s old. On a later frame within the 0.2 s the
+--      trailing read stays in charge, so a burst that runs over many frames
+--      is not read in every one of them.
+--    Reading both banks in full costs about a millisecond and leaves a table
+--    per slot behind; the 0.2 s between reads is what bounds that.
+-- 2. Which read is kept, bank by bank.
+--    - Refused by the adapter: not kept.
+--    - With items: kept.
+--    - Without a single item while nothing with items is remembered for that
+--      bank: kept 2 s or more after the opening ("seen, nothing in it").
+--    - Without a single item while items are remembered: believed only when
+--      (a) this visit already kept a read with items of the same slot count,
+--      or it is 2 s or more after the opening, and (b) an earlier read of
+--      this visit, taken on an earlier frame, found the bank empty too.
+--      Until then the empty read is unresolved and one more read is taken:
+--      the trailing read when only (b) is missing, else the look at 2 s.
+--    A kept read replaces what is remembered and takes a doubt mark away.
+-- 3. When a bank is behind. The carried bags "changed since the last kept
+--    read" of a bank when a bag update of a container that is no bank
+--    container arrived in the frame of that read or later - so the order of
+--    a move's two updates inside one frame does not matter, and only a read
+--    kept on a later frame clears it. A bank is BEHIND while a read is owed
+--    or its empty read is unresolved, and the carried bags changed since its
+--    last kept read. While the window is open a scan leaves a bank that is
+--    behind out (it says so in its third return); the next read brings it
+--    back.
+-- 4. The close: the adapter's closing notice, which comes while the bank
+--    still counts as open, and likewise a logout with the bank open. When a
+--    read is owed or an empty read is unresolved the bank is read once more,
+--    and a bank is kept from that read only when the read is not refused,
+--    holds at least one item and has the slot count of the last read kept in
+--    this visit. A bank that is still behind after that, and of which
+--    something is remembered, is marked in doubt.
+-- 5. After the close. The carried bags' contents (item -> count) are noted
+--    at the closing notice. A bag update in the CLOSE_WATCH (1 s) after it,
+--    whatever container it names, has them compared with the note - on the
+--    next frame, or by a scan that comes first. When a count differs, the
+--    answer of a last move arrived late: both remembered banks of the visit
+--    are marked in doubt. An update that changes no count marks nothing (the
+--    client may only be letting go of the bank), nor does anything later
+--    than the second, or a session without a close. Updates of bank
+--    containers that arrive while the bank is closed are counted for
+--    /lp diag stock.
+-- 6. In doubt is a mark saved with the remembered bank (StockMemory.lua). A
+--    bank that carries it is not counted by any scan - not for its own
+--    character, not as an alt's bank (the alt's bags still count), not as
+--    the account bank - and the scan's third return says so; the Shopping
+--    tab shows a line for it. The next kept read of that bank takes the mark
+--    away.
 local ADDON_NAME, LazyProf = ...
 
 LazyProf.Inventory = {}
@@ -27,9 +112,11 @@ local Inventory = LazyProf.Inventory
 -- ============================================================================
 
 -- The bags the character carries, read by the client adapter (which bags
--- there are and how a slot is read differ per client).
+-- there are and how a slot is read differ per client). After the items the
+-- adapter's other two returns follow: the soulbound part of them, and the
+-- backpack's slot count (zero: the bags could not be read just now).
 function Inventory:ScanBags()
-    return (LazyProf.Client:BagContents())
+    return LazyProf.Client:BagContents()
 end
 
 -- Scan bags from Syndicator character data (for alts)
@@ -197,10 +284,11 @@ end
 local memoryErrors = { count = 0, last = nil, where = nil }
 
 -- Hand a message to the game's error handler. geterrorhandler() returns it
--- (a client global: Ketho BlizzardInterfaceResources, forever branch,
--- Resources/GlobalAPI.lua:6884; Blizzard calls it the same way in
--- Blizzard_SharedXMLBase/ErrorUtil.lua:1-6 and :17-19). A client without
--- one, or a handler that fails itself, changes nothing here.
+-- (a global of the WoW Forever client: Ketho BlizzardInterfaceResources,
+-- forever branch, Resources/GlobalAPI.lua:6884; Blizzard's UI source of that
+-- client calls it the same way, Interface/AddOns/Blizzard_SharedXMLBase/
+-- ErrorUtil.lua:3 and :18-19). A client without it, or a handler that fails
+-- itself, changes nothing here.
 local function ShowError(message)
     if type(geterrorhandler) ~= "function" then return end
     local found, handler = pcall(geterrorhandler)
@@ -229,6 +317,10 @@ local function Protected(where, fn, ...)
     end
     return true, result
 end
+
+-- Defined with the bank's rules further down ("Keeping the memory").
+local BankBehind        -- is the open bank of that kind behind right now (rule 3)?
+local SettleAfterClose  -- the comparison due after a bag update that followed a close (rule 5)
 
 -- Frame-level cache: ScanAll is called many times per frame (once per recipe in
 -- GetCandidates). Cache results so only the first call per frame does real work.
@@ -370,13 +462,18 @@ end
 --     accountSeenAt  when the account bank of its world was seen
 --     bankInDoubt    true when the character's bank is remembered but in doubt
 --     accountInDoubt true when the account bank of its world is
+--     bankPending    true when the character's bank is left out because it
+--                    is open and behind: a read is on its way
+--     accountPending the same for the account bank
 --     alts = { [name] = { bags = time, bank = time } } }   the alts counted
 -- The character's own bank and the account bank are both bank stock (the
 -- account bank is other characters' stock too, so a character that cannot
 -- receive anything does not count it). An alt's bank needs both settings.
--- A bank in doubt (see "Keeping the memory") is not counted: not the
+-- A bank in doubt (rule 6 at the top of this file) is not counted: not the
 -- character's own, not the account bank, and not an alt's (its bags still
--- are). The two marks are only set for a bank that would count otherwise.
+-- are). Nor is the open bank while it is behind (rule 3). The marks are only
+-- set for a bank that would count otherwise. Nothing is read from the client
+-- here and nothing is written.
 local function AddRememberedStock(self, combined, breakdown, countAlts)
     local Memory, Client = LazyProf.StockMemory, LazyProf.Client
     local countBank = LazyProf.db.profile.includeBankItems and true or false
@@ -387,6 +484,8 @@ local function AddRememberedStock(self, combined, breakdown, countAlts)
         local items, seenAt, doubt = Memory:OwnBank(identity.guid)
         if items and doubt then
             meta.bankInDoubt = true
+        elseif items and BankBehind("character") then
+            meta.bankPending = true
         elseif items then
             mergeSource(items, "bank", nil, combined, breakdown)
             meta.bankSeenAt = seenAt
@@ -395,6 +494,8 @@ local function AddRememberedStock(self, combined, breakdown, countAlts)
             items, seenAt, doubt = Memory:AccountBank(identity.world)
             if items and doubt then
                 meta.accountInDoubt = true
+            elseif items and BankBehind("account") then
+                meta.accountPending = true
             elseif items then
                 mergeSource(items, "bank", nil, combined, breakdown)
                 meta.accountSeenAt = seenAt
@@ -418,11 +519,13 @@ local function AddRememberedStock(self, combined, breakdown, countAlts)
     return meta
 end
 
--- The memory's part of a scan. With the bank window open, what is in it now
--- is read first (unless this frame has read it already).
-local function ScanMemory(self, combined, breakdown, countAlts)
-    if LazyProf.db.profile.includeBankItems and LazyProf.Client:IsBankOpen() and not self:BankReadThisFrame() then
-        self:LookAtOpenBank()
+-- The memory's part of a scan. A comparison that is due after a close (rule
+-- 5) is made first, with the bags the scan has just read - so that no scan
+-- counts a bank beside the items that have just come out of it. The bank
+-- itself is never read here.
+local function ScanMemory(self, combined, breakdown, countAlts, bagItems, backpackSlots)
+    if backpackSlots and backpackSlots > 0 then
+        SettleAfterClose(bagItems)
     end
     return AddRememberedStock(self, combined, breakdown, countAlts)
 end
@@ -454,7 +557,7 @@ function Inventory:ScanAll()
     local meta = nil
 
     -- 1. Current character bags (read live, always on)
-    local bagItems = self:ScanBags()
+    local bagItems, _, backpackSlots = self:ScanBags()
     mergeSource(bagItems, "bags", nil, combined, breakdown)
 
     local bagCount = 0
@@ -466,7 +569,7 @@ function Inventory:ScanAll()
     if self:UsesSyndicator() then
         AddSyndicatorStock(self, combined, breakdown, countAlts)
     else
-        local ok, result = Protected("scan", ScanMemory, self, combined, breakdown, countAlts)
+        local ok, result = Protected("scan", ScanMemory, self, combined, breakdown, countAlts, bagItems, backpackSlots)
         if ok then
             meta = result
         else
@@ -504,56 +607,54 @@ end
 
 -- ============================================================================
 -- Keeping the memory
--- Nothing here plans the path again; a changed bank only asks the shown list
--- to redraw. With Syndicator installed none of it does anything.
---
--- Bags: saved BAG_SAVE_DELAY seconds after a bag update (one save for a burst
--- of updates) and, when a save is still waiting, at logout. Bags that report
--- no backpack slots could not be read and are not saved. Bags that read as
--- completely empty are saved only when a bag update came before the read: at
--- login and at logout nothing says the client has the bags' contents, and
--- slots without items would otherwise replace the snapshot with nothing.
---
--- Bank: read while the bank window is open only.
---   A change: the first bag update of a frame (whatever container it names -
---     an item may have gone into the bank or come out of it) and a change of
---     the bank's tabs read the bank in the same call. More of them in that
---     frame leave one further read, taken on the next frame.
---   The close: the adapter reports it in two steps. A read still owed is
---     taken during the first, while the bank still counts as open - the next
---     frame would be too late. Whether the client still has the bank then is
---     not known, so that read is only kept when it looks like a normal read
---     of this visit: the adapter does not refuse it, it holds at least one
---     item, and its slot count is that of the last read kept in this visit.
---     After the second step nothing is read. A bank container's update that
---     still arrives then cannot be read; it is counted for /lp diag stock.
---   The opening: whether the items are there the moment the window opens is
---     not known either. The bank is read at once, always once more
---     BANK_SETTLE seconds later, and a read without a single item is only
---     believed BANK_EMPTY_TRUST seconds after the opening; when a read before
---     that mark found nothing, or was refused, the bank is looked at again at
---     the mark.
---   The adapter returns nothing for a bank it cannot read, and then what is
---   remembered stays.
+-- Nothing here plans the path again; a change of what is remembered only
+-- asks the shown list to redraw. With Syndicator installed none of it does
+-- anything. The rules are at the top of this file.
 -- ============================================================================
 
 local BAG_SAVE_DELAY = 2
-local BANK_SETTLE = 0.5
-local BANK_EMPTY_TRUST = 2
+local BANK_SETTLE = 0.5         -- the second look, this long after the opening
+local BANK_EMPTY_TRUST = 2      -- an empty bank is not believed earlier after the opening
+local BANK_READ_SPACING = 0.2   -- least time between two reads that changes ask for
+local CLOSE_WATCH = 1           -- how long after the close a late answer is watched for
+local CLOCK_SLACK = 0.001       -- a timer may run a hair before its mark
 local BANK_KINDS = { "character", "account" }
 
 -- First-wins debounces on a pending flag (C_Timer.After returns nothing).
 local bagSavePending = false
 local bagUpdateSeen = false     -- a bag update asked for the waiting save
 
-local bankOpenedAt = nil        -- GetTime() when this visit's window opened
+-- The bank visit in progress, or the last one (kept for /lp diag stock):
+--   openedAt, closedAt   GetTime() of the opening and of the close
+--   lastReadAt           GetTime() of the last read; GetTime() is the same
+--                        all through a frame, so it also names the frame
+--   reads                how many reads were taken
+--   owed                 an update arrived after the last read
+--   confirm              an empty read waits for its second look
+--   trailingPending      the trailing read's timer is waiting
+--   lookPending[mark]    the look `mark` seconds after the opening is waiting
+--   bagsUpdateAt         frame of the last update of a carried bag
+--   closing              what the closing notice did (see CloseVisit)
+--   character, account   per bank:
+--     slots      slot count of the last read kept
+--     keptItems  a read with items was kept
+--     keptAt     frame of the last read kept
+--     emptyAt    frame of the first empty read not believed yet (unresolved)
+--     kept       how many reads were kept
+--     last       what the last read gave, in words
+local visit = nil
 local bankClosedAt = nil        -- GetTime() of the last close
-local bankReadThisFrame = false -- cleared by a zero-delay timer
-local bankReadOwed = false      -- one more read, for the next frame
-local bankLookPending = {}      -- [mark] = true while the look at that mark is waiting
-local visitSlots = {}           -- [kind] = slot count of the last read kept in this visit
 -- Bank containers' updates that arrived while the bank was closed.
 local closedBankUpdates = { count = 0, lastAfter = nil }
+-- The watch after a close (rule 5):
+--   at, guid, world   when the window closed, and whose banks the visit read
+--   note              the carried bags' contents at the closing notice
+--   updates           bag updates that arrived inside the watch
+--   carried           one of them named a carried bag
+--   owed, pending     a comparison is due; its timer is waiting
+--   compared          how many comparisons were made
+--   changed           a count differed: the banks were marked in doubt
+local watch = nil
 
 -- Remember what the character carries. trustEmpty: a bag update came before
 -- this read, so bags without a single item are really empty. Returns whether
@@ -588,173 +689,422 @@ function Inventory:RequestBagSave(fromUpdate)
     end)
 end
 
--- Read the open bank (the character's and the account's) and remember what
--- can be kept of it. closing: the read taken while the window closes, which
--- is held to the stricter rule above. Returns whether anything was saved,
--- and whether a bank read as empty before that could be believed or was
--- refused (it is then worth another look).
-function Inventory:ReadBank(closing)
-    if self:UsesSyndicator() then return false, false end
-    local Client, Memory = LazyProf.Client, LazyProf.StockMemory
-    if not Client:IsBankOpen() then return false, false end
-    local identity = Client:CharacterIdentity() or {}
-    local now = Client:Now()
-    local openFor = bankOpenedAt and (GetTime() - bankOpenedAt) or math.huge
-    local saved, unsettled = false, false
+-- The bank -------------------------------------------------------------------
+
+local function NewVisit()
+    local v = { openedAt = GetTime(), reads = 0, owed = false, confirm = false, trailingPending = false, lookPending = {} }
     for _, kind in ipairs(BANK_KINDS) do
+        v[kind] = { kept = 0, keptItems = false }
+    end
+    return v
+end
+
+-- The visit in progress; nil while the bank is closed. A bank that counts as
+-- open without its opening having been reported begins a visit here.
+local function OpenVisit()
+    if not LazyProf.Client:IsBankOpen() then return nil end
+    if not visit or visit.closedAt then
+        visit = NewVisit()
+    end
+    return visit
+end
+
+-- Rule 3. The carried bags changed since that bank's last kept read: an
+-- update of a carried bag arrived in the frame of that read or later.
+local function BagsChangedSince(v, state)
+    return v.bagsUpdateAt ~= nil and (state.keptAt == nil or v.bagsUpdateAt >= state.keptAt)
+end
+
+-- That bank is behind: what is remembered of it may not be what is in it,
+-- while the bags that are counted live have changed.
+local function Behind(v, state, owed)
+    return (owed or state.emptyAt ~= nil) and BagsChangedSince(v, state)
+end
+
+-- For a scan: is the open bank of that kind behind right now?
+BankBehind = function(kind)
+    local v = visit
+    if not v or v.closedAt or v.closing then return false end
+    return Behind(v, v[kind], v.owed)
+end
+
+-- Does the memory hold items for that bank?
+local function RemembersItems(kind, identity)
+    local Memory = LazyProf.StockMemory
+    local items
+    if kind == "character" then
+        items = Memory:OwnBank(identity.guid)
+    else
+        items = Memory:AccountBank(identity.world)
+    end
+    return items ~= nil and next(items) ~= nil
+end
+
+local function SaveBank(kind, identity, items, bound, now)
+    if kind == "character" then
+        return LazyProf.StockMemory:SaveBank(identity, items, bound, now, not IsSelfFound())
+    end
+    return LazyProf.StockMemory:SaveAccountBank(identity.world, items, now)
+end
+
+-- Mark the remembered bank of that kind in doubt. Returns whether that
+-- changed what is remembered (there is such a bank, and it was not marked).
+local function MarkDoubt(kind, guid, world)
+    if kind == "character" then
+        return LazyProf.StockMemory:MarkBankDoubt(guid)
+    end
+    return LazyProf.StockMemory:MarkAccountBankDoubt(world)
+end
+
+-- One read of the open bank, both kinds, keeping what rule 2 allows (rule 4
+-- for the read at the closing notice: `closing`, which also has the kinds it
+-- kept noted in keptNow). Returns whether what is remembered changed, and
+-- whether a kind was refused or found empty without being believed before
+-- the two-second mark (the look at that mark is then wanted).
+local function ReadBank(v, closing, keptNow)
+    local Client = LazyProf.Client
+    local identity = Client:CharacterIdentity() or {}
+    local now, frame = Client:Now(), GetTime()
+    local late = frame - v.openedAt >= BANK_EMPTY_TRUST - CLOCK_SLACK
+    v.lastReadAt = frame
+    v.reads = v.reads + 1
+    v.owed = false
+    v.confirm = false
+    local changed, lookWanted = false, false
+    for _, kind in ipairs(BANK_KINDS) do
+        local state = v[kind]
         local items, bound, slots = Client:BankContents(kind)
-        local keep
+        local keep = false
         if not items then
-            keep = false
-            unsettled = true
-        elseif next(items) == nil then
-            -- Not a single item: believed only well after the opening, and
-            -- never from the read at the close.
-            keep = (not closing) and openFor >= BANK_EMPTY_TRUST
-            unsettled = unsettled or not keep
+            state.last = "refused"
+            lookWanted = lookWanted or not late
+        elseif next(items) ~= nil then
+            keep = not closing or (state.slots ~= nil and slots == state.slots)
+            state.last = keep and "items" or "items, another slot count"
         elseif closing then
-            keep = visitSlots[kind] ~= nil and slots == visitSlots[kind]
+            -- Never believed from this read: the client may have let go of
+            -- the bank already. It makes no empty read unresolved either.
+            state.last = "empty"
         else
-            keep = true
+            local remembered = RemembersItems(kind, identity)
+            local sameBank = state.keptItems and state.slots == slots
+            if not remembered then
+                keep = late
+            else
+                keep = (late or sameBank) and state.emptyAt ~= nil and state.emptyAt < frame
+            end
+            if keep then
+                state.last = "empty, believed"
+            else
+                state.last = "empty, not believed"
+                state.emptyAt = state.emptyAt or frame
+                lookWanted = lookWanted or not late
+                -- Only the second look is missing: it comes with the trailing read.
+                if remembered and (late or sameBank) then
+                    v.confirm = true
+                end
+            end
         end
         if keep then
-            local ok
-            if kind == "character" then
-                ok = Memory:SaveBank(identity, items, bound, now, not IsSelfFound())
+            if SaveBank(kind, identity, items, bound, now) then
+                state.slots = slots
+                state.keptAt = frame
+                state.emptyAt = nil
+                state.kept = state.kept + 1
+                if next(items) ~= nil then
+                    state.keptItems = true
+                end
+                if keptNow then
+                    keptNow[kind] = true
+                end
+                changed = true
+                InvalidateFrame()
             else
-                ok = Memory:SaveAccountBank(identity.world, items, now)
-            end
-            if ok then
-                saved = true
-                visitSlots[kind] = slots
+                state.last = state.last .. ", not saved"
             end
         end
     end
-    if saved then
-        InvalidateFrame()
-    end
-    return saved, unsettled
+    return changed, lookWanted
 end
 
 local LookAtBank
 
--- The bank is looked at again `mark` seconds after its window opened; one
--- such look per mark is waiting at most. A window opened again meanwhile
--- moves the look to the new opening's mark.
-local function LookAtMark(mark)
-    if bankLookPending[mark] or not bankOpenedAt then return end
-    bankLookPending[mark] = true
+-- The look `mark` seconds after this visit's opening; one per mark is waiting
+-- at most. A visit that is over by then is not looked at.
+local function ScheduleLook(v, mark)
+    if v.lookPending[mark] then return end
+    v.lookPending[mark] = true
+    C_Timer.After(math.max(0, v.openedAt + mark - GetTime()), function()
+        v.lookPending[mark] = nil
+        if visit ~= v or v.closedAt then return end
+        Protected("bank read", LookAtBank, Inventory)
+    end)
+end
+
+-- The trailing read: BANK_READ_SPACING after the last read, when a read is
+-- owed or an empty read waits for its second look by then. One is waiting at
+-- most; a read taken meanwhile moves it on.
+local function ScheduleTrailing(v)
+    if v.trailingPending then return end
+    v.trailingPending = true
     local function fire()
-        local wait = bankOpenedAt + mark - GetTime()
-        if wait > 0.001 and LazyProf.Client:IsBankOpen() then
+        if visit ~= v or v.closedAt then
+            v.trailingPending = false
+            return
+        end
+        local wait = (v.lastReadAt or 0) + BANK_READ_SPACING - GetTime()
+        if wait > CLOCK_SLACK then
             C_Timer.After(wait, fire)
             return
         end
-        bankLookPending[mark] = nil
-        Protected("bank read", LookAtBank, Inventory, true)
+        v.trailingPending = false
+        if v.owed or v.confirm then
+            Protected("bank read", LookAtBank, Inventory)
+        end
     end
-    C_Timer.After(math.max(0, bankOpenedAt + mark - GetTime()), fire)
+    C_Timer.After(math.max(0, (v.lastReadAt or GetTime()) + BANK_READ_SPACING - GetTime()), fire)
 end
 
--- One read of the open bank, the one of this frame. redraw: let a shown list
--- redraw when the read changed what is remembered (a scan passes false: it
--- is the redraw). Returns whether anything was saved.
-LookAtBank = function(self, redraw)
-    if not bankReadThisFrame then
-        bankReadThisFrame = true
-        C_Timer.After(0, function() bankReadThisFrame = false end)
+-- Read the open bank now and ask for what the read leaves open: the look at
+-- the two-second mark, the second look at an empty bank. A shown list is
+-- asked to redraw when the read changed what is remembered. Returns whether
+-- it did.
+LookAtBank = function(self)
+    local v = OpenVisit()
+    if not v then return false end
+    local changed, lookWanted = ReadBank(v, false)
+    if lookWanted then
+        ScheduleLook(v, BANK_EMPTY_TRUST)
     end
-    local saved, unsettled = self:ReadBank()
-    if unsettled and bankOpenedAt and GetTime() - bankOpenedAt < BANK_EMPTY_TRUST then
-        LookAtMark(BANK_EMPTY_TRUST)
+    if v.confirm then
+        ScheduleTrailing(v)
     end
-    if saved and redraw and LazyProf.ScheduleShoppingListRefresh then
+    if changed and LazyProf.ScheduleShoppingListRefresh then
         LazyProf:ScheduleShoppingListRefresh()
     end
-    return saved
-end
-
--- That look without the redraw request, for a scan (which is the redraw).
-function Inventory:LookAtOpenBank()
-    return LookAtBank(self, false)
-end
-
--- Has this frame read the bank already?
-function Inventory:BankReadThisFrame()
-    return bankReadThisFrame
+    return changed
 end
 
 -- Something changed while the bank is open (a bag update, a change of its
--- tabs): read it now when this frame has not read it yet, else leave one
--- read for the next frame.
+-- tabs): read it now when the last read is long enough ago, else the read is
+-- owed and the trailing read takes it.
 function Inventory:OnBankChange()
-    if self:UsesSyndicator() or not LazyProf.Client:IsBankOpen() then return end
-    if not bankReadThisFrame then
-        LookAtBank(self, true)
-    elseif not bankReadOwed then
-        bankReadOwed = true
-        C_Timer.After(0, function()
-            if not bankReadOwed then return end   -- taken at the close meanwhile
-            bankReadOwed = false
-            -- reads nothing when the bank has closed meanwhile
-            Protected("bank read", LookAtBank, Inventory, true)
-        end)
+    if self:UsesSyndicator() then return end
+    local v = OpenVisit()
+    if not v then return end
+    if v.lastReadAt == nil or GetTime() - v.lastReadAt >= BANK_READ_SPACING - CLOCK_SLACK then
+        LookAtBank(self)
+    else
+        v.owed = true
+        ScheduleTrailing(v)
     end
 end
 
 function Inventory:OnBankOpened()
     if self:UsesSyndicator() then return end
-    bankOpenedAt = GetTime()
-    bankReadOwed = false
-    visitSlots = {}
-    Protected("bank read", LookAtBank, self, true)
-    LookAtMark(BANK_SETTLE)
+    -- A comparison still due from the last close is made before its watch ends.
+    if watch and watch.owed then
+        Protected("bank close", SettleAfterClose)
+    end
+    watch = nil
+    visit = NewVisit()
+    Protected("bank read", LookAtBank, self)
+    ScheduleLook(visit, BANK_SETTLE)
 end
 
--- The window is closing and the bank still counts as open: take the read
--- that is still owed, by the stricter rule (see ReadBank).
-function Inventory:OnBankClosing()
-    if not bankReadOwed then return end
-    Protected("bank read", function()
-        if self:ReadBank(true) and LazyProf.ScheduleShoppingListRefresh then
+local function SameCounts(a, b)
+    for itemId, count in pairs(a) do
+        if b[itemId] ~= count then return false end
+    end
+    for itemId in pairs(b) do
+        if a[itemId] == nil then return false end
+    end
+    return true
+end
+
+-- Rule 4, at the adapter's closing notice and at a logout with the bank
+-- open; once per visit. visit.closing says afterwards what was done:
+--   owed, unresolved   what the visit still had open
+--   read               the bank was read once more
+--   kept[kind]         that read was kept for the kind
+--   doubt[kind]        the kind was still behind: marked in doubt
+-- It also takes the note of the carried bags for the watch after the close.
+local function CloseVisit(self)
+    local v = OpenVisit()
+    if not v or v.closing then return end
+    local Client = LazyProf.Client
+    local done = { owed = v.owed, unresolved = false, read = false, kept = {}, doubt = {} }
+    v.closing = done
+    for _, kind in ipairs(BANK_KINDS) do
+        if v[kind].emptyAt ~= nil then
+            done.unresolved = true
+        end
+    end
+    local changed = false
+    if done.owed or done.unresolved then
+        done.read = true
+        changed = ReadBank(v, true, done.kept)
+    end
+    local identity = Client:CharacterIdentity() or {}
+    for _, kind in ipairs(BANK_KINDS) do
+        if not done.kept[kind] and Behind(v, v[kind], done.owed) then
+            done.doubt[kind] = true
+            if MarkDoubt(kind, identity.guid, identity.world) then
+                changed = true
+            end
+        end
+    end
+    local items, _, backpackSlots = Client:BagContents()
+    watch = {
+        at = GetTime(), guid = identity.guid, world = identity.world,
+        note = (backpackSlots and backpackSlots > 0) and items or nil,
+        updates = 0, compared = 0, owed = false, pending = false,
+    }
+    if changed then
+        InvalidateFrame()
+        if LazyProf.ScheduleShoppingListRefresh then
             LazyProf:ScheduleShoppingListRefresh()
+        end
+    end
+end
+
+-- The window is closing and the bank still counts as open.
+function Inventory:OnBankClosing()
+    if self:UsesSyndicator() then return end
+    Protected("bank close", CloseVisit, self)
+end
+
+-- The bank counts as closed now: nothing is read any more.
+function Inventory:OnBankClosed()
+    bankClosedAt = GetTime()
+    if visit and not visit.closedAt then
+        visit.closedAt = bankClosedAt
+        visit.owed = false
+    end
+end
+
+-- Rule 5: the comparison that is due after an update inside the watch.
+-- bagItems: the carried bags, when the caller has just read them (a scan);
+-- otherwise they are read here. A read that cannot be trusted (no backpack
+-- slots) decides nothing and leaves the comparison due. Returns whether a
+-- bank was marked.
+SettleAfterClose = function(bagItems)
+    local w = watch
+    if not w or not w.owed then return false end
+    local items = bagItems
+    if not items then
+        local read, _, backpackSlots = LazyProf.Client:BagContents()
+        if not backpackSlots or backpackSlots <= 0 then return false end
+        items = read
+    end
+    w.owed = false
+    w.compared = w.compared + 1
+    local differs
+    if w.note then
+        differs = not SameCounts(w.note, items)
+    else
+        -- No note could be taken at the close: an update of a carried bag
+        -- is then all there is to go by.
+        differs = w.carried == true
+    end
+    if not differs then return false end
+    w.changed = true
+    local marked = false
+    for _, kind in ipairs(BANK_KINDS) do
+        if MarkDoubt(kind, w.guid, w.world) then
+            marked = true
+        end
+    end
+    if marked then
+        InvalidateFrame()
+        if LazyProf.ScheduleShoppingListRefresh then
+            LazyProf:ScheduleShoppingListRefresh()
+        end
+    end
+    return marked
+end
+
+-- A bag update while the bank is closed: inside the watch after a close it
+-- asks for the comparison - on the next frame (one timer, a pending flag),
+-- or by a scan that comes first.
+local function WatchUpdate(carried)
+    local w = watch
+    if not w or w.changed then return end
+    if GetTime() - w.at > CLOSE_WATCH + CLOCK_SLACK then return end
+    w.updates = w.updates + 1
+    if carried then
+        w.carried = true
+    end
+    w.owed = true
+    InvalidateFrame()
+    if w.pending then return end
+    w.pending = true
+    C_Timer.After(0, function()
+        w.pending = false
+        if watch == w then
+            Protected("bank close", SettleAfterClose)
         end
     end)
 end
 
--- The bank counts as closed now: nothing is read any more, and a read that
--- was owed is not owed any longer.
-function Inventory:OnBankClosed()
-    bankClosedAt = GetTime()
-    bankReadOwed = false
-end
-
--- A bag update (Core/Init.lua passes every BAG_UPDATE on with its container
--- id). While the bank is open the bank is read again; an update of a bank
--- container is not a change of the bags.
-function Inventory:OnBagUpdate(bagId)
-    if self:UsesSyndicator() then return end
-    Protected("bag update", function()
-        local Client = LazyProf.Client
-        local bankKind = Client:BankKindOfBag(bagId)
-        if Client:IsBankOpen() then
-            self:OnBankChange()
-        elseif bankKind then
+local function BagUpdated(self, bagId)
+    local Client = LazyProf.Client
+    local bankKind = Client:BankKindOfBag(bagId)
+    local v = OpenVisit()
+    if v then
+        if not bankKind then
+            v.bagsUpdateAt = GetTime()
+        end
+        -- Whether a bank is behind may have changed with this update.
+        InvalidateFrame()
+        self:OnBankChange()
+    else
+        if bankKind then
             -- It cannot be read now. Counted, so that one dump shows whether
             -- the client reports bank changes after the window closed.
             closedBankUpdates.count = closedBankUpdates.count + 1
             closedBankUpdates.lastAfter = bankClosedAt and (GetTime() - bankClosedAt) or nil
         end
-        if not bankKind then
-            self:RequestBagSave(true)
-        end
-    end)
+        WatchUpdate(not bankKind)
+    end
+    if not bankKind then
+        self:RequestBagSave(true)
+    end
+end
+
+-- A bag update (Core/Init.lua passes every BAG_UPDATE on with its container
+-- id). While the bank is open the bank is read again (rule 1); an update of
+-- a bank container is not a change of the bags.
+function Inventory:OnBagUpdate(bagId)
+    if self:UsesSyndicator() then return end
+    Protected("bag update", BagUpdated, self, bagId)
+end
+
+local function BatchComplete(self)
+    local v = OpenVisit()
+    if not v or not v.owed then return end
+    local frame = GetTime()
+    if v.lastReadAt == nil or v.lastReadAt == frame or frame - v.lastReadAt >= BANK_READ_SPACING - CLOCK_SLACK then
+        LookAtBank(self)
+    end
+end
+
+-- The client says a batch of bag updates is complete (Core/Init.lua passes
+-- BAG_UPDATE_DELAYED on): a read owed for this frame's updates is taken now.
+function Inventory:OnBagUpdateDelayed()
+    if self:UsesSyndicator() then return end
+    Protected("bag update", BatchComplete, self)
 end
 
 -- Logout (the client's event, and the database's own shutdown notice, which
--- is sure to come before the saved tables are tidied): write a bag save that
--- is still waiting.
+-- is sure to come before the saved tables are tidied; either may come first
+-- and both may come). With the bank still open the visit ends as at a close.
+-- Then a bag save that is still waiting is written.
 function Inventory:OnLogout()
+    if self:UsesSyndicator() then return end
+    if visit and not visit.closedAt and not visit.closing then
+        Protected("logout", CloseVisit, self)
+    end
     if not bagSavePending then return end
     bagSavePending = false
     bagUpdateSeen = false
@@ -809,18 +1159,20 @@ function Inventory:OnSettingsReset()
 end
 
 -- Forget every remembered character and account bank (the options button).
--- The character being played is remembered again by itself.
+-- The character being played is remembered again by itself: its bags with
+-- the next save, and its bank at once when the bank window is open.
 function Inventory:ForgetRemembered()
     LazyProf.StockMemory:Forget()
     self:InvalidateCache()
     self:ForgetAltsPart()
-    visitSlots = {}
-    Protected("bank read", self.LookAtOpenBank, self)
+    watch = nil
+    Protected("bank read", LookAtBank, self)
     self:RequestBagSave()
 end
 
 -- /lp diag stock: where stock outside the bags comes from, who the character
--- is and what is remembered. Read-only (an open bank is not saved by it).
+-- is, what the current or the last bank visit did and what is remembered.
+-- Read-only (an open bank is neither read nor saved by it).
 function Inventory:RunDiagnostic(lines)
     local function add(text) lines[#lines + 1] = text end
     local Memory, Client = LazyProf.StockMemory, LazyProf.Client
@@ -866,8 +1218,49 @@ function Inventory:RunDiagnostic(lines)
     if not identity.faction then
         add("faction: unknown - alts are not counted")
     end
-    add("waiting: bagSave=" .. tostring(bagSavePending) .. " bankRead=" .. tostring(bankReadOwed or next(bankLookPending) ~= nil)
+    local v = visit
+    local bankReadWaiting = v ~= nil and not v.closedAt
+        and (v.owed or v.confirm or v.trailingPending or next(v.lookPending) ~= nil) or false
+    add("waiting: bagSave=" .. tostring(bagSavePending) .. " bankRead=" .. tostring(bankReadWaiting)
         .. " bankOpen=" .. tostring(Client:IsBankOpen()))
+    -- The bank visit in progress or the last one: which rules fired.
+    if not v then
+        add("bank visit: none this session")
+    else
+        local frame = GetTime()
+        local head
+        if v.closedAt then
+            head = string.format("bank visit: closed %.1f s ago after %.1f s", frame - v.closedAt, v.closedAt - v.openedAt)
+        else
+            head = string.format("bank visit: open for %.1f s", frame - v.openedAt)
+        end
+        add(head .. "; reads=" .. tostring(v.reads) .. " owed=" .. tostring(v.owed)
+            .. " carriedBagsUpdated=" .. tostring(v.bagsUpdateAt ~= nil))
+        for _, kind in ipairs(BANK_KINDS) do
+            local state = v[kind]
+            add("bank visit " .. kind .. ": kept=" .. tostring(state.kept) .. " lastRead=" .. tostring(state.last or "none")
+                .. " slots=" .. tostring(state.slots) .. " unresolvedEmpty=" .. tostring(state.emptyAt ~= nil)
+                .. " bagsChangedSinceKept=" .. tostring(BagsChangedSince(v, state)))
+        end
+        local done = v.closing
+        if done then
+            local function names(set)
+                local list = {}
+                for _, kind in ipairs(BANK_KINDS) do
+                    if set[kind] then list[#list + 1] = kind end
+                end
+                return #list > 0 and table.concat(list, ",") or "none"
+            end
+            add("bank visit close: owed=" .. tostring(done.owed) .. " unresolvedEmpty=" .. tostring(done.unresolved)
+                .. " readAgain=" .. tostring(done.read) .. " kept=" .. names(done.kept)
+                .. " markedInDoubt=" .. names(done.doubt))
+        end
+    end
+    if watch then
+        add("after the close: bagUpdates=" .. tostring(watch.updates) .. " compared=" .. tostring(watch.compared)
+            .. " carriedBagsChanged=" .. tostring(watch.changed == true)
+            .. (watch.changed and " (the remembered banks were marked in doubt)" or ""))
+    end
     -- Whether the client reports bank changes after the window closed (they
     -- cannot be read then, so the remembered bank misses them).
     local closedLine = "bank updates while closed: " .. tostring(closedBankUpdates.count)
@@ -904,9 +1297,10 @@ function Inventory:RunDiagnostic(lines)
         unknown = "not counted (this character's world or faction is unknown)",
     }
     local standing = Memory:Standing(identity)
-    local function part(label, items, at)
+    local function part(label, items, at, doubt)
         if items == nil then return label .. "=never seen" end
-        return label .. "=" .. tostring(items) .. " items (" .. tostring(Memory.AgeText(now, at) or "no time") .. ")"
+        return label .. "=" .. tostring(items) .. " items (" .. tostring(Memory.AgeText(now, at) or "no time")
+            .. (doubt and ", in doubt: not counted" or "") .. ")"
     end
     for _, c in ipairs(summary.characters) do
         local label = STANDING[standing[c.guid]]
@@ -921,11 +1315,11 @@ function Inventory:RunDiagnostic(lines)
         end
         add("character: " .. tostring(c.name) .. " [" .. tostring(label) .. "] world=" .. tostring(c.world)
             .. " faction=" .. tostring(c.faction) .. " " .. part("bags", c.bagItems, c.bagsAt)
-            .. " " .. part("bank", c.bankItems, c.bankAt) .. " guid=" .. tostring(c.guid))
+            .. " " .. part("bank", c.bankItems, c.bankAt, c.bankDoubt) .. " guid=" .. tostring(c.guid))
     end
     for _, bank in ipairs(summary.account) do
         add("account bank: world=" .. tostring(bank.world) .. " items=" .. tostring(bank.items)
-            .. " (" .. tostring(Memory.AgeText(now, bank.at) or "no time") .. ")")
+            .. " (" .. tostring(Memory.AgeText(now, bank.at) or "no time") .. (bank.doubt and ", in doubt: not counted" or "") .. ")")
     end
 end
 

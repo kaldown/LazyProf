@@ -14,6 +14,7 @@
 --   local addon = World.login(saved, { selfFound = false, init = false })
 --   World.event(addon, "BANKFRAME_OPENED")  -- a client event the adapter registered
 --   World.bagUpdate(addon, 6, 0)            -- BAG_UPDATE for each container id given
+--   World.bagUpdateDelayed(addon)           -- BAG_UPDATE_DELAYED: that batch of updates is complete
 --   World.advance(0.5); World.nextFrame()
 --   World.scan(addon)                       -- ScanAll past the frame cache
 --
@@ -239,6 +240,16 @@ function World.bagUpdate(addon, ...)
         else
             addon.Inventory:OnBagUpdate(bagId)
         end
+    end
+end
+
+-- BAG_UPDATE_DELAYED: the client's notice that a batch of bag updates is
+-- complete. Core/Init.lua owns that event too.
+function World.bagUpdateDelayed(addon)
+    if addon.events.BAG_UPDATE_DELAYED then
+        World.event(addon, "BAG_UPDATE_DELAYED")
+    else
+        addon.Inventory:OnBagUpdateDelayed()
     end
 end
 
