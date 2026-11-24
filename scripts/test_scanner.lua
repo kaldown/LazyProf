@@ -88,6 +88,7 @@ local function resetClient()
     client = {
         identity = MAIN, now = NOW, bankOpen = false,
         gameSelfFound = false,                       -- what the game's own Self-Found flag reads
+        clientCounts = nil,                          -- function(itemId): the client's own three counts; nil = this client has none
         bags = { [2589] = 5 }, bagsBound = {}, backpackSlots = 16,
         bank = { character = nil, account = nil },   -- [kind] = { items, bound }; nil = cannot be read now
         usable = {},                                 -- [kind] = true / false: says so whatever the bank reads
@@ -125,6 +126,13 @@ LazyProf.Client = {
     end,
     CharacterIdentity = function() return client.identity end,
     IsSelfFoundCharacter = function() return client.gameSelfFound end,
+    -- Like the adapters: nil on a client without such a count; without an
+    -- item, zeros and nothing asked.
+    ClientItemCounts = function(_, itemId)
+        if not client.clientCounts then return nil end
+        if itemId == nil then return 0, 0, 0 end
+        return client.clientCounts(itemId)
+    end,
     Now = function() return client.now end,
     StartStock = function(_, callbacks) client.started = callbacks end,
     RunStockDiagnostic = function(_, lines) lines[#lines + 1] = "adapter: stock lines" end,
@@ -3052,6 +3060,110 @@ T.section("diagnostic lines", function()
             visitText:find("bank visit account: usable=false kept=0 lastRead=refused slots=nil unresolvedEmpty=false unsettled=false\n", 1, true) ~= nil,
             visitText)
         advance(3)
+    end
+
+    -- What the client itself counts of the character's remembered bank,
+    -- beside what is remembered: one paste away from the bank says whether
+    -- the client counts a bank while its window is closed.
+    do
+        local function dumpOf()
+            local out = {}
+            Inventory:RunDiagnostic(out)
+            return table.concat(out, "\n"), out
+        end
+        local function countLines(out)
+            local kept = {}
+            for _, line in ipairs(out) do
+                if line:find("client count", 1, true) then kept[#kept + 1] = line end
+            end
+            return kept
+        end
+        fresh()
+        Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW)
+        Memory:SaveBank(MAIN, { [2589] = 40, [765] = 3, [2770] = 9, [4306] = 2, [774] = 1, [6948] = 1 }, {}, NOW)
+        Memory:SaveAccountBank("eu-pvp", { [2589] = 10, [774] = 4 }, NOW)
+        client.bags = { [2589] = 5, [774] = 2 }
+        -- A client that counts both banks while they are closed.
+        local inBank = { [2589] = 40, [765] = 3, [2770] = 9, [4306] = 2, [774] = 1, [6948] = 1 }
+        local inAccount = { [2589] = 10, [774] = 4 }
+        local askedFor = {}
+        client.clientCounts = function(itemId)
+            askedFor[#askedFor + 1] = itemId
+            local carried = client.bags[itemId] or 0
+            return carried, carried + (inBank[itemId] or 0), carried + (inBank[itemId] or 0) + (inAccount[itemId] or 0)
+        end
+        local saveBefore = Memory:Summary().characters[1].seen
+        local dump, out = dumpOf()
+        local counts = countLines(out)
+        T.eq("client counts: one line for each of the five lowest item ids of the remembered bank", #counts, 5)
+        T.eq("client counts: the first line, word for word", counts[1],
+            "client count 765: carried=0 withBank=3 withAccountBank=3; remembered: bags now=0 bank=3 accountBank=0")
+        T.eq("client counts: an item held in the bags and in both banks", counts[2],
+            "client count 774: carried=2 withBank=3 withAccountBank=7; remembered: bags now=2 bank=1 accountBank=4")
+        T.eq("client counts: the third", counts[3],
+            "client count 2589: carried=5 withBank=45 withAccountBank=55; remembered: bags now=5 bank=40 accountBank=10")
+        T.check("client counts: lowest ids first, and no more than five",
+            counts[4]:find("client count 2770: ", 1, true) == 1 and counts[5]:find("client count 4306: ", 1, true) == 1
+            and not dump:find("client count 6948", 1, true), dump)
+        T.eq("client counts: the client is asked for those five only", table.concat(askedFor, ","), "765,774,2589,2770,4306")
+        T.check("client counts: after the bank's lines, before what is remembered",
+            dump:find("\nbank updates while closed: [^\n]*\nclient count 765: ") ~= nil
+            and dump:find("\nclient count 4306: [^\n]*\nmemory: format=1 ") ~= nil, dump)
+        T.check("client counts: the dump stays read-only", Memory:Summary().characters[1].seen == saveBefore and #timers == 0)
+        -- A client that does not count a closed bank: the lines say so by their numbers.
+        client.clientCounts = function(itemId)
+            local carried = client.bags[itemId] or 0
+            return carried, carried, carried
+        end
+        T.eq("client counts: a client that sees only what is carried", countLines(select(2, dumpOf()))[3],
+            "client count 2589: carried=5 withBank=5 withAccountBank=5; remembered: bags now=5 bank=40 accountBank=10")
+        -- No account bank remembered for this world: said in words, not as a count.
+        LazyProf.db.global.stock.account["eu-pvp"] = nil
+        T.eq("client counts: no account bank remembered", countLines(select(2, dumpOf()))[1],
+            "client count 765: carried=0 withBank=0 withAccountBank=0; remembered: bags now=0 bank=3 accountBank=never seen")
+        -- Fewer than five items remembered: a line for each.
+        Memory:SaveBank(MAIN, { [4306] = 2, [765] = 3 }, {}, NOW)
+        counts = countLines(select(2, dumpOf()))
+        T.check("client counts: two items remembered, two lines", #counts == 2 and counts[1]:find("client count 765: ", 1, true) == 1
+            and counts[2]:find("client count 4306: ", 1, true) == 1, table.concat(counts, " | "))
+        -- A bank marked in doubt is still what is remembered: it is compared.
+        Memory:MarkBankDoubt(MAIN.guid)
+        T.eq("client counts: a bank in doubt is compared all the same", #countLines(select(2, dumpOf())), 2)
+        -- Nothing remembered of this character's bank: one line says so.
+        Memory:SaveBank(MAIN, {}, {}, NOW)
+        counts = countLines(select(2, dumpOf()))
+        T.check("client counts: a bank remembered as empty has nothing to compare", #counts == 1
+            and counts[1] == "client count: nothing remembered of this bank to compare", table.concat(counts, " | "))
+        LazyProf.db.global.stock.characters[MAIN.guid].bank = nil
+        counts = countLines(select(2, dumpOf()))
+        T.check("client counts: nor has a bank never seen", #counts == 1
+            and counts[1] == "client count: nothing remembered of this bank to compare", table.concat(counts, " | "))
+        -- A client whose adapter has no such count: no line at all.
+        Memory:SaveBank(MAIN, { [2589] = 40, [765] = 3 }, {}, NOW)
+        client.clientCounts = nil
+        dump, out = dumpOf()
+        T.eq("client counts: an adapter without the count prints no line", #countLines(out), 0)
+        LazyProf.db.global.stock.characters[MAIN.guid].bank = nil
+        T.eq("client counts: nor the line about nothing to compare", #countLines(select(2, dumpOf())), 0)
+        Memory:SaveBank(MAIN, { [2589] = 40, [765] = 3 }, {}, NOW)
+        -- A count call that fails: said in its place, and the rest of the dump stays.
+        client.clientCounts = function(itemId)
+            if itemId == 2589 then error("count down") end
+            return 0, 3, 3
+        end
+        dump, out = dumpOf()
+        T.check("client counts: a failing count call is reported as a section error",
+            dump:find("\nclient count 765: carried=0 withBank=3 withAccountBank=3; [^\n]*\nSECTION ERROR: client count: [^\n]*count down")
+                ~= nil, dump)
+        T.check("client counts: and the rest of the dump stays", dump:find("\nmemory: format=1 characters=2 ", 1, true) ~= nil
+            and dump:find("\ncharacter: Main Character [this character]", 1, true) ~= nil
+            and dump:find("\ncharacter: Bank Alt [alt, counted]", 1, true) ~= nil, dump)
+        -- With Syndicator the memory is not in use: nothing to compare.
+        client.clientCounts = function() return 1, 2, 3 end
+        installSyndicator()
+        T.eq("client counts: none with Syndicator installed", #countLines(select(2, dumpOf())), 0)
+        _G.Syndicator = nil
+        client.clientCounts = nil
     end
 
     -- Entries that are not what LazyProf writes are counted, not listed.

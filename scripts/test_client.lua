@@ -195,7 +195,7 @@ section("selection", function()
                          "FreeBagSlots", "Money", "RunMerchantDiagnostic",
                          "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic",
                          "BagContents", "IsBankOpen", "BankContents", "BankUsable", "BankKindOfBag", "CharacterIdentity", "Now",
-                         "IsSelfFoundCharacter", "ShowError",
+                         "IsSelfFoundCharacter", "ShowError", "ClientItemCounts",
                          "StartStock", "RunStockDiagnostic" }) do
         check(p .. "Client:" .. m .. " exists", type(classic.Client[m]) == "function")
     end
@@ -577,6 +577,17 @@ section("stock", function()
             check(p .. "ShowError: " .. case[1] .. " - nothing raised, nothing handed on", ran and #handed == 1, err)
         end
         _G.geterrorhandler = savedHandler
+    end
+
+    -- The client's own item count is not asked on these clients (no bank
+    -- is remembered here to compare it with).
+    do
+        local savedItem = _G.C_Item
+        _G.C_Item = { GetItemCount = function() error("the client's count asked on a Classic client") end }
+        check(p .. "client counts: none on this adapter, and the client is not asked",
+            select("#", Client:ClientItemCounts(2589)) == 1 and Client:ClientItemCounts(2589) == nil
+            and Client:ClientItemCounts(nil) == nil)
+        _G.C_Item = savedItem
     end
 
     _G.GetServerTime = function() return 1763900000 end

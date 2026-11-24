@@ -12,6 +12,7 @@
 --   World.containers[6] = { slots = 28, World.slot(2589, 100) }
 --   World.bank[0] = { tabs = { { ID = 6 } } }          -- [bankType]: tabs, canView, locked
 --   World.gameSelfFound = true              -- the game itself marks the character Self-Found
+--   World.countsBank = false                -- the client's own item count leaves the banks out
 --   local addon = World.login(saved, { selfFound = false, init = false })
 --   World.event(addon, "BANKFRAME_OPENED")  -- a client event the adapter registered
 --   World.bagUpdate(addon, 6, 0)            -- BAG_UPDATE for each container id given
@@ -38,6 +39,7 @@ World.guid = "Player-4444-000000AA"
 World.name = "Main Goldtooth"
 World.faction = "Horde"
 World.gameSelfFound = false   -- C_PlayerInfo.IsSelfFoundActive()
+World.countsBank = true       -- C_Item.GetItemCount counts the banks' containers when asked to
 World.calls = { slots = 0, tabs = 0 }
 World.errors = {}
 
@@ -60,6 +62,7 @@ function World.reset()
     World.name = "Main Goldtooth"
     World.faction = "Horde"
     World.gameSelfFound = false
+    World.countsBank = true
     World.calls = { slots = 0, tabs = 0 }
     World.errors = {}
 end
@@ -120,6 +123,28 @@ function World.install()
     _G.UnitGUID = function(unit) return unit == "player" and World.guid or nil end
     _G.NameUtil = { GetUnmodifiedUnitFullName = function() return World.name end }
     _G.C_PlayerInfo = { IsSelfFoundActive = function() return World.gameSelfFound end }
+    -- The client's own count of an item: what the carried bags hold (0-5),
+    -- with the character bank's tabs (6-14) and the account bank's (15-23)
+    -- when asked for. Whether the real client counts a bank while its window
+    -- is closed is not known; World.countsBank = false is a client that
+    -- does not.
+    _G.C_Item = { GetItemCount = function(itemId, includeBank, _includeUses, _includeReagentBank, includeAccountBank)
+        local function held(first, last)
+            local count = 0
+            for bag = first, last do
+                local container = World.containers[bag]
+                for index = 1, container and container.slots or 0 do
+                    local info = container[index]
+                    if info and info.itemID == itemId then count = count + info.stackCount end
+                end
+            end
+            return count
+        end
+        local count = held(0, 5)
+        if includeBank and World.countsBank then count = count + held(6, 14) end
+        if includeAccountBank and World.countsBank then count = count + held(15, 23) end
+        return count
+    end }
     _G.issecretvalue = nil
     _G.geterrorhandler = function()
         return function(message) World.errors[#World.errors + 1] = tostring(message) end

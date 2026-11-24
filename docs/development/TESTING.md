@@ -43,12 +43,12 @@ The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks ever
 | `test_panelshell.lua` | Panel position, size, closed state and combat hide / restore |
 | `test_arrow.lua` | The recipe arrow and its tooltip |
 | `test_client.lua`, `test_forever_client.lua` | The Classic and the WoW Forever client adapter |
-| `test_boundaries.lua` | Client API calls stay inside `Core/Client/` and `Modules/UI/Widgets/` |
+| `test_boundaries.lua` | Client API calls stay inside `Core/Client/` and `Modules/UI/Widgets/`; the bank, logout and bag events are each registered in one place |
 | `test_charstore.lua` | Per-character planner data kept under the character's GUID |
 | `test_learned.lua` | Learned-recipe detection |
 | `test_profile.lua` | Per-client branches: Wowhead links, racial bonuses, skill brackets |
 | `test_brackets.lua` | A what-if path from skill 1: the arrow follows the real skill |
-| `test_perf.lua` | Debounced recalculation, the item-info trailing debounce, the availability memo, a burst of bag updates (one light refresh, one remembered snapshot, no recalculation) |
+| `test_perf.lua` | Debounced recalculation, the item-info trailing debounce, the availability memo, a burst of bag updates (one light refresh, one remembered snapshot, no recalculation), no debug lines built by a stock scan while debugging is off |
 | `test_debuglog.lua` | The debug-log buffer and its rendering |
 | `test_utils.lua` | The pure helpers in `Core/Utils.lua` |
 
@@ -154,6 +154,7 @@ After making changes, run `/reload` and verify:
 9. "Forget remembered characters": the "From alts" row goes until the alt is played again
 10. "Reset All Settings" (or `/lp reset`): the settings are back at their defaults, the "From bank" and "From alts" rows are still there
 11. Stand at the open bank and craft, or sort the bank: no stutter; `/lp diag stock` shows `bank visit: ... reads=N` growing by a few per second at most
+12. After a bank visit, walk away from the bank and run `/lp diag stock`: paste the `client count` lines. `withBank - carried` equal to `bank=` means the game counts the bank while its window is closed (then the remembered bank could be checked against the game at any time); `withBank` equal to `carried` means it does not
 
 **Stock and the route (Cheapest):**
 1. Own enough reagents for a whole run of a recipe that is not on the path

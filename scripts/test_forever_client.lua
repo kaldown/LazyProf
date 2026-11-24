@@ -207,7 +207,7 @@ local SURFACE = { "IsOpen", "AnchorFrame", "PanelOffsetX", "GetLine", "NoDataPro
                   "FreeBagSlots", "Money", "RunMerchantDiagnostic",
                   "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic",
                   "BagContents", "IsBankOpen", "BankContents", "BankUsable", "BankKindOfBag", "CharacterIdentity", "Now",
-                  "IsSelfFoundCharacter", "ShowError",
+                  "IsSelfFoundCharacter", "ShowError", "ClientItemCounts",
                   "StartStock", "RunStockDiagnostic" }
 
 -- Names of the functions an adapter installs.
@@ -1082,6 +1082,35 @@ section("stock", function()
             check(p .. "ShowError: " .. case[1] .. " - nothing raised, nothing handed on", ran and #handed == 1, err)
         end
         _G.geterrorhandler = savedHandler
+    end
+
+    -- What the client itself counts of an item ----------------------------------
+    do
+        local asked = {}
+        _G.C_Item.GetItemCount = function(itemInfo, includeBank, includeUses, includeReagentBank, includeAccountBank)
+            asked[#asked + 1] = table.concat({ tostring(itemInfo), tostring(includeBank), tostring(includeUses),
+                tostring(includeReagentBank), tostring(includeAccountBank) }, ",")
+            return 5 + (includeBank and 100 or 0) + (includeAccountBank and 60 or 0)
+        end
+        local carried, withBank, withAccountBank = Client:ClientItemCounts(2589)
+        check(p .. "client counts: carried only, with the bank, with the bank and the account bank",
+            carried == 5 and withBank == 105 and withAccountBank == 165,
+            tostring(carried) .. "," .. tostring(withBank) .. "," .. tostring(withAccountBank))
+        -- All five arguments are passed, as Blizzard does; charges and the
+        -- reagent bank are never asked for.
+        check(p .. "client counts: asked three times, with all five arguments",
+            table.concat(asked, " | ") == "2589,false,false,false,false | 2589,true,false,false,false | 2589,true,false,false,true",
+            table.concat(asked, " | "))
+        check(p .. "client counts: three values", select("#", Client:ClientItemCounts(2589)) == 3)
+        -- Without an item nothing is asked of the client: the answer only
+        -- says that this client has such a count.
+        asked = {}
+        carried, withBank, withAccountBank = Client:ClientItemCounts(nil)
+        check(p .. "client counts: without an item nothing is asked, and the three are zero",
+            carried == 0 and withBank == 0 and withAccountBank == 0 and #asked == 0, #asked)
+        _G.C_Item.GetItemCount = function() error("count down") end
+        check(p .. "client counts: a failing count call is the caller's to catch", pcall(Client.ClientItemCounts, Client, 2589) == false)
+        _G.C_Item.GetItemCount = nil
     end
 
     -- The clock ----------------------------------------------------------------

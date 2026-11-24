@@ -1689,8 +1689,42 @@ function Inventory:ForgetRemembered()
     self:RequestBagSave()
 end
 
+-- /lp diag stock: what the client itself counts of the character's
+-- remembered bank, beside what is remembered - a line for each of the lowest
+-- CLIENT_COUNT_ITEMS item ids of that bank (the lowest, so that two dumps
+-- print the same items). Whether the client's count sees a bank while its
+-- window is closed is not known; taken away from the bank, `withBank -
+-- carried` equal to the remembered bank says that it does. Only the dump
+-- asks for these counts. On a client whose adapter has none, no line.
+local CLIENT_COUNT_ITEMS = 5
+
+local function AddClientCounts(add, identity)
+    local Memory, Client = LazyProf.StockMemory, LazyProf.Client
+    -- Asked without an item, the adapter says whether this client counts at all.
+    if Client:ClientItemCounts(nil) == nil then return end
+    local bank = Memory:OwnBank(identity.guid) or {}
+    local ids = {}
+    for itemId in pairs(bank) do ids[#ids + 1] = itemId end
+    if #ids == 0 then
+        add("client count: nothing remembered of this bank to compare")
+        return
+    end
+    table.sort(ids)
+    local account = Memory:AccountBank(identity.world)
+    local carriedNow = Client:BagContents()
+    for i = 1, math.min(CLIENT_COUNT_ITEMS, #ids) do
+        local itemId = ids[i]
+        local carried, withBank, withAccountBank = Client:ClientItemCounts(itemId)
+        add("client count " .. tostring(itemId) .. ": carried=" .. tostring(carried) .. " withBank=" .. tostring(withBank)
+            .. " withAccountBank=" .. tostring(withAccountBank)
+            .. "; remembered: bags now=" .. tostring(carriedNow[itemId] or 0) .. " bank=" .. tostring(bank[itemId])
+            .. " accountBank=" .. (account and tostring(account[itemId] or 0) or "never seen"))
+    end
+end
+
 -- /lp diag stock: where stock outside the bags comes from, who the character
--- is, what the current or the last bank visit did and what is remembered.
+-- is, what the current or the last bank visit did, what the client itself
+-- counts of the remembered bank and what is remembered.
 -- Read-only (an open bank is neither read nor saved by it).
 function Inventory:RunDiagnostic(lines)
     local function add(text) lines[#lines + 1] = text end
@@ -1829,6 +1863,16 @@ function Inventory:RunDiagnostic(lines)
         end
     end
     add(closedLine)
+
+    -- What the client itself counts of the remembered bank (not with
+    -- Syndicator: the memory is not in use then). A section of its own: a
+    -- count call that fails is said here, and the rest of the dump stays.
+    if not self:UsesSyndicator() then
+        local counted, countError = pcall(AddClientCounts, add, identity)
+        if not counted then
+            add("SECTION ERROR: client count: " .. tostring(countError))
+        end
+    end
 
     local summary = Memory:Summary()
     if not summary.usable then

@@ -845,6 +845,28 @@ function Client:ShowError(message)
     end
 end
 
+-- What the client itself counts of an item: carried only, with the bank,
+-- and with the bank and the account bank.
+-- C_Item.GetItemCount(itemInfo, includeBank, includeUses, includeReagentBank,
+-- includeAccountBank) returns a number (ItemDocumentation.lua:451-467; in the
+-- client's function list, dump, GlobalAPI.lua:2517). All five arguments are
+-- passed, as Blizzard does (Blizzard_FrameXMLUtil/ItemUtil.lua:320); charges
+-- and the reagent bank are never asked for.
+-- Whether this count sees a bank while its window is closed is not known,
+-- so nothing is worked out from it: only /lp diag stock prints the three
+-- numbers beside what is remembered, and one paste taken away from the bank
+-- settles it. Nothing else may use this until then.
+-- Without an item id nothing is asked of the client and the three are zero:
+-- the caller learns from it that this client has such a count (the Classic
+-- adapter answers nil).
+function Client:ClientItemCounts(itemId)
+    if itemId == nil then return 0, 0, 0 end
+    local carried = C_Item.GetItemCount(itemId, false, false, false, false)
+    local withBank = C_Item.GetItemCount(itemId, true, false, false, false)
+    local withAccountBank = C_Item.GetItemCount(itemId, true, false, false, true)
+    return carried, withBank, withAccountBank
+end
+
 -- Server time in seconds (SystemTimeDocumentation.lua:30-36): the same on
 -- every character and computer, which the computer's own clock is not.
 function Client:Now()

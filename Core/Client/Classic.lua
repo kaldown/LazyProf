@@ -499,6 +499,13 @@ function Client:ShowError(message)
     end
 end
 
+-- What the client itself counts of an item, with and without the bank, is
+-- not asked on these clients: no bank is remembered here to compare it with
+-- (see the bank note above). nil, whatever is asked.
+function Client:ClientItemCounts(itemId)
+    return nil
+end
+
 -- Server time in seconds; the computer's clock on a client without that call.
 function Client:Now()
     if GetServerTime then

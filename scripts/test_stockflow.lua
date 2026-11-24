@@ -482,6 +482,72 @@ T.section("a character the game itself marks Self-Found", function()
 end)
 
 -- ===========================================================================
+-- /lp diag stock prints what the client itself counts of the remembered bank
+-- beside what is remembered. Whether the client's count sees a bank while its
+-- window is closed is not known: these lines, pasted from a dump taken away
+-- from the bank, settle it. Nothing else uses the count.
+-- ===========================================================================
+T.section("the stock dump: what the client itself counts", function()
+    World.reset()
+    World.containers = { [0] = { slots = 16, slot(LINEN, 5) }, [6] = { slots = 28, slot(LINEN, 100), slot(SILK, 7) },
+                         [15] = { slots = 98, slot(LINEN, 60) } }
+    World.bank = { [0] = { tabs = { { ID = 6 } } }, [2] = { tabs = { { ID = 15 } } } }
+    local saved = {}
+    local addon = World.login(saved, { init = true })
+    addon:OnEnable()
+    World.advance(3)
+    local shown
+    addon.ShowDiagnosticOutput = function(_, text) shown = text end
+    local function dump()
+        shown = nil
+        addon:RunStockDiagnostic()
+        return "\n" .. tostring(shown) .. "\n"
+    end
+    T.check("before the bank was ever open: nothing to compare",
+        dump():find("\nclient count: nothing remembered of this bank to compare\n", 1, true) ~= nil, shown)
+    World.event(addon, "BANKFRAME_OPENED")
+    World.advance(3)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(11)
+    local text = dump()
+    -- A client that counts the banks while their window is closed.
+    T.check("a client that counts the closed banks: the difference is the remembered bank",
+        text:find("\nclient count 2589: carried=5 withBank=105 withAccountBank=165; remembered: bags now=5 bank=100 accountBank=60\n",
+            1, true) ~= nil, shown)
+    T.check("an item of the character bank alone",
+        text:find("\nclient count 4306: carried=0 withBank=7 withAccountBank=7; remembered: bags now=0 bank=7 accountBank=0\n",
+            1, true) ~= nil, shown)
+    -- A client that does not.
+    World.countsBank = false
+    T.check("a client that does not count them: the three numbers are the same",
+        dump():find("\nclient count 2589: carried=5 withBank=5 withAccountBank=5; remembered: bags now=5 bank=100 accountBank=60\n",
+            1, true) ~= nil, shown)
+    World.countsBank = true
+    -- The count is only printed: a scan counts what is remembered, as before.
+    local calls = 0
+    local realCount = _G.C_Item.GetItemCount
+    _G.C_Item.GetItemCount = function(...)
+        calls = calls + 1
+        return realCount(...)
+    end
+    World.bagUpdate(addon, 0)
+    World.advance(3)
+    T.eq("a scan counts bags, bank and account bank from what is remembered", (World.scan(addon))[LINEN], 165)
+    T.eq("and nothing but the dump asks the client for its count", calls, 0)
+    -- A count call that fails is said in the dump, and the rest of it stays.
+    _G.C_Item.GetItemCount = function() error("count down") end
+    text = dump()
+    _G.C_Item.GetItemCount = realCount
+    T.check("a failing count call: a section error in its place", text:find("\nSECTION ERROR: client count: ", 1, true) ~= nil
+        and text:find("count down", 1, true) ~= nil, shown)
+    T.check("and what is remembered is still listed",
+        text:find("\nmemory: format=1 characters=1 accountBanks=1 ", 1, true) ~= nil
+        and text:find("\ncharacter: Main Goldtooth [this character] ", 1, true) ~= nil
+        and text:find("\naccount bank: world=eu-pvp items=1 ", 1, true) ~= nil, shown)
+    T.eq("the dump's own failure is no failure of the memory: nothing is handed to the game's error handler", #World.errors, 0)
+end)
+
+-- ===========================================================================
 -- A name belongs to one character of a world: the record seen last. An older
 -- record of that name never counts in its place.
 -- ===========================================================================
