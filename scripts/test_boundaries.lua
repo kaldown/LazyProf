@@ -15,8 +15,10 @@ local FORBIDDEN = {
     -- Trainer window calls and the map (the adapter's TrainerInfo / TrainerServices)
     "GetTrainer", "GetNumTrainerServices", "IsTradeskillTrainer", "BuyTrainerService", "ClassTrainerFrame",
     "C_Map", "GetRealZoneText", "GetSubZoneText",
-    -- Bags and the bank (the adapter's BagContents / BankContents / IsBankOpen)
+    -- Bags and the bank (the adapter's BagContents / BankContents / IsBankOpen),
+    -- and the locks of their slots (the adapter's MoveInFlight / BagContents)
     "C_Container", "GetContainerItemInfo", "GetContainerNumSlots", "C_Bank", "BANKFRAME", "BANK_TABS_CHANGED",
+    "isLocked", "ITEM_LOCK",
     -- The world a character belongs to and the server clock (the adapter's
     -- CharacterIdentity / Now): a realm name is no stable key on every client
     "C_GameRules", "GetCurrentRegion", "GetRealmName", "GetServerTime",
