@@ -2861,6 +2861,143 @@ T.section("after the close", function()
 end)
 
 -- ===========================================================================
+-- Every mark, and every change of what a scan leaves out, drops the frame's
+-- scan: a scan later in the same frame must not count a bank that was just
+-- marked (the list is drawn from the frame's scan). And a mark after the
+-- close falls only on a bank that was usable in the visit.
+T.section("a mark is seen by a later scan of the same frame", function()
+    local function inDoubt() return (select(3, Memory:OwnBank(MAIN.guid))) end
+    local function accountDoubt() return (select(3, Memory:AccountBank("eu"))) end
+    local function closedVisit(atClose, account)
+        fresh()
+        Inventory:Initialize()
+        advance(2.1)
+        client.bankOpen = true
+        client.bank.character = { items = { [2589] = 100 }, slots = 28 }
+        if account ~= false then client.bank.account = { items = { [4306] = 9 }, slots = 98 } end
+        client.started.onBankOpened()
+        advance(3)
+        if atClose then atClose() end
+        client.started.onBankClosing()
+        client.bankOpen = false
+        client.started.onBankClosed()
+    end
+    -- The frame of the timers that are due next: a scan in it before they
+    -- run, then the timers, then a scan of the same frame.
+    local function frameOfNextTimer()
+        local due
+        for _, t in ipairs(timers) do
+            if not due or t.due < due then due = t.due end
+        end
+        fakeNow = due
+        local before = { Inventory:ScanAll() }
+        advance(0)
+        return before, { Inventory:ScanAll() }
+    end
+
+    -- Rule 5a: an update of a bank container while the bank is closed.
+    closedVisit()
+    advance(5)
+    Inventory:ScanAll()                               -- this frame's scan
+    Inventory:OnBagUpdate(6)                          -- a craft takes reagents from the closed bank
+    local combined, _, meta = Inventory:ScanAll()
+    T.check("a closed bank's own update: a scan later in the frame does not count it", combined[2589] == 5
+        and meta.bankInDoubt == true, combined[2589])
+
+    -- Rule 5b: a carried count that rose after the close, compared a frame later.
+    closedVisit()
+    advance(0.1)
+    client.bags = { [2589] = 65 }
+    Inventory:OnBagUpdate(0)
+    local before, after = frameOfNextTimer()
+    T.check("(the frame's scan before the comparison leaves the bank out)", before[1][2589] == 65 and before[3].bankPending == true)
+    T.check("the comparison marks it: a scan later in the frame says so", after[1][2589] == 65 and after[3].bankInDoubt == true
+        and after[3].bankPending == nil)
+    -- No note of the bags at the close: a carried update marks at once.
+    closedVisit(function() client.backpackSlots = 0 end)
+    client.backpackSlots = 16
+    advance(0.1)
+    Inventory:ScanAll()
+    client.bags = { [2589] = 65 }
+    Inventory:OnBagUpdate(0)
+    combined, _, meta = Inventory:ScanAll()
+    T.check("no note at the close: the mark of a carried update is seen by a scan later in the frame", combined[2589] == 65
+        and meta.bankInDoubt == true, combined[2589])
+    -- The comparison given up at the end of the watch (the bags could not be read for it).
+    closedVisit()
+    advance(0.1)
+    client.backpackSlots = 0
+    Inventory:OnBagUpdate(0)
+    advance(0.95)
+    client.backpackSlots = 16
+    local guard = 0
+    repeat
+        before, after = frameOfNextTimer()
+        guard = guard + 1
+    until inDoubt() == true or guard > 200
+    T.check("given up at the end of the watch: the mark is seen by a scan later in the frame", after[3].bankInDoubt == true, guard)
+
+    -- Rule 4: a bank held for the second after its close counts again when
+    -- the second is over - also for a scan later in that very frame.
+    closedVisit(function()
+        Inventory:OnBagUpdate(0)                      -- read at once
+        Inventory:OnBagUpdate(0)                      -- owed
+        client.bank.character = nil                   -- the closing read is refused
+        client.bank.account = nil
+    end)
+    advance(0.9)
+    T.check("(held: left out during the second)", select(3, scan()).bankPending == true)
+    repeat before, after = frameOfNextTimer() until after[3].bankPending == nil or #timers == 0
+    T.check("(held: the frame's scan before the second is over leaves the banks out)", before[3].bankPending == true
+        and before[3].accountPending == true)
+    T.check("the second over: a scan later in the frame counts them again", after[1][2589] == 105 and after[1][4306] == 9
+        and after[3].bankPending == nil and after[3].accountPending == nil, after[1][2589])
+
+    -- Rule 4: a lock a kept read saw marks at the close; a scan later in
+    -- the frame of the close does not count the banks.
+    fresh()
+    Inventory:Initialize()
+    advance(2.1)
+    client.bankOpen = true
+    client.bank.character = { items = { [2589] = 100 }, slots = 28 }
+    client.bank.account = { items = { [4306] = 9 }, slots = 98 }
+    client.started.onBankOpened()
+    advance(3)
+    client.bank.character = { items = { [2589] = 100 }, slots = 28, locked = { [2589] = 100 } }
+    client.bags = { [2589] = 105 }
+    Inventory:OnBagUpdate(0)
+    advance(0.3)
+    client.bank.character = nil
+    Inventory:ScanAll()
+    client.started.onBankClosing(); client.bankOpen = false; client.started.onBankClosed()
+    combined, _, meta = Inventory:ScanAll()
+    T.check("a lock a kept read saw: the close's marks are seen by a scan later in its frame", combined[2589] == 105
+        and combined[4306] == nil and meta.bankInDoubt == true and meta.accountInDoubt == true, combined[2589])
+
+    -- Only a bank usable in the visit is marked after the close, or left out.
+    -- The account bank is remembered, but this character could not use it.
+    local function blindAccount()
+        Memory:SaveAccountBank(MAIN, { [4306] = 9 }, NOW - DAY)
+    end
+    closedVisit(function() client.backpackSlots = 0; blindAccount() end, false)
+    client.backpackSlots = 16
+    advance(0.1)
+    client.bags = { [2589] = 65, [4306] = 3 }
+    Inventory:OnBagUpdate(0)
+    T.check("no note at the close: a carried update marks the bank of the visit", inDoubt() == true)
+    T.check("and not a bank never usable in it", accountDoubt() == false)
+    closedVisit(blindAccount, false)
+    advance(0.1)
+    client.bags = { [2589] = 5, [4306] = 3 }
+    Inventory:OnBagUpdate(0)
+    combined, _, meta = scan()
+    T.check("a rise after the close of what only a bank never usable in the visit holds: a scan does not leave it out",
+        combined[4306] == 3 + 9 and meta.accountPending == nil, combined[4306])
+    nextFrame()
+    T.check("nor does the comparison mark it", accountDoubt() == false)
+end)
+
+-- ===========================================================================
 -- The answer of a last move may arrive after the session has ended. That
 -- session cannot see it; the next one can, because nothing else changes the
 -- carried bags in between. So a session that ends with the bank open, or

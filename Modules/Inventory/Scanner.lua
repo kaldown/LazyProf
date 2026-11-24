@@ -162,8 +162,9 @@
 --    update of a carried bag, not such an update itself.
 --    A bank that is not unsettled and not marked, for which a read was
 --    owed and the closing read was not kept, and of which items are
---    remembered, is HELD instead: for CLOSE_WATCH (1 s) after the close a
---    scan leaves it out, as being read. Its own update may be the one that
+--    remembered, is HELD instead: for CLOSE_WATCH (1 s) after the close - up
+--    to the moment the timer that ends that second runs - a scan leaves it
+--    out, as being read. Its own update may be the one that
 --    is still to come (a client can change both containers of a move with
 --    the carried bag's update and report the bank's container later); when
 --    it comes, rule 5a marks the bank. When none comes in that second the
@@ -286,6 +287,9 @@
 --    kept read of that bank takes the mark away. A bank whose time read
 --    back is damaged is left out and named the same way (the dump says
 --    "time damaged"); an alt's bags with a damaged time are not counted.
+--    Every mark, and every change of what a scan leaves out, drops the
+--    frame's scan at once (a later scan of the same frame sees it) and asks
+--    a shown list to redraw.
 --
 -- What these rules cannot see, or accept on purpose:
 --    - A move that is answered after the session has ended, where its locks
@@ -1009,6 +1013,7 @@ local closedBankUpdates = { count = 0, lastAfter = nil, quiet = 0, marked = 0 }
 --   usable[kind]      the bank was usable in the visit: it can be marked
 --   held[kind]        the bank could not be read back at the close: left out
 --                     of the scans for CLOSE_WATCH (rule 4)
+--   heldOver          the timer that ends CLOSE_WATCH for the held banks ran
 --   note              the carried bags' contents at the closing notice (nil:
 --                     they could not be read), lowered by each comparison
 --                     to the counts that have fallen
@@ -1715,10 +1720,12 @@ local function CloseVisit(self)
     watch = w
     if anyHeld then
         changed = true
-        -- When the second is over the held banks count again: a shown list
-        -- is asked to redraw then (one timer per close that holds a bank).
-        C_Timer.After(CLOSE_WATCH + 2 * CLOCK_SLACK, function()
+        -- The second is over when this timer runs (one per close that holds
+        -- a bank): the held banks count again from that moment - also for a
+        -- scan later in the same frame - and a shown list is asked to redraw.
+        C_Timer.After(CLOSE_WATCH, function()
             if watch ~= w then return end
+            w.heldOver = true
             InvalidateFrame()
             if LazyProf.ScheduleShoppingListRefresh then
                 LazyProf:ScheduleShoppingListRefresh()
@@ -1783,10 +1790,11 @@ local function WatchOpen(w)
 end
 
 -- Rule 4, for a scan: is that bank held right now - it could not be read
--- back at the close, CLOSE_WATCH is not over and nothing has marked it?
+-- back at the close, the timer that ends CLOSE_WATCH has not run and
+-- nothing has marked it?
 HeldAfterClose = function(kind)
     local w = watch
-    return (w ~= nil and w.held[kind] == true and not w.done[kind] and GetTime() - w.at <= CLOSE_WATCH + CLOCK_SLACK) or false
+    return (w ~= nil and w.held[kind] == true and not w.done[kind] and not w.heldOver) or false
 end
 
 -- Lower a note of the carried bags to every count that has fallen.
