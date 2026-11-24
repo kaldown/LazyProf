@@ -820,6 +820,18 @@ function Client:CharacterIdentity()
     return { guid = known.guid, name = known.name, world = WorldKey(), faction = known.faction }
 end
 
+-- Whether the game itself marks the character Self-Found: such a character
+-- can neither be sent anything nor send anything.
+-- C_PlayerInfo.IsSelfFoundActive() returns a boolean
+-- (PlayerInfoDocumentation.lua:322-329; in the client's function list, dump,
+-- GlobalAPI.lua:3359). It is asked at every call: whether the flag can change
+-- during a session is not known. Anything but true is false.
+-- Verify in game: the gameSelfFound value of /lp diag stock on a character
+-- that is Self-Found and on one that is not.
+function Client:IsSelfFoundCharacter()
+    return C_PlayerInfo.IsSelfFoundActive() == true
+end
+
 -- Server time in seconds (SystemTimeDocumentation.lua:30-36): the same on
 -- every character and computer, which the computer's own clock is not.
 function Client:Now()

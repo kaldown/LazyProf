@@ -11,6 +11,7 @@
 --   World.reset()                           -- a fresh client state
 --   World.containers[6] = { slots = 28, World.slot(2589, 100) }
 --   World.bank[0] = { tabs = { { ID = 6 } } }          -- [bankType]: tabs, canView, locked
+--   World.gameSelfFound = true              -- the game itself marks the character Self-Found
 --   local addon = World.login(saved, { selfFound = false, init = false })
 --   World.event(addon, "BANKFRAME_OPENED")  -- a client event the adapter registered
 --   World.bagUpdate(addon, 6, 0)            -- BAG_UPDATE for each container id given
@@ -36,6 +37,7 @@ World.regionNumber = 3
 World.guid = "Player-4444-000000AA"
 World.name = "Main Goldtooth"
 World.faction = "Horde"
+World.gameSelfFound = false   -- C_PlayerInfo.IsSelfFoundActive()
 World.calls = { slots = 0, tabs = 0 }
 World.errors = {}
 
@@ -57,6 +59,7 @@ function World.reset()
     World.guid = "Player-4444-000000AA"
     World.name = "Main Goldtooth"
     World.faction = "Horde"
+    World.gameSelfFound = false
     World.calls = { slots = 0, tabs = 0 }
     World.errors = {}
 end
@@ -114,6 +117,7 @@ function World.install()
     _G.UnitFactionGroup = function() return World.faction, World.faction end
     _G.UnitGUID = function(unit) return unit == "player" and World.guid or nil end
     _G.NameUtil = { GetUnmodifiedUnitFullName = function() return World.name end }
+    _G.C_PlayerInfo = { IsSelfFoundActive = function() return World.gameSelfFound end }
     _G.issecretvalue = nil
     _G.geterrorhandler = function()
         return function(message) World.errors[#World.errors + 1] = tostring(message) end

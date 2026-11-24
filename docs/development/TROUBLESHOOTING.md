@@ -205,7 +205,7 @@ the dump says so.
 | `world: region=.. regionNumber=.. rp=.. pvp=.. hardcore=.. guidSecret=.. serverTime=..` | What the character's world is made of on WoW Forever (region and ruleset - there are no realms), whether the client withheld the character's id, and the server clock the ages are counted from. A region without a name is written with its number (`region3-pvp`). |
 | `crafting from the bank: restricted=..` | A game rule of this client. If it is `false`, crafts may be able to take reagents straight from the bank: the bank then changes while its window is closed, and the remembered bank is behind until you open it again. Paste the line if "From bank" rows list reagents you have already used. |
 | `source: ...` | `LazyProf's own memory (no inventory addon)`, or `Syndicator (...)`: then the stock comes from Syndicator and the memory is neither used nor updated. |
-| `settings: bank=.. alts=.. guildBank=.. selfFound=..` | The stock options. With `selfFound=true` nothing that belongs to other characters is counted. |
+| `settings: bank=.. alts=.. guildBank=.. selfFound=.. gameSelfFound=..` | The stock options, and what the game says. `selfFound` is LazyProf's own Self-Found setting; `gameSelfFound` is whether the game itself marks the character Self-Found (on a client without that mode it is always `false`; `not readable: <error>` when the game could not be asked). With either of them `true` nothing that belongs to other characters is counted, and what the character holds is not counted for the others. |
 | `last error: <message> (in: <where>; N this session; ...)` | Only when something went wrong while the memory was started, read or updated: the last error, the step it happened in and how many there were this session. LazyProf carries on. The first one of a session is handed to the game's error display, once (you see it when Lua errors are shown or an error collector is installed), and is written to the debug log when debugging is on. Paste this line with a bug report. |
 | `scan now: whole - ...` / `scan now: bags only - the memory cannot be read: <error>` | What counting your stock does at this moment (not printed with Syndicator). `whole`: bank and alt stock are counted from the memory - an error in the line above is then over. `bags only`: the memory cannot be read right now, for the reason given, and only what you carry is counted. |
 | `identity: guid=.. name=.. world=.. faction=..` | Who LazyProf takes the character for. Without a `guid` nothing is remembered; without a `world` or a `faction` no other character counts as an alt. |
@@ -530,7 +530,9 @@ read from it; check in Syndicator / Baganator that it knows the character.
 5. Mail, auctions and the guild bank are never known without Syndicator.
 6. In Self-Found mode (Settings, General) nothing from other characters is counted (nor
    the guild bank, with Syndicator), and a character with the mode on is no alt for the
-   others: what it holds is not counted for them.
+   others: what it holds is not counted for them. A character the game itself marks
+   Self-Found is treated the same with the setting off (`/lp diag stock` prints both:
+   `selfFound=.. gameSelfFound=..`).
 7. A bank that may have changed after LazyProf last read it is not counted until you open
    the bank again. The Shopping tab then starts with a grey line: "Your bank is not
    counted: it may have changed after LazyProf last read it. Open the bank to count it

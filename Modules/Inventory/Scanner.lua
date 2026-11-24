@@ -13,7 +13,9 @@
 -- A Self-Found character cannot be sent anything, so nothing that belongs to
 -- other characters is counted for it, from either place (alts, the account
 -- bank, the guild bank); and it cannot send anything, so the memory does not
--- offer what it holds to the others.
+-- offer what it holds to the others. A character is Self-Found here when the
+-- game itself marks it so (the client adapter asks) or the addon's Self-Found
+-- setting is on; which recipes the planner allows follows the setting alone.
 --
 -- The memory can never stop the addon: everything that touches it runs
 -- protected (see Protected), and a scan that cannot read it counts the bags.
@@ -386,14 +388,6 @@ function Inventory:UsesSyndicator()
     return (Syndicator and Syndicator.API) and true or false
 end
 
--- A Self-Found character can neither be sent anything nor send anything:
--- nothing of the other characters is counted for it, and what it holds is
--- not offered to them (every save of its stock says so).
-local function IsSelfFound()
-    local char = LazyProf.db and LazyProf.db.char
-    return (char and char.selfFoundMode) and true or false
-end
-
 -- The memory must never stop the addon: a damaged saved table or a client
 -- call that fails would otherwise break login or every scan. Its entry
 -- points therefore run protected. A failure is not hidden: the first one of
@@ -439,6 +433,27 @@ local function Protected(where, fn, ...)
     return true, result
 end
 
+-- The addon's own Self-Found setting (per character, off by default).
+local function SelfFoundSetting()
+    local char = LazyProf.db and LazyProf.db.char
+    return (char and char.selfFoundMode) and true or false
+end
+
+-- A Self-Found character can neither be sent anything nor send anything:
+-- nothing of the other characters is counted for it, and what it holds is
+-- not offered to them (every save of its stock says so). It is one when the
+-- setting is on or the game itself marks it (the adapter's answer, asked at
+-- every call and never kept: a scan made under the other answer must not
+-- serve). A scan asks this outside the memory's protected part, so the
+-- adapter's call runs protected here: when it fails the setting alone
+-- decides, and the failure is counted like every other.
+local function IsSelfFound()
+    if SelfFoundSetting() then return true end
+    local Client = LazyProf.Client
+    local asked, marked = Protected("game flag", Client.IsSelfFoundCharacter, Client)
+    return asked and marked == true
+end
+
 -- Defined with the bank's rules further down ("Keeping the memory").
 local BankPending       -- is the open bank of that kind left out of a scan right now (rule 3)?
 local RisenAfterClose   -- which banks a scan leaves out for a carried count that rose after a close (rule 5b)
@@ -451,8 +466,9 @@ local HeldAfterClose    -- is that bank left out for the second after its close 
 local scanCache = { time = 0, combined = nil, breakdown = nil, meta = nil }
 
 -- Stock from Syndicator: the character's bank, mail and auctions, the alts,
--- the guild bank (the last two not for a Self-Found character).
-local function AddSyndicatorStock(self, combined, breakdown, countAlts)
+-- the guild bank (the last two not for a Self-Found character: selfFound,
+-- as the scan found it).
+local function AddSyndicatorStock(self, combined, breakdown, countAlts, selfFound)
     local charName = Syndicator.API.GetCurrentCharacter()
     local charData = charName and Syndicator.API.GetByCharacterFullName(charName)
 
@@ -509,7 +525,7 @@ local function AddSyndicatorStock(self, combined, breakdown, countAlts)
 
     -- Guild bank (if enabled). It is other characters' stock as well: a
     -- Self-Found character, which cannot be handed anything, does not count it.
-    if LazyProf.db.profile.includeGuildBank and not IsSelfFound() then
+    if LazyProf.db.profile.includeGuildBank and not selfFound then
         local guildItems = self:ScanGuildBank()
         mergeSource(guildItems, "guildBank", nil, combined, breakdown)
 
@@ -616,8 +632,9 @@ end
 -- named in leaveOut ({ [kind] = true }, rule 5b), nor a bank that waits for
 -- the comparison with the last session's note (rule 5c).
 -- The marks are only set for a bank that would count otherwise. Nothing is
--- read from the client here and nothing is written.
-local function AddRememberedStock(self, combined, breakdown, countAlts, leaveOut)
+-- read from the client here and nothing is written: whether the character is
+-- Self-Found is handed in (selfFound), as the caller found it.
+local function AddRememberedStock(self, combined, breakdown, countAlts, selfFound, leaveOut)
     local Memory, Client = LazyProf.StockMemory, LazyProf.Client
     local countBank = LazyProf.db.profile.includeBankItems and true or false
     local identity = Client:CharacterIdentity() or {}
@@ -634,7 +651,7 @@ local function AddRememberedStock(self, combined, breakdown, countAlts, leaveOut
             mergeSource(items, "bank", nil, combined, breakdown)
             meta.bankSeenAt = seenAt
         end
-        if not IsSelfFound() then
+        if not selfFound then
             items, seenAt, doubt = Memory:AccountBank(identity.world)
             if items and doubt then
                 meta.accountInDoubt = true
@@ -671,12 +688,12 @@ end
 -- (rule 5b), the bags the scan has just read say which banks it leaves out -
 -- so that no scan counts a bank beside the items that have just come out of
 -- it. The bank itself is never read here, and nothing is marked.
-local function ScanMemory(self, combined, breakdown, countAlts, bagItems, backpackSlots)
+local function ScanMemory(self, combined, breakdown, countAlts, selfFound, bagItems, backpackSlots)
     local leaveOut = nil
     if backpackSlots and backpackSlots > 0 then
         leaveOut = RisenAfterClose(bagItems)
     end
-    return AddRememberedStock(self, combined, breakdown, countAlts, leaveOut)
+    return AddRememberedStock(self, combined, breakdown, countAlts, selfFound, leaveOut)
 end
 
 -- Scan all inventory sources based on settings
@@ -716,9 +733,9 @@ function Inventory:ScanAll()
     -- 2. Everything outside the bags
     local countAlts = wantAlts and not selfFound
     if self:UsesSyndicator() then
-        AddSyndicatorStock(self, combined, breakdown, countAlts)
+        AddSyndicatorStock(self, combined, breakdown, countAlts, selfFound)
     else
-        local ok, result = Protected("scan", ScanMemory, self, combined, breakdown, countAlts, bagItems, backpackSlots)
+        local ok, result = Protected("scan", ScanMemory, self, combined, breakdown, countAlts, selfFound, bagItems, backpackSlots)
         if ok then
             meta = result
         else
@@ -1658,8 +1675,14 @@ function Inventory:RunDiagnostic(lines)
     else
         add("source: LazyProf's own memory (no inventory addon)")
     end
+    -- The Self-Found setting and the game's own flag, apart: either makes
+    -- the character Self-Found for stock. The flag is asked here without
+    -- counting a failure (the dump reports, it does not add to the count).
+    local flagRead, gameFlag = pcall(Client.IsSelfFoundCharacter, Client)
+    local selfFound = SelfFoundSetting() or (flagRead and gameFlag == true)
     add("settings: bank=" .. tostring(profile.includeBankItems) .. " alts=" .. tostring(profile.includeAltCharacters)
-        .. " guildBank=" .. tostring(profile.includeGuildBank) .. " selfFound=" .. tostring(IsSelfFound()))
+        .. " guildBank=" .. tostring(profile.includeGuildBank) .. " selfFound=" .. tostring(SelfFoundSetting())
+        .. " gameSelfFound=" .. (flagRead and tostring(gameFlag == true) or ("not readable: " .. tostring(gameFlag))))
 
     if memoryErrors.count > 0 then
         add("last error: " .. tostring(memoryErrors.last) .. " (in: " .. tostring(memoryErrors.where) .. "; "
@@ -1668,7 +1691,7 @@ function Inventory:RunDiagnostic(lines)
     -- What a scan does right now: tried here, on tables that are thrown
     -- away, so that a failure long over does not read as stock left out.
     if not self:UsesSyndicator() then
-        local whole, err = pcall(AddRememberedStock, self, {}, {}, profile.includeAltCharacters and not IsSelfFound())
+        local whole, err = pcall(AddRememberedStock, self, {}, {}, profile.includeAltCharacters and not selfFound, selfFound)
         if whole then
             add("scan now: whole - bank and alt stock are counted from the memory")
         else
@@ -1812,7 +1835,7 @@ function Inventory:RunDiagnostic(lines)
             -- Left over from a time without it: listed, but nothing of it counts.
             label = "remembered, not used (Syndicator is installed)"
         elseif standing[c.guid] == "alt" then
-            if IsSelfFound() then
+            if selfFound then
                 label = "not counted (this character is Self-Found)"
             elseif not profile.includeAltCharacters then
                 label = "alt, not counted (alts off)"

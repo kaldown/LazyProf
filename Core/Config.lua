@@ -245,7 +245,9 @@ LazyProf.options = {
                            "characters and of the guild bank is not counted for it. It " ..
                            "cannot send anything either: where LazyProf remembers the stock " ..
                            "itself (no inventory addon installed), its own stock is not " ..
-                           "counted for your other characters.\n\n" ..
+                           "counted for your other characters. A character the game itself " ..
+                           "marks Self-Found is treated this way for stock even with this " ..
+                           "setting off.\n\n" ..
                            "This setting is per character.",
                     type = "toggle",
                     order = 6,

@@ -195,6 +195,7 @@ section("selection", function()
                          "FreeBagSlots", "Money", "RunMerchantDiagnostic",
                          "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic",
                          "BagContents", "IsBankOpen", "BankContents", "BankUsable", "BankKindOfBag", "CharacterIdentity", "Now",
+                         "IsSelfFoundCharacter",
                          "StartStock", "RunStockDiagnostic" }) do
         check(p .. "Client:" .. m .. " exists", type(classic.Client[m]) == "function")
     end
@@ -533,6 +534,28 @@ section("stock", function()
     _G.UnitGUID = nil
     check(p .. "identity: no GUID call, no guid, no error", Client:CharacterIdentity().guid == nil)
     _G.UnitGUID = function() return "Player-5555-00ABCDEF" end
+
+    -- Self-Found by the game's own flag: asked where the client has the
+    -- call, which not every client of this family does.
+    _G.C_PlayerInfo = nil
+    check(p .. "Self-Found: a client without the call is not Self-Found, and no error",
+        select(2, pcall(Client.IsSelfFoundCharacter, Client)) == false)
+    _G.C_PlayerInfo = {}
+    check(p .. "Self-Found: nor one whose table lacks the call", select(2, pcall(Client.IsSelfFoundCharacter, Client)) == false)
+    local flag, flagAsked = true, 0
+    _G.C_PlayerInfo = { IsSelfFoundActive = function()
+        flagAsked = flagAsked + 1
+        return flag
+    end }
+    check(p .. "Self-Found: the game's flag where the client has it", Client:IsSelfFoundCharacter() == true)
+    flag = false
+    check(p .. "Self-Found: asked again at every call, not kept", Client:IsSelfFoundCharacter() == false and flagAsked == 2,
+        flagAsked)
+    for _, value in ipairs({ 1, "yes", {} }) do
+        flag = value
+        check(p .. "Self-Found: a value that is not true is false (" .. type(value) .. ")", Client:IsSelfFoundCharacter() == false)
+    end
+    _G.C_PlayerInfo = nil
 
     _G.GetServerTime = function() return 1763900000 end
     check(p .. "Now is the server time", Client:Now() == 1763900000, Client:Now())

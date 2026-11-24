@@ -402,6 +402,7 @@ section("J", function()
         BankContents = function() bankReads = bankReads + 1; return nil end,
         BankKindOfBag = function() return nil end,
         CharacterIdentity = function() return { guid = "Player-1-PERF", name = "Perf", world = "eu-pvp", faction = "Horde" } end,
+        IsSelfFoundCharacter = function() return false end,
         Now = function() return 1763900000 end,
     }
     _G.Syndicator = nil

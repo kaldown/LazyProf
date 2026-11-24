@@ -202,6 +202,18 @@ T.section("a reset and the Self-Found setting", function()
     T.check("the setting is off again", addon.db.char.selfFoundMode == false)
     T.check("and the record says so without waiting for a save", addon.db.global.stock.characters[MAIN_GUID].noSend == nil)
     T.eq("the alt counts again in the next scan", (addon.Inventory:ScanAll())[LINEN], 125)
+
+    -- A character the game itself marks Self-Found is not a matter of the
+    -- settings: it stays one through a reset.
+    addon = remembered()
+    World.gameSelfFound = true
+    addon.Inventory:OnSendingChanged()
+    T.check("fixture: marked by the game, the record says it cannot send",
+        addon.db.char.selfFoundMode == false and addon.db.global.stock.characters[MAIN_GUID].noSend == true)
+    addon:SlashCommand("reset")
+    T.check("after the reset the record still says so", addon.db.global.stock.characters[MAIN_GUID].noSend == true)
+    T.eq("and the scan still counts its own bank only", (addon.Inventory:ScanAll())[LINEN], 105)
+    World.gameSelfFound = false
 end)
 
 -- ===========================================================================

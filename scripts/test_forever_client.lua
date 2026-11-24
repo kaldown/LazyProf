@@ -207,6 +207,7 @@ local SURFACE = { "IsOpen", "AnchorFrame", "PanelOffsetX", "GetLine", "NoDataPro
                   "FreeBagSlots", "Money", "RunMerchantDiagnostic",
                   "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic",
                   "BagContents", "IsBankOpen", "BankContents", "BankUsable", "BankKindOfBag", "CharacterIdentity", "Now",
+                  "IsSelfFoundCharacter",
                   "StartStock", "RunStockDiagnostic" }
 
 -- Names of the functions an adapter installs.
@@ -1006,6 +1007,24 @@ section("stock", function()
     rules = { [10] = true, [213] = true }
     check(p .. "identity: and again", client:CharacterIdentity().world == "eu-hc-pvp", client:CharacterIdentity().world)
     rules = { [213] = true }
+
+    -- Self-Found by the game's own flag -------------------------------------------
+    local flag, flagAsked = true, 0
+    _G.C_PlayerInfo = { IsSelfFoundActive = function()
+        flagAsked = flagAsked + 1
+        return flag
+    end }
+    check(p .. "Self-Found: the game's flag", Client:IsSelfFoundCharacter() == true)
+    flag = false
+    check(p .. "Self-Found: asked again at every call, not kept", Client:IsSelfFoundCharacter() == false and flagAsked == 2,
+        flagAsked)
+    for _, value in ipairs({ 1, "yes", {} }) do
+        flag = value
+        check(p .. "Self-Found: a value that is not true is false (" .. type(value) .. ")", Client:IsSelfFoundCharacter() == false)
+    end
+    flag = nil
+    check(p .. "Self-Found: no value is false", Client:IsSelfFoundCharacter() == false)
+    _G.C_PlayerInfo = nil
 
     -- The clock ----------------------------------------------------------------
     _G.GetServerTime = function() return 1763900000 end

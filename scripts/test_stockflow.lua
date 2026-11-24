@@ -397,6 +397,90 @@ T.section("a Self-Found alt", function()
 end)
 
 -- ===========================================================================
+-- The game has a Self-Found flag of its own. A character it marks is
+-- Self-Found for stock whatever the addon's setting says: nothing of the
+-- other characters is counted for it, and what it holds is not offered to
+-- them.
+-- ===========================================================================
+T.section("a character the game itself marks Self-Found", function()
+    local SOLO_GUID = "Player-4444-000000SF"
+    local function session(saved, guid, name, linen, gameFlag, opts)
+        World.reset()
+        World.guid, World.name = guid, name
+        World.gameSelfFound = gameFlag
+        World.containers = { [0] = { slots = 16, slot(LINEN, linen) } }
+        local addon = World.login(saved, opts)
+        World.advance(3)
+        return addon
+    end
+    local function dump(addon)
+        local lines = {}
+        addon.Inventory:RunDiagnostic(lines)
+        return table.concat(lines, "\n")
+    end
+
+    -- The flag on, the setting at its default (off).
+    local saved = {}
+    local solo = session(saved, SOLO_GUID, "Solo Goldtooth", 20, true)
+    T.check("fixture: the addon's own setting is off", solo.db.char.selfFoundMode == false)
+    T.check("its record says that it cannot send", saved.stock.characters[SOLO_GUID] ~= nil
+        and saved.stock.characters[SOLO_GUID].noSend == true)
+    World.event(solo, "PLAYER_LOGOUT")
+    T.check("and still does after logout", saved.stock.characters[SOLO_GUID].noSend == true)
+
+    local main = session(saved, MAIN_GUID, "Main Goldtooth", 1, false)
+    local combined, breakdown = World.scan(main)
+    T.eq("nothing of it is counted for the other character", combined[LINEN], 1)
+    T.check("which names no alt", breakdown[LINEN].alts == nil)
+    T.check("the other character's dump says why",
+        dump(main):find("character: Solo Goldtooth [not counted (Self-Found)]", 1, true) ~= nil, dump(main))
+    World.event(main, "PLAYER_LOGOUT")
+
+    saved.stock.account["eu-pvp"] = { items = { [BAR] = 50 }, at = World.serverTime }
+    solo = session(saved, SOLO_GUID, "Solo Goldtooth", 20, true)
+    local meta
+    combined, breakdown, meta = World.scan(solo)
+    T.eq("nothing of the others is counted for it", combined[LINEN], 20)
+    T.check("no alt is named, and the account bank is other characters' stock too",
+        breakdown[LINEN].alts == nil and next(meta.alts) == nil and combined[BAR] == nil and meta.accountSeenAt == nil)
+    local text = dump(solo)
+    T.check("its dump prints the setting and the game's flag apart",
+        text:find("settings: bank=true alts=true guildBank=false selfFound=false gameSelfFound=true", 1, true) ~= nil, text)
+    T.check("and labels the other character for it",
+        text:find("character: Main Goldtooth [not counted (this character is Self-Found)]", 1, true) ~= nil, text)
+    -- Its own bank is its own stock, and is saved as not to be sent.
+    World.containers[6] = { slots = 28, slot(LINEN, 300) }
+    World.bank = { [0] = { tabs = { { ID = 6 } } } }
+    World.event(solo, "BANKFRAME_OPENED")
+    World.advance(3)
+    World.event(solo, "BANKFRAME_CLOSED")
+    World.advance(11)
+    T.eq("its own bank still counts for it", (World.scan(solo))[LINEN], 320)
+    World.event(solo, "PLAYER_LOGOUT")
+    main = session(saved, MAIN_GUID, "Main Goldtooth", 1, false)
+    T.eq("the other character is offered neither its bags nor its bank", (World.scan(main))[LINEN], 1)
+    World.event(main, "PLAYER_LOGOUT")
+
+    -- The flag is gone (the mode was given up): the next save says so.
+    solo = session(saved, SOLO_GUID, "Solo Goldtooth", 20, false)
+    T.check("without the flag its next save says that it can send", saved.stock.characters[SOLO_GUID].noSend == nil)
+    T.eq("and the others count for it again", (World.scan(solo))[LINEN], 321)
+    World.event(solo, "PLAYER_LOGOUT")
+    main = session(saved, MAIN_GUID, "Main Goldtooth", 1, false)
+    T.eq("as it does for them, bank included", (World.scan(main))[LINEN], 321)
+    World.event(main, "PLAYER_LOGOUT")
+
+    -- The flag off and the setting on: as it always was.
+    solo = session(saved, SOLO_GUID, "Solo Goldtooth", 20, false, { selfFound = true })
+    T.check("flag off, setting on: the record says it cannot send", saved.stock.characters[SOLO_GUID].noSend == true)
+    T.eq("flag off, setting on: only its own stock counts for it", (World.scan(solo))[LINEN], 320)
+    text = dump(solo)
+    T.check("flag off, setting on: the dump prints both",
+        text:find("settings: bank=true alts=true guildBank=false selfFound=true gameSelfFound=false", 1, true) ~= nil, text)
+    T.eq("nothing in all of this was handed to the game's error handler", #World.errors, 0)
+end)
+
+-- ===========================================================================
 -- A name belongs to one character of a world: the record seen last. An older
 -- record of that name never counts in its place.
 -- ===========================================================================

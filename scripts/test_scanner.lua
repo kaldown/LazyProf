@@ -9,7 +9,8 @@
 --     from the memory (Modules/Inventory/StockMemory.lua), with how old each is
 --   - the bags are remembered a moment after they change and at logout, the
 --     bank only while its window is open and never as "nothing"
---   - a Self-Found character gets no stock from other characters
+--   - a Self-Found character - by the addon's setting or by the game's own
+--     flag - gets no stock from other characters and offers them none
 -- Also the wiring in Core/Init.lua: bag updates are passed on and never plan
 -- the path again, a refresh carries the stock's age, /lp diag stock.
 --
@@ -86,6 +87,7 @@ local client
 local function resetClient()
     client = {
         identity = MAIN, now = NOW, bankOpen = false,
+        gameSelfFound = false,                       -- what the game's own Self-Found flag reads
         bags = { [2589] = 5 }, bagsBound = {}, backpackSlots = 16,
         bank = { character = nil, account = nil },   -- [kind] = { items, bound }; nil = cannot be read now
         usable = {},                                 -- [kind] = true / false: says so whatever the bank reads
@@ -122,6 +124,7 @@ LazyProf.Client = {
         return nil
     end,
     CharacterIdentity = function() return client.identity end,
+    IsSelfFoundCharacter = function() return client.gameSelfFound end,
     Now = function() return client.now end,
     StartStock = function(_, callbacks) client.started = callbacks end,
     RunStockDiagnostic = function(_, lines) lines[#lines + 1] = "adapter: stock lines" end,
@@ -383,6 +386,40 @@ T.section("Self-Found: nothing from other characters", function()
     LazyProf.db.char.selfFoundMode = false
     combined = scan()
     T.eq("memory: with the mode off everything counts again", combined[2589], 5 + 40 + 10 + 20 + 100)
+
+    -- The game's own flag does the same with the setting off.
+    client.gameSelfFound = true
+    combined, breakdown, meta = scan()
+    T.eq("the game's flag: bags and the character's own bank", combined[2589], 5 + 40)
+    T.check("the game's flag: no alt stock, no account bank", breakdown[2589].alts == nil and next(meta.alts) == nil
+        and meta.accountSeenAt == nil and breakdown[2589].bank == 40)
+    -- Every save of its stock says that it cannot send.
+    Inventory:SaveBags(true)
+    T.check("the game's flag: its bags are saved as not to be sent",
+        LazyProf.db.global.stock.characters[MAIN.guid].noSend == true)
+    client.bankOpen = true
+    client.bank.character = { items = { [2589] = 41 } }
+    Inventory:Initialize()
+    client.started.onBankOpened()
+    T.check("the game's flag: so is its bank", (Memory:OwnBank(MAIN.guid))[2589] == 41
+        and LazyProf.db.global.stock.characters[MAIN.guid].noSend == true)
+    client.started.onBankClosing(); client.bankOpen = false; client.started.onBankClosed()
+    advance(11)
+    -- The adapter answers true or false; anything else is not the flag.
+    for _, value in ipairs({ 1, "yes" }) do
+        client.gameSelfFound = value
+        T.eq("a flag that is not true is none (" .. type(value) .. ")", (scan())[2589], 5 + 41 + 10 + 20 + 100)
+    end
+    client.gameSelfFound = false
+    Inventory:SaveBags(true)
+    T.check("the flag off: its next save says that it can send", LazyProf.db.global.stock.characters[MAIN.guid].noSend == nil)
+    T.eq("the flag off: everything counts again", (scan())[2589], 5 + 41 + 10 + 20 + 100)
+    -- Either of the two is enough; the planner's mode stays the setting alone.
+    LazyProf.db.char.selfFoundMode = true
+    client.gameSelfFound = true
+    T.eq("setting and flag both: as with one of them", (scan())[2589], 5 + 41)
+    LazyProf.db.char.selfFoundMode = false
+    client.gameSelfFound = false
 end)
 
 -- ===========================================================================
@@ -485,6 +522,12 @@ T.section("Syndicator present: as before, the memory is not used", function()
         LazyProf.db.char.selfFoundMode = false
         combined, breakdown = Inventory:ScanAll()      -- same frame: the scan made as Self-Found must not answer
         T.eq("(with the mode off the guild bank counts)", breakdown[2589].guildBank, 500)
+        -- The game's own flag, with the setting off: the same.
+        client.gameSelfFound = true
+        combined, breakdown = Inventory:ScanAll()
+        T.check("the game's Self-Found flag: no alt stock and no guild bank from Syndicator",
+            combined[2589] == 5 + 30 + 4 and breakdown[2589].alts == nil and breakdown[2589].guildBank == nil, combined[2589])
+        client.gameSelfFound = false
         LazyProf.db.profile.includeGuildBank = false
     end)
     for name, fn in pairs(saved) do Memory[name] = fn end
@@ -544,6 +587,12 @@ T.section("frame cache", function()
     T.eq("everything back on", (Inventory:ScanAll())[2589], 65)
     Inventory:ScanAll()
     T.eq("unchanged settings: the frame's scan answers", client.reads.bags, 1)
+    -- The game's own Self-Found flag is asked at every scan: a scan made
+    -- under the other answer does not serve.
+    client.gameSelfFound = true
+    T.eq("the game's Self-Found flag reads true in the same frame, nothing else", (Inventory:ScanAll())[2589], 45)
+    client.gameSelfFound = false
+    T.eq("and false again", (Inventory:ScanAll())[2589], 65)
     -- The guild bank setting only does something with Syndicator.
     installSyndicator()
     nextFrame()
@@ -2533,6 +2582,20 @@ T.section("no entry point lets a failure out", function()
     survives("dropping old characters at the start", "Now", function() Inventory:Initialize() end)
     fresh()
     survives("a scan", "CharacterIdentity", function() T.eq("which then counts the bags", (scan())[2589], 5) end)
+    -- The game's Self-Found flag is asked outside the memory's part of a
+    -- scan: a failure there must not get out either. The setting alone
+    -- decides then.
+    fresh()
+    Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW)
+    survives("asking the game whether the character is Self-Found", "IsSelfFoundCharacter", function()
+        T.eq("the flag cannot be read: a scan counts as the setting says", (scan())[2589], 25)
+        LazyProf.db.char.selfFoundMode = true
+        T.eq("and with the setting on, as Self-Found", (scan())[2589], 5)
+        LazyProf.db.char.selfFoundMode = false
+        Inventory:SaveBags(true)
+    end)
+    T.check("a save made while the flag cannot be read is saved as the setting says",
+        LazyProf.db.global.stock.characters[MAIN.guid] ~= nil and LazyProf.db.global.stock.characters[MAIN.guid].noSend == nil)
 
     -- A read at the close that fails is a read that was not kept: the bank
     -- it was owed for must not go on counting as it was remembered.
@@ -2641,7 +2704,8 @@ T.section("diagnostic lines", function()
     Inventory:RunDiagnostic(lines)
     local text = table.concat(lines, "\n")
     T.check("says where stock outside the bags comes from", text:find("source: LazyProf's own memory", 1, true) ~= nil, text)
-    T.check("the settings", text:find("settings: bank=true alts=true guildBank=false selfFound=false", 1, true) ~= nil, text)
+    T.check("the settings, and beside the Self-Found setting what the game's own flag reads",
+        text:find("settings: bank=true alts=true guildBank=false selfFound=false gameSelfFound=false\n", 1, true) ~= nil, text)
     T.check("who the character is", text:find("identity: guid=Player-1-MAIN name=Main Character world=eu-pvp faction=Alliance", 1, true) ~= nil, text)
     T.check("how much is remembered", text:find("memory: format=1 characters=3 accountBanks=1", 1, true) ~= nil, text)
     T.check("this character, with ages",
@@ -2690,7 +2754,34 @@ T.section("diagnostic lines", function()
     local _, soloDump = labels()
     T.check("label: an alt while this character is Self-Found",
         soloDump:find("character: Bank Alt [not counted (this character is Self-Found)]", 1, true) ~= nil, soloDump)
+    T.check("the settings line: the setting on, the game's flag off",
+        soloDump:find("settings: bank=true alts=true guildBank=false selfFound=true gameSelfFound=false\n", 1, true) ~= nil, soloDump)
     LazyProf.db.char.selfFoundMode = false
+    -- Self-Found by the game's own flag, with the setting off: printed apart,
+    -- and the alts are labelled as for the setting.
+    client.gameSelfFound = true
+    local _, flagDump = labels()
+    T.check("the settings line: the setting off, the game's flag on",
+        flagDump:find("settings: bank=true alts=true guildBank=false selfFound=false gameSelfFound=true\n", 1, true) ~= nil, flagDump)
+    T.check("label: an alt while the game marks this character Self-Found",
+        flagDump:find("character: Bank Alt [not counted (this character is Self-Found)]", 1, true) ~= nil, flagDump)
+    client.gameSelfFound = false
+    -- A flag that cannot be read is said to be so; the dump counts no failure for it.
+    do
+        local function failures(dumpText) return tonumber((dumpText:match("; (%d+) this session"))) or 0 end
+        local _, healthyDump = labels()
+        local realFlag = LazyProf.Client.IsSelfFoundCharacter
+        LazyProf.Client.IsSelfFoundCharacter = function() error("flag down") end
+        local _, brokenDump = labels()
+        LazyProf.Client.IsSelfFoundCharacter = realFlag
+        local _, afterDump = labels()
+        T.check("the settings line: a flag that cannot be read",
+            brokenDump:find("selfFound=false gameSelfFound=not readable: ", 1, true) ~= nil
+            and brokenDump:find("flag down", 1, true) ~= nil, brokenDump)
+        T.eq("the dump itself counts no failure for it", failures(afterDump), failures(healthyDump))
+        T.check("and still labels the alt as counted (the setting alone decides then)",
+            brokenDump:find("character: Bank Alt [alt, counted]", 1, true) ~= nil, brokenDump)
+    end
     -- With "Include bank items" off an alt supplies its bags only: the label says so.
     Memory:SaveBank(ALT, { [2589] = 100 }, {}, NOW - DAY)
     LazyProf.db.profile.includeBankItems = false
@@ -2865,6 +2956,9 @@ T.section("options", function()
     T.check("Self-Found: does not claim to keep its stock from the others whatever supplies the stock",
         not selfFoundText:find("and its own stock is not counted for them.", 1, true)
         and selfFoundText:find("remembers the stock itself", 1, true) ~= nil, selfFoundText)
+    T.check("Self-Found: says that the game's own Self-Found mark counts for stock with the setting off",
+        selfFoundText:find("A character the game itself marks Self-Found is treated this way for stock even with this setting off.",
+            1, true) ~= nil, selfFoundText)
     T.check("Self-Found: plain ASCII", not selfFoundText:find("[\128-\255]"))
     Inventory:SaveBags(true)
     T.check("before: the character is remembered as able to send", Memory:Summary().characters[1].canSend == true)

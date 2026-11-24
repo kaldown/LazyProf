@@ -476,6 +476,18 @@ function Client:CharacterIdentity()
     }
 end
 
+-- Whether the game itself marks the character Self-Found (it can then
+-- neither be sent anything nor send anything). The clients that have the mode
+-- say so through C_PlayerInfo.IsSelfFoundActive(); not every client of this
+-- family has that call, and where it is missing nothing says so: false.
+-- Asked at every call. Anything but true is false.
+function Client:IsSelfFoundCharacter()
+    if C_PlayerInfo and C_PlayerInfo.IsSelfFoundActive then
+        return C_PlayerInfo.IsSelfFoundActive() == true
+    end
+    return false
+end
+
 -- Server time in seconds; the computer's clock on a client without that call.
 function Client:Now()
     if GetServerTime then
