@@ -88,6 +88,7 @@ local function resetClient()
     client = {
         identity = MAIN, now = NOW, bankOpen = false,
         gameSelfFound = false,                       -- what the game's own Self-Found flag reads
+        inFlight = false,                            -- a slot reads as locked: a move is on its way (true / false / "fail")
         clientCounts = nil,                          -- function(itemId): the client's own three counts; nil = this client has none
         bags = { [2589] = 5 }, bagsBound = {}, backpackSlots = 16,
         bank = { character = nil, account = nil },   -- [kind] = { items, bound }; nil = cannot be read now
@@ -128,6 +129,10 @@ LazyProf.Client = {
     IsSelfFoundCharacter = function() return client.gameSelfFound end,
     -- Like the adapters: nil on a client without such a count; without an
     -- item, zeros and nothing asked.
+    MoveInFlight = function()
+        if client.inFlight == "fail" then error("locks unreadable") end
+        return client.inFlight
+    end,
     ClientItemCounts = function(_, itemId)
         if not client.clientCounts then return nil end
         if itemId == nil then return 0, 0, 0 end
@@ -1612,7 +1617,7 @@ T.section("the close", function()
     close()                                                -- nothing owed, the bank not unsettled
     T.check("an empty read that was not believed marks nothing at the close", inDoubt() == false)
     T.eq("the dump says the bank is held", closeLine(),
-        "bank visit close: owed=false unsettled=none readAgain=false kept=none markedInDoubt=none held=character")
+        "bank visit close: owed=false unsettled=none readAgain=false kept=none markedInDoubt=none held=character moveInFlight=false")
     local combined, _, meta = scan()
     T.check("for a second a scan leaves that bank out, as being read: the stack is counted once", combined[2589] == 105
         and meta.bankPending == true and meta.bankInDoubt == nil and combined[4306] == 9 and meta.accountPending == nil, combined[2589])
@@ -1644,7 +1649,7 @@ T.section("the close", function()
     client.bank.account = nil                              -- refused at the close
     close()
     T.eq("a read owed at the close and refused: both banks are held, neither marked", closeLine(),
-        "bank visit close: owed=true unsettled=none readAgain=true kept=none markedInDoubt=none held=character,account")
+        "bank visit close: owed=true unsettled=none readAgain=true kept=none markedInDoubt=none held=character,account moveInFlight=false")
     combined, _, meta = scan()
     T.check("neither is counted for that second", combined[2589] == 105 and combined[4306] == nil and meta.bankPending == true
         and meta.accountPending == true, combined[2589])
@@ -1660,7 +1665,7 @@ T.section("the close", function()
     Inventory:OnBagUpdate(0)                               -- owed
     close()
     T.eq("kept at the close: not held", closeLine(),
-        "bank visit close: owed=true unsettled=none readAgain=true kept=character,account markedInDoubt=none held=none")
+        "bank visit close: owed=true unsettled=none readAgain=true kept=character,account markedInDoubt=none held=none moveInFlight=false")
     -- The session ends inside that second: the update may never be heard,
     -- so the bank is marked.
     visit()
@@ -1717,7 +1722,7 @@ T.section("the close", function()
     T.check("an empty bank, a glance with one bag update that changes nothing: neither is in doubt",
         doubt == false and accountDoubt == false)
     T.eq("nor is a bank held of which no item is remembered", closeLine(),
-        "bank visit close: owed=true unsettled=none readAgain=true kept=account markedInDoubt=none held=none")
+        "bank visit close: owed=true unsettled=none readAgain=true kept=account markedInDoubt=none held=none moveInFlight=false")
     client.started.onLogout()
     T.check("so a logout right after such a visit marks nothing", inDoubt() == false)
 
@@ -1840,7 +1845,7 @@ T.section("the close", function()
     Inventory:RunDiagnostic(lines)
     local text = table.concat(lines, "\n")
     T.check("the dump: what the close did",
-        text:find("bank visit close: owed=true unsettled=character readAgain=true kept=account markedInDoubt=character held=none\n", 1, true) ~= nil, text)
+        text:find("bank visit close: owed=true unsettled=character readAgain=true kept=account markedInDoubt=character held=none moveInFlight=false\n", 1, true) ~= nil, text)
     T.check("the dump: the bank marked in doubt",
         text:find("bank=1 items (less than an hour ago, in doubt: not counted)", 1, true) ~= nil, text)
 
@@ -1863,7 +1868,7 @@ T.section("the close", function()
     close()
     T.check("fixture: nothing is remembered of the account bank", Memory:AccountBank("eu") == nil)
     T.eq("the dump names only the bank that got the mark", closeLine(),
-        "bank visit close: owed=true unsettled=character,account readAgain=true kept=none markedInDoubt=character held=none")
+        "bank visit close: owed=true unsettled=character,account readAgain=true kept=none markedInDoubt=character held=none moveInFlight=false")
 
     -- A logout with the bank open ends the visit the same way, once.
     visit()
@@ -1930,6 +1935,104 @@ T.section("the close", function()
     nextFrame()
     Inventory:OnBagUpdate(6)
     T.eq("an update while the bank is open is not counted", (closedUpdates()), before)
+end)
+
+-- ===========================================================================
+-- A move whose answer has not come when the window closes cannot be seen by
+-- any read: a client may never report the bank's part of it once the window
+-- is closed. The client locks the slots of a move from the click until its
+-- answer, so a slot that reads as locked at the closing notice (or at a
+-- logout with the bank open) marks every bank that was usable in the visit
+-- and of which something is remembered.
+T.section("a move still on its way at the close", function()
+    local function bankDoubt() return (select(3, Memory:OwnBank(MAIN.guid))) end
+    local function accountDoubt() return (select(3, Memory:AccountBank("eu"))) end
+    local function visit(account)
+        fresh()
+        Inventory:Initialize()
+        advance(2.1)
+        client.bankOpen = true
+        client.bank.character = { items = { [2589] = 100 }, slots = 28 }
+        if account ~= false then client.bank.account = { items = { [4306] = 9 }, slots = 98 } end
+        client.started.onBankOpened()
+        advance(3)
+    end
+    local function close()
+        client.started.onBankClosing()
+        client.bankOpen = false
+        client.started.onBankClosed()
+    end
+    local function closeLine()
+        local lines = {}
+        Inventory:RunDiagnostic(lines)
+        return (("\n" .. table.concat(lines, "\n") .. "\n"):match("\n(bank visit close: [^\n]*)\n"))
+    end
+
+    visit()
+    close()
+    T.check("nothing on its way: no mark", bankDoubt() == false and accountDoubt() == false)
+    T.check("and the dump says so", closeLine():find(" moveInFlight=false$") ~= nil, closeLine())
+
+    -- A deposit clicked a moment before Escape: no update has come, the bank
+    -- is settled, every read was kept - and yet the move is not answered.
+    visit()
+    client.inFlight = true
+    refreshes = 0
+    close()
+    T.check("a slot locked at the closing notice: both banks of the visit are in doubt", bankDoubt() == true and accountDoubt() == true)
+    T.check("the dump names them and why", closeLine() ==
+        "bank visit close: owed=false unsettled=none readAgain=false kept=none markedInDoubt=character,account held=none moveInFlight=true",
+        closeLine())
+    T.check("a shown list is asked to redraw", refreshes >= 1, refreshes)
+    client.inFlight = false
+    advance(2)
+    T.check("and nothing takes the marks away before the next visit", bankDoubt() == true and accountDoubt() == true)
+    client.bankOpen = true
+    client.started.onBankOpened()
+    T.check("the next visit's read does", bankDoubt() == false and accountDoubt() == false)
+
+    -- Only a bank that was usable in the visit, and of which something is remembered.
+    visit(false)
+    client.inFlight = true
+    close()
+    T.check("a bank never usable in the visit is not marked", bankDoubt() == true and Memory:AccountBank("eu") == nil)
+    fresh()
+    Memory:SaveAccountBank(MAIN, { [4306] = 9 }, NOW - DAY)
+    Memory:SaveBags(MAIN, { [2589] = 5 }, {}, NOW - DAY)
+    Inventory:Initialize()
+    advance(2.1)
+    client.bankOpen = true
+    client.bank.character = nil
+    client.bank.account = nil                         -- the account bank may not be viewed by this one
+    client.started.onBankOpened()
+    advance(3)
+    client.inFlight = true
+    close()
+    T.check("nor a remembered bank this character could not use", accountDoubt() == false and Memory:OwnBank(MAIN.guid) == nil)
+
+    -- A logout with the bank open is a close.
+    visit()
+    client.inFlight = true
+    client.started.onLogout()
+    T.check("a logout with the bank open and a slot locked: both in doubt", bankDoubt() == true and accountDoubt() == true)
+
+    -- A lock that cannot be read is taken for a move on its way.
+    visit()
+    client.inFlight = "fail"
+    local ok = pcall(close)
+    T.check("the locks cannot be read: no error, both in doubt", ok and bankDoubt() == true and accountDoubt() == true)
+    T.check("and the dump says that it was not known", closeLine():find(" moveInFlight=unknown$") ~= nil, closeLine())
+    client.inFlight = false
+
+    -- A bank that is marked for it is not held as well (it is in doubt already).
+    visit()
+    Inventory:OnBagUpdate(0)                          -- read at once
+    Inventory:OnBagUpdate(0)                          -- owed
+    client.bank.character = { items = {}, slots = 28 }
+    client.inFlight = true
+    close()
+    T.check("marked, not held", closeLine():find("markedInDoubt=character,account held=none", 1, true) ~= nil, closeLine())
+    client.inFlight = false
 end)
 
 -- ===========================================================================

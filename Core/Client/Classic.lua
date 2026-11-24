@@ -443,6 +443,29 @@ function Client:BagContents()
     return items, bound, backpackSlots
 end
 
+-- Whether a move of items is still on its way: a slot of the carried bags
+-- reads as locked - the table-returning container call's isLocked, or the
+-- older positional call's third return. Without a container call, false.
+-- (No bank is read on these clients, so nothing here depends on it.)
+function Client:MoveInFlight()
+    local modern = C_Container and C_Container.GetContainerNumSlots and C_Container.GetContainerItemInfo
+    if not modern and not (GetContainerNumSlots and GetContainerItemInfo) then return false end
+    for bag = 0, 4 do
+        local slots = (modern and C_Container.GetContainerNumSlots(bag) or GetContainerNumSlots(bag)) or 0
+        for slot = 1, slots do
+            local locked
+            if modern then
+                local info = C_Container.GetContainerItemInfo(bag, slot)
+                locked = info and info.isLocked
+            else
+                locked = select(3, GetContainerItemInfo(bag, slot))
+            end
+            if locked then return true end
+        end
+    end
+    return false
+end
+
 -- The bank is not read on these clients: its calls and events could not be
 -- checked against client source here, and a bank read on a guess could
 -- remember a wrong or an empty bank. So the bank never counts as open,

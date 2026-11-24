@@ -118,6 +118,12 @@
 --    bank is kept from that read only when the read is not refused, holds
 --    at least one item and has the slot count of the last read kept in this
 --    visit. A bank that is still unsettled after that is marked in doubt.
+--    So is every bank of the visit when a move is still on its way: the
+--    client locks the slots of a move from the click until its answer, and
+--    when a slot of the carried bags or of a bank that can be read reads as
+--    locked (the adapter's MoveInFlight; locks that cannot be read count as
+--    a lock), the answer may come after the close - for the carried bag
+--    alone on a client that does not report the bank's containers then.
 --    Nothing else marks at the close: not an empty read that was merely not
 --    believed while the bank is not unsettled, not a read that was owed for
 --    an update of a carried bag, not such an update itself.
@@ -224,9 +230,11 @@
 --      before the look two seconds after the opening (nor when its slot
 --      count is no longer that of the read that saw its items). Such a
 --      visit ends with that bank in doubt.
---    - On a client that reports the answer of a move for the carried bag
---      alone once the window is closed: a deposit (the count falls, which
---      marks nothing), and a withdrawal answered later than CLOSE_WATCH.
+--    - On a client that neither lets the bank be read at the closing notice
+--      nor reports the bank's part of a move once the window is closed: a
+--      move whose carried bag's part was answered before the close and the
+--      bank's part after it. Its carried slot is unlocked by then and the
+--      bank's slot cannot be read, so nothing shows it on its way.
 local ADDON_NAME, LazyProf = ...
 
 LazyProf.Inventory = {}
@@ -1268,10 +1276,12 @@ end
 --   unsettled[kind]    the kind was unsettled when the notice came
 --   read               the bank was read once more
 --   kept[kind]         that read was kept for the kind
---   doubt[kind]        the kind was still unsettled: its remembered bank
---                      carries the doubt mark
+--   doubt[kind]        the kind was still unsettled, or a move was on its
+--                      way: its remembered bank carries the doubt mark
 --   held[kind]         the kind could not be read back and is held for a
 --                      second (see rule 4)
+--   moveInFlight       a slot read as locked: true, false, or "unknown" when
+--                      the locks could not be read (taken for true)
 -- It also takes the note of the carried bags for the watch after the close.
 local function CloseVisit(self)
     local v = OpenVisit()
@@ -1294,10 +1304,15 @@ local function CloseVisit(self)
         local _, kept = Protected("bank close", ReadBank, v, true, done.kept)
         changed = kept and true or false
     end
+    -- A move whose answer has not come: the client locks its slots from the
+    -- click until the answer. Locks that cannot be read are taken for one.
+    local asked, locked = Protected("bank close", Client.MoveInFlight, Client)
+    done.moveInFlight = asked and (locked == true) or (not asked and "unknown")
+    local inFlight = done.moveInFlight ~= false
     local identity = Client:CharacterIdentity() or {}
     for _, kind in ipairs(BANK_KINDS) do
         local state = v[kind]
-        if state.unsettled and state.usable then
+        if state.usable and (state.unsettled or inFlight) then
             local new, marked = MarkDoubt(kind, identity.guid, identity.region)
             if marked then
                 done.doubt[kind] = true
@@ -1313,8 +1328,8 @@ local function CloseVisit(self)
     local anyHeld = false
     for _, kind in ipairs(BANK_KINDS) do
         local state = v[kind]
-        if state.usable and not state.unsettled and not done.kept[kind] and (done.owed or state.emptyAt ~= nil)
-                and RemembersItems(kind, identity) then
+        if state.usable and not state.unsettled and not done.doubt[kind] and not done.kept[kind]
+                and (done.owed or state.emptyAt ~= nil) and RemembersItems(kind, identity) then
             done.held[kind] = true
             anyHeld = true
         end
@@ -1849,7 +1864,8 @@ function Inventory:RunDiagnostic(lines)
             end
             add("bank visit close: owed=" .. tostring(done.owed) .. " unsettled=" .. names(done.unsettled)
                 .. " readAgain=" .. tostring(done.read) .. " kept=" .. names(done.kept)
-                .. " markedInDoubt=" .. names(done.doubt) .. " held=" .. names(done.held))
+                .. " markedInDoubt=" .. names(done.doubt) .. " held=" .. names(done.held)
+                .. " moveInFlight=" .. tostring(done.moveInFlight))
         end
     end
     -- The watch after the last close: what arrived, and which banks it

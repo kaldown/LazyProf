@@ -1191,6 +1191,41 @@ T.section("the close", function()
     T.check("bank to account bank and close in one frame", total == 105 and bags == 5 and bank == 100, total)
     T.eq("of which 60 in the account bank", (addon.StockMemory:AccountBank("eu"))[LINEN], 60)
 
+    -- A move clicked just before Escape: the client has locked its slots,
+    -- and the answer comes after the close - on a client that may never
+    -- report the bank's part of it then. Both banks are marked at the close.
+    addon = bankVisit()
+    World.containers[0][2] = slot(LINEN, 5, false, true)      -- the deposit's source, locked
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(0.2)
+    World.containers[0][2] = nil                               -- the answer: only the carried bag reports
+    World.containers[6][2] = slot(LINEN, 5)
+    World.bagUpdate(addon, 0)
+    World.advance(5)
+    local meta
+    total, bags, bank, meta = linen(addon)
+    T.check("a deposit on its way at the close: the banks are in doubt, nothing counts twice",
+        total == nil and meta.bankInDoubt == true and meta.accountInDoubt == true, total)
+    -- The carried bag's part came before the close, the bank's part not: the
+    -- bank's slot is still locked at the closing notice.
+    addon = bankVisit()
+    World.containers[0][3] = slot(LINEN, 60)
+    World.containers[6][1] = slot(LINEN, 100, false, true)     -- still shown whole, locked
+    World.bagUpdate(addon, 0)
+    World.bagUpdateDelayed(addon)
+    World.advance(0.05)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(0.2)
+    World.containers[6][1] = slot(LINEN, 40)                   -- the bank's part, after the close: not reported
+    World.advance(5)
+    total, bags, bank, meta = linen(addon)
+    T.check("half a withdrawal heard at the close: the bank whose slot is locked is in doubt",
+        total == 65 and bags == 65 and bank == nil and meta.bankInDoubt == true, total)
+    local lines = {}
+    addon.Inventory:RunDiagnostic(lines)
+    T.check("and the dump says that a move was on its way", table.concat(lines, "\n"):find("moveInFlight=true", 1, true) ~= nil,
+        table.concat(lines, "\n"))
+
     -- The read taken at the close is kept only when it looks like the reads
     -- of the visit: not refused, at least one item, the same slot count. The
     -- bank's own update is still without a kept read here (the read taken

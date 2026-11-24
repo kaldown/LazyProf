@@ -743,6 +743,42 @@ function Client:BankUsable(kind)
     return (tabs ~= nil and #tabs > 0) and true or false
 end
 
+-- Whether a slot of the container reads as locked.
+local function ContainerLocked(container)
+    for slot = 1, C_Container.GetContainerNumSlots(container) do
+        local info = C_Container.GetContainerItemInfo(container, slot)
+        if info and info.isLocked then return true end
+    end
+    return false
+end
+
+-- Whether a move of items is still on its way: a slot of the carried bags,
+-- or of a bank that can be read right now (the gates of BankContents above),
+-- reads as locked. The client locks a slot from the click until the move is
+-- answered: ContainerItemInfo.isLocked (ContainerDocumentation.lua:766-783,
+-- the field at :773), by which the bag and bank windows grey such a slot
+-- (Blizzard_UIPanels_Game/Mainline/ContainerFrame.lua:1285-1289,
+-- BankFrameTemplates.lua:594-596). A slot is also locked while its item is
+-- on the cursor; that reads as a move on its way too.
+-- Verify in game: whether the slots of a move read as locked at the bank's
+-- closing notice, and for which containers (/lp diag stock after a close:
+-- the "bank visit close" line).
+function Client:MoveInFlight()
+    for bag = Enum.BagIndex.Backpack, Enum.BagIndex.ReagentBag do
+        if ContainerLocked(bag) then return true end
+    end
+    if not bankOpen then return false end
+    for _, kind in ipairs({ "character", "account" }) do
+        local bankType = BankType(kind)
+        if C_Bank.CanViewBank(bankType) and C_Bank.FetchBankLockedReason(bankType) == nil then
+            for _, tab in ipairs(C_Bank.FetchPurchasedBankTabData(bankType) or {}) do
+                if ContainerLocked(tab.ID) then return true end
+            end
+        end
+    end
+    return false
+end
+
 -- Which bank a container id belongs to ("character" | "account"), nil for
 -- the carried bags and anything else. A BAG_UPDATE carries the container id
 -- (ContainerDocumentation.lua:659-667); the bank window reads it the same

@@ -9,7 +9,7 @@
 --   local World = require("scripts.lib.stockworld")
 --   World.install()                         -- stubs the client; call once
 --   World.reset()                           -- a fresh client state
---   World.containers[6] = { slots = 28, World.slot(2589, 100) }
+--   World.containers[6] = { slots = 28, World.slot(2589, 100) }   -- World.slot(id, n, bound, locked)
 --   World.bank[0] = { tabs = { { ID = 6 } } }          -- [bankType]: tabs, canView, locked
 --   World.gameSelfFound = true              -- the game itself marks the character Self-Found
 --   World.countsBank = false                -- the client's own item count leaves the banks out
@@ -43,8 +43,11 @@ World.countsBank = true       -- C_Item.GetItemCount counts the banks' container
 World.calls = { slots = 0, tabs = 0 }
 World.errors = {}
 
-function World.slot(itemId, stack, isBound)
-    return { itemID = itemId, stackCount = stack, isBound = isBound and true or false }
+-- A slot as GetContainerItemInfo reads it. isLocked: the client has locked
+-- the slot - a move of it is on its way (the click is made, the answer has
+-- not come).
+function World.slot(itemId, stack, isBound, isLocked)
+    return { itemID = itemId, stackCount = stack, isBound = isBound and true or false, isLocked = isLocked and true or false }
 end
 
 -- A fresh client: an empty backpack, no bank, a PvP world in Europe, the

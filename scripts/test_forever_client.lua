@@ -207,7 +207,7 @@ local SURFACE = { "IsOpen", "AnchorFrame", "PanelOffsetX", "GetLine", "NoDataPro
                   "FreeBagSlots", "Money", "RunMerchantDiagnostic",
                   "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic",
                   "BagContents", "IsBankOpen", "BankContents", "BankUsable", "BankKindOfBag", "CharacterIdentity", "Now",
-                  "IsSelfFoundCharacter", "ShowError", "ClientItemCounts",
+                  "IsSelfFoundCharacter", "ShowError", "ClientItemCounts", "MoveInFlight",
                   "StartStock", "RunStockDiagnostic" }
 
 -- Names of the functions an adapter installs.
@@ -888,6 +888,33 @@ section("stock", function()
     check(p .. "an empty bank that has slots is an empty table, not nil", type(items) == "table" and next(items) == nil)
     resetContainers()
 
+    -- A move on its way: a slot that reads as locked, in the carried bags or
+    -- in a bank that can be read right now.
+    check(p .. "in flight: nothing locked, nothing on its way", Client:MoveInFlight() == false)
+    containers[0][2].isLocked = true
+    check(p .. "in flight: a locked slot of the backpack", Client:MoveInFlight() == true)
+    containers[0][2].isLocked = nil
+    containers[5][1].isLocked = true
+    check(p .. "in flight: a locked slot of the reagent bag", Client:MoveInFlight() == true)
+    containers[5][1].isLocked = false
+    check(p .. "in flight: a slot that reads unlocked is not", Client:MoveInFlight() == false)
+    containers[8][2].isLocked = true
+    check(p .. "in flight: a locked slot of a character bank tab", Client:MoveInFlight() == true)
+    bank[0].canView = false
+    check(p .. "in flight: not of a bank that cannot be read now", Client:MoveInFlight() == false)
+    bank[0].canView = true
+    bank[0].locked = 1
+    check(p .. "in flight: nor of a locked bank", Client:MoveInFlight() == false)
+    bank[0].locked = nil
+    containers[8][2].isLocked = nil
+    containers[15][1].isLocked = true
+    check(p .. "in flight: a locked slot of the account bank", Client:MoveInFlight() == true)
+    containers[15][1].isLocked = nil
+    containers[7][1].isLocked = true
+    containers[-1][1].isLocked = true
+    check(p .. "in flight: not a container that is no purchased tab, nor the keyring", Client:MoveInFlight() == false)
+    resetContainers()
+
     -- Tab events while open.
     addon.events.BANK_TABS_CHANGED("BANK_TABS_CHANGED", 0)
     addon.events.BANK_TABS_CHANGED("BANK_TABS_CHANGED", 2)
@@ -906,6 +933,11 @@ section("stock", function()
     check(p .. "the bank counts as closed inside onBankClosed", openDuringClose == false)
     check(p .. "closed again: nothing is read", Client:IsBankOpen() == false and Client:BankContents("character") == nil)
     check(p .. "closed again: no bank is usable", Client:BankUsable("character") == false and Client:BankUsable("account") == false)
+    containers[6][1].isLocked = true
+    check(p .. "closed again: a bank's slots are not looked at for a move on its way", Client:MoveInFlight() == false)
+    containers[1][1].isLocked = true
+    check(p .. "closed again: the carried bags' still are", Client:MoveInFlight() == true)
+    resetContainers()
 
     addon.events.PLAYER_LOGOUT("PLAYER_LOGOUT")
     check(p .. "PLAYER_LOGOUT -> onLogout", seen[6] == "logout", table.concat(seen, ","))

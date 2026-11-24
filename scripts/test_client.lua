@@ -195,7 +195,7 @@ section("selection", function()
                          "FreeBagSlots", "Money", "RunMerchantDiagnostic",
                          "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic",
                          "BagContents", "IsBankOpen", "BankContents", "BankUsable", "BankKindOfBag", "CharacterIdentity", "Now",
-                         "IsSelfFoundCharacter", "ShowError", "ClientItemCounts",
+                         "IsSelfFoundCharacter", "ShowError", "ClientItemCounts", "MoveInFlight",
                          "StartStock", "RunStockDiagnostic" }) do
         check(p .. "Client:" .. m .. " exists", type(classic.Client[m]) == "function")
     end
@@ -443,7 +443,7 @@ section("stock", function()
     local addon = loadAdapter(11508)
     local Client = addon.Client
 
-    -- [bag] = { slots, [slot] = { itemId, count, bound } }
+    -- [bag] = { slots, [slot] = { itemId, count, bound, locked } }
     local bags = {
         [0] = { slots = 16, { 2589, 20 }, { 2589, 5 }, nil, { 6948, 1, true } },
         [1] = { slots = 8, { 2592, 10, true }, { 2592, 4 } },
@@ -464,7 +464,7 @@ section("stock", function()
         GetContainerItemInfo = function(bag, index)
             local entry = bags[bag] and bags[bag][index]
             if not entry then return nil end
-            return { itemID = entry[1], stackCount = entry[2], isBound = entry[3] and true or false }
+            return { itemID = entry[1], stackCount = entry[2], isBound = entry[3] and true or false, isLocked = entry[4] }
         end,
     }
     local items, bound, backpackSlots = Client:BagContents()
@@ -473,6 +473,13 @@ section("stock", function()
     check(p .. "bags: nothing beyond them", items[99999] == nil and items[5396] == nil)
     check(p .. "bags: soulbound counts are split off", bound[2592] == 10 and bound[6948] == 1 and bound[2589] == nil)
     check(p .. "bags: the backpack's slot count is the third return", backpackSlots == 16, backpackSlots)
+    -- A move on its way: a slot of the carried bags that reads as locked.
+    check(p .. "in flight: nothing locked", Client:MoveInFlight() == false)
+    bags[1][2][4] = true
+    check(p .. "in flight: a locked slot of a bag", Client:MoveInFlight() == true)
+    bags[1][2][4] = nil
+    bags[5][1][4] = true
+    check(p .. "in flight: not of a container that is no carried bag here", Client:MoveInFlight() == false)
 
     -- The older positional API: count is the 2nd return, the link the 7th.
     _G.C_Container = nil
@@ -480,7 +487,7 @@ section("stock", function()
     _G.GetContainerItemInfo = function(bag, index)
         local entry = bags[bag] and bags[bag][index]
         if not entry then return nil end
-        return "tex", entry[2], false, 1, false, false, "|cffffffff|Hitem:" .. entry[1] .. "::::::::60:::::|h[x]|h|r"
+        return "tex", entry[2], entry[4], 1, false, false, "|cffffffff|Hitem:" .. entry[1] .. "::::::::60:::::|h[x]|h|r"
     end
     asked = {}
     items, bound, backpackSlots = Client:BagContents()
@@ -489,12 +496,19 @@ section("stock", function()
     check(p .. "older call: the same five containers", table.concat(asked, ",") == "0,1,2,3,4", table.concat(asked, ","))
     check(p .. "older call: it does not say what is soulbound", next(bound) == nil)
     check(p .. "older call: backpack slots", backpackSlots == 16, backpackSlots)
+    -- Its third return is the lock (true, or 1 on the oldest clients).
+    bags[5][1][4] = nil
+    check(p .. "older call, in flight: nothing locked", Client:MoveInFlight() == false)
+    bags[0][2][4] = 1
+    check(p .. "older call, in flight: a locked slot", Client:MoveInFlight() == true)
+    bags[0][2][4] = nil
 
     -- No container call at all: nothing, and the backpack counts as unread.
     _G.GetContainerNumSlots, _G.GetContainerItemInfo = nil, nil
     items, bound, backpackSlots = Client:BagContents()
     check(p .. "no container call: empty, no backpack slots, no error",
         type(items) == "table" and next(items) == nil and type(bound) == "table" and backpackSlots == 0)
+    check(p .. "no container call: no move is seen on its way, and no error", Client:MoveInFlight() == false)
 
     -- The bank is not read on these clients.
     _G.C_Bank = { FetchPurchasedBankTabData = function() error("bank read on a Classic client") end }
