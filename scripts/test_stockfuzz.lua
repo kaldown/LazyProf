@@ -57,7 +57,8 @@
 --   I2.stale.<bank>      a counted bank is remembered with less than it holds (settled)
 --   I2.pending|unsaid|noline|uncounted   a bank left out, and the scan's third return
 --                        or the Shopping tab does not say so (settled)
---   I2.alt               the other character's bank is in doubt and left out without a word
+--   I2.alt               the other character's bank is in doubt and left out, and the
+--                        scan's third return or the Shopping tab does not name it
 --   I3.count|doubt       a well-behaved client: an open bank wrong or in doubt after two
 --                        quiet seconds (I3x.*: the same on any other client; not a check)
 --   I3.stuck, I4.blindmark   a bank this character may not view is in doubt
@@ -251,8 +252,6 @@ local KNOWN = {
     { "I1.multi.alt", "The same, for as long as the other character is logged in (the case of I1.settled.alt)." },
     { "I2.stale.account", "The account bank is remembered without the stack that was put into it (the case of I1.settled.alt)"
         .. " and nothing says so." },
-    { "I2.alt", "The bank of another character that is in doubt is left out of the counts without a word in the scan's third"
-        .. " return or on the Shopping tab." },
     { "I3.stuck.account", "The account bank is in doubt for a character that may not view it, so no visit of its own takes"
         .. " the mark away. The mark is another character's, set after a visit of its own that left the bank uncertain." },
 }
@@ -496,7 +495,8 @@ local function Guard(what, fn, ...)
     end
 end
 
--- The first row of the Shopping tab, as the window would draw it from `meta`.
+-- The lines the Shopping tab starts with, as the window would draw them from
+-- `meta`: its first two rows (one for the character's banks, one for alts).
 local function ShoppingLine(meta)
     local addon = S.addon
     if not addon.GuideViews then
@@ -505,7 +505,7 @@ local function ShoppingLine(meta)
         end
     end
     local rows = addon.GuideViews.Shopping({ path = {}, missing = { rows = {} }, stockMeta = meta, now = World.serverTime })
-    return rows[1] and tostring(rows[1].text) or ""
+    return (rows[1] and tostring(rows[1].text) or "") .. "\n" .. (rows[2] and tostring(rows[2].text) or "")
 end
 
 -- remembered against true: "none" (nothing remembered), "eq", "high", "low", "mixed"
@@ -667,8 +667,11 @@ local function SettledChecks(meta)
         if metaDoubt then
             S.stats.doubtSettled = S.stats.doubtSettled + 1
             local line = ShoppingLine(meta)
-            if not line:find("not counted", 1, true) then
-                Violate("I2.noline." .. kind, "in doubt, and the Shopping tab's first row is: " .. line, { cause = cause })
+            local named = own and (line:find("Your bank is not counted", 1, true) or line:find("Your bank and the account bank are not counted", 1, true))
+                or (not own and (line:find("The account bank is not counted", 1, true)
+                    or line:find("Your bank and the account bank are not counted", 1, true)))
+            if not named then
+                Violate("I2.noline." .. kind, "in doubt, and the Shopping tab starts with: " .. line, { cause = cause })
             end
         end
         if pending then
@@ -709,17 +712,27 @@ local function SettledChecks(meta)
                 .. " ms) cannot read that bank to take the mark away", { cause = cause })
         end
     end
-    -- An alt's bank that is in doubt is left out too: does anything say so?
+    -- An alt's bank that is in doubt is left out too: the scan's third
+    -- return names the alt, and the Shopping tab has a line for it.
     local other = S.chars[OtherName()]
     if other then
         local items, _, doubt = Remembered("character", OtherName())
         if items and doubt then
-            local sendable = {}
-            for _, container in pairs(other.bank) do AddCounts(sendable, container, true) end
-            if next(sendable) ~= nil then
-                Violate("I2.alt", "the other character's bank is in doubt and left out; the scan's third return has no word for it", { cause = Cause() })
+            local name, named = NAME[OtherName()], false
+            for _, listed in ipairs(meta.altBanksInDoubt or {}) do
+                if listed == name then named = true end
             end
+            if not named then
+                Violate("I2.alt", "the other character's bank is in doubt and left out; the scan's third return does not name it", { cause = Cause() })
+            elseif not ShoppingLine(meta):find("The bank of " .. name .. " is not counted", 1, true) then
+                Violate("I2.alt", "the other character's bank is in doubt and left out; the Shopping tab starts with: "
+                    .. ShoppingLine(meta), { cause = Cause() })
+            end
+        elseif meta.altBanksInDoubt ~= nil then
+            Violate("I2.alt", "the scan names an alt whose bank is not in doubt", { cause = Cause() })
         end
+    elseif meta.altBanksInDoubt ~= nil then
+        Violate("I2.alt", "the scan names an alt, and there is no other character", { cause = Cause() })
     end
     -- The model itself: with nothing on its way the client shows the truth.
     if InFlight() == 0 then

@@ -1553,10 +1553,16 @@ T.section("shopping: a bank that is not counted says so", function()
         v.stockMeta, v.now = meta, meta and NOW or nil
         return Views.Shopping(v)
     end
-    local OWN = "Your bank is not counted: it changed after LazyProf last read it. Open the bank to count it again."
-    local ACCOUNT = "The account bank is not counted: it changed after LazyProf last read it. Open the bank to count it again."
-    local BOTH = "Your bank and the account bank are not counted: they changed after LazyProf last read them. "
+    local OWN = "Your bank is not counted: it may have changed after LazyProf last read it. Open the bank to count it again."
+    local ACCOUNT = "The account bank is not counted: it may have changed after LazyProf last read it. Open the bank to count it again."
+    local BOTH = "Your bank and the account bank are not counted: they may have changed after LazyProf last read them. "
         .. "Open the bank to count them again."
+    local ONE_ALT = "The bank of Zed Alt is not counted: it may have changed after LazyProf last read it. "
+        .. "Open the bank on that character to count it again."
+    local TWO_ALTS = "The banks of Amy Alt and Zed Alt are not counted: they may have changed after LazyProf last read them. "
+        .. "Open the bank on those characters to count them again."
+    local THREE_ALTS = "The banks of Amy Alt, Bob Alt and Zed Alt are not counted: they may have changed after LazyProf last read them. "
+        .. "Open the bank on those characters to count them again."
 
     local plain = rowsWith({ remembered = true, alts = {} })
     local rows = rowsWith({ remembered = true, alts = {}, bankInDoubt = true })
@@ -1579,6 +1585,25 @@ T.section("shopping: a bank that is not counted says so", function()
     T.eq("both in doubt: one line for the two", rows[1].text, BOTH)
     T.check("and only one", rows[2].text ~= OWN and rows[2].text ~= ACCOUNT and #rows == #plain + 1)
 
+    -- An alt's bank that is in doubt is left out too: a line of its own
+    -- names the alt (the scan lists them by name).
+    rows = rowsWith({ remembered = true, alts = {}, altBanksInDoubt = { "Zed Alt" } })
+    T.eq("one alt's bank in doubt", rows[1].text, ONE_ALT)
+    T.check("grey and wrapping like the other", rows[1].kind == "line" and rows[1].wrap == true and rows[1].color[1] == 0.7
+        and #rows == #plain + 1)
+    rows = rowsWith({ remembered = true, alts = {}, altBanksInDoubt = { "Amy Alt", "Zed Alt" } })
+    T.eq("two alts: joined by and", rows[1].text, TWO_ALTS)
+    rows = rowsWith({ remembered = true, alts = {}, altBanksInDoubt = { "Amy Alt", "Bob Alt", "Zed Alt" } })
+    T.eq("three alts: commas, then and", rows[1].text, THREE_ALTS)
+    T.eq("still one line", #rows, #plain + 1)
+    -- One line per kind of statement: the character's banks first.
+    rows = rowsWith({ remembered = true, alts = { ["Zed Alt"] = { bags = NOW - DAY } }, bankInDoubt = true, accountInDoubt = true,
+        altBanksInDoubt = { "Zed Alt" } }, stock, where)
+    T.check("own banks and an alt's: two lines, the character's first", rows[1].text == BOTH and rows[2].text == ONE_ALT, rows[2].text)
+    T.eq("both before the collect block", rows[3].text, "Collect first")
+    rows = rowsWith({ remembered = true, alts = {}, altBanksInDoubt = {} })
+    T.eq("an empty list of alts: no line", #rows, #plain)
+
     -- Nothing to say.
     T.check("nothing in doubt: no line", plain[1].text ~= OWN and plain[1].text ~= ACCOUNT and plain[1].text ~= BOTH)
     rows = rowsWith(nil)
@@ -1588,7 +1613,7 @@ T.section("shopping: a bank that is not counted says so", function()
     rows = rowsWith({ remembered = true, alts = {}, bankInDoubt = true },
         nil, nil, { steps = {}, nothingLeft = true, actualSkill = 300, currentSkill = 300, totalCost = 0 })
     T.check("nothing left to level: the notice alone", #rows >= 1 and rows[1].text ~= OWN)
-    for _, text in ipairs({ OWN, ACCOUNT, BOTH }) do
+    for _, text in ipairs({ OWN, ACCOUNT, BOTH, ONE_ALT, TWO_ALTS, THREE_ALTS }) do
         T.check("plain ASCII: " .. text:sub(1, 24), not text:find("[\128-\255]"))
     end
 end)

@@ -553,7 +553,7 @@ local function firstShoppingRow(addon)
     return rows[1] and rows[1].text
 end
 
-local NOT_COUNTED = "Your bank and the account bank are not counted: they changed after LazyProf last read them. "
+local NOT_COUNTED = "Your bank and the account bank are not counted: they may have changed after LazyProf last read them. "
     .. "Open the bank to count them again."
 
 -- A scan never counts more linen than is owned.
@@ -1175,7 +1175,7 @@ T.section("the close", function()
         T.check("the bank this character may not view is not, and still counts", meta.accountInDoubt == nil and combined[BAR] == 50,
             tostring(meta.accountInDoubt))
         T.eq("the Shopping tab names the character's bank alone", firstShoppingRow(addon),
-            "Your bank is not counted: it changed after LazyProf last read it. Open the bank to count it again.")
+            "Your bank is not counted: it may have changed after LazyProf last read it. Open the bank to count it again.")
 
         -- Nor by a change of the carried bags in the second after a close.
         World.event(addon, "BANKFRAME_OPENED")
@@ -1363,7 +1363,7 @@ T.section("the close", function()
     T.check("the bank whose container reported it is in doubt, the other is not", inDoubt == true and accountDoubt == false)
     T.eq("so it is not counted", (linen(addon)), 5)
     T.eq("and the Shopping tab says so", firstShoppingRow(addon),
-        "Your bank is not counted: it changed after LazyProf last read it. Open the bank to count it again.")
+        "Your bank is not counted: it may have changed after LazyProf last read it. Open the bank to count it again.")
     linenLeft, inDoubt, barsLeft, accountDoubt = letGoThen("BANKFRAME_CLOSED", 15)
     T.check("the same told by an account bank container's update: the account bank is in doubt", linenLeft == 100 and barsLeft == 50
         and inDoubt == false and accountDoubt == true, tostring(linenLeft) .. "/" .. tostring(barsLeft))
@@ -1443,7 +1443,7 @@ end)
 -- the carried bag alone - the carried count of an item the bank holds rising
 -- in the second after the close.
 -- ===========================================================================
-local BANK_NOT_COUNTED = "Your bank is not counted: it changed after LazyProf last read it. Open the bank to count it again."
+local BANK_NOT_COUNTED = "Your bank is not counted: it may have changed after LazyProf last read it. Open the bank to count it again."
 
 T.section("the answer of a last move arrives after the close", function()
     local function closedUpdates(addon)
@@ -2036,8 +2036,21 @@ T.section("a bank in doubt until the next visit", function()
         combined[LINEN])
     T.check("the account bank is in doubt for this character too", combined[BAR] == nil and meta.accountInDoubt == true
         and meta.bankInDoubt == nil)
-    T.eq("its Shopping tab names the account bank alone", firstShoppingRow(crafter),
-        "The account bank is not counted: it changed after LazyProf last read it. Open the bank to count it again.")
+    T.eq("its Shopping tab names the account bank", firstShoppingRow(crafter),
+        "The account bank is not counted: it may have changed after LazyProf last read it. Open the bank to count it again.")
+    -- The first character's bank is left out of this one's counts as well:
+    -- the scan names it, and the Shopping tab has a second line for it.
+    T.check("the scan names the alt whose bank is not counted", type(meta.altBanksInDoubt) == "table"
+        and #meta.altBanksInDoubt == 1 and meta.altBanksInDoubt[1] == "Main Goldtooth")
+    do
+        local rows = crafter.GuideViews.Shopping({ path = {}, missing = { rows = {} }, stockMeta = meta, now = World.serverTime })
+        T.eq("and the Shopping tab says so in its second row", rows[2] and rows[2].text,
+            "The bank of Main Goldtooth is not counted: it may have changed after LazyProf last read it. "
+            .. "Open the bank on that character to count it again.")
+    end
+    crafter.db.profile.includeAltCharacters = false
+    T.check("with alts off there is nothing to say of it", select(3, World.scan(crafter)).altBanksInDoubt == nil)
+    crafter.db.profile.includeAltCharacters = true
     World.event(crafter, "PLAYER_LOGOUT")
 
     -- Back on the first character: the next visit's kept read clears the mark.
@@ -2070,6 +2083,7 @@ T.section("a bank in doubt until the next visit", function()
     World.advance(3)
     combined = World.scan(crafter)
     T.check("and the other character counts bank and account bank again", combined[LINEN] == 106 and combined[BAR] == 50, combined[LINEN])
+    T.check("with no alt named any more", select(3, World.scan(crafter)).altBanksInDoubt == nil)
 end)
 
 -- ===========================================================================

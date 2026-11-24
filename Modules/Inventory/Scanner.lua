@@ -171,9 +171,10 @@
 -- 6. In doubt is a mark saved with the remembered bank (StockMemory.lua). A
 --    bank that carries it is not counted by any scan - not for its own
 --    character, not as an alt's bank (the alt's bags still count), not as
---    the account bank - and the scan's third return says so; the Shopping
---    tab shows a line for it. The next kept read of that bank takes the mark
---    away.
+--    the account bank - and the scan's third return says so: bankInDoubt,
+--    accountInDoubt, and altBanksInDoubt with the names of the alts whose
+--    bank is left out. The Shopping tab shows a line for each. The next
+--    kept read of that bank takes the mark away.
 local ADDON_NAME, LazyProf = ...
 
 LazyProf.Inventory = {}
@@ -486,13 +487,16 @@ end
 --   { guid, world, faction, countBank, token,
 --     totals  = { [itemId] = count over all alts },
 --     sources = { [itemId] = { [name] = { bags, bank } } },
---     seen    = { [name] = { bags = time, bank = time } } }
+--     seen    = { [name] = { bags = time, bank = time } },
+--     bankDoubt = { name, ... } }   the alts whose bank is in doubt and so
+--                                   left out, by name (only while banks count)
 local altsPart = nil
 
 local function BuildAltsPart(identity, countBank)
     local part = { guid = identity.guid, world = identity.world, faction = identity.faction, countBank = countBank,
-                   totals = {}, sources = {}, seen = {} }
+                   totals = {}, sources = {}, seen = {}, bankDoubt = {} }
     local where = {}
+    -- The memory hands the alts out by name, so bankDoubt is in that order.
     for _, alt in ipairs(LazyProf.StockMemory:Alts(identity)) do
         local seen = {}
         if alt.bags then
@@ -502,6 +506,8 @@ local function BuildAltsPart(identity, countBank)
         if countBank and alt.bank then
             mergeSource(alt.bank, "bank", alt.name, part.totals, where)
             seen.bank = alt.bankAt
+        elseif countBank and alt.bankDoubt then
+            part.bankDoubt[#part.bankDoubt + 1] = alt.name
         end
         part.seen[alt.name] = seen
     end
@@ -549,6 +555,9 @@ end
 --                    not been compared yet with what they held when the
 --                    last session ended at the bank
 --     accountPending the same for the account bank
+--     altBanksInDoubt  { name, ... }: the alts whose bank is in doubt and so
+--                    left out, by name; nil when there is none (or alts or
+--                    bank items do not count)
 --     alts = { [name] = { bags = time, bank = time } } }   the alts counted
 -- The character's own bank and the account bank are both bank stock (the
 -- account bank is other characters' stock too, so a character that cannot
@@ -604,6 +613,9 @@ local function AddRememberedStock(self, combined, breakdown, countAlts, leaveOut
             entry.alts = part.sources[itemId]
         end
         meta.alts = part.seen
+        if #part.bankDoubt > 0 then
+            meta.altBanksInDoubt = part.bankDoubt
+        end
     end
     return meta
 end

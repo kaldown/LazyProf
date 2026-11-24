@@ -311,6 +311,38 @@ T.section("no inventory addon: a bank in doubt is not counted", function()
     T.check("named as bags, with their age and no bank age", breakdown[2589].alts["Bank Alt"].bags == 20
         and breakdown[2589].alts["Bank Alt"].bank == nil and meta.alts["Bank Alt"].bags == NOW - DAY
         and meta.alts["Bank Alt"].bank == nil)
+    -- And the scan names the alt, so that the list can say whose bank is
+    -- missing from it.
+    T.check("the scan names the alt whose bank is left out", type(meta.altBanksInDoubt) == "table"
+        and #meta.altBanksInDoubt == 1 and meta.altBanksInDoubt[1] == "Bank Alt", meta.altBanksInDoubt and meta.altBanksInDoubt[1])
+    local EXTRA = { guid = "Player-1-EXTRA", name = "Carl Extra", world = "eu-pvp", faction = "Alliance" }
+    Memory:SaveBags(EXTRA, { [765] = 1 }, {}, NOW - DAY)
+    Memory:SaveBank(EXTRA, { [2589] = 7 }, {}, NOW - DAY)
+    Memory:MarkBankDoubt(EXTRA.guid)
+    Memory:SaveBank(HORDE, { [2589] = 7 }, {}, NOW - DAY)
+    Memory:MarkBankDoubt(HORDE.guid)
+    Inventory:ForgetAltsPart()
+    combined, breakdown, meta = scan()
+    T.check("several: by name, and only characters that count as alts", #meta.altBanksInDoubt == 2
+        and meta.altBanksInDoubt[1] == "Bank Alt" and meta.altBanksInDoubt[2] == "Carl Extra", table.concat(meta.altBanksInDoubt, ","))
+    LazyProf.db.profile.includeBankItems = false
+    combined, breakdown, meta = scan()
+    T.check("bank items off: no alt's bank would count, none is named", meta.altBanksInDoubt == nil)
+    LazyProf.db.profile.includeBankItems = true
+    LazyProf.db.profile.includeAltCharacters = false
+    combined, breakdown, meta = scan()
+    T.check("alts off: none is named", meta.altBanksInDoubt == nil)
+    LazyProf.db.profile.includeAltCharacters = true
+    LazyProf.db.char.selfFoundMode = true
+    combined, breakdown, meta = scan()
+    T.check("Self-Found: none is named", meta.altBanksInDoubt == nil)
+    LazyProf.db.char.selfFoundMode = false
+    -- Back to the one alt with a bank in doubt.
+    LazyProf.db.global.stock.characters[EXTRA.guid] = nil
+    LazyProf.db.global.stock.characters[HORDE.guid].bank = nil
+    Inventory:ForgetAltsPart()
+    combined, breakdown, meta = scan()
+    T.check("one again", #meta.altBanksInDoubt == 1 and meta.altBanksInDoubt[1] == "Bank Alt")
 
     -- The next save of a bank takes its mark away.
     Memory:SaveBank(MAIN, { [2589] = 41 }, {}, NOW)
