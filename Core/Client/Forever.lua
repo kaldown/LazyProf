@@ -832,6 +832,19 @@ function Client:IsSelfFoundCharacter()
     return C_PlayerInfo.IsSelfFoundActive() == true
 end
 
+-- Hand a message to the game's error handler, which shows it when Lua
+-- errors are displayed. geterrorhandler() returns the handler (a global of
+-- this client: dump, GlobalAPI.lua:6884; Blizzard's UI source calls it the
+-- same way, Blizzard_SharedXMLBase/ErrorUtil.lua:3 and :18-19). Asking for
+-- the handler and calling it both run protected: a handler that is missing
+-- or fails itself changes nothing, and nothing is raised from here.
+function Client:ShowError(message)
+    local found, handler = pcall(geterrorhandler)
+    if found and type(handler) == "function" then
+        pcall(handler, message)
+    end
+end
+
 -- Server time in seconds (SystemTimeDocumentation.lua:30-36): the same on
 -- every character and computer, which the computer's own clock is not.
 function Client:Now()

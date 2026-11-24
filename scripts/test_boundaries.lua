@@ -2,6 +2,7 @@
 -- (Core/Client/) and the widget layer (Modules/UI/Widgets/), and calls that
 -- do not exist on WoW Forever may only appear in Classic-only code. Strips
 -- `--` comments, then fails listing file:line for every forbidden name.
+-- Also: the events of the stock memory are each registered in one place.
 -- Run from the repo root: lua5.1 scripts/test_boundaries.lua
 
 local FORBIDDEN = {
@@ -19,6 +20,11 @@ local FORBIDDEN = {
     -- The world a character belongs to and the server clock (the adapter's
     -- CharacterIdentity / Now): a realm name is no stable key on every client
     "C_GameRules", "GetCurrentRegion", "GetRealmName", "GetServerTime",
+    -- Which container is which and which bank is which, the client's way of
+    -- writing a full name, the game's own Self-Found flag and its error
+    -- handler (the adapter's BagContents / BankKindOfBag / CharacterIdentity /
+    -- IsSelfFoundCharacter / ShowError)
+    "Enum.BagIndex", "Enum.BankType", "NameUtil", "C_PlayerInfo", "geterrorhandler",
 }
 
 local EXEMPT_DIRS = { "Core/Client/", "Modules/UI/Widgets/" }
@@ -86,7 +92,50 @@ for f in p:lines() do files[#files + 1] = f end
 p:close()
 assert(#files > 0, "no Lua files found (run from the repo root)")
 
+-- The addon object has one handler per event: a second registration of an
+-- event silently replaces the first. So each event of the stock memory is
+-- registered in exactly one place: the bank window's events and logout in the
+-- client adapter (logout once in each adapter - one of the two loads), the
+-- two bag events in Core/Init.lua, which passes them on to the scanner.
+-- [event] = { [file] = how often it is registered there }; anywhere else: never.
+local REGISTERED_IN = {
+    PLAYER_LOGOUT = { ["Core/Client/Classic.lua"] = 1, ["Core/Client/Forever.lua"] = 1 },
+    BANKFRAME_OPENED = { ["Core/Client/Forever.lua"] = 1 },
+    BANKFRAME_CLOSED = { ["Core/Client/Forever.lua"] = 1 },
+    BANK_TABS_CHANGED = { ["Core/Client/Forever.lua"] = 1 },
+    BAG_UPDATE = { ["Core/Init.lua"] = 1 },
+    BAG_UPDATE_DELAYED = { ["Core/Init.lua"] = 1 },
+}
+
 local offenders = {}
+
+local registered = {}   -- [event] = { [file] = count }
+for _, path in ipairs(files) do
+    for raw in io.lines(path) do
+        for event in strip_comment(raw):gmatch("RegisterEvent%s*%(%s*[\"']([%w_]+)[\"']") do
+            if REGISTERED_IN[event] then
+                registered[event] = registered[event] or {}
+                registered[event][path] = (registered[event][path] or 0) + 1
+            end
+        end
+    end
+end
+for event, expected in pairs(REGISTERED_IN) do
+    local found = registered[event] or {}
+    for path, count in pairs(found) do
+        if (expected[path] or 0) ~= count then
+            offenders[#offenders + 1] = string.format("%s: %s is registered %d time(s) here, expected %d", path, event, count,
+                expected[path] or 0)
+        end
+    end
+    for path, count in pairs(expected) do
+        if found[path] == nil then
+            offenders[#offenders + 1] = string.format("%s: %s is not registered here, expected %d time(s)", path, event, count)
+        end
+    end
+end
+table.sort(offenders)
+
 for _, path in ipairs(files) do
     if not exempt(path) then
         local n = 0
@@ -178,7 +227,8 @@ end
 
 if #offenders > 0 then
     for _, o in ipairs(offenders) do print(o) end
-    print(string.format("FAIL: %d forbidden client-API use(s) (outside the adapter, or a call that does not exist on Forever)", #offenders))
+    print(string.format("FAIL: %d forbidden client-API use(s) (outside the adapter, or a call that does not exist on Forever) "
+        .. "or event registration(s) out of place", #offenders))
     os.exit(1)
 end
 print(string.format("boundaries: OK (%d files scanned)", #files))

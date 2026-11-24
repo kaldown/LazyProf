@@ -488,6 +488,17 @@ function Client:IsSelfFoundCharacter()
     return false
 end
 
+-- Hand a message to the game's error handler (geterrorhandler() returns
+-- it), which shows it when Lua errors are displayed. Asking for the handler
+-- and calling it both run protected: a client without one, or a handler that
+-- fails itself, changes nothing, and nothing is raised from here.
+function Client:ShowError(message)
+    local found, handler = pcall(geterrorhandler)
+    if found and type(handler) == "function" then
+        pcall(handler, message)
+    end
+end
+
 -- Server time in seconds; the computer's clock on a client without that call.
 function Client:Now()
     if GetServerTime then

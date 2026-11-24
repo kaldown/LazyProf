@@ -398,17 +398,13 @@ end
 -- reads right now.
 local memoryErrors = { count = 0, last = nil, where = nil }
 
--- Hand a message to the game's error handler. geterrorhandler() returns it
--- (a global of the WoW Forever client: Ketho BlizzardInterfaceResources,
--- forever branch, Resources/GlobalAPI.lua:6884; Blizzard's UI source of that
--- client calls it the same way, Interface/AddOns/Blizzard_SharedXMLBase/
--- ErrorUtil.lua:3 and :18-19). A client without it, or a handler that fails
--- itself, changes nothing here.
+-- Hand a message to the game's error handler, through the client adapter
+-- (the handler is the client's). Nothing gets out of here: this runs where a
+-- failure is being noted, and noting one must not be the next failure.
 local function ShowError(message)
-    if type(geterrorhandler) ~= "function" then return end
-    local found, handler = pcall(geterrorhandler)
-    if found and type(handler) == "function" then
-        pcall(handler, message)
+    local Client = LazyProf.Client
+    if Client then
+        pcall(Client.ShowError, Client, message)
     end
 end
 

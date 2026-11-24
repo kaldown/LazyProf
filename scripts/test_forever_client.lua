@@ -207,7 +207,7 @@ local SURFACE = { "IsOpen", "AnchorFrame", "PanelOffsetX", "GetLine", "NoDataPro
                   "FreeBagSlots", "Money", "RunMerchantDiagnostic",
                   "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic",
                   "BagContents", "IsBankOpen", "BankContents", "BankUsable", "BankKindOfBag", "CharacterIdentity", "Now",
-                  "IsSelfFoundCharacter",
+                  "IsSelfFoundCharacter", "ShowError",
                   "StartStock", "RunStockDiagnostic" }
 
 -- Names of the functions an adapter installs.
@@ -1025,6 +1025,27 @@ section("stock", function()
     flag = nil
     check(p .. "Self-Found: no value is false", Client:IsSelfFoundCharacter() == false)
     _G.C_PlayerInfo = nil
+
+    -- Handing a message to the game's error handler ----------------------------
+    do
+        local savedHandler = _G.geterrorhandler
+        local handed = {}
+        _G.geterrorhandler = function() return function(message) handed[#handed + 1] = message end end
+        Client:ShowError("LazyProf: something failed")
+        check(p .. "ShowError: the message goes to the game's error handler",
+            #handed == 1 and handed[1] == "LazyProf: something failed", handed[1])
+        for _, case in ipairs({
+            { "a client without an error handler", false },
+            { "an error handler that is not a function", function() return "broken" end },
+            { "an error handler that fails", function() return function() error("handler down") end end },
+            { "asking for the error handler fails", function() error("no handler today") end },
+        }) do
+            _G.geterrorhandler = case[2] or nil
+            local ran, err = pcall(Client.ShowError, Client, "another")
+            check(p .. "ShowError: " .. case[1] .. " - nothing raised, nothing handed on", ran and #handed == 1, err)
+        end
+        _G.geterrorhandler = savedHandler
+    end
 
     -- The clock ----------------------------------------------------------------
     _G.GetServerTime = function() return 1763900000 end
