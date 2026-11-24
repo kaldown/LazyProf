@@ -1136,6 +1136,8 @@ end
 -- Decided: a carried count that rises in that second for an item a bank of
 -- the visit is remembered to hold marks that bank - the rules cannot tell
 -- it from the answer of a last withdrawal, also when it was loot or a craft.
+-- A rise is one against the least the bags have held of the item since the
+-- close: what was used up first does not hide what arrives after it.
 -- Such a visit is filed as "+rise" and is no failure; any other change of
 -- the bags in that second ("+after": a count that fell, an item no
 -- remembered bank holds) must leave no mark.
@@ -1146,12 +1148,16 @@ local function NoteChange(counts)
         v.lastMoveMs = S.now
     elseif counts and S.lastVisit and S.closeMs and S.now - S.closeMs <= 1000 then
         local last = S.lastVisit
+        local least = last.bagsAtClose or {}
         local now, rose = ShownBags(), false
         for _, kind in ipairs({ "character", "account" }) do
             local held = Remembered(kind, last.who)
             for _, id in ipairs(ALL_ITEMS) do
-                if (now[id] or 0) > ((last.bagsAtClose or {})[id] or 0) and held and (held[id] or 0) > 0 then rose = true end
+                if (now[id] or 0) > (least[id] or 0) and held and (held[id] or 0) > 0 then rose = true end
             end
+        end
+        for _, id in ipairs(ALL_ITEMS) do
+            if (now[id] or 0) < (least[id] or 0) then least[id] = now[id] or 0 end
         end
         if rose then last.afterRise = true else last.after = true end
     end

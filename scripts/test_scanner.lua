@@ -1865,16 +1865,42 @@ T.section("after the close", function()
         combined[2589])
     nextFrame()
     T.check("and the comparison marks it: the count rose against what was left", inDoubt() == true)
-    -- A scan that sees the fall counts as having seen it, too.
+    -- Only the comparison lowers the note, when the frame's updates are
+    -- through - not a scan in between. A stack on its way from one carried
+    -- bag to another shows in neither for a moment when the source's update
+    -- comes first; a scan at that moment must not turn the stack's arrival
+    -- in the other bag into a rise.
     closedVisit()
     advance(0.08)
-    client.bags = { [2589] = 3 }
+    client.bags = { [2589] = 3 }                         -- two linen have left their bag ...
     Inventory:OnBagUpdate(0)
-    T.eq("a scan after the fall counts bags and bank", (Inventory:ScanAll())[2589], 103)
-    client.bags = { [2589] = 4 }
+    T.eq("a scan between the two updates of a move among the carried bags counts bags and bank", (Inventory:ScanAll())[2589], 103)
+    client.bags = { [2589] = 5 }                         -- ... and are in the other one
+    Inventory:OnBagUpdate(1)
+    combined, breakdown, meta = Inventory:ScanAll()
+    T.check("a scan after the second update leaves the bank out: the count rose against what the scan before it saw",
+        combined[2589] == 5 and meta.bankPending == true and inDoubt() == false, combined[2589])
+    nextFrame()
+    T.check("the comparison marks nothing: against the note nothing has risen", inDoubt() == false)
+    T.eq("and the bank counts again", (scan())[2589], 105)
+    -- That is for the scans of one frame only: the comparison starts them afresh.
     Inventory:OnBagUpdate(0)
     combined, breakdown, meta = Inventory:ScanAll()
-    T.check("a rise in the same frame, after that scan: left out", combined[2589] == 4 and meta.bankPending == true, combined[2589])
+    T.check("a scan after a later update is measured against the note again", combined[2589] == 105 and meta.bankPending == nil,
+        combined[2589])
+    -- A scan that saw a count fall does see what arrives after it, in the
+    -- same frame: three linen are used up, then the answer of a withdrawal
+    -- brings one - before the comparison has lowered the note.
+    closedVisit()
+    advance(0.08)
+    client.bags = { [2589] = 2 }
+    Inventory:OnBagUpdate(0)
+    T.eq("a scan after the fall counts bags and bank", (Inventory:ScanAll())[2589], 102)
+    client.bags = { [2589] = 3 }
+    Inventory:OnBagUpdate(0)
+    combined, breakdown, meta = Inventory:ScanAll()
+    T.check("a stack arriving in that frame, after the scan: the bank is left out, not counted beside it", combined[2589] == 3
+        and meta.bankPending == true, combined[2589])
     -- The note is the scanner's own: the bags the adapter handed out are not changed by it.
     closedVisit()
     local handed = client.bags

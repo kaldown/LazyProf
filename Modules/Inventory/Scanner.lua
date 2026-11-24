@@ -138,19 +138,22 @@
 --        of the visit holds that item, that bank is marked in doubt - also
 --        when it was loot or a craft: the two cannot be told apart. A count
 --        that fell, or rose for an item no remembered bank of the visit
---        holds, marks nothing. The note follows a count that falls (what is
---        used up after the close must not hide a stack that arrives after
---        it). The comparison is made on the next frame after an update of a
---        carried bag, when the bank is opened again, and at logout; bags
---        that cannot be read then are not compared, and the comparison
---        stays due. A scan that comes before it does not mark: it leaves a
+--        holds, marks nothing. The comparison is made on the next frame
+--        after an update of a carried bag, when the bank is opened again,
+--        and at logout; bags that cannot be read then are not compared,
+--        and the comparison stays due. Each comparison lowers the note to
+--        the counts that have fallen (what is used up after the close must
+--        not hide a stack that arrives after it). A scan that comes before
+--        the comparison neither marks nor touches the note: it leaves a
 --        bank out of its own count (as being read) when the count it has
---        just read has risen for an item that bank holds. Within one frame
---        a stack on its way from one carried bag to another can show in
---        both; by the next frame the count is what it was. When no note
---        could be taken at the close (the bags could not be read), an
---        update of a carried bag within that second marks the visit's banks
---        at once.
+--        just read has risen for an item that bank holds - risen against
+--        the note or against what an earlier scan of the same frame saw.
+--        Within one frame a stack on its way from one carried bag to
+--        another can show in both, or in neither; by the next frame the
+--        count is what it was.
+--        When no note could be taken at the close (the bags could not be
+--        read), an update of a carried bag within that second marks the
+--        visit's banks at once.
 --    (c) The end of the session. An answer that arrives after the session
 --        has ended (a logout or a reload) cannot be seen by that session;
 --        the next one can tell, because nothing else changes the carried
@@ -787,7 +790,11 @@ local closedBankUpdates = { count = 0, lastAfter = nil }
 --   held[kind]        the bank could not be read back at the close: left out
 --                     of the scans for CLOSE_WATCH (rule 4)
 --   note              the carried bags' contents at the closing notice (nil:
---                     they could not be read)
+--                     they could not be read), lowered by each comparison
+--                     to the counts that have fallen
+--   floor             the same for the scans that come before a comparison:
+--                     lowered by each of them, and set back to the note by
+--                     the comparison
 --   bankUpdates, bankLast   updates of bank containers inside CLOSE_WATCH_BANK,
 --                     and how long after the close the last one came
 --   bagUpdates, bagLast     the same for carried bags inside CLOSE_WATCH
@@ -1316,7 +1323,7 @@ HeldAfterClose = function(kind)
     return (w ~= nil and w.held[kind] == true and not w.done[kind] and GetTime() - w.at <= CLOSE_WATCH + CLOCK_SLACK) or false
 end
 
--- The note of the carried bags follows every count that has fallen.
+-- Lower a note of the carried bags to every count that has fallen.
 local function LowerNote(note, items)
     for itemId, count in pairs(note) do
         local now = items[itemId] or 0
@@ -1360,6 +1367,7 @@ SettleAfterClose = function()
         end
     end
     LowerNote(w.note, items)
+    w.floor = nil     -- the scans of the next frame start from the note again
     -- A scan that left a bank out for this comparison may have been drawn:
     -- when nothing was marked the bank counts again, and nothing else would
     -- say so.
@@ -1377,22 +1385,33 @@ end
 
 -- Rule 5b, for a scan that comes before that comparison: the banks it leaves
 -- out ({ [kind] = true }; nil when none), judged by the bags it has just
--- read. Nothing is marked and the comparison stays due; the note follows
--- the counts that have fallen.
+-- read. Nothing is marked, the note is left as it is and the comparison
+-- stays due. The scans of one frame measure against a floor of their own:
+-- the note, lowered by every scan to what it saw fall. Between two updates
+-- of a frame a count can dip (a stack shows in neither of two carried bags,
+-- or was used up) and what arrives after the dip must not be counted beside
+-- the bank by the next scan - but only what has risen against the note at
+-- the end of the frame is a reason for a mark.
 RisenAfterClose = function(bagItems)
     local w = watch
     if not w or not w.owed or not w.note then return nil end
+    local floor = w.floor
+    if not floor then
+        floor = {}
+        for itemId, count in pairs(w.note) do floor[itemId] = count end
+        w.floor = floor
+    end
     local leaveOut = nil
     for _, kind in ipairs(BANK_KINDS) do
         if w.usable[kind] and not w.done[kind] then
             local held = WatchedBank(w, kind)
-            if held and RisenItem(w.note, bagItems, held) then
+            if held and RisenItem(floor, bagItems, held) then
                 leaveOut = leaveOut or {}
                 leaveOut[kind] = true
             end
         end
     end
-    LowerNote(w.note, bagItems)
+    LowerNote(floor, bagItems)
     if leaveOut then
         w.scanLeftOut = true
     end
