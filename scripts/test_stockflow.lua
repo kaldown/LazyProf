@@ -136,6 +136,18 @@ T.section("damaged saved stock", function()
                 and summary.characters[1].guid == MAIN_GUID, #summary.characters)
         end
     end
+
+    -- Before the first save a saved stock that is not a table is still this
+    -- version's format, with nothing in it: the dump must not call it another.
+    World.reset()
+    World.containers = { [0] = { slots = 16, slot(LINEN, 5) } }
+    local addon = World.login({ stock = "broken" })
+    local lines = {}
+    addon.Inventory:RunDiagnostic(lines)
+    local text = "\n" .. table.concat(lines, "\n") .. "\n"
+    T.check("a saved stock that is text, before the first save: the dump reads it as empty, not as another format",
+        text:find("\nmemory: format=1 characters=0 accountBanks=0 ", 1, true) ~= nil
+        and not text:find("not a format this version reads", 1, true), text)
 end)
 
 -- ===========================================================================
@@ -222,6 +234,10 @@ T.section("a failing client call", function()
     local where, howMany = text:match("last error: [^\n]*%(in: ([%a ]+); (%d+) this session")
     T.check("the dump names the last failure and where it happened", text:find("last error:", 1, true) ~= nil
         and text:find("IsGameRuleActive", 1, true) ~= nil and where == "scan", text)
+    -- The error itself, not only where it happened: the line before "(in:".
+    local said = text:match("last error: (.-) %(in: [%a ]+; %d+ this session")
+    T.check("the last error line gives the error itself", said ~= nil and said:find("IsGameRuleActive", 1, true) ~= nil
+        and said ~= where, text)
     T.check("and how many there were", tonumber(howMany) ~= nil and tonumber(howMany) > 3, howMany)
     T.check("and that a scan right now counts the bags only",
         text:find("scan now: bags only - the memory cannot be read: ", 1, true) ~= nil

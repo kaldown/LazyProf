@@ -1527,6 +1527,31 @@ T.section("collect first: how old remembered stock is", function()
         "In bank: 12 | Grab: 12 / Account bank as seen 5 days ago / Shift-click to link")
     meta.accountSeenAt = nil
 
+    -- The bank's ages belong to the "From bank" row alone: a row of mail,
+    -- of the guild bank or of an alt says nothing of them.
+    do
+        meta.bankSeenAt, meta.accountSeenAt = NOW - 60, NOW - 5 * DAY
+        local otherInventory = { [SILK] = 30, [WOOL] = 20 }
+        local otherBreakdown = {
+            [SILK] = { bank = 12, mail = 10, guildBank = 8 },
+            [WOOL] = { alts = { ["Zed Alt"] = { bags = 20 } } },
+        }
+        local path = makePath({ complete = true, gaps = {}, currentSkill = 100, actualSkill = 100, prices = prices,
+            steps = { step(robe, 100, 110, 10, 0) }, inventory = otherInventory, sourceBreakdown = otherBreakdown,
+            stockMeta = meta })
+        local v = shopView(path, { inventory = otherInventory, breakdown = otherBreakdown })
+        v.stockMeta, v.now = meta, NOW
+        local other = tips(v)
+        T.eq("the bank row has both ages", joined(other["From bank Silk"]),
+            "In bank: 12 | Grab: 12 / Bank as seen less than an hour ago / Account bank as seen 5 days ago / Shift-click to link")
+        T.eq("a mail row: no bank age", joined(other["Check mail Silk"]), "In mail: 10 | Grab: 10 / Shift-click to link")
+        T.eq("a guild bank row: no bank age", joined(other["From guild bank Silk"]),
+            "In guild bank: 8 | Withdraw: 8 / Shared resource - others may need these / Shift-click to link")
+        T.eq("an alt row: its own age only", joined(other["From alts Wool"]),
+            "On your alts: /   Zed Alt: 20 - bags as seen 5 hours ago / Transfer to this character before crafting / Shift-click to link")
+        meta.bankSeenAt, meta.accountSeenAt = nil, nil
+    end
+
     -- An alt the ages do not know (it should not happen): its line stays plain.
     meta.alts["Amy Alt"] = nil
     t = tips(view(meta, NOW))

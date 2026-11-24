@@ -67,6 +67,21 @@ T.section("store", function()
     T.check("and no reader writes the format number", bare.schema == nil, bare.schema)
     Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW)
     T.eq("the first save does", bare.schema, 1)
+
+    -- A saved value that is not a table at all (cut off, edited by hand) is
+    -- this format with nothing in it until the first save replaces it: it is
+    -- not "a format this version does not read".
+    for _, damaged in ipairs({ "garbage", 5, true }) do
+        LazyProf.db.global = { stock = damaged }
+        local summary = Memory:Summary()
+        T.check("a saved stock that is " .. type(damaged) .. ", before the first save: read as this format, empty",
+            summary.usable == true and summary.schema == 1 and #summary.characters == 0 and #summary.account == 0
+            and summary.unreadable == 0, tostring(summary.usable) .. "/" .. tostring(summary.schema))
+        T.check("and nothing is written by reading it", LazyProf.db.global.stock == damaged)
+        Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW)
+        T.check("the first save replaces it", type(LazyProf.db.global.stock) == "table" and LazyProf.db.global.stock.schema == 1
+            and Memory:Summary().characters[1].guid == MAIN.guid)
+    end
 end)
 
 T.section("save and read back", function()
@@ -224,6 +239,29 @@ T.section("one name, one character", function()
         Memory:SaveBags(who("Player-1-AAA", "Bank Alt"), { [2589] = 4 }, {}, NOW - 20 * DAY, false)
     end)
     T.eq("two records of a name seen at the same time: the first by id decides", #list, 0)
+    -- Whatever the order the saved table hands them out in: for pairs of ids
+    -- saved either way round, the one that sorts first is the character of
+    -- that name, and the other is an older record of it.
+    local ids = { "Player-1-AAA", "Player-1-GONE", "Player-1-ZZZ", "Player-2-0001", "Player-9-FFFF", "Player-3-M" }
+    local wrong = {}
+    for i = 1, #ids do
+        for j = 1, #ids do
+            if i ~= j then
+                fresh()
+                Memory:SaveBags(MAIN, { [2589] = 9 }, {}, NOW)
+                Memory:SaveBags(who(ids[i], "Bank Alt"), { [2589] = 30 }, {}, NOW - DAY)
+                Memory:SaveBags(who(ids[j], "Bank Alt"), { [2589] = 4 }, {}, NOW - DAY)
+                local first, second = ids[i], ids[j]
+                if second < first then first, second = second, first end
+                local standing = Memory:Standing(MAIN)
+                if standing[first] ~= "alt" or standing[second] ~= "name" then
+                    wrong[#wrong + 1] = ids[i] .. " then " .. ids[j]
+                end
+            end
+        end
+    end
+    T.check("two records of a name seen at the same moment: the id that sorts first, saved in any order",
+        #wrong == 0, table.concat(wrong, ", "))
     fresh()
     Memory:SaveBags(MAIN, { [2589] = 9 }, {}, NOW)
     Memory:SaveBags(who("Player-1-GONE", "Bank Alt"), { [2589] = 30 }, {}, NOW - 20 * DAY)

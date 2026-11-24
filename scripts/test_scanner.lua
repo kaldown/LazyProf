@@ -3512,6 +3512,32 @@ T.section("diagnostic lines", function()
             line ~= nil and line:find("scan now: bags only - the memory cannot be read: ", 1, true) == 1
             and line:find("bank table gone", 1, true) ~= nil, brokenDump)
     end
+    -- The try reads what a scan reads, no more: a Self-Found character's
+    -- scan never reads the alts, so alts that cannot be read do not make the
+    -- try fail for it - by the setting or by the game's flag.
+    do
+        local realAlts = Memory.Alts
+        Memory.Alts = function() error("alts table gone") end
+        local function scanNow()
+            Inventory:ForgetAltsPart()
+            local _, dumpText = labels()
+            return dumpText:match("scan now: [^\n]*"), dumpText
+        end
+        local line, dumpText = scanNow()
+        T.check("scan now, the alts cannot be read: bags only (fixture)",
+            line ~= nil and line:find("alts table gone", 1, true) ~= nil, dumpText)
+        LazyProf.db.char.selfFoundMode = true
+        line, dumpText = scanNow()
+        T.eq("scan now, the alts cannot be read but the character is Self-Found: the memory reads", line,
+            "scan now: the memory reads without error")
+        LazyProf.db.char.selfFoundMode = false
+        client.gameSelfFound = true
+        line, dumpText = scanNow()
+        T.eq("scan now, the same for a character the game marks Self-Found", line, "scan now: the memory reads without error")
+        client.gameSelfFound = false
+        Memory.Alts = realAlts
+        Inventory:ForgetAltsPart()
+    end
 
     -- "waiting" names every read of the bank that is still to come: a look
     -- after the opening, a trailing read, a read that is owed.
