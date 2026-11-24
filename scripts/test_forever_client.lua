@@ -994,6 +994,42 @@ section("stock", function()
     id = client:CharacterIdentity()
     check(p .. "identity: a complete read is kept", id.guid == "Player-4444-0A1B2C3D" and guidCalls == 0, guidCalls)
     guid = "Player-4444-0A1B2C3D"
+    -- A read that lacks the GUID, the name or the faction is not kept: what
+    -- could not be read in the first moments would be missing all session.
+    do
+        local savedNameUtil, savedFaction = _G.NameUtil, _G.UnitFactionGroup
+        local nameReadable, factionReadable = false, true
+        _G.NameUtil = { GetUnmodifiedUnitFullName = function(unit)
+            return (nameReadable and unit == "player") and "Thrag Ironhide" or nil
+        end }
+        _G.UnitFactionGroup = function()
+            if factionReadable then return "Horde", "Die Horde" end
+            return nil
+        end
+        id, client = identityOf()
+        check(p .. "identity: the name cannot be read yet", id.name == nil and id.guid == "Player-4444-0A1B2C3D", id.name)
+        nameReadable = true
+        check(p .. "identity: a read without the name is not kept", client:CharacterIdentity().name == "Thrag Ironhide",
+            client:CharacterIdentity().name)
+        factionReadable = false
+        id, client = identityOf()
+        check(p .. "identity: the faction cannot be read yet", id.faction == nil and id.name == "Thrag Ironhide", id.faction)
+        factionReadable = true
+        check(p .. "identity: a read without the faction is not kept", client:CharacterIdentity().faction == "Horde",
+            client:CharacterIdentity().faction)
+        guid = SECRET
+        id, client = identityOf()
+        check(p .. "identity: the GUID cannot be read yet", id.guid == nil and id.faction == "Horde", id.guid)
+        guid = "Player-4444-0A1B2C3D"
+        check(p .. "identity: a read without the GUID is not kept", client:CharacterIdentity().guid == "Player-4444-0A1B2C3D",
+            client:CharacterIdentity().guid)
+        guidCalls = 0
+        guid = "Player-4444-CHANGED"
+        check(p .. "identity: the complete read that followed is", client:CharacterIdentity().guid == "Player-4444-0A1B2C3D"
+            and guidCalls == 0, guidCalls)
+        guid = "Player-4444-0A1B2C3D"
+        _G.NameUtil, _G.UnitFactionGroup = savedNameUtil, savedFaction
+    end
     -- The world is not kept: the game rules can read false in the first
     -- moments after login, and a world frozen then would be wrong for good.
     rules = {}

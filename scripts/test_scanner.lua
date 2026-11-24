@@ -842,6 +842,19 @@ T.section("the alts' part is kept between scans", function()
     client.identity = MAIN
     nextFrame()
     T.eq("known a moment later: the alts count", (Inventory:ScanAll())[2589], 25)
+    -- The name is part of who the character is: an older record under its
+    -- own name is no alt, and without the name that cannot be told. What was
+    -- worked out while the name could not be read must not be kept.
+    fresh()
+    Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW)
+    Memory:SaveBags({ guid = "Player-1-OLDMAIN", name = MAIN.name, world = "eu-pvp", faction = "Alliance" }, { [2589] = 300 }, {},
+        NOW - 9 * DAY)
+    client.identity = { guid = MAIN.guid, world = "eu-pvp", faction = "Alliance" }     -- everything but the name
+    nextFrame()
+    T.eq("(fixture: without the name the older record of it cannot be told from an alt)", (Inventory:ScanAll())[2589], 325)
+    client.identity = MAIN
+    nextFrame()
+    T.eq("the name is known a moment later: the older record of the character's own name is no alt", (Inventory:ScanAll())[2589], 25)
     Memory.Alts = realAlts
 end)
 
@@ -3049,10 +3062,20 @@ T.section("diagnostic lines", function()
     T.check("unreadable entries are counted in the dump", table.concat(lines, "\n"):find("unreadable=2", 1, true) ~= nil,
         table.concat(lines, "\n"))
 
-    LazyProf.db.global.stock = { schema = 9 }
+    -- A saved table in a format this version does not read: the dump says
+    -- so in words, and lists nothing of it as if it had been read.
+    LazyProf.db.global.stock = { schema = 9, account = { ["eu-pvp"] = { items = { [2589] = 1 }, at = NOW } }, characters = {
+        [ALT.guid] = { name = "Bank Alt", world = "eu-pvp", faction = "Alliance", seen = NOW,
+            bags = { items = { [2589] = 20 }, at = NOW } } } }
     lines = {}
     Inventory:RunDiagnostic(lines)
-    T.check("another format is named, not read", table.concat(lines, "\n"):find("format=9", 1, true) ~= nil, table.concat(lines, "\n"))
+    text = table.concat(lines, "\n")
+    T.check("another format is named, and said not to be read",
+        hasLine(text, "memory: format=9 - not a format this version reads; it is left alone"), text)
+    T.check("that is the last line: no count of characters, no character and no account bank is listed",
+        lines[#lines] == "memory: format=9 - not a format this version reads; it is left alone"
+        and not text:find("characters=", 1, true) and not text:find("\ncharacter: ", 1, true)
+        and not text:find("\naccount bank: ", 1, true), text)
 end)
 
 -- ===========================================================================
@@ -3104,6 +3127,22 @@ T.section("options", function()
     T.check("Self-Found: does not claim to keep its stock from the others whatever supplies the stock",
         not selfFoundText:find("and its own stock is not counted for them.", 1, true)
         and selfFoundText:find("remembers the stock itself", 1, true) ~= nil, selfFoundText)
+    -- The sentences that carry the meaning, word for word: a text that said
+    -- the opposite would still hold the few words looked for above.
+    for _, sentence in ipairs({
+        "Such a character cannot be sent anything: stock of your other characters and of the guild bank is not counted for it.",
+        "It cannot send anything either: where LazyProf remembers the stock itself (no inventory addon installed), "
+            .. "its own stock is not counted for your other characters.",
+    }) do
+        T.check("Self-Found: says, word for word: " .. sentence:sub(1, 44) .. "...", selfFoundText:find(sentence, 1, true) ~= nil,
+            selfFoundText)
+    end
+    T.check("alts: says, word for word, that a Self-Found character gets no alt stock",
+        text(alts.desc):find("A character in Self-Found mode cannot be sent anything, so no alt stock is counted for it.", 1, true) ~= nil,
+        text(alts.desc))
+    T.check("guild bank: says, word for word, that it is not counted for a Self-Found character",
+        text(guild.desc):find("A character in Self-Found mode cannot be handed anything, so the guild bank is not counted for it.",
+            1, true) ~= nil, text(guild.desc))
     T.check("Self-Found: says that the game's own Self-Found mark counts for stock with the setting off",
         selfFoundText:find("A character the game itself marks Self-Found is treated this way for stock even with this setting off.",
             1, true) ~= nil, selfFoundText)
@@ -3322,6 +3361,18 @@ T.section("init wiring", function()
     LazyProf:SlashCommand("diag stock")
     T.check("a failing adapter section is reported, the rest still prints",
         shown:find("SECTION ERROR", 1, true) ~= nil and shown:find("memory: format=1", 1, true) ~= nil, shown)
+    -- The memory's section is protected the same way: a failure in it is
+    -- reported in the window, and what the adapter printed stays.
+    LazyProf.Client.RunStockDiagnostic = function(_, out) out[#out + 1] = "adapter: stock lines" end
+    local realRun = Inventory.RunDiagnostic
+    Inventory.RunDiagnostic = function() error("memory boom") end
+    shown = nil
+    local ran, runError = pcall(LazyProf.SlashCommand, LazyProf, "diag stock")
+    Inventory.RunDiagnostic = realRun
+    T.check("a failing memory section does not raise", ran, runError)
+    T.check("it is reported with its error, after the adapter's lines", type(shown) == "string"
+        and shown:find("adapter: stock lines\nSECTION ERROR: memory: ", 1, true) ~= nil
+        and shown:find("memory boom", 1, true) ~= nil, shown)
     printed = {}
     LazyProf:SlashCommand("diag")
     T.check("/lp diag lists the stock dump", table.concat(printed, "\n"):find("/lp diag stock", 1, true) ~= nil)

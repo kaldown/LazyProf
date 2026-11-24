@@ -51,6 +51,22 @@ T.section("store", function()
     T.check("reading makes nothing", LazyProf.db.global.stock == nil)
     Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW)
     T.eq("the store carries its format number from the first save", LazyProf.db.global.stock.schema, 1)
+
+    -- Reading changes nothing. A saved table without a format number yet is
+    -- read as this format, and no reader writes the number into it: that is
+    -- for the first save.
+    local bare = { account = { ["eu-pvp"] = { items = { [2770] = 5 }, at = NOW } }, characters = {
+        [MAIN.guid] = { name = "Main Character", world = "eu-pvp", faction = "Alliance", seen = NOW,
+            bank = { items = { [2589] = 40 }, at = NOW }, bagsAtBank = { items = {}, banks = { character = true }, at = NOW } },
+        ["Player-1-ALT"] = { name = "Alt", world = "eu-pvp", faction = "Alliance", seen = NOW,
+            bags = { items = { [2589] = 20 }, at = NOW } } } }
+    LazyProf.db.global = { stock = bare }
+    T.check("a table without a format number is read", (Memory:OwnBank(MAIN.guid))[2589] == 40
+        and (Memory:AccountBank("eu-pvp"))[2770] == 5 and #Memory:Alts(MAIN) == 1 and Memory:Standing(MAIN)[MAIN.guid] == "self"
+        and #Memory:Summary().characters == 2 and Memory:BagsAtBank(MAIN.guid) ~= nil and Memory:Token() == bare.characters)
+    T.check("and no reader writes the format number", bare.schema == nil, bare.schema)
+    Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW)
+    T.eq("the first save does", bare.schema, 1)
 end)
 
 T.section("save and read back", function()
@@ -231,6 +247,20 @@ T.section("one name, one character", function()
     alts = Memory:Alts(MAIN)
     T.check("a save without a name keeps the remembered name", #alts == 1 and alts[1].name == "Bank Alt"
         and alts[1].bags[2589] == 6)
+    -- The same for the world and the faction: a save that could not read one
+    -- of them keeps what was remembered, and the character stays filed where
+    -- it was.
+    local record = LazyProf.db.global.stock.characters["Player-1-NEW"]
+    Memory:SaveBags({ guid = "Player-1-NEW", name = "Bank Alt", faction = "Alliance" }, { [2589] = 7 }, {}, NOW)
+    T.eq("a save without a world keeps the remembered world", record.world, "eu-pvp")
+    Memory:SaveBank({ guid = "Player-1-NEW", name = "Bank Alt", world = "eu-pvp" }, { [2589] = 50 }, {}, NOW)
+    T.eq("a save without a faction keeps the remembered faction", record.faction, "Alliance")
+    Memory:NoteBagsAtBank({ guid = "Player-1-NEW" }, { [2589] = 7 }, { character = true }, NOW)
+    T.check("a note without any of them keeps all three", record.name == "Bank Alt" and record.world == "eu-pvp"
+        and record.faction == "Alliance")
+    alts = Memory:Alts(MAIN)
+    T.check("so it is still the alt of that name, with what the saves held", #alts == 1 and alts[1].guid == "Player-1-NEW"
+        and alts[1].bags[2589] == 7 and alts[1].bank[2589] == 50, alts[1] and alts[1].guid)
 end)
 
 -- A character that cannot send anything (Self-Found) is no source of stock
@@ -325,6 +355,18 @@ T.section("account bank", function()
     items, at = Memory:AccountBank("eu-pvp")
     T.check("a second save replaces", items[4306] == 2 and items[2589] == nil and at == NOW + 5)
     T.check("no world asked: nothing", Memory:AccountBank(nil) == nil)
+
+    -- The memory keeps a copy of its own, holding only what can be counted.
+    local mine = { [2589] = 60, [4306] = -3, [774] = 2.5, [765] = "x", name = 7 }
+    Memory:SaveAccountBank("eu-pvp", mine, NOW + 10)
+    local kept = LazyProf.db.global.stock.account["eu-pvp"].items
+    T.check("what is saved is not the caller's table", kept ~= mine)
+    T.check("and holds only positive whole counts under numeric ids", kept[2589] == 60 and count(kept) == 1, count(kept))
+    mine[2589] = 1
+    T.eq("changing the caller's table afterwards changes nothing", (Memory:AccountBank("eu-pvp"))[2589], 60)
+    items = Memory:AccountBank("eu-pvp")
+    items[2589] = 9999
+    T.eq("and what is handed out is a copy too", (Memory:AccountBank("eu-pvp"))[2589], 60)
 end)
 
 -- A remembered bank can be marked "in doubt": the addon has reason to think
@@ -696,6 +738,25 @@ T.section("saved data that is not what the addon wrote", function()
         T.check(label .. ": nothing but positive whole counts", out.negative == false)
         T.eq(label .. ": linen counted", linen(out), want)
     end
+
+    -- A part without an items table was never seen: that is not the same as
+    -- seen and empty (an empty bank is a fact, a missing one is not).
+    LazyProf.db.global = { characters = {}, stock = { schema = 1, account = {}, characters = {
+        [MAIN.guid] = { name = "Main Character", world = "eu-pvp", faction = "Alliance", seen = NOW,
+            bags = { at = NOW }, bank = { at = NOW } },
+        [ALT.guid] = { name = "Alt Character", world = "eu-pvp", faction = "Alliance", seen = NOW - 100,
+            bags = { at = NOW - 100 }, bank = { at = NOW - 100, doubt = true } } } } }
+    T.check("a bank without an items table is a bank never seen, not an empty one", Memory:OwnBank(MAIN.guid) == nil)
+    local partless = Memory:Summary()
+    T.check("the summary says never seen for both parts of both characters", #partless.characters == 2
+        and partless.characters[1].bagItems == nil and partless.characters[1].bankItems == nil
+        and partless.characters[2].bagItems == nil and partless.characters[2].bankItems == nil
+        and partless.characters[1].bankDoubt == false and partless.characters[2].bankDoubt == false)
+    local partlessAlts = Memory:Alts(MAIN)
+    T.check("an alt's parts without items are not handed out, nor is its bank called in doubt", #partlessAlts == 1
+        and partlessAlts[1].bags == nil and partlessAlts[1].bank == nil and partlessAlts[1].bankDoubt == nil)
+    T.check("and there is no bank to mark", Memory:MarkBankDoubt(MAIN.guid) == false
+        and LazyProf.db.global.stock.characters[MAIN.guid].bank.doubt == nil)
 
     -- A part without a usable time is counted but has no age.
     local out = read({ schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.at = "noon"; return r end)() }, account = {} })
