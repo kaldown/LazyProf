@@ -405,6 +405,98 @@ T.section("a bank in doubt", function()
         and theirs.account["eu-pvp"].doubt == nil)
 end)
 
+-- A session that ends at the bank leaves a note with the character's record:
+-- what its carried bags held then and which banks its last visit could use.
+-- The character's next session compares its bags with it (Scanner.lua).
+T.section("the bags at the bank", function()
+    fresh()
+    T.check("nothing remembered: no note", Memory:BagsAtBank(MAIN.guid) == nil)
+    Memory:SaveBags(MAIN, { [2589] = 5 }, {}, NOW - DAY)
+    Memory:SaveBank(MAIN, { [2589] = 40 }, {}, NOW - DAY)
+    T.check("a character without a note has none", Memory:BagsAtBank(MAIN.guid) == nil)
+
+    local held = { [2589] = 5, [6948] = 1 }
+    T.check("noting reports success", Memory:NoteBagsAtBank(MAIN, held, { character = true, account = false }, NOW) == true)
+    local note = Memory:BagsAtBank(MAIN.guid)
+    T.check("the note holds the counts", note ~= nil and note.known == true and note.items[2589] == 5 and note.items[6948] == 1
+        and count(note.items) == 2)
+    T.check("and which banks it is about", note.character == true and note.account == false)
+    held[2589] = 99
+    T.eq("it is a copy of what was passed", Memory:BagsAtBank(MAIN.guid).items[2589], 5)
+    note.items[2589] = 77
+    T.eq("and hands out a copy", Memory:BagsAtBank(MAIN.guid).items[2589], 5)
+    T.check("the bags and the bank of the record are untouched", (Memory:OwnBank(MAIN.guid))[2589] == 40
+        and Memory:Summary().characters[1].bagItems == 1)
+    -- A later save of the bags or the bank keeps the note.
+    Memory:SaveBags(MAIN, { [2589] = 6 }, {}, NOW + 1)
+    Memory:SaveBank(MAIN, { [2589] = 41 }, {}, NOW + 1)
+    T.check("saving bags or bank keeps the note", Memory:BagsAtBank(MAIN.guid) ~= nil)
+    -- A new note replaces the old one.
+    Memory:NoteBagsAtBank(MAIN, {}, { account = true }, NOW + 2)
+    note = Memory:BagsAtBank(MAIN.guid)
+    T.check("a new note replaces the old one: empty bags, the account bank alone", note.known == true and next(note.items) == nil
+        and note.character == false and note.account == true)
+    -- Bags that could not be read: the note says that it is not known.
+    Memory:NoteBagsAtBank(MAIN, nil, { character = true, account = true }, NOW + 3)
+    note = Memory:BagsAtBank(MAIN.guid)
+    T.check("without items the note says the bags are not known", note.known == false and note.items == nil
+        and note.character == true and note.account == true)
+
+    T.check("clearing says there was one", Memory:ClearBagsAtBank(MAIN.guid) == true)
+    T.check("and it is gone", Memory:BagsAtBank(MAIN.guid) == nil and LazyProf.db.global.stock.characters[MAIN.guid].bagsAtBank == nil)
+    T.check("clearing again says there was none", Memory:ClearBagsAtBank(MAIN.guid) == false)
+    T.check("the record itself stays", (Memory:OwnBank(MAIN.guid))[2589] == 41)
+
+    -- A character never seen before gets a record with the note.
+    local NEW = who("Player-1-NEW", "New Character")
+    T.check("a note for a character without a record makes the record", Memory:NoteBagsAtBank(NEW, { [1] = 1 }, { character = true }, NOW)
+        and Memory:BagsAtBank(NEW.guid).items[1] == 1 and Memory:Summary().characters[2].name == "New Character")
+
+    -- Nothing is noted without a character, a time or the banks.
+    T.check("no guid: nothing noted", Memory:NoteBagsAtBank({ name = "Nobody" }, {}, { character = true }, NOW) == false)
+    T.check("no time: nothing noted", Memory:NoteBagsAtBank(MAIN, {}, { character = true }, nil) == false)
+    T.check("no banks: nothing noted", Memory:NoteBagsAtBank(MAIN, {}, nil, NOW) == false and Memory:BagsAtBank(MAIN.guid) == nil)
+    T.check("nothing to read or clear without a character", Memory:BagsAtBank(nil) == nil and Memory:ClearBagsAtBank(nil) == false)
+
+    -- A note that is not what this file writes counts as unknown, for both
+    -- banks: nothing in it can be relied on.
+    local record = LazyProf.db.global.stock.characters[MAIN.guid]
+    for label, damaged in pairs({
+        ["a note that is text"] = "yesterday",
+        ["a note that is true"] = true,
+        ["a note whose items are a number"] = { items = 7, banks = { character = true }, at = NOW },
+        ["a note without banks"] = { items = { [2589] = 5 }, at = NOW },
+        ["a note whose banks are text"] = { items = { [2589] = 5 }, banks = "both", at = NOW },
+    }) do
+        record.bagsAtBank = damaged
+        note = Memory:BagsAtBank(MAIN.guid)
+        T.check(label .. ": unknown, both banks", note ~= nil and note.known == false and note.items == nil
+            and note.character == true and note.account == true)
+    end
+    -- Counts that cannot be counts are left out: the note then differs from
+    -- any bags, which is the safe side.
+    record.bagsAtBank = { items = { [2589] = 5, [4306] = -3, bad = 2, [765] = "x" }, banks = { character = true }, at = NOW }
+    note = Memory:BagsAtBank(MAIN.guid)
+    T.check("counts that are no counts are left out", note.known == true and note.items[2589] == 5 and count(note.items) == 1)
+    T.check("reading changed nothing", record.bagsAtBank.items[4306] == -3)
+    T.check("a damaged note can be cleared", Memory:ClearBagsAtBank(MAIN.guid) == true and record.bagsAtBank == nil)
+    LazyProf.db.global.stock.characters["Player-1-JUNK"] = "gone"
+    T.check("what is not a record has no note", Memory:BagsAtBank("Player-1-JUNK") == nil and Memory:ClearBagsAtBank("Player-1-JUNK") == false)
+
+    -- Another format: neither read nor written.
+    local theirs = { schema = 9, characters = { [MAIN.guid] = { bagsAtBank = { items = {}, banks = { character = true } } } } }
+    LazyProf.db.global.stock = theirs
+    T.check("another format: no note is read, written or cleared", Memory:BagsAtBank(MAIN.guid) == nil
+        and Memory:NoteBagsAtBank(MAIN, {}, { character = true }, NOW) == false and Memory:ClearBagsAtBank(MAIN.guid) == false
+        and theirs.characters[MAIN.guid].bagsAtBank ~= nil)
+
+    -- Forget removes it with the record.
+    fresh()
+    Memory:NoteBagsAtBank(MAIN, { [1] = 1 }, { character = true }, NOW)
+    Memory:Forget()
+    T.check("forgetting everything forgets the note", Memory:BagsAtBank(MAIN.guid) == nil)
+end)
+
 T.section("prune", function()
     fresh()
     local old = who("Player-1-OLD", "Old Alt")

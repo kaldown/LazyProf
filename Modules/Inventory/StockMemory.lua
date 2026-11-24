@@ -14,6 +14,7 @@
 --                                characters (Self-Found); absent otherwise
 --       bags = { items = { [itemId] = count }, bound = { [itemId] = count }, at },
 --       bank = { items = ..., bound = ..., at, doubt },
+--       bagsAtBank = { items = { [itemId] = count }, banks = { character, account }, at },
 --   }
 --   stock.account[world] = { items = { [itemId] = count }, at, doubt }
 -- `bound` holds how many of an item's count are soulbound (left out when
@@ -26,6 +27,15 @@
 -- bank stays remembered, but it is handed out with that mark, and an alt's
 -- bank that carries it is not handed out at all. The next save of the bank
 -- replaces its table and with it the mark.
+--
+-- `bagsAtBank` is a note left by a session that ended at the bank (with its
+-- window open or shortly after it closed): what the carried bags held at
+-- that moment - `items` is absent when that could not be read - and which of
+-- the two banks (`banks.character`, `banks.account`: true or absent) the
+-- session's last visit could use. The answer of a move may arrive after a
+-- session has ended; the character's next session compares its bags with the
+-- note and takes it away (NoteBagsAtBank / BagsAtBank / ClearBagsAtBank; the
+-- caller decides what follows from a difference).
 --
 -- The format number is written here and is deliberately not among the
 -- database defaults: the database strips saved values that equal a default
@@ -252,6 +262,59 @@ function StockMemory:MarkAccountBankDoubt(world)
     local bank = account and world ~= nil and account[world]
     if type(bank) ~= "table" or type(bank.items) ~= "table" or bank.doubt == true then return false end
     bank.doubt = true
+    return true
+end
+
+-- Leave a note with the character's record: what its carried bags held when
+-- its session ended at the bank. items: { [itemId] = count }, or nil when
+-- they could not be read (the note then says that they are not known).
+-- banks: { character = bool, account = bool }, the banks the note is about.
+-- Returns whether it was written (never without a GUID, the banks or a
+-- time). The record's bags and bank are not touched.
+function StockMemory:NoteBagsAtBank(identity, items, banks, now)
+    if not (type(identity) == "table" and identity.guid and type(banks) == "table" and type(now) == "number") then
+        return false
+    end
+    if items ~= nil and type(items) ~= "table" then return false end
+    local characters = Store(true)
+    if not characters then return false end
+    local record = Record(characters, identity, now)
+    record.bagsAtBank = {
+        items = items and Counts(items) or nil,
+        banks = { character = banks.character and true or nil, account = banks.account and true or nil },
+        at = now,
+    }
+    return true
+end
+
+-- The note a character's last session left, nil when there is none:
+--   { known, items, character, account }
+-- known: the bags' contents are known (items is then a copy of them; nil
+-- otherwise). character / account: whether the note is about that bank. A
+-- note that is not what this file writes counts as not known, for both
+-- banks. Reading changes nothing.
+function StockMemory:BagsAtBank(guid)
+    local characters = Store()
+    local record = characters and guid ~= nil and characters[guid]
+    if type(record) ~= "table" or record.bagsAtBank == nil then return nil end
+    local note = record.bagsAtBank
+    if type(note) ~= "table" or type(note.banks) ~= "table" or (note.items ~= nil and type(note.items) ~= "table") then
+        return { known = false, character = true, account = true }
+    end
+    return {
+        known = note.items ~= nil,
+        items = note.items ~= nil and Counts(note.items) or nil,
+        character = note.banks.character == true,
+        account = note.banks.account == true,
+    }
+end
+
+-- Take that note away. Returns whether there was one.
+function StockMemory:ClearBagsAtBank(guid)
+    local characters = Store()
+    local record = characters and guid ~= nil and characters[guid]
+    if type(record) ~= "table" or record.bagsAtBank == nil then return false end
+    record.bagsAtBank = nil
     return true
 end
 
