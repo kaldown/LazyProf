@@ -117,20 +117,25 @@
 --    bank is unsettled or a read is owed, the bank is read once more, and a
 --    bank is kept from that read only when the read is not refused, holds
 --    at least one item and has the slot count of the last read kept in this
---    visit. A bank that is still unsettled after that is marked in doubt.
---    So is every bank of the visit when a move is still on its way: the
---    client locks the slots of a move from the click until its answer, and
---    when a slot of the carried bags or of a bank that can be read reads as
---    locked (the adapter's MoveInFlight; locks that cannot be read count as
---    a lock), the answer may come after the close - for the carried bag
---    alone on a client that does not report the bank's containers then.
---    Nothing else marks at the close: not an empty read that was merely not
---    believed while the bank is not unsettled, not a read that was owed for
---    an update of a carried bag, not such an update itself.
---    A bank that is not unsettled but could not be read back either - the
---    closing read was not kept for it although a read was owed, or its last
---    read found it empty without being believed - and of which items are
---    remembered is HELD instead: for CLOSE_WATCH (1 s) after the close a
+--    visit. Then a bank of the visit is marked in doubt
+--    - when it is still unsettled - except when its last read (not the
+--      closing one) found it empty with no update of its own after that
+--      read, and it is remembered as empty or not at all: what is
+--      remembered then agrees with what was read;
+--    - when its last read found it empty without being believed (rule 2)
+--      and items of it are remembered: that is a sign that it was emptied,
+--      and the old contents must not count again after the close;
+--    - when a move is still on its way: the client locks the slots of a
+--      move from the click until its answer, and when a slot of the
+--      carried bags or of a bank that can be read reads as locked (the
+--      adapter's MoveInFlight; locks that cannot be read count as a lock),
+--      the answer may come after the close - for the carried bag alone on
+--      a client that does not report the bank's containers then.
+--    Nothing else marks at the close: not a read that was owed for an
+--    update of a carried bag, not such an update itself.
+--    A bank that is not unsettled and not marked, for which a read was
+--    owed and the closing read was not kept, and of which items are
+--    remembered, is HELD instead: for CLOSE_WATCH (1 s) after the close a
 --    scan leaves it out, as being read. Its own update may be the one that
 --    is still to come (a client can change both containers of a move with
 --    the carried bag's update and report the bank's container later); when
@@ -235,7 +240,10 @@
 --      unsettles a bank, and a bank that reads empty is not believed empty
 --      before the look two seconds after the opening (nor when its slot
 --      count is no longer that of the read that saw its items). Such a
---      visit ends with that bank in doubt.
+--      visit ends with that bank in doubt, unless what is remembered of it
+--      is empty. So does a glance of under two seconds at a bank that reads
+--      empty while items of it are remembered (emptied by a hand the memory
+--      did not see, or shown late by the client).
 --    - On a client that neither lets the bank be read at the closing notice
 --      nor reports the bank's part of a move once the window is closed: a
 --      move whose carried bag's part was answered before the close and the
@@ -1325,7 +1333,17 @@ local function CloseVisit(self)
     local identity = Client:CharacterIdentity() or {}
     for _, kind in ipairs(BANK_KINDS) do
         local state = v[kind]
-        if state.usable and (state.unsettled or inFlight) then
+        -- Its last read found it empty and was not believed (emptyAt is
+        -- cleared by every update of its own, and by a kept read):
+        local lastReadEmpty = state.emptyAt ~= nil and not done.kept[kind]
+        local remembersItems = RemembersItems(kind, identity)
+        -- unsettled, but that empty read came after its last own update
+        -- and what is remembered of it is empty too: what is remembered
+        -- agrees with what was read - no mark for that;
+        local settledByRead = lastReadEmpty and not remembersItems
+        -- the evidence that it was emptied must not be thrown away while
+        -- items of it are remembered: marked.
+        if state.usable and ((state.unsettled and not settledByRead) or inFlight or (lastReadEmpty and remembersItems)) then
             local new, marked = MarkDoubt(kind, identity.guid, identity.region)
             if marked then
                 done.doubt[kind] = true
@@ -1335,14 +1353,14 @@ local function CloseVisit(self)
             end
         end
     end
-    -- Held: not unsettled, yet not read back either, and items of it are
-    -- remembered (nothing can be counted twice from a bank that is
-    -- remembered as empty).
+    -- Held: not unsettled, a read was owed and the closing read was not
+    -- kept for it, and items of it are remembered (nothing can be counted
+    -- twice from a bank that is remembered as empty).
     local anyHeld = false
     for _, kind in ipairs(BANK_KINDS) do
         local state = v[kind]
         if state.usable and not state.unsettled and not done.doubt[kind] and not done.kept[kind]
-                and (done.owed or state.emptyAt ~= nil) and RemembersItems(kind, identity) then
+                and done.owed and RemembersItems(kind, identity) then
             done.held[kind] = true
             anyHeld = true
         end

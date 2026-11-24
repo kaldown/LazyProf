@@ -1543,17 +1543,19 @@ T.section("the close", function()
     end
     -- Nothing tells that from the bank's last stacks having been moved out,
     -- so the bank whose container reported it is not replaced by nothing -
-    -- and it is in doubt: on such a client every visit ends so.
+    -- and it is in doubt: on such a client every visit ends so. The other
+    -- bank read as empty too (both are read at every read) and was not
+    -- believed: in doubt as well.
     local linenLeft, inDoubt, barsLeft, accountDoubt = letGoThen("BANKFRAME_CLOSED")
     T.check("the client empties the bank before the close: the remembered bank is unchanged", linenLeft == 100 and barsLeft == 50,
         tostring(linenLeft) .. "/" .. tostring(barsLeft))
-    T.check("the bank whose container reported it is in doubt, the other is not", inDoubt == true and accountDoubt == false)
-    T.eq("so it is not counted", (linen(addon)), 5)
+    T.check("the bank whose container reported it is in doubt, and the other one that read empty", inDoubt == true and accountDoubt == true)
+    T.eq("so neither is counted", (linen(addon)), 5)
     T.eq("and the Shopping tab says so", firstShoppingRow(addon),
-        "Your bank is not counted: it may have changed after LazyProf last read it. Open the bank to count it again.")
+        "Your bank and the account bank are not counted: they may have changed after LazyProf last read them. Open the bank to count them again.")
     linenLeft, inDoubt, barsLeft, accountDoubt = letGoThen("BANKFRAME_CLOSED", 15)
-    T.check("the same told by an account bank container's update: the account bank is in doubt", linenLeft == 100 and barsLeft == 50
-        and inDoubt == false and accountDoubt == true, tostring(linenLeft) .. "/" .. tostring(barsLeft))
+    T.check("the same told by an account bank container's update: both in doubt", linenLeft == 100 and barsLeft == 50
+        and inDoubt == true and accountDoubt == true, tostring(linenLeft) .. "/" .. tostring(barsLeft))
     -- The same client, after the bank was emptied and one stack put back:
     -- the empty read of the emptied bank, taken before the deposit, must not
     -- stand in as the second look for the empty read the client's letting
@@ -1635,7 +1637,8 @@ T.section("the close", function()
     kept, doubt = glance(function() end)
     T.check("a glance: the remembered bank is what the opening read saw", kept == 90 and doubt == false, kept)
     kept, doubt = glance(function() World.containers[6] = { slots = 28 } end)
-    T.check("a glance at a bank that reads as empty: unchanged, not in doubt", kept == 100 and doubt == false, kept)
+    T.check("a glance at a bank that reads as empty: unchanged, and in doubt (it may have been emptied)",
+        kept == 100 and doubt == true, kept)
     kept, doubt = glance(function() World.bank[0].locked = 1 end)
     T.check("a glance at a bank that is refused: unchanged, not in doubt", kept == 100 and doubt == false, kept)
 
@@ -1772,14 +1775,14 @@ T.section("the answer of a last move arrives after the close", function()
     World.bagUpdate(addon, 0)                        -- read at once: the bank empty, not believed
     World.event(addon, "BANKFRAME_CLOSED")
     total, bags, bank, meta = linen(addon)
-    T.check("the bank's update still to come at the close: the bank is left out, not counted beside the stack",
-        total == 105 and bank == nil and meta.bankPending == true and meta.bankInDoubt == nil, tostring(total))
+    T.check("the bank's update still to come at the close: the bank read empty is in doubt, not counted beside the stack",
+        total == 105 and bank == nil and meta.bankInDoubt == true, tostring(total))
     World.advance(0.06)
-    T.eq("and stays out until that update", notOver("between the close and the bank's late update", addon), 105)
+    T.eq("and stays out", notOver("between the close and the bank's late update", addon), 105)
     World.bagUpdate(addon, 6)
     World.advance(5)
     total, bags, bank, meta = linen(addon)
-    T.check("the late update marks the bank", total == 105 and meta.bankInDoubt == true, tostring(total))
+    T.check("the late update changes nothing of it", total == 105 and meta.bankInDoubt == true, tostring(total))
     -- The same with a logout between the two updates: the bank's update is
     -- never heard, and the bags the next session finds are the bags that
     -- were noted - only the mark set at logout keeps the stack from being
@@ -2400,13 +2403,20 @@ T.section("two characters", function()
         breakdown[LINEN].bank == 40 and breakdown[SILK].bank == 30 and breakdown[BAR].bank == 50, breakdown[LINEN].bank)
     -- A visit so short that its second look is still waiting when the window
     -- closes: that look must not be taken from the closed bank.
+    World.containers[6] = { slots = 28, slot(LINEN, 40), slot(SILK, 30) }
+    World.containers[8] = { slots = 12, slot(WOOL, 10, true) }
+    World.containers[15] = { slots = 98, slot(BAR, 50) }
     World.event(banker, "BANKFRAME_OPENED")
     World.advance(0.2)
     World.event(banker, "BANKFRAME_CLOSED")
+    World.containers[6] = { slots = 28 }
+    World.containers[8] = { slots = 12 }
+    World.containers[15] = { slots = 98 }
     bankReads = 0
     World.advance(5)
     T.eq("a look that was still waiting is not taken after the close", bankReads, 0)
-    T.eq("and the short visit that found nothing changed nothing", (memory:OwnBank(World.guid))[LINEN], 40)
+    T.check("and the short visit kept what its opening read saw", (memory:OwnBank(World.guid))[LINEN] == 40
+        and select(3, memory:OwnBank(World.guid)) == false)
 
     -- Loot just before logging out: the waiting save is written at logout.
     World.containers[0][4] = slot(HERB, 7)

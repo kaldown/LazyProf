@@ -1597,13 +1597,10 @@ T.section("the close", function()
     T.check("closed 0.3 s later, after the second look: remembered as empty, nothing in doubt",
         after == 105 and doubt == false and accountDoubt == false and next((bankOf())) == nil, tostring(after) .. "/" .. tostring(doubt))
 
-    -- A bank that could not be read back at the end of its visit, and whose
-    -- own update has not come: a read was owed at the close and the closing
-    -- read was not kept for it, or its last read found it empty without
-    -- being believed. That marks nothing - but its own update may be the
-    -- one that is late (the client changed both containers of a move with
-    -- the carried bag's update). For a second after the close a scan leaves
-    -- such a bank out; its own update, when it comes, marks it.
+    -- A bank whose last read found it empty without being believed, and of
+    -- which items are remembered: the evidence that it was emptied must not
+    -- be thrown away, nor may what is remembered count again after the
+    -- close - it is marked in doubt at the close.
     local function closeLine()
         local lines = {}
         Inventory:RunDiagnostic(lines)
@@ -1615,29 +1612,34 @@ T.section("the close", function()
     Inventory:OnBagUpdate(0)                               -- read at once: the bank empty, not believed
     refreshes = 0
     close()                                                -- nothing owed, the bank not unsettled
-    T.check("an empty read that was not believed marks nothing at the close", inDoubt() == false)
-    T.eq("the dump says the bank is held", closeLine(),
-        "bank visit close: owed=false unsettled=none readAgain=false kept=none markedInDoubt=none held=character moveInFlight=false")
+    T.check("an empty read not believed, items remembered: in doubt at the close", inDoubt() == true)
+    T.eq("the dump says so", closeLine(),
+        "bank visit close: owed=false unsettled=none readAgain=false kept=none markedInDoubt=character held=none moveInFlight=false")
     local combined, _, meta = scan()
-    T.check("for a second a scan leaves that bank out, as being read: the stack is counted once", combined[2589] == 105
-        and meta.bankPending == true and meta.bankInDoubt == nil and combined[4306] == 9 and meta.accountPending == nil, combined[2589])
-    advance(0.06)
-    Inventory:OnBagUpdate(6)                               -- the bank's own update, late
-    T.check("its own update, when it comes, marks it", inDoubt() == true and (scan())[2589] == 105)
-    -- No update of the bank follows: after the second it counts again.
-    visit()
-    client.bank.character = { items = {}, slots = 28 }     -- say the client was slow to show it
-    Inventory:OnBagUpdate(0)
-    close()
-    refreshes = 0
-    advance(0.9)
-    T.check("0.9 s after the close it is still left out", (scan())[2589] == 5 and select(3, scan()).bankPending == true)
-    advance(0.2)
+    T.check("the stack is counted once, the bank is named", combined[2589] == 105 and meta.bankInDoubt == true
+        and combined[4306] == 9 and meta.accountPending == nil, combined[2589])
+    T.check("a shown list is asked to redraw", refreshes >= 1, refreshes)
+    advance(1.5)
     combined, _, meta = scan()
-    T.check("no update of the bank within the second: it counts again, unmarked", combined[2589] == 105 and meta.bankPending == nil
-        and inDoubt() == false, combined[2589])
-    T.check("and a shown list was asked to redraw when that second was over", refreshes >= 1, refreshes)
-    -- The same for a read that was owed and not made up for at the close.
+    T.check("and it stays in doubt after the second: it is not counted again", combined[2589] == 105 and meta.bankInDoubt == true
+        and meta.bankPending == nil, combined[2589])
+    -- A glance at a bank emptied by a hand the memory never saw: two empty
+    -- reads half a second apart, not believed before two seconds.
+    fresh()
+    Memory:SaveBank(MAIN, { [2589] = 100 }, {}, NOW - DAY)
+    Memory:SaveBags(MAIN, { [2589] = 5 }, {}, NOW - DAY)
+    Inventory:Initialize()
+    advance(2.1)
+    client.bankOpen = true
+    client.bank.character = { items = {}, slots = 28 }
+    client.started.onBankOpened()
+    advance(1.5)
+    close()
+    T.check("a glance of 1.5 s at a bank found empty: in doubt", inDoubt() == true)
+    advance(1.5)
+    combined, _, meta = scan()
+    T.check("and not counted again after the close", combined[2589] == 5 and meta.bankInDoubt == true, combined[2589])
+    -- The held second stays for a read that was owed and not made up for at the close.
     visit()
     client.bags = { [2589] = 65 }
     client.bank.character = { items = { [2589] = 40 }, slots = 28 }
@@ -1659,6 +1661,20 @@ T.section("the close", function()
     combined, _, meta = scan()
     T.check("the bank whose update came is in doubt, the other counts again", meta.bankInDoubt == true and meta.accountInDoubt == nil
         and combined[4306] == 9 and combined[2589] == 105, combined[2589])
+    -- No update of the bank follows: after the second it counts again.
+    visit()
+    Inventory:OnBagUpdate(1)                               -- read at once
+    Inventory:OnBagUpdate(0)                               -- owed
+    client.bank.character = nil
+    close()
+    refreshes = 0
+    advance(0.9)
+    T.check("0.9 s after the close it is still left out", (scan())[2589] == 5 and select(3, scan()).bankPending == true)
+    advance(0.2)
+    combined, _, meta = scan()
+    T.check("no update of the bank within the second: it counts again, unmarked", combined[2589] == 105 and meta.bankPending == nil
+        and inDoubt() == false, combined[2589])
+    T.check("and a shown list was asked to redraw when that second was over", refreshes >= 1, refreshes)
     -- A bank the closing read was kept for is not held.
     visit()
     Inventory:OnBagUpdate(6)
@@ -1669,9 +1685,9 @@ T.section("the close", function()
     -- The session ends inside that second: the update may never be heard,
     -- so the bank is marked.
     visit()
-    client.bags = { [2589] = 105 }
-    client.bank.character = { items = {}, slots = 28 }
-    Inventory:OnBagUpdate(0)
+    Inventory:OnBagUpdate(1)
+    Inventory:OnBagUpdate(0)                               -- owed
+    client.bank.character = nil
     close()
     advance(0.5)
     client.started.onLogout()
@@ -1685,10 +1701,11 @@ T.section("the close", function()
     client.bank.character = { items = {}, slots = 28 }
     Inventory:OnBagUpdate(0)
     client.started.onLogout()                              -- with the bank open
-    T.check("so does a logout with the bank open", inDoubt() == true)
+    T.check("an empty read at a logout with the bank open: in doubt", inDoubt() == true)
     visit()
-    client.bank.character = { items = {}, slots = 28 }
+    Inventory:OnBagUpdate(1)
     Inventory:OnBagUpdate(0)
+    client.bank.character = nil
     close()
     advance(1.5)
     client.started.onLogout()
@@ -1725,6 +1742,33 @@ T.section("the close", function()
         "bank visit close: owed=true unsettled=none readAgain=true kept=account markedInDoubt=none held=none moveInFlight=false")
     client.started.onLogout()
     T.check("so a logout right after such a visit marks nothing", inDoubt() == false)
+    -- A stack put into it and taken out again: its last read found it empty,
+    -- and no update of its own came after that read - what is remembered
+    -- (empty) agrees with what was read, so nothing is marked.
+    local function inAndOut(closeAfter, lateUpdate)
+        return emptyBank(0.1, function()
+            client.bags = {}
+            client.bank.character = { items = { [2589] = 5 }, slots = 28 }
+            Inventory:OnBagUpdate(6)                       -- the deposit: unsettled, the read owed (spacing)
+            Inventory:OnBagUpdate(0)
+            advance(0.09)
+            client.bags = { [2589] = 5 }
+            client.bank.character = { items = {}, slots = 28 }
+            Inventory:OnBagUpdate(6)                       -- the withdrawal, before that read: the trailing read finds it empty
+            Inventory:OnBagUpdate(0)
+            advance(closeAfter)
+            if lateUpdate then Inventory:OnBagUpdate(6) end
+        end)
+    end
+    doubt = inAndOut(0.5)
+    T.check("in and out again, closed 0.5 s after: the bank remembered as empty is not marked", doubt == false, closeLine())
+    T.check("(and is remembered as empty)", next((bankOf())) == nil)
+    doubt = inAndOut(1.8)
+    T.check("closed 1.8 s after: not marked either", doubt == false)
+    doubt = inAndOut(0)
+    T.check("closed in the frame of the withdrawal, before any read after it: in doubt", doubt == true)
+    doubt = inAndOut(0.5, true)
+    T.check("an update of its own after that empty read: unsettled again - in doubt", doubt == true)
 
     -- A read that was owed is taken and refused: the update is still
     -- unanswered. The close reads once more and settles it.
@@ -2643,7 +2687,8 @@ T.section("the first moments after opening", function()
     T.check("never remembered, empty: saved as empty at two seconds", items ~= nil and next(items) == nil)
 
     -- Closed before the two seconds are over: the remembered bank stays,
-    -- and nothing is in doubt (the carried bags did not change).
+    -- in doubt - its empty reads are a sign that it was emptied, and it is
+    -- not counted until the next visit reads it.
     start()
     client.started.onBankOpened()
     advance(0.7)
@@ -2652,7 +2697,7 @@ T.section("the first moments after opening", function()
     advance(5)
     T.check("closed before it could be believed: kept, and nothing read after the close",
         (bankOf())[2589] == 40 and client.reads.character == 0, client.reads.character)
-    T.check("and not in doubt", select(3, Memory:OwnBank(MAIN.guid)) == false)
+    T.check("and in doubt", select(3, Memory:OwnBank(MAIN.guid)) == true)
 
     -- The items arrive a moment after the window, with an update.
     start()
