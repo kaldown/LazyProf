@@ -967,8 +967,11 @@ local function CloseVisit(self)
     end
     local changed = false
     if done.owed or done.unanswered or done.unresolved then
+        -- Protected on its own: a read that fails is a read that kept
+        -- nothing, and what follows must still be done.
         done.read = true
-        changed = ReadBank(v, true, done.kept)
+        local _, kept = Protected("bank close", ReadBank, v, true, done.kept)
+        changed = kept and true or false
     end
     local identity = Client:CharacterIdentity() or {}
     for _, kind in ipairs(BANK_KINDS) do

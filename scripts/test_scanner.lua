@@ -1675,6 +1675,30 @@ T.section("no entry point lets a failure out", function()
     fresh()
     survives("a scan", "CharacterIdentity", function() T.eq("which then counts the bags", (scan())[2589], 5) end)
 
+    -- A read at the close that fails is a read that was not kept: the bank
+    -- it was owed for must not go on counting as it was remembered.
+    openBank()
+    client.bags = { [2589] = 65 }
+    Inventory:OnBagUpdate(0)                                -- read at once: the bank as it was
+    Inventory:OnBagUpdate(6)                                -- owed
+    breakCall("BankContents")
+    local closed, closeError = pcall(function()
+        client.started.onBankClosing()
+        client.bankOpen = false
+        client.started.onBankClosed()
+    end)
+    restore()
+    T.check("a failing read at the close does not raise", closed, closeError)
+    T.check("and leaves the bank it was owed for in doubt", select(3, Memory:OwnBank(MAIN.guid)) == true)
+    T.eq("so that a scan counts what is carried and no more", (scan())[2589], 65)
+    client.bags = { [2589] = 66 }
+    Inventory:OnBagUpdate(0)
+    nextFrame()
+    local watchLines = {}
+    Inventory:RunDiagnostic(watchLines)
+    T.check("the watch after the close was still set up",
+        table.concat(watchLines, "\n"):find("after the close: bagUpdates=1 compared=1", 1, true) ~= nil, table.concat(watchLines, "\n"))
+
     -- No pending flag is left set by a failure: everything works afterwards.
     openBank()
     Inventory:OnBagUpdate(6)
