@@ -1499,12 +1499,18 @@ T.section("the close", function()
 end)
 
 -- ===========================================================================
--- The second after the close: the carried bags are compared with what they
--- held at the closing notice.
+-- After the close the bank cannot be read any more. The answer of a last move
+-- may still arrive: an update of a bank container in the ten seconds after
+-- the close marks that bank at once; a carried count that has risen within a
+-- second, against what the bags held at the closing notice, marks a bank
+-- that is remembered to hold that item.
 T.section("after the close", function()
     local function bankOf() return Memory:OwnBank(MAIN.guid) end
     local function inDoubt() return (select(3, Memory:OwnBank(MAIN.guid))) end
-    local function closedVisit()
+    local function accountDoubt() return (select(3, Memory:AccountBank("eu-pvp"))) end
+    -- 5 linen carried, 100 in the bank, 9 silk in the account bank; the
+    -- window was open for three seconds and has just closed.
+    local function closedVisit(atClose)
         fresh()
         Inventory:Initialize()
         advance(2.1)
@@ -1513,52 +1519,49 @@ T.section("after the close", function()
         client.bank.account = { items = { [4306] = 9 }, slots = 98 }
         client.started.onBankOpened()
         advance(3)
+        if atClose then atClose() end
         client.started.onBankClosing()
         client.bankOpen = false
         client.started.onBankClosed()
         client.reads.bags = 0
     end
+    local function afterLine()
+        local lines = {}
+        Inventory:RunDiagnostic(lines)
+        return (("\n" .. table.concat(lines, "\n") .. "\n"):match("\n(after the close: [^\n]*)\n"))
+    end
 
-    -- The answer of a last move: the bags changed.
+    -- An update of a bank container: that bank is marked at once, in the
+    -- handler of the update, and the other bank is not.
     closedVisit()
     advance(0.08)
-    client.bags = { [2589] = 65 }
     refreshes = 0
     Inventory:OnBagUpdate(6)
-    Inventory:OnBagUpdate(0)
-    T.eq("the updates themselves read nothing", client.reads.bags, 0)
-    T.check("nothing is marked before something compared", inDoubt() == false)
-    nextFrame()
-    T.eq("one comparison a frame later, however many updates there were", client.reads.bags, 1)
-    T.check("the bags changed: both remembered banks are in doubt", inDoubt() == true
-        and select(3, Memory:AccountBank("eu-pvp")) == true)
+    T.check("an update of a bank container after the close marks that bank at once", inDoubt() == true)
+    T.check("and not the other bank", accountDoubt() == false)
     T.eq("still remembered", (bankOf())[2589], 100)
     T.check("a shown list is asked to redraw", refreshes >= 1, refreshes)
+    T.eq("nothing was read for it", client.reads.bags, 0)
     local combined, breakdown, meta = scan()
-    T.check("a scan counts neither", combined[2589] == 65 and combined[4306] == nil and meta.bankInDoubt == true
-        and meta.accountInDoubt == true, combined[2589])
-    Inventory:OnBagUpdate(0)
-    nextFrame()
-    T.eq("once marked, nothing is compared any more", client.reads.bags, 1 + 1)   -- the scan above read the bags once
-
-    -- A scan that comes before the next frame makes the comparison itself,
-    -- also when the frame has scanned before the update came.
+    T.check("a scan counts the bags and the account bank", combined[2589] == 5 and combined[4306] == 9 and meta.bankInDoubt == true
+        and meta.accountInDoubt == nil, combined[2589])
+    T.eq("the dump names the bank and why", afterLine(),
+        "after the close: bankUpdates=1 (last 0.1 s after the close) bagUpdates=0 compared=0 marked=character (bank container updated)")
     closedVisit()
     advance(0.08)
-    T.eq("this frame's scan, before the answer arrives", (Inventory:ScanAll())[2589], 105)
-    client.reads.bags = 0
-    client.bags = { [2589] = 65 }
-    Inventory:OnBagUpdate(0)
-    combined, breakdown, meta = Inventory:ScanAll()     -- no InvalidateCache: the update dropped the frame's scan
-    T.check("a scan in the frame of the update does not count the bank", combined[2589] == 65 and meta.bankInDoubt == true,
-        combined[2589])
-    T.eq("with the bags it read anyway: one read", client.reads.bags, 1)
-    nextFrame()
-    T.eq("and the timer has nothing left to compare", client.reads.bags, 1)
-
-    -- Only the banks that were usable in the visit are marked: here the
-    -- account bank is remembered from another character and this one may
-    -- not view it.
+    Inventory:OnBagUpdate(15)
+    T.check("an update of an account bank container marks the account bank alone", accountDoubt() == true and inDoubt() == false)
+    -- Up to ten seconds after the close; later ones are only counted.
+    closedVisit()
+    advance(9.9)
+    Inventory:OnBagUpdate(6)
+    T.check("9.9 s after the close: marked", inDoubt() == true)
+    closedVisit()
+    advance(10.1)
+    Inventory:OnBagUpdate(6)
+    T.check("10.1 s after the close: not marked", inDoubt() == false)
+    T.eq("and not counted by the watch", afterLine(), "after the close: bankUpdates=0 bagUpdates=0 compared=0 marked=none")
+    -- A bank that was never usable in the visit is not marked by it.
     fresh()
     Inventory:Initialize()
     advance(2.1)
@@ -1572,47 +1575,114 @@ T.section("after the close", function()
     client.bankOpen = false
     client.started.onBankClosed()
     advance(0.08)
-    client.bags = { [2589] = 65 }
-    Inventory:OnBagUpdate(0)
-    nextFrame()
-    T.check("a late answer marks the bank that was usable", inDoubt() == true)
-    T.check("and not the one that never was", select(3, Memory:AccountBank("eu-pvp")) == false)
-    combined, breakdown, meta = scan()
-    T.check("which goes on counting", combined[4306] == 9 and meta.accountInDoubt == nil, combined[4306])
+    Inventory:OnBagUpdate(15)
+    Inventory:OnBagUpdate(6)
+    T.check("an update for a bank that was never usable in the visit does not mark it", accountDoubt() == false and inDoubt() == true)
+    T.eq("the dump counts both updates and names the one bank", afterLine(),
+        "after the close: bankUpdates=2 (last 0.1 s after the close) bagUpdates=0 compared=0 marked=character (bank container updated)")
 
-    -- An item the bags did not hold at the close is a change too.
+    -- A client that reports the late answer for the carried bag alone: the
+    -- count of an item has risen and the remembered bank holds that item.
     closedVisit()
     advance(0.08)
-    client.bags = { [2589] = 5, [4306] = 9 }
+    client.bags = { [2589] = 65 }
+    Inventory:OnBagUpdate(0)
+    T.eq("the update itself reads nothing", client.reads.bags, 0)
+    T.check("nothing is marked before something compared", inDoubt() == false)
     Inventory:OnBagUpdate(0)
     nextFrame()
-    T.check("an item that was not carried before arrives: marked", inDoubt() == true)
+    T.eq("one comparison a frame later, however many updates there were", client.reads.bags, 1)
+    T.check("a carried count rose for an item the bank holds: that bank is in doubt", inDoubt() == true)
+    T.check("the account bank holds none of it: not marked", accountDoubt() == false)
+    T.eq("the dump says which item", afterLine(),
+        "after the close: bankUpdates=0 bagUpdates=2 (last 0.1 s after the close) compared=1 marked=character (carried count rose: 2589)")
+    Inventory:OnBagUpdate(0)
+    nextFrame()
+    T.eq("the other bank is still compared for", client.reads.bags, 2)
+    client.bags = { [2589] = 65, [4306] = 1 }
+    Inventory:OnBagUpdate(0)
+    nextFrame()
+    T.check("until it is marked too", accountDoubt() == true)
+    Inventory:OnBagUpdate(0)
+    nextFrame()
+    T.eq("once both are marked, nothing is compared any more", client.reads.bags, 3)
+
+    -- A scan that comes before that comparison leaves the bank out of its
+    -- own count and marks nothing: the comparison on the next frame decides
+    -- (a stack on its way from one carried bag to another shows in both for
+    -- a moment).
+    closedVisit()
+    advance(0.08)
+    T.eq("this frame's scan, before the answer arrives", (Inventory:ScanAll())[2589], 105)
+    client.reads.bags = 0
+    client.bags = { [2589] = 65 }
+    Inventory:OnBagUpdate(0)
+    combined, breakdown, meta = Inventory:ScanAll()     -- no InvalidateCache: the update dropped the frame's scan
+    T.check("a scan in the frame of the update does not count the bank beside the risen count",
+        combined[2589] == 65 and meta.bankPending == true, combined[2589])
+    T.check("and does not mark it", inDoubt() == false and meta.bankInDoubt == nil)
+    T.check("the account bank, which holds none of the item, counts", combined[4306] == 9 and meta.accountPending == nil)
+    T.eq("with the bags it read anyway: one read", client.reads.bags, 1)
+    nextFrame()
+    T.check("the comparison a frame later marks it", inDoubt() == true and client.reads.bags == 2, client.reads.bags)
+    -- The count is back at the note by the next frame: nothing is marked.
+    closedVisit()
+    advance(0.08)
+    client.bags = { [2589] = 10 }                        -- a stack between two bags, in both for a moment
+    Inventory:OnBagUpdate(1)
+    combined, breakdown, meta = Inventory:ScanAll()
+    T.check("a stack shown in two carried bags for a moment: that scan leaves the bank out", combined[2589] == 10
+        and meta.bankPending == true, combined[2589])
+    client.bags = { [2589] = 5 }
+    Inventory:OnBagUpdate(0)
+    nextFrame()
+    T.check("and the comparison finds nothing risen: no mark", inDoubt() == false and (scan())[2589] == 105)
+
+    -- A count that fell marks nothing, nor one that rose for an item no
+    -- remembered bank of the visit holds.
     closedVisit()
     advance(0.08)
     client.bags = {}
     Inventory:OnBagUpdate(0)
     nextFrame()
-    T.check("an item that was carried is gone: marked", inDoubt() == true)
-
-    -- Nothing changed in the bags: no doubt, whatever container the update names.
+    T.check("an item that was carried is gone: nothing is marked", inDoubt() == false and accountDoubt() == false)
+    T.eq("it was compared", client.reads.bags, 1)
     closedVisit()
     advance(0.08)
-    Inventory:OnBagUpdate(6)
+    client.bags = { [2589] = 5, [774] = 3 }
     Inventory:OnBagUpdate(0)
     nextFrame()
-    T.check("updates that change no count mark nothing", inDoubt() == false and select(3, Memory:AccountBank("eu-pvp")) == false)
+    T.check("an item no remembered bank holds arrives: nothing is marked", inDoubt() == false and accountDoubt() == false)
+    closedVisit()
+    advance(0.08)
+    client.bags = { [2589] = 5, [4306] = 1 }
+    Inventory:OnBagUpdate(0)
+    nextFrame()
+    T.check("an item the account bank holds arrives: the account bank is marked, the other not",
+        accountDoubt() == true and inDoubt() == false)
+
+    -- Nothing changed in the bags: no doubt.
+    closedVisit()
+    advance(0.08)
+    Inventory:OnBagUpdate(0)
+    Inventory:OnBagUpdate(1)
+    nextFrame()
+    T.check("updates that change no count mark nothing", inDoubt() == false and accountDoubt() == false)
     T.eq("they were compared once", client.reads.bags, 1)
-    -- Bags that cannot be read decide nothing; the next update compares again.
-    client.bags, client.backpackSlots = {}, 0
+    -- Bags that cannot be read are not compared: that decides nothing and
+    -- the comparison stays due.
+    client.bags, client.backpackSlots = { [2589] = 65 }, 0
     Inventory:OnBagUpdate(0)
     nextFrame()
     T.check("bags that cannot be read mark nothing", inDoubt() == false)
-    client.bags, client.backpackSlots = { [2589] = 65 }, 16
+    T.eq("and are not compared", afterLine(),
+        "after the close: bankUpdates=0 bagUpdates=3 (last 0.1 s after the close) compared=1 marked=none")
+    client.backpackSlots = 16
     Inventory:OnBagUpdate(0)
     nextFrame()
-    T.check("readable again and changed: marked", inDoubt() == true)
+    T.check("readable again and risen: marked", inDoubt() == true)
 
-    -- Later than a second after the close nothing is watched.
+    -- Later than a second after the close a change of the bags is play.
     closedVisit()
     advance(1.5)
     client.bags = { [2589] = 65 }
@@ -1620,31 +1690,67 @@ T.section("after the close", function()
     nextFrame()
     T.check("a change of the bags 1.5 s after the close marks nothing", inDoubt() == false)
     T.eq("and nothing is compared", client.reads.bags, 0)
+    T.eq("the dump: nothing came inside the watch", afterLine(), "after the close: bankUpdates=0 bagUpdates=0 compared=0 marked=none")
 
-    -- The dump tells it.
-    local lines = {}
-    Inventory:RunDiagnostic(lines)
-    T.check("the dump: nothing came inside the watch",
-        table.concat(lines, "\n"):find("after the close: bagUpdates=0 compared=0 carriedBagsChanged=false", 1, true) ~= nil,
-        table.concat(lines, "\n"))
-    closedVisit()
+    -- No note is taken of bags that could not be read at the close. Without
+    -- a note, an update of a carried bag within the second is all there is
+    -- to go by: it marks the visit's banks, at once.
+    closedVisit(function() client.bags, client.backpackSlots = { [2589] = 65 }, 0 end)
+    client.backpackSlots = 16                           -- readable again, and holding what they held at the close
     advance(0.08)
-    client.bags = { [2589] = 65 }
+    T.check("nothing is marked by the close itself", inDoubt() == false and accountDoubt() == false)
+    Inventory:OnBagUpdate(0)
+    T.check("no note of the bags: an update of a carried bag marks the visit's banks",
+        inDoubt() == true and accountDoubt() == true)
+    T.eq("the dump says why", afterLine(), "after the close: bankUpdates=0 bagUpdates=1 (last 0.1 s after the close) compared=0"
+        .. " marked=character (no note of the bags), account (no note of the bags)")
+    closedVisit(function() client.bags, client.backpackSlots = { [2589] = 65 }, 0 end)
+    client.backpackSlots = 16
+    advance(1.5)
+    Inventory:OnBagUpdate(0)
+    T.check("without a note too only inside the second", inDoubt() == false and accountDoubt() == false)
+
+    -- A session without a visit: updates of bank containers are only counted.
+    fresh()
+    Inventory:ForgetRemembered()                        -- also ends the watch the visit above left
+    Inventory:Initialize()
+    advance(2.1)
+    Memory:SaveBank(MAIN, { [2589] = 40 }, {}, NOW - DAY)
     Inventory:OnBagUpdate(6)
     Inventory:OnBagUpdate(0)
     nextFrame()
-    lines = {}
-    Inventory:RunDiagnostic(lines)
-    T.check("the dump: a late answer",
-        table.concat(lines, "\n"):find("after the close: bagUpdates=2 compared=1 carriedBagsChanged=true (the remembered banks were marked in doubt)", 1, true) ~= nil,
-        table.concat(lines, "\n"))
+    T.check("no visit in this session: nothing is marked", inDoubt() == false)
+    T.eq("and there is no line for a watch", afterLine(), nil)
+
+    -- A logout before that next frame: the comparison is made at logout.
+    closedVisit()
+    advance(0.08)
+    client.bags = { [2589] = 65 }
+    Inventory:OnBagUpdate(0)
+    client.started.onLogout()
+    T.check("a comparison still due at logout is made then", inDoubt() == true)
+    T.eq("the dump has it", afterLine(),
+        "after the close: bankUpdates=0 bagUpdates=1 (last 0.1 s after the close) compared=1 marked=character (carried count rose: 2589)")
 
     -- A new visit ends the watch, and its first kept read takes the mark away.
+    closedVisit()
+    advance(0.08)
+    Inventory:OnBagUpdate(6)
+    Inventory:OnBagUpdate(15)
     client.bankOpen = true
     client.bank.character = { items = { [2589] = 40 }, slots = 28 }
     client.started.onBankOpened()
     T.check("the next visit's kept read clears the doubt", inDoubt() == false and (bankOf())[2589] == 40)
-    T.check("of the account bank too", select(3, Memory:AccountBank("eu-pvp")) == false)
+    T.check("of the account bank too", accountDoubt() == false)
+    -- A comparison still due when the bank is opened again is made first.
+    closedVisit()
+    advance(0.08)
+    client.bags = { [2589] = 65 }
+    Inventory:OnBagUpdate(0)
+    client.bankOpen = true
+    client.bank.character = nil                         -- cannot be read in the new visit
+    client.started.onBankOpened()
+    T.check("a comparison still due at the next opening is made before the visit begins", inDoubt() == true)
 end)
 
 -- ===========================================================================
@@ -2028,7 +2134,8 @@ T.section("no entry point lets a failure out", function()
     local watchLines = {}
     Inventory:RunDiagnostic(watchLines)
     T.check("the watch after the close was still set up",
-        table.concat(watchLines, "\n"):find("after the close: bagUpdates=1 compared=1", 1, true) ~= nil, table.concat(watchLines, "\n"))
+        table.concat(watchLines, "\n"):find("after the close: bankUpdates=0 bagUpdates=1 (last 0.0 s after the close) compared=1", 1, true) ~= nil,
+        table.concat(watchLines, "\n"))
 
     -- No pending flag is left set by a failure: everything works afterwards.
     openBank()

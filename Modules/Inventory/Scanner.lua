@@ -101,16 +101,28 @@
 --    Nothing else marks at the close: not an empty read that was merely not
 --    believed while the bank is not unsettled, not a read that was owed for
 --    an update of a carried bag, not such an update itself.
--- 5. After the close. The carried bags' contents (item -> count) are noted
---    at the closing notice. A bag update in the CLOSE_WATCH (1 s) after it,
---    whatever container it names, has them compared with the note - on the
---    next frame, or by a scan that comes first. When a count differs, the
---    answer of a last move arrived late: the banks of the visit are marked
---    in doubt. An update that changes no count marks nothing (the
---    client may only be letting go of the bank), nor does anything later
---    than the second, or a session without a close. Updates of bank
---    containers that arrive while the bank is closed are counted for
---    /lp diag stock.
+-- 5. After the close the bank cannot be read. What may still arrive is the
+--    answer of a last move.
+--    (a) An update of a bank container that arrives within CLOSE_WATCH_BANK
+--        (10 s) after the close marks that bank in doubt at once, in the
+--        handler of the update. Later ones, and those of a session without
+--        a visit, are only counted for /lp diag stock.
+--    (b) The carried bags' contents (item -> count) are noted at the closing
+--        notice. When, within CLOSE_WATCH (1 s) after the close, the carried
+--        count of an item has RISEN against that note and a remembered bank
+--        of the visit holds that item, that bank is marked in doubt. A count
+--        that fell, or rose for an item no remembered bank of the visit
+--        holds, marks nothing. The comparison is made on the next frame
+--        after an update of a carried bag, when the bank is opened again,
+--        and at logout; bags that cannot be read then are not compared, and
+--        the comparison stays due. A scan that comes before it does not
+--        mark: it leaves a bank out of its own count (as being read) when
+--        the count it has just read has risen for an item that bank holds.
+--        Within one frame a stack on its way from one carried bag to
+--        another can show in both; by the next frame the count is what it
+--        was. When no note could be taken at the close (the bags could not
+--        be read), an update of a carried bag within that second marks the
+--        visit's banks at once.
 -- Which banks a visit can mark (rules 4 and 5): only a bank that was USABLE
 --    at some moment of it - the adapter says so (window open, the bank may
 --    be viewed, is not locked, has a tab), and it is asked at every read of
@@ -344,7 +356,8 @@ end
 
 -- Defined with the bank's rules further down ("Keeping the memory").
 local BankPending       -- is the open bank of that kind left out of a scan right now (rule 3)?
-local SettleAfterClose  -- the comparison due after a bag update that followed a close (rule 5)
+local RisenAfterClose   -- which banks a scan leaves out for a carried count that rose after a close (rule 5b)
+local SettleAfterClose  -- the comparison due after a carried bag's update that followed a close (rule 5b)
 
 -- Frame-level cache: ScanAll is called many times per frame (once per recipe in
 -- GetCandidates). Cache results so only the first call per frame does real work.
@@ -489,7 +502,9 @@ end
 --     accountInDoubt true when the account bank of its world is
 --     bankPending    true when the character's bank is left out because it
 --                    is open and unsettled, a read is owed or its empty read
---                    is not believed yet: a read is on its way
+--                    is not believed yet: a read is on its way; or because
+--                    a carried count rose after its close and the
+--                    comparison is still to come
 --     accountPending the same for the account bank
 --     alts = { [name] = { bags = time, bank = time } } }   the alts counted
 -- The character's own bank and the account bank are both bank stock (the
@@ -498,10 +513,10 @@ end
 -- A bank in doubt (rule 6 at the top of this file) is not counted: not the
 -- character's own, not the account bank, and not an alt's (its bags still
 -- are). Nor is the open bank while it is unsettled or a read of it is owed
--- (rule 3). The marks are only
--- set for a bank that would count otherwise. Nothing is read from the client
--- here and nothing is written.
-local function AddRememberedStock(self, combined, breakdown, countAlts)
+-- (rule 3), nor a bank named in leaveOut ({ [kind] = true }, rule 5b). The
+-- marks are only set for a bank that would count otherwise. Nothing is read
+-- from the client here and nothing is written.
+local function AddRememberedStock(self, combined, breakdown, countAlts, leaveOut)
     local Memory, Client = LazyProf.StockMemory, LazyProf.Client
     local countBank = LazyProf.db.profile.includeBankItems and true or false
     local identity = Client:CharacterIdentity() or {}
@@ -511,7 +526,7 @@ local function AddRememberedStock(self, combined, breakdown, countAlts)
         local items, seenAt, doubt = Memory:OwnBank(identity.guid)
         if items and doubt then
             meta.bankInDoubt = true
-        elseif items and BankPending("character") then
+        elseif items and (BankPending("character") or (leaveOut and leaveOut.character)) then
             meta.bankPending = true
         elseif items then
             mergeSource(items, "bank", nil, combined, breakdown)
@@ -521,7 +536,7 @@ local function AddRememberedStock(self, combined, breakdown, countAlts)
             items, seenAt, doubt = Memory:AccountBank(identity.world)
             if items and doubt then
                 meta.accountInDoubt = true
-            elseif items and BankPending("account") then
+            elseif items and (BankPending("account") or (leaveOut and leaveOut.account)) then
                 meta.accountPending = true
             elseif items then
                 mergeSource(items, "bank", nil, combined, breakdown)
@@ -546,15 +561,16 @@ local function AddRememberedStock(self, combined, breakdown, countAlts)
     return meta
 end
 
--- The memory's part of a scan. A comparison that is due after a close (rule
--- 5) is made first, with the bags the scan has just read - so that no scan
--- counts a bank beside the items that have just come out of it. The bank
--- itself is never read here.
+-- The memory's part of a scan. While a comparison is due after a close
+-- (rule 5b), the bags the scan has just read say which banks it leaves out -
+-- so that no scan counts a bank beside the items that have just come out of
+-- it. The bank itself is never read here, and nothing is marked.
 local function ScanMemory(self, combined, breakdown, countAlts, bagItems, backpackSlots)
+    local leaveOut = nil
     if backpackSlots and backpackSlots > 0 then
-        SettleAfterClose(bagItems)
+        leaveOut = RisenAfterClose(bagItems)
     end
-    return AddRememberedStock(self, combined, breakdown, countAlts)
+    return AddRememberedStock(self, combined, breakdown, countAlts, leaveOut)
 end
 
 -- Scan all inventory sources based on settings
@@ -643,7 +659,8 @@ local BAG_SAVE_DELAY = 2
 local BANK_SETTLE = 0.5         -- the second look, this long after the opening
 local BANK_EMPTY_TRUST = 2      -- an empty bank is not believed earlier after the opening
 local BANK_READ_SPACING = 0.2   -- least time between two reads that changes ask for
-local CLOSE_WATCH = 1           -- how long after the close a late answer is watched for
+local CLOSE_WATCH = 1           -- how long after the close a carried count that rose is taken for a late answer
+local CLOSE_WATCH_BANK = 10     -- how long after the close an update of a bank container marks that bank
 local CLOCK_SLACK = 0.001       -- a timer may run a hair before its mark
 local BANK_KINDS = { "character", "account" }
 
@@ -678,12 +695,16 @@ local closedBankUpdates = { count = 0, lastAfter = nil }
 -- The watch after a close (rule 5):
 --   at, guid, world   when the window closed, and whose banks the visit read
 --   usable[kind]      the bank was usable in the visit: it can be marked
---   note              the carried bags' contents at the closing notice
---   updates           bag updates that arrived inside the watch
---   carried           one of them named a carried bag
+--   note              the carried bags' contents at the closing notice (nil:
+--                     they could not be read)
+--   bankUpdates, bankLast   updates of bank containers inside CLOSE_WATCH_BANK,
+--                     and how long after the close the last one came
+--   bagUpdates, bagLast     the same for carried bags inside CLOSE_WATCH
 --   owed, pending     a comparison is due; its timer is waiting
 --   compared          how many comparisons were made
---   changed           a count differed: the banks were marked in doubt
+--   done[kind]        the remembered bank carries the doubt mark: nothing
+--                     more to find out about it
+--   marked[kind]      why this watch marked it
 local watch = nil
 
 -- Remember what the character carries. trustEmpty: a bag update came before
@@ -957,16 +978,6 @@ function Inventory:OnBankOpened()
     ScheduleLook(visit, BANK_EMPTY_TRUST)
 end
 
-local function SameCounts(a, b)
-    for itemId, count in pairs(a) do
-        if b[itemId] ~= count then return false end
-    end
-    for itemId in pairs(b) do
-        if a[itemId] == nil then return false end
-    end
-    return true
-end
-
 -- Rule 4, at the adapter's closing notice and at a logout with the bank
 -- open; once per visit. visit.closing says afterwards what was done:
 --   owed               a read was owed
@@ -1015,7 +1026,8 @@ local function CloseVisit(self)
         at = GetTime(), guid = identity.guid, world = identity.world,
         usable = { character = v.character.usable, account = v.account.usable },
         note = (backpackSlots and backpackSlots > 0) and items or nil,
-        updates = 0, compared = 0, owed = false, pending = false,
+        bankUpdates = 0, bagUpdates = 0, compared = 0, owed = false, pending = false,
+        done = {}, marked = {},
     }
     if changed then
         InvalidateFrame()
@@ -1040,58 +1052,125 @@ function Inventory:OnBankClosed()
     end
 end
 
--- Rule 5: the comparison that is due after an update inside the watch.
--- bagItems: the carried bags, when the caller has just read them (a scan);
--- otherwise they are read here. A read that cannot be trusted (no backpack
--- slots) decides nothing and leaves the comparison due. Returns whether a
--- bank was marked.
-SettleAfterClose = function(bagItems)
-    local w = watch
-    if not w or not w.owed then return false end
-    local items = bagItems
-    if not items then
-        local read, _, backpackSlots = LazyProf.Client:BagContents()
-        if not backpackSlots or backpackSlots <= 0 then return false end
-        items = read
+-- What is remembered of a bank of the visit the watch follows.
+local function WatchedBank(w, kind)
+    if kind == "character" then
+        return LazyProf.StockMemory:OwnBank(w.guid)
     end
-    w.owed = false
-    w.compared = w.compared + 1
-    local differs
-    if w.note then
-        differs = not SameCounts(w.note, items)
-    else
-        -- No note could be taken at the close: an update of a carried bag
-        -- is then all there is to go by.
-        differs = w.carried == true
+    return LazyProf.StockMemory:AccountBank(w.world)
+end
+
+-- Rule 5: mark a bank of the visit in doubt, for `reason`. Only a bank that
+-- was usable in the visit, and of which something is remembered. Returns
+-- whether the mark is new.
+local function WatchMark(w, kind, reason)
+    if w.done[kind] or not w.usable[kind] then return false end
+    local new, marked = MarkDoubt(kind, w.guid, w.world)
+    if marked then
+        w.done[kind] = true
     end
-    if not differs then return false end
-    w.changed = true
-    local marked = false
+    if not new then return false end
+    w.marked[kind] = reason
+    InvalidateFrame()
+    if LazyProf.ScheduleShoppingListRefresh then
+        LazyProf:ScheduleShoppingListRefresh()
+    end
+    return true
+end
+
+-- Is there still a bank of the visit the watch could mark?
+local function WatchOpen(w)
     for _, kind in ipairs(BANK_KINDS) do
-        if w.usable[kind] and MarkDoubt(kind, w.guid, w.world) then
-            marked = true
+        if w.usable[kind] and not w.done[kind] then return true end
+    end
+    return false
+end
+
+-- The item (the lowest id) whose carried count in `items` is above the note
+-- and which the remembered bank `held` holds; nil when there is none.
+local function RisenItem(note, items, held)
+    local risen = nil
+    for itemId, count in pairs(items) do
+        if count > (note[itemId] or 0) and (held[itemId] or 0) > 0 and (risen == nil or itemId < risen) then
+            risen = itemId
         end
     end
-    if marked then
-        InvalidateFrame()
-        if LazyProf.ScheduleShoppingListRefresh then
-            LazyProf:ScheduleShoppingListRefresh()
+    return risen
+end
+
+-- Rule 5b: the comparison that is due after an update of a carried bag
+-- inside the watch. Bags that cannot be read (no backpack slots) are not
+-- compared: that decides nothing and leaves the comparison due. Returns
+-- whether a bank was marked.
+SettleAfterClose = function()
+    local w = watch
+    if not w or not w.owed or not w.note then return false end
+    local items, _, backpackSlots = LazyProf.Client:BagContents()
+    if not backpackSlots or backpackSlots <= 0 then return false end
+    w.owed = false
+    w.compared = w.compared + 1
+    local marked = false
+    for _, kind in ipairs(BANK_KINDS) do
+        if w.usable[kind] and not w.done[kind] then
+            local held = WatchedBank(w, kind)
+            local risen = held and RisenItem(w.note, items, held)
+            if risen and WatchMark(w, kind, "carried count rose: " .. tostring(risen)) then
+                marked = true
+            end
         end
     end
     return marked
 end
 
--- A bag update while the bank is closed: inside the watch after a close it
--- asks for the comparison - on the next frame (one timer, a pending flag),
--- or by a scan that comes first.
-local function WatchUpdate(carried)
+-- Rule 5b, for a scan that comes before that comparison: the banks it leaves
+-- out ({ [kind] = true }; nil when none), judged by the bags it has just
+-- read. Nothing is marked and the comparison stays due.
+RisenAfterClose = function(bagItems)
     local w = watch
-    if not w or w.changed then return end
-    if GetTime() - w.at > CLOSE_WATCH + CLOCK_SLACK then return end
-    w.updates = w.updates + 1
-    if carried then
-        w.carried = true
+    if not w or not w.owed or not w.note then return nil end
+    local leaveOut = nil
+    for _, kind in ipairs(BANK_KINDS) do
+        if w.usable[kind] and not w.done[kind] then
+            local held = WatchedBank(w, kind)
+            if held and RisenItem(w.note, bagItems, held) then
+                leaveOut = leaveOut or {}
+                leaveOut[kind] = true
+            end
+        end
     end
+    return leaveOut
+end
+
+-- Rule 5a: an update of a bank container while the bank is closed. Inside
+-- CLOSE_WATCH_BANK after a close it marks that bank at once.
+local function WatchBankUpdate(kind)
+    local w = watch
+    if not w then return end
+    local after = GetTime() - w.at
+    if after > CLOSE_WATCH_BANK + CLOCK_SLACK then return end
+    w.bankUpdates = w.bankUpdates + 1
+    w.bankLast = after
+    WatchMark(w, kind, "bank container updated")
+end
+
+-- Rule 5b: an update of a carried bag while the bank is closed. Inside
+-- CLOSE_WATCH after a close it asks for the comparison on the next frame
+-- (one timer, a pending flag); without a note of the bags it marks the
+-- visit's banks at once.
+local function WatchBagUpdate()
+    local w = watch
+    if not w then return end
+    local after = GetTime() - w.at
+    if after > CLOSE_WATCH + CLOCK_SLACK then return end
+    w.bagUpdates = w.bagUpdates + 1
+    w.bagLast = after
+    if not w.note then
+        for _, kind in ipairs(BANK_KINDS) do
+            WatchMark(w, kind, "no note of the bags")
+        end
+        return
+    end
+    if not WatchOpen(w) then return end
     w.owed = true
     InvalidateFrame()
     if w.pending then return end
@@ -1115,8 +1194,10 @@ local function BagUpdated(self, bagId)
             -- the client reports bank changes after the window closed.
             closedBankUpdates.count = closedBankUpdates.count + 1
             closedBankUpdates.lastAfter = bankClosedAt and (GetTime() - bankClosedAt) or nil
+            WatchBankUpdate(bankKind)
+        else
+            WatchBagUpdate()
         end
-        WatchUpdate(not bankKind)
     end
     if not bankKind then
         self:RequestBagSave(true)
@@ -1149,12 +1230,18 @@ end
 
 -- Logout (the client's event, and the database's own shutdown notice, which
 -- is sure to come before the saved tables are tidied; either may come first
--- and both may come). With the bank still open the visit ends as at a close.
--- Then a bag save that is still waiting is written.
+-- and both may come). With the bank still open the visit ends as at a close,
+-- and a comparison that is due after a close is made. Then a bag save that
+-- is still waiting is written.
 function Inventory:OnLogout()
     if self:UsesSyndicator() then return end
     if visit and not visit.closedAt and not visit.closing then
         Protected("logout", CloseVisit, self)
+    end
+    -- A comparison still due after a close (rule 5b) has no next frame to
+    -- wait for.
+    if watch and watch.owed then
+        Protected("logout", SettleAfterClose)
     end
     if not bagSavePending then return end
     bagSavePending = false
@@ -1307,10 +1394,22 @@ function Inventory:RunDiagnostic(lines)
                 .. " markedInDoubt=" .. names(done.doubt))
         end
     end
+    -- The watch after the last close: what arrived, and which banks it
+    -- marked and why.
     if watch then
-        add("after the close: bagUpdates=" .. tostring(watch.updates) .. " compared=" .. tostring(watch.compared)
-            .. " carriedBagsChanged=" .. tostring(watch.changed == true)
-            .. (watch.changed and " (the remembered banks were marked in doubt)" or ""))
+        local function updates(label, count, last)
+            return label .. "=" .. tostring(count) .. (last and string.format(" (last %.1f s after the close)", last) or "")
+        end
+        local marks = {}
+        for _, kind in ipairs(BANK_KINDS) do
+            if watch.marked[kind] then
+                marks[#marks + 1] = kind .. " (" .. watch.marked[kind] .. ")"
+            end
+        end
+        add("after the close: " .. updates("bankUpdates", watch.bankUpdates, watch.bankLast)
+            .. " " .. updates("bagUpdates", watch.bagUpdates, watch.bagLast)
+            .. " compared=" .. tostring(watch.compared)
+            .. " marked=" .. (#marks > 0 and table.concat(marks, ", ") or "none"))
     end
     -- Whether the client reports bank changes after the window closed (they
     -- cannot be read then, so the remembered bank misses them).

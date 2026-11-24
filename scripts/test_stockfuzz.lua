@@ -12,7 +12,8 @@
 --   I3  on a well-behaved client an open bank is right, and without a doubt
 --       mark, two seconds after the last event
 --   I4  on a well-behaved client a visit that ends half a second or more
---       after its last move leaves no doubt mark
+--       after its last move (the moment the client showed it) leaves no
+--       doubt mark
 --   I5  nothing raises and nothing reaches the game's error handler
 -- A failing walk is cut down to the shortest sequence that still fails and
 -- can be written out as a script that needs only scripts/lib/stockworld.lua.
@@ -61,7 +62,8 @@
 --   I4.nuisance|glance|afterclose   a well-behaved client: a doubt mark after a visit
 --                        that ended 0.5 s or more after its last move / in which
 --                        nothing was moved / after a change of the bags in the
---                        second after the close
+--                        second after the close that was no rise of an item a
+--                        remembered bank holds
 --   I5.error|handler     a Lua error, or a message to the game's error handler
 --
 -- KNOWN (below) lists the kinds of failure the suite still shows on the code
@@ -188,13 +190,13 @@ local HABITS = { logoutMidMove = true, closeMidMove = true, afterCloseChange = t
 -- shows any more fails the run, so the list cannot outlive what it describes.
 -- ===========================================================================
 local KNOWN = {
-    { "I1.settled.own", "A stack that left a bank is still counted in it after the visit: a move between the two banks was"
-        .. " answered after the close, or the session ended before the answer of a move was heard." },
+    { "I1.settled.own", "A stack that left a bank is still counted in it: the session ended (a logout or a reload) before the"
+        .. " answer of the move was heard, and the next session does not notice." },
     { "I1.settled.alt", "After a logout before the answer of a move was heard, the other character counts the moved stack in"
         .. " the bags and in the remembered bank of the first." },
-    { "I1.latent.character", "The character's bank stays remembered with a stack that has left it (the cases of I1.settled.own)." },
-    { "I1.latent.account", "The account bank stays remembered with a stack that has left it (the cases of I1.settled.own)." },
-    { "I1.multi.own", "A stack is counted in a bank and where it went for several frames (the cases of I1.settled.own)." },
+    { "I1.latent.character", "The character's bank stays remembered with a stack that has left it (the case of I1.settled.own)." },
+    { "I1.latent.account", "The account bank stays remembered with a stack that has left it (the case of I1.settled.own)." },
+    { "I1.multi.own", "A stack is counted in a bank and where it went for several frames (the case of I1.settled.own)." },
     { "I1.multi.alt", "The other character counts a stack twice for as long as it is logged in (the case of I1.settled.alt)." },
     { "I1.frame.own", "After a logout before the answer of a move was heard, the stack is counted twice until the bank is"
         .. " opened again." },
@@ -203,15 +205,11 @@ local KNOWN = {
     { "I2.stale.character", "The character's bank is remembered without a stack that is in it and nothing says so: a deposit"
         .. " answered after the session ended, or a bank that was shown only partly when its window opened." },
     { "I2.stale.account", "The account bank is remembered without a stack that is in it and nothing says so (the cases of"
-        .. " I2.stale.character, and a move between the two banks answered after the close)." },
+        .. " I2.stale.character)." },
     { "I2.alt", "The bank of another character that is in doubt is left out of the counts without a word in the scan's third"
         .. " return or on the Shopping tab." },
     { "I3.stuck.account", "The account bank is in doubt for a character that may not view it, so no visit of its own takes"
         .. " the mark away. The mark is another character's, set after a visit of its own that left the bank uncertain." },
-    { "I4.glance", "A visit in which nothing was moved leaves a doubt mark when, in the second after its close, a stack is"
-        .. " moved between two carried bags and a scan comes between the two bag updates of that move." },
-    { "I4.afterclose", "Any change of the carried bags in the second after the close marks both banks in doubt, whatever"
-        .. " changed." },
 }
 
 -- ===========================================================================
@@ -523,7 +521,7 @@ local function JudgeVisit(v)
     if v.moves == 0 then class = "glance"
     elseif v.hurried then class = "hurried"
     else class = "unhurried" end
-    if v.after then class = class .. "+after" end
+    if v.afterRise then class = class .. "+rise" elseif v.after then class = class .. "+after" end
     local stat = S.stats.visits[class] or { n = 0, doubt = 0 }
     S.stats.visits[class] = stat
     stat.n = stat.n + 1
@@ -832,6 +830,9 @@ Process = function(d)
             end
         end
         for container in pairs(touched) do PushView(container) end
+        -- The client shows the move now: a visit is judged by how long
+        -- after this it ended (see CloseNotice).
+        if S.visit and d.epoch == S.epoch then S.visit.lastMoveMs = S.now end
         for _ = 1, d.rep or 1 do BagUpdate(d.c) end
         if d.chain then
             d.chain.at = S.now + d.chainGap
@@ -1051,16 +1052,39 @@ local function Usable(container, index)
     return not S.bagsHidden
 end
 
+-- What the client shows of the carried bags, item by item.
+local function ShownBags()
+    local counts = {}
+    for container in pairs(Me().bags) do
+        if S.shown[container] then AddCounts(counts, S.shown[container]) end
+    end
+    return counts
+end
+
 -- The player changed what the character holds: for judging the visit.
--- counts: the carried bags hold other counts afterwards (loot, a craft) -
--- within the second after a close that is what rule 5 takes for a late answer.
+-- counts: the carried bags hold other counts afterwards (loot, a craft), in
+-- the second after a close. Call it after the change.
+-- Decided: a carried count that rises in that second for an item a bank of
+-- the visit is remembered to hold marks that bank - the rules cannot tell
+-- it from the answer of a last withdrawal, also when it was loot or a craft.
+-- Such a visit is filed as "+rise" and is no failure; any other change of
+-- the bags in that second ("+after": a count that fell, an item no
+-- remembered bank holds) must leave no mark.
 local function NoteChange(counts)
     local v = S.visit
     if v then
         v.moves = v.moves + 1
         v.lastMoveMs = S.now
     elseif counts and S.lastVisit and S.closeMs and S.now - S.closeMs <= 1000 then
-        S.lastVisit.after = true
+        local last = S.lastVisit
+        local now, rose = ShownBags(), false
+        for _, kind in ipairs({ "character", "account" }) do
+            local held = Remembered(kind, last.who)
+            for _, id in ipairs(ALL_ITEMS) do
+                if (now[id] or 0) > ((last.bagsAtClose or {})[id] or 0) and held and (held[id] or 0) > 0 then rose = true end
+            end
+        end
+        if rose then last.afterRise = true else last.after = true end
     end
 end
 
@@ -1354,7 +1378,13 @@ end
 local function CloseNotice(a, event)
     local v = S.visit
     v.closeMs = S.now
+    v.bagsAtClose = ShownBags()
     v.inflight = InFlight()
+    -- Hurried: the window is closed while the answer of a move is still on
+    -- its way, or less than half a second after the client showed the last
+    -- move (its answer arrived - with a server that takes 0.3 s that is later
+    -- than the click, and an emptied bank needs two looks 0.2 s apart from
+    -- there before it is believed empty).
     v.hurried = (v.lastMoveMs ~= nil and S.now - v.lastMoveMs < 500) or v.inflight > 0
     v.cause = (v.moves == 0 and "glance" or (v.hurried and "hurried" or "unhurried")) .. (v.inflight > 0 and ",inflight" or "")
         .. (S.now - v.openMs < SETTLE and ",short" or "")
@@ -2282,7 +2312,8 @@ if MODE == "campaign" then
     for _, key in ipairs(names) do
         local stat = visits[key]
         local parts = { key }
-        for _, class in ipairs({ "glance", "glance+after", "unhurried", "unhurried+after", "hurried", "hurried+after" }) do
+        for _, class in ipairs({ "glance", "glance+after", "glance+rise", "unhurried", "unhurried+after", "unhurried+rise",
+                                 "hurried", "hurried+after", "hurried+rise" }) do
             local s = stat[class] or { n = 0, doubt = 0 }
             parts[#parts + 1] = s.n
             parts[#parts + 1] = s.doubt
