@@ -1383,7 +1383,10 @@ T.section("the close", function()
     linenLeft, inDoubt, barsLeft, accountDoubt = letGoThen("PLAYER_LOGOUT")
     T.check("the same at logout with the bank open: unchanged", linenLeft == 100 and barsLeft == 50,
         tostring(linenLeft) .. "/" .. tostring(barsLeft))
-    T.check("and the bank whose container reported it in doubt", inDoubt == true and accountDoubt == false)
+    -- The other bank read as empty too and could not be read back before
+    -- the session ended: an update of its own could no longer be heard.
+    T.check("both in doubt: the bank whose container reported it, and the one the session could not read back",
+        inDoubt == true and accountDoubt == true)
     -- A move in the last frame before a logout with the bank open is judged like one before a close.
     addon = bankVisit(30)
     WITHDRAWALS[3][2](addon)
@@ -1545,6 +1548,45 @@ T.section("the answer of a last move arrives after the close", function()
     World.nextFrame()
     T.check("a frame later the bank is marked without any scan", select(2, bankOf(addon)) == true)
 
+    -- A client that changes both containers of a move with the carried
+    -- bag's update and reports the bank's container frames later. The last
+    -- 100 linen are taken out and the window is closed between the two
+    -- updates: the closing read finds the bank empty, which is never
+    -- believed at the close, and the bank's own update is still to come.
+    addon = bankVisit()
+    World.containers[6] = { slots = 28 }
+    World.containers[0][3] = slot(LINEN, 100)
+    World.bagUpdate(addon, 0)                        -- read at once: the bank empty, not believed
+    World.event(addon, "BANKFRAME_CLOSED")
+    total, bags, bank, meta = linen(addon)
+    T.check("the bank's update still to come at the close: the bank is left out, not counted beside the stack",
+        total == 105 and bank == nil and meta.bankPending == true and meta.bankInDoubt == nil, tostring(total))
+    World.advance(0.06)
+    T.eq("and stays out until that update", notOver("between the close and the bank's late update", addon), 105)
+    World.bagUpdate(addon, 6)
+    World.advance(5)
+    total, bags, bank, meta = linen(addon)
+    T.check("the late update marks the bank", total == 105 and meta.bankInDoubt == true, tostring(total))
+    -- The same with a logout between the two updates: the bank's update is
+    -- never heard, and the bags the next session finds are the bags that
+    -- were noted - only the mark set at logout keeps the stack from being
+    -- counted twice.
+    do
+        local saved = {}
+        addon = bankVisit(3, saved)
+        World.containers[6] = { slots = 28 }
+        World.containers[0][3] = slot(LINEN, 100)
+        World.bagUpdate(addon, 0)
+        World.event(addon, "PLAYER_LOGOUT")
+        T.check("a logout before the bank's late update: the bank is marked at logout", select(2, bankOf(addon)) == true)
+        World.timers = {}
+        World.time = World.time + 30
+        addon = World.login(saved)
+        World.advance(3)
+        total, bags, bank, meta = linen(addon)
+        T.check("the next session counts the stack once", total == 105 and bank == nil and meta.bankInDoubt == true, tostring(total))
+    end
+
     -- The player logs out (or reloads) in the frame the answer arrives,
     -- before the comparison of the next frame: it is made at logout, so the
     -- stack is not counted in the bags and in the bank from the next login.
@@ -1682,6 +1724,280 @@ T.section("the answer of a last move arrives after the close", function()
     World.bagUpdate(addon, 0)
     T.eq("one before the bank was ever opened is named as such", closedUpdates(addon),
         "bank updates while closed: 1, before the bank was opened this session")
+end)
+
+-- ===========================================================================
+-- The session ends (a logout or a reload) before the answer of a last move
+-- is heard. That session cannot see it. It leaves a note of what the carried
+-- bags held; the character's next session compares its bags with the note -
+-- nothing else changes the bags in between - and marks the banks of that
+-- visit in doubt when they differ.
+-- ===========================================================================
+T.section("the answer of a last move arrives after the session ended", function()
+    local function sessionLine(addon)
+        local lines = {}
+        addon.Inventory:RunDiagnostic(lines)
+        return (("\n" .. table.concat(lines, "\n") .. "\n"):match("\n(bags at the bank [^\n]*)\n"))
+    end
+    -- The next session of the same character, `away` seconds later. The
+    -- client shows the bags and the bank as they really are by then.
+    local function relog(saved, away)
+        World.timers = {}
+        World.time = World.time + (away or 30)
+        World.serverTime = World.serverTime + (away or 30)
+        return World.login(saved)
+    end
+    local function note(saved)
+        local record = saved.stock and saved.stock.characters[MAIN_GUID]
+        return record and record.bagsAtBank
+    end
+
+    -- A withdrawal: 60 of the 100 banked linen are clicked out and the
+    -- player logs out before the answer. The answer lands while nobody is
+    -- there to hear it.
+    local saved = {}
+    local addon = bankVisit(3, saved)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(0.05)
+    World.event(addon, "PLAYER_LOGOUT")
+    T.check("a logout right after the close leaves a note of the bags with the record", note(saved) ~= nil
+        and note(saved).items[LINEN] == 5 and note(saved).banks.character == true and note(saved).banks.account == true)
+    World.containers[6][1] = slot(LINEN, 40)             -- the answer, unheard
+    World.containers[0][3] = slot(LINEN, 60)
+    addon = relog(saved)
+    local total, bags, bank, meta = linen(addon)
+    T.check("the next session, before its bags are compared: the bank is left out, as being read",
+        total == 65 and bank == nil and meta.bankPending == true and meta.accountPending == true and meta.bankInDoubt == nil,
+        tostring(total))
+    T.check("no line is shown for that", not tostring(firstShoppingRow(addon)):find("not counted", 1, true), firstShoppingRow(addon))
+    T.eq("the dump says so", sessionLine(addon), "bags at the bank (from the last session): not compared yet")
+    World.advance(1.9)
+    T.check("still so 1.9 s after the login", select(4, linen(addon)).bankPending == true)
+    World.advance(0.2)                                   -- the first save of the bags
+    total, bags, bank, meta = linen(addon)
+    T.check("when the bags are first saved they are compared: they differ, the banks of that visit are in doubt",
+        total == 65 and bank == nil and meta.bankInDoubt == true and meta.accountInDoubt == true and meta.bankPending == nil,
+        tostring(total))
+    T.eq("the Shopping tab says so", firstShoppingRow(addon), NOT_COUNTED)
+    T.eq("and the dump", sessionLine(addon), "bags at the bank (from the last session): compared, different: character,account marked in doubt")
+    T.check("the note is gone", note(saved) == nil)
+    T.check("a shown list was asked to redraw", addon.refreshes >= 1, addon.refreshes)
+    notOver("a withdrawal answered after the logout", addon)
+    World.event(addon, "PLAYER_LOGOUT")
+
+    -- A deposit: the 5 carried linen are clicked into the bank, logout
+    -- before the answer. The bank is then short of them - and says so.
+    saved = {}
+    addon = bankVisit(3, saved)
+    World.event(addon, "PLAYER_LOGOUT")                  -- with the bank open
+    T.check("a logout with the bank open leaves the note too", note(saved) ~= nil and note(saved).items[LINEN] == 5)
+    World.containers[6][2] = slot(LINEN, 5)
+    World.containers[0][2] = nil
+    addon = relog(saved)
+    World.bagUpdate(addon, 0)                            -- the bags arrive: the first bag update of the session
+    total, bags, bank, meta = linen(addon)
+    T.check("a deposit answered after the logout: compared at the first bag update, the banks in doubt",
+        total == nil and meta.bankInDoubt == true and meta.accountInDoubt == true, tostring(total))
+    T.check("the note is gone", note(saved) == nil)
+
+    -- Nothing was on its way: the bags are what they were, and the banks
+    -- count again as soon as that is known.
+    saved = {}
+    addon = bankVisit(3, saved)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(4)
+    World.event(addon, "PLAYER_LOGOUT")
+    addon = relog(saved)
+    T.check("an ordinary logout four seconds after the close: the bank waits for the comparison",
+        select(4, linen(addon)).bankPending == true)
+    local refreshes = addon.refreshes
+    World.advance(2.1)
+    total, bags, bank, meta = linen(addon)
+    T.check("the bags are as they were: both banks count, nothing in doubt", total == 105 and bank == 100
+        and meta.bankPending == nil and meta.accountPending == nil and meta.bankInDoubt == nil and meta.accountInDoubt == nil,
+        tostring(total))
+    T.eq("the dump says so", sessionLine(addon), "bags at the bank (from the last session): compared, equal")
+    T.check("the note is gone", note(saved) == nil)
+    T.check("a shown list is asked to redraw: the bank counts again", addon.refreshes > refreshes, addon.refreshes - refreshes)
+    World.event(addon, "PLAYER_LOGOUT")
+    -- The same with the bags' update at login: compared at once.
+    saved = {}
+    addon = bankVisit(3, saved)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(4)
+    World.event(addon, "PLAYER_LOGOUT")
+    addon = relog(saved)
+    World.bagUpdate(addon, 0)
+    total, bags, bank, meta = linen(addon)
+    T.check("compared at the first bag update of the session", total == 105 and meta.bankPending == nil and meta.bankInDoubt == nil,
+        tostring(total))
+
+    -- Later than ten seconds after the close a session leaves no note, and
+    -- the next one has nothing to wait for.
+    saved = {}
+    addon = bankVisit(3, saved)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(11)
+    World.event(addon, "PLAYER_LOGOUT")
+    T.check("a logout eleven seconds after the close leaves no note", note(saved) == nil)
+    addon = relog(saved)
+    total, bags, bank, meta = linen(addon)
+    T.check("and the next session counts the bank at once", total == 105 and meta.bankPending == nil, tostring(total))
+    T.eq("with no line in the dump", sessionLine(addon), nil)
+
+    -- Bags that could not be read when the session ended: the note says
+    -- that they are not known, and the next session marks.
+    saved = {}
+    addon = bankVisit(3, saved)
+    World.containers[0] = nil                            -- no backpack slots: the bags cannot be read
+    World.event(addon, "PLAYER_LOGOUT")
+    T.check("bags that cannot be read at a logout with the bank open: noted as not known", note(saved) ~= nil
+        and note(saved).items == nil)
+    World.containers[0] = { slots = 16, slot(HEARTHSTONE, 1, true), slot(LINEN, 5) }
+    addon = relog(saved)
+    World.advance(2.1)
+    total, bags, bank, meta = linen(addon)
+    T.check("the next session cannot compare: the banks are in doubt", total == 5 and meta.bankInDoubt == true
+        and meta.accountInDoubt == true, tostring(total))
+    T.eq("the dump says why", sessionLine(addon), "bags at the bank (from the last session): unknown: character,account marked in doubt")
+    -- A note that is not what the addon wrote counts the same.
+    saved = {}
+    addon = bankVisit(3, saved)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(15)
+    World.event(addon, "PLAYER_LOGOUT")
+    saved.stock.characters[MAIN_GUID].bagsAtBank = "damaged"
+    addon = relog(saved)
+    World.advance(2.1)
+    total, bags, bank, meta = linen(addon)
+    T.check("a damaged note: both banks in doubt", total == 5 and meta.bankInDoubt == true and meta.accountInDoubt == true,
+        tostring(total))
+    T.check("and it is removed", note(saved) == nil)
+
+    -- The bags of the next session cannot be read by the time of the first
+    -- save, or read as completely empty without any bag update having come:
+    -- that is no read to compare with. The banks are in doubt then.
+    saved = {}
+    addon = bankVisit(3, saved)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(4)
+    World.event(addon, "PLAYER_LOGOUT")
+    World.containers[0] = { slots = 16 }                 -- slots, and not one item
+    addon = relog(saved)
+    World.advance(2.1)
+    total, bags, bank, meta = linen(addon)
+    T.check("bags that read as empty, and no bag update yet: not trusted, the banks are in doubt",
+        meta.bankInDoubt == true and meta.accountInDoubt == true, tostring(total))
+    T.eq("the dump calls that unknown", sessionLine(addon), "bags at the bank (from the last session): unknown: character,account marked in doubt")
+    -- With a bag update before it, empty bags are a read like any other.
+    saved = {}
+    World.reset()
+    World.containers = { [0] = { slots = 16 }, [6] = { slots = 28, slot(LINEN, 100) }, [15] = { slots = 98, slot(BAR, 50) } }
+    World.bank = { [0] = { tabs = { { ID = 6 } } }, [2] = { tabs = { { ID = 15 } } } }
+    addon = World.login(saved)
+    World.bagUpdate(addon, 0)
+    World.advance(3)
+    World.event(addon, "BANKFRAME_OPENED")
+    World.advance(3)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(1)
+    World.event(addon, "PLAYER_LOGOUT")
+    T.check("a character that carries nothing: the note of the close says so", note(saved) ~= nil and next(note(saved).items) == nil)
+    addon = relog(saved)
+    World.bagUpdate(addon, 0)
+    total, bags, bank, meta = linen(addon)
+    T.check("empty then, empty now, told by a bag update: equal, the banks count", total == 100 and meta.bankInDoubt == nil
+        and meta.bankPending == nil, tostring(total))
+
+    -- The bank is opened before the comparison was made: it is made first,
+    -- so that no mark is set on a bank the new visit has just read.
+    saved = {}
+    addon = bankVisit(3, saved)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(0.05)
+    World.event(addon, "PLAYER_LOGOUT")
+    World.containers[6][1] = slot(LINEN, 40)
+    World.containers[0][3] = slot(LINEN, 60)
+    addon = relog(saved)
+    World.advance(0.5)
+    World.event(addon, "BANKFRAME_OPENED")
+    total, bags, bank, meta = linen(addon)
+    T.check("the bank opened half a second after the login: read, right and not in doubt", total == 105 and bank == 40
+        and meta.bankInDoubt == nil and meta.accountInDoubt == nil and meta.bankPending == nil, tostring(total))
+    T.eq("the comparison was made at the opening", sessionLine(addon),
+        "bags at the bank (from the last session): compared, different: character,account marked in doubt")
+    World.advance(5)
+    total, bags, bank, meta = linen(addon)
+    T.check("and nothing marks it afterwards", total == 105 and meta.bankInDoubt == nil and meta.accountInDoubt == nil, tostring(total))
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(15)
+    World.event(addon, "PLAYER_LOGOUT")
+
+    -- The next session ends before it has compared: with bags it can read
+    -- the comparison is made at logout, before the bags are saved - else the
+    -- other characters would count the stack in these bags and in the bank.
+    saved = {}
+    addon = bankVisit(3, saved)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(0.05)
+    World.event(addon, "PLAYER_LOGOUT")
+    World.containers[6][1] = slot(LINEN, 40)
+    World.containers[0][3] = slot(LINEN, 60)
+    addon = relog(saved)
+    World.advance(0.5)
+    World.event(addon, "PLAYER_LOGOUT")                  -- half a second after the login
+    T.check("a session of half a second: the comparison is made at its logout", note(saved) == nil
+        and saved.stock.characters[MAIN_GUID].bank.doubt == true)
+    T.eq("with the bags that are then saved", saved.stock.characters[MAIN_GUID].bags.items[LINEN], 65)
+
+    -- A bank this character may not view was not usable in its visit: the
+    -- note does not name it, and the next session neither waits for it nor
+    -- marks it.
+    saved = { stock = { schema = 1,
+        characters = { OTHER = { name = "Other Goldtooth", world = "eu-pvp", faction = "Horde", seen = World.serverTime - 100,
+            bags = { items = { [SILK] = 1 }, at = World.serverTime - 100 } } },
+        account = { ["eu-pvp"] = { items = { [BAR] = 50 }, at = World.serverTime - 100 } } } }
+    World.reset()
+    World.containers = { [0] = { slots = 16, slot(HEARTHSTONE, 1, true), slot(LINEN, 5) }, [6] = { slots = 28, slot(LINEN, 100) } }
+    World.bank = { [0] = { tabs = { { ID = 6 } } }, [2] = { tabs = { { ID = 15 } }, canView = false } }
+    addon = World.login(saved)
+    World.advance(3)
+    World.event(addon, "BANKFRAME_OPENED")
+    World.advance(3)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(0.05)
+    World.event(addon, "PLAYER_LOGOUT")
+    T.check("the note names the character's bank alone", note(saved) ~= nil and note(saved).banks.character == true
+        and note(saved).banks.account == nil)
+    World.containers[6][1] = slot(LINEN, 40)
+    World.containers[0][3] = slot(LINEN, 60)
+    addon = relog(saved)
+    local combined
+    combined, _, meta = World.scan(addon)
+    T.check("the next session waits for the character's bank, not for the account bank", meta.bankPending == true
+        and meta.accountPending == nil and combined[BAR] == 50)
+    World.advance(2.1)
+    combined, _, meta = World.scan(addon)
+    T.check("and marks the character's bank alone", meta.bankInDoubt == true and meta.accountInDoubt == nil and combined[BAR] == 50
+        and combined[LINEN] == 65, combined[LINEN])
+    T.eq("the dump names it alone", sessionLine(addon), "bags at the bank (from the last session): compared, different: character marked in doubt")
+
+    -- Another character in between counts the first one's bags and bank as
+    -- they were remembered when it left: that is still one stack, not two.
+    saved = {}
+    addon = bankVisit(3, saved)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(0.05)
+    World.event(addon, "PLAYER_LOGOUT")
+    World.reset()
+    World.guid, World.name = "Player-4444-000000BB", "Crafter Goldtooth"
+    World.containers = { [0] = { slots = 16, slot(LINEN, 1) } }
+    local crafter = World.login(saved)
+    World.advance(3)
+    combined, _, meta = World.scan(crafter)
+    T.check("another character before the first one returns: its bags and its bank as remembered, 5 + 100 and the 1 carried",
+        combined[LINEN] == 106 and meta.bankPending == nil and meta.accountPending == nil, combined[LINEN])
+    T.check("the first one's note is still there for its own next session", note(saved) ~= nil)
 end)
 
 -- ===========================================================================

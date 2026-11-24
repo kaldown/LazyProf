@@ -35,6 +35,8 @@
 --                     combination from the i-th) | one combination's key
 --   STOCKFUZZ_WHERE   "switch=value,..." keeps the combinations that fit
 --   STOCKFUZZ_HABITS  player habits to switch off, comma separated (HABITS)
+--   STOCKFUZZ_ALSO    habits to switch on that the default player does not
+--                     have, because what follows from them is decided (ALSO)
 --   STOCKFUZZ_OUT     directory for campaign tables and shrunk scripts
 --   STOCKFUZZ_TAG     name prefix of the campaign's tables
 --   shrink: STOCKFUZZ_COMBOS (a key), STOCKFUZZ_SEED, STOCKFUZZ_KIND, and
@@ -183,6 +185,53 @@ end
 local HABITS = { logoutMidMove = true, closeMidMove = true, afterCloseChange = true, quickVisit = true,
                  bankToBank = true, emptyBags = true, logoutAfterClose = true }
 
+-- Decided behaviour: what the bank's rules accept on purpose. The test is
+-- told each by name - a habit the default player does not have, a kind of
+-- failure that is counted and printed but is no check, a class of clients a
+-- check leaves out - never by loosening a check without a word.
+--
+-- Habits the default player does not have (STOCKFUZZ_ALSO names the ones to
+-- switch on, comma separated, to see what follows from them):
+--   logoutMidBankMove  log out or reload while the answer of a move between
+--                      the character bank and the account bank is on its
+--                      way. No carried bag changes, so neither that session
+--                      nor a later one can tell that the two remembered
+--                      banks are behind.
+--   emptyBagsLogout    empty the carried bags completely and log out within
+--                      the two seconds before they are saved. Completely
+--                      empty bags are not trusted at logout (nothing says
+--                      the client still holds the bags then), so the
+--                      character's record keeps the bags as last saved.
+--   leaveEarly         on a client that shows a bank only partly when its
+--                      window opens: end the visit before the look two
+--                      seconds after the opening has read the whole bank. A
+--                      visit that ends earlier keeps the partial read (the
+--                      client's own bank window could not draw such a bank).
+-- Kinds and classes:
+--   "+rise" visits     in the second after a close a carried count rises for
+--                      an item a bank of the visit is remembered to hold:
+--                      that bank is marked, also when it was loot or a craft
+--                      (see NoteChange). The check "a change of the bags in
+--                      the second after the close leaves no mark" is for
+--                      counts that fall and for items no remembered bank
+--                      holds.
+--   I1h.*              while the client itself shows an item in two
+--                      containers (a move half reported), a scan counts it
+--                      twice.
+--   letgo clients      a client that empties the bank's containers and
+--                      reports that before the close notice ends every
+--                      visit in doubt: an emptied bank cannot be told from
+--                      one the client let go of. The "no doubt mark after an
+--                      unhurried visit" checks are for well-behaved clients
+--                      (WellBehaved above), which do not do that.
+-- Not modelled at all: a clock that runs backwards; a client that reports
+-- the answer of a move for the carried bag alone once the bank is closed and
+-- takes longer for it than the rules watch (a second for a carried bag).
+local ALSO = { logoutMidBankMove = false, emptyBagsLogout = false, leaveEarly = false }
+local DEFAULT_HABITS = {}
+for name, value in pairs(HABITS) do DEFAULT_HABITS[name] = value end
+for name, value in pairs(ALSO) do DEFAULT_HABITS[name] = value end
+
 -- ===========================================================================
 -- Known failures: kinds of failure (or the first part of a kind) the default
 -- run still shows, each with what is wrong. A check whose failures are all on
@@ -190,22 +239,18 @@ local HABITS = { logoutMidMove = true, closeMidMove = true, afterCloseChange = t
 -- shows any more fails the run, so the list cannot outlive what it describes.
 -- ===========================================================================
 local KNOWN = {
-    { "I1.settled.own", "A stack that left a bank is still counted in it: the session ended (a logout or a reload) before the"
-        .. " answer of the move was heard, and the next session does not notice." },
-    { "I1.settled.alt", "After a logout before the answer of a move was heard, the other character counts the moved stack in"
-        .. " the bags and in the remembered bank of the first." },
-    { "I1.latent.character", "The character's bank stays remembered with a stack that has left it (the case of I1.settled.own)." },
-    { "I1.latent.account", "The account bank stays remembered with a stack that has left it (the case of I1.settled.own)." },
-    { "I1.multi.own", "A stack is counted in a bank and where it went for several frames (the case of I1.settled.own)." },
-    { "I1.multi.alt", "The other character counts a stack twice for as long as it is logged in (the case of I1.settled.alt)." },
-    { "I1.frame.own", "After a logout before the answer of a move was heard, the stack is counted twice until the bank is"
-        .. " opened again." },
-    { "I1.mid.own", "After a logout before the answer of a withdrawal was heard, the stack is counted in the carried bags and"
-        .. " in the remembered bank." },
-    { "I2.stale.character", "The character's bank is remembered without a stack that is in it and nothing says so: a deposit"
-        .. " answered after the session ended, or a bank that was shown only partly when its window opened." },
-    { "I2.stale.account", "The account bank is remembered without a stack that is in it and nothing says so (the cases of"
-        .. " I2.stale.character)." },
+    { "I1.settled.own", "A stack is taken out of the account bank and the session ends before the answer is heard; the other"
+        .. " character plays before the first one returns. It counts the account bank as it was remembered, with the stack"
+        .. " (the first character's remembered bags are without it, so the sum is right - but not the bank)." },
+    { "I1.latent.account", "The account bank stays remembered with that stack until a character reads it again (the case of"
+        .. " I1.settled.own)." },
+    { "I1.multi.own", "The same, for as long as the other character is logged in (the case of I1.settled.own)." },
+    { "I1.settled.alt", "A stack is put into the account bank and the session ends before the answer is heard; the other"
+        .. " character plays before the first one returns. It counts the first one's bags as they were remembered, with the"
+        .. " stack, and - once it has read the account bank itself - the stack in the account bank as well." },
+    { "I1.multi.alt", "The same, for as long as the other character is logged in (the case of I1.settled.alt)." },
+    { "I2.stale.account", "The account bank is remembered without the stack that was put into it (the case of I1.settled.alt)"
+        .. " and nothing says so." },
     { "I2.alt", "The bank of another character that is in doubt is left out of the counts without a word in the scan's third"
         .. " return or on the Shopping tab." },
     { "I3.stuck.account", "The account bank is in doubt for a character that may not view it, so no visit of its own takes"
@@ -509,6 +554,15 @@ local function InFlight()
     return n
 end
 
+-- Is the answer of a move between the character bank and the account bank
+-- on its way?
+local function InFlightAcrossBanks()
+    for _, d in ipairs(S.queue) do
+        if d.kind == "upd" and (d.across or (d.chain and d.chain.across)) then return true end
+    end
+    return false
+end
+
 -- What a visit left behind, judged once: at the first settled moment after
 -- its close, at the next opening or at logout, whichever comes first.
 local function JudgeVisit(v)
@@ -768,6 +822,7 @@ end
 local function BagUpdate(container)
     Emit("upd(" .. container .. ")")
     Guard("BAG_UPDATE", World.bagUpdate, S.addon, container)
+    if not KindOf(container) then S.lastBagUpdateMs = S.now end
     S.updatesSince = S.updatesSince + 1
     Touched()
     Observe("mid")
@@ -1156,8 +1211,9 @@ function OPS.move(a)
     end
     local firstSet, secondSet = srcSet, dstSet
     if a.first == "dst" then firstSet, secondSet = dstSet, srcSet end
-    local d1 = { at = at, kind = "upd", c = firstSet.c, sets = { firstSet } }
-    local d2 = { at = at, kind = "upd", c = secondSet.c, sets = { secondSet } }
+    local across = KindOf(a.sc) ~= nil and KindOf(a.dc) ~= nil and KindOf(a.sc) ~= KindOf(a.dc)
+    local d1 = { at = at, kind = "upd", c = firstSet.c, sets = { firstSet }, across = across }
+    local d2 = { at = at, kind = "upd", c = secondSet.c, sets = { secondSet }, across = across }
     if a.atomic then
         d1.sets, d2.sets = { firstSet, secondSet }, {}
     end
@@ -1420,9 +1476,18 @@ local function CloseNotice(a, event)
     PushBankViews()
 end
 
+-- leaveEarly (see ALSO): the visit would end before the whole of a partly
+-- shown bank has been read.
+local function LeavesEarly(a)
+    if S.habits.leaveEarly or a.tail or not S.bankOpen then return false end
+    if cfg.open ~= "partial" and cfg.open ~= "partialSilent" then return false end
+    return S.now - S.openMs < 2100 or S.mask.character == "partial" or S.mask.account == "partial"
+end
+
 function OPS.close(a)
     if not S.bankOpen then return end
     if not S.habits.closeMidMove and InFlight() > 0 and not a.tail then return end
+    if LeavesEarly(a) then return end
     if cfg.idle and a.idleBefore then BagUpdate(BACKPACK) end
     CloseNotice(a, "BANKFRAME_CLOSED")
     if cfg.idle and a.idleAfter then
@@ -1433,6 +1498,14 @@ end
 -- Log out (or reload), then log in again: as the same character or the other.
 function OPS.logout(a)
     if not S.habits.logoutMidMove and InFlight() > 0 and not a.tail then return end
+    if not S.habits.logoutMidBankMove and InFlightAcrossBanks() and not a.tail then return end
+    if LeavesEarly(a) then return end
+    -- emptyBagsLogout (see ALSO): the bags hold nothing and their save is
+    -- still waiting.
+    if not S.habits.emptyBagsLogout and not a.tail and next(ShownBags()) == nil
+            and S.lastBagUpdateMs and S.now - S.lastBagUpdateMs < 2100 then
+        return
+    end
     if not S.habits.logoutAfterClose and not S.bankOpen and S.closeMs and S.now - S.closeMs <= 1100 and not a.tail then return end
     if S.bankOpen then
         CloseNotice(a, a.closeFirst and "BANKFRAME_CLOSED" or nil)
@@ -1749,7 +1822,7 @@ local function NewWalk(config, init, opts)
         saved = {}, violations = {}, episodes = {}, step = 0, sessions = 0,
         lastEvent = 1000, settleChecked = false, activity = false, followUp = false, follows = 0,
         updatesSince = 0, errorsSeen = 0, loginMs = 1000,
-        density = opts.density or "frame", init = opts.init or false, habits = opts.habits or HABITS,
+        density = opts.density or "frame", init = opts.init or false, habits = opts.habits or DEFAULT_HABITS,
         trace = opts.trace and {} or nil, wanted = opts.wanted,
         stats = { scans = 0, frames = 0, visits = {}, episodes = {}, longest = {}, doubtNeeded = 0, doubtIdle = 0,
                   doubtSettled = 0, unseen = 0, healChecks = 0, settled = 0 },
@@ -1790,7 +1863,7 @@ local function Walk(config, seed, steps, opts)
     end
     opts.density = opts.density or ({ "frame", "event", "step" })[seed % 3 + 1]
     if opts.init == nil then opts.init = seed % 4 == 0 end
-    local habits = opts.habits or HABITS
+    local habits = opts.habits or DEFAULT_HABITS
     NewWalk(config, init, opts)
     local actions = {}
     for _ = 1, steps do
@@ -2123,9 +2196,12 @@ local OUT = os.getenv("STOCKFUZZ_OUT")
 
 local function Habits()
     local habits = {}
-    for k, value in pairs(HABITS) do habits[k] = value end
+    for k, value in pairs(DEFAULT_HABITS) do habits[k] = value end
     for name in (os.getenv("STOCKFUZZ_HABITS") or ""):gmatch("[^,]+") do
         habits[name] = false
+    end
+    for name in (os.getenv("STOCKFUZZ_ALSO") or ""):gmatch("[^,]+") do
+        habits[name] = true
     end
     return habits
 end
@@ -2517,7 +2593,7 @@ if MODE == "guard" then
     --    have settled; with both updates in one frame not even for a frame;
     --    and with the bank's items there at the opening nothing is short.
     local careful = {}
-    for name, value in pairs(HABITS) do careful[name] = value end
+    for name, value in pairs(DEFAULT_HABITS) do careful[name] = value end
     careful.logoutMidMove, careful.closeMidMove, careful.bankToBank, careful.emptyBags = false, false, false, false
     local n = 0
     for index = 0, ComboCount() - 1 do
