@@ -953,6 +953,14 @@ T.section("the bank is read only while its window is open", function()
     refreshes = 0
     Inventory:OnBagUpdate(6)
     T.check("emptied: the first empty read is not believed", (bankOf())[2589] == 61 and refreshes == 0, refreshes)
+    local emptyLines = {}
+    Inventory:RunDiagnostic(emptyLines)
+    T.check("the dump: the bank was seen, empty, and that is not believed yet", table.concat(emptyLines, "\n"):find(
+        "lastRead=empty, not believed slots=28 unresolvedEmpty=true unansweredUpdate=false", 1, true) ~= nil,
+        table.concat(emptyLines, "\n"))
+    T.check("the dump: the bank that was refused has the update unanswered", table.concat(emptyLines, "\n"):find(
+        "lastRead=refused slots=28 unresolvedEmpty=false unansweredUpdate=true", 1, true) ~= nil,
+        table.concat(emptyLines, "\n"))
     advance(0.25)
     items = bankOf()
     T.check("the second look 0.2 s later is: saved as empty", items ~= nil and next(items) == nil)
