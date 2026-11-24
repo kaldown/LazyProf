@@ -20,7 +20,7 @@ Run these in-game to check addon health:
 /lp diag trainer       -- At a profession trainer: what it lists as LazyProf reads it, and what is remembered (copyable window)
 /lp diag stock         -- Which bags and banks are remembered for your characters; at an open bank, what the bank reads as (copyable window)
 /lp resetpanels        -- Move the LazyProf window and its panels back to their default place and size
-/lp reset              -- Reset every setting to its default; also clears the vendor prices and trainers seen and each character's targets and choices (the bags and banks remembered for your characters are kept)
+/lp reset              -- Reset every setting to its default; also clears the vendor prices and trainers LazyProf has seen and every character's targets, pins, kept routes and craft-or-buy choices (the bags and banks remembered for your characters are kept)
 ```
 
 Enable debug mode in LazyProf settings to see detailed logging.
@@ -741,10 +741,11 @@ WoW Client: <Retail/Classic/TBC/Anniversary>
 ## Reset to Defaults
 
 `/lp reset` (or "Reset All Settings" in the options) puts every setting back to its default
-in game. It also clears the vendor prices and the trainers LazyProf has seen and each
+in game. It also clears the vendor prices and the trainers LazyProf has seen and every
 character's targets and choices (recipes chosen, craft-or-buy, the route it follows). The
 bags and banks LazyProf remembers for your characters are kept ("Forget remembered
-characters" is the button for those).
+characters" is the button for those). The question before the reset and the message after
+it say so.
 
 If all else fails, remove LazyProf's saved file - this also deletes everything it remembers:
 

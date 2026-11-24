@@ -119,9 +119,16 @@ local function remembered()
     addon.Inventory:ForgetAltsPart()
     addon.db.profile.marginPercent = 25
     addon.db.global.vendorPrices[LINEN] = 12
+    addon.db.global.trainers.FOREVER = { tailoring = { [3363] = { name = "Trainer", at = World.serverTime } } }
+    addon.db.global.trainerFees.FOREVER = { [2385] = 100 }
+    addon.db.global.characters[MAIN_GUID] = { professions = { tailoring = { target = 150 } }, craftChoices = { [LINEN] = "buy" } }
     World.nextFrame()
     return addon
 end
+
+-- What the player is told after a reset, by /lp reset and by the options button.
+local RESET_MESSAGE = "Settings reset to defaults. Vendor prices, trainers, targets and craft-or-buy choices were cleared; "
+    .. "remembered bags and banks were kept."
 
 local function linen(addon)
     addon.Inventory:InvalidateCache()
@@ -142,6 +149,10 @@ T.section("/lp reset keeps the remembered stock", function()
     addon:SlashCommand("reset")
     T.eq("the setting is back at its default", addon.db.profile.marginPercent, default)
     T.check("the other account-wide data went with it, as before", addon.db.global.vendorPrices[LINEN] == nil)
+    -- What the message names as cleared is cleared.
+    T.check("the trainers seen and their fees went with it", next(addon.db.global.trainers) == nil
+        and next(addon.db.global.trainerFees) == nil)
+    T.check("and the character's targets and craft-or-buy choices", addon.db.global.characters[MAIN_GUID] == nil)
     T.check("the remembered characters are still there", type(addon.db.global.stock) == "table"
         and addon.db.global.stock.schema == 1 and count(addon.db.global.stock.characters) == 2,
         count(addon.db.global.stock and addon.db.global.stock.characters))
@@ -149,9 +160,9 @@ T.section("/lp reset keeps the remembered stock", function()
     local combined = addon.Inventory:ScanAll()
     T.check("the very next scan counts them", combined[LINEN] == 125 and combined[BAR] == 50, combined[LINEN])
     T.check("a recalculation is asked for, so that what is shown is redrawn", #addon.recalcs == 1, #addon.recalcs)
-    -- The remembered stock is kept, so it is the settings that were reset:
-    -- the message says what the options button says.
-    T.check("the player is told what was reset", #addon.printed == 1 and addon.printed[1] == "Settings reset to defaults.",
+    -- The message says what went with the settings and what was kept, in
+    -- the same words as after the options button.
+    T.check("the player is told what was reset and what was kept", #addon.printed == 1 and addon.printed[1] == RESET_MESSAGE,
         table.concat(addon.printed, " | "))
 
     World.advance(5)
@@ -176,10 +187,17 @@ T.section("Reset All Settings keeps the remembered stock", function()
     T.check("it says that remembered characters are kept and where they are forgotten",
         tostring(button.desc):find("LazyProf remembers for your characters are kept", 1, true) ~= nil
         and tostring(button.desc):find("Forget remembered characters", 1, true) ~= nil, button.desc)
+    T.check("it says what else goes with the settings",
+        tostring(button.desc):find("This also clears the vendor prices and trainers LazyProf has seen and every character's "
+            .. "targets and craft-or-buy choices.", 1, true) ~= nil, button.desc)
+    -- The question before the reset says what it clears and what it keeps.
+    T.eq("the confirmation says what is cleared and what is kept", button.confirmText,
+        "Reset all settings to their defaults? This also clears the vendor prices and trainers LazyProf has seen and "
+        .. "every character's targets and craft-or-buy choices. Remembered bags and banks are kept.")
     addon.recalcs = {}
     addon.printed = {}
     button.func()
-    T.check("the player is told the same as by /lp reset", #addon.printed == 1 and addon.printed[1] == "Settings reset to defaults.",
+    T.check("the player is told the same as by /lp reset", #addon.printed == 1 and addon.printed[1] == RESET_MESSAGE,
         table.concat(addon.printed, " | "))
     T.eq("the setting is back at its default", addon.db.profile.marginPercent, addon.defaults.profile.marginPercent)
     local combined = addon.Inventory:ScanAll()

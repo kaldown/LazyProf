@@ -84,6 +84,12 @@ LazyProf.defaults = {
     },
 }
 
+-- What the player is told after a reset ("Reset All Settings" below and
+-- /lp reset, LazyProf:ResetSettings in Core/Init.lua): what went with the
+-- settings and what was kept.
+LazyProf.RESET_MESSAGE = "Settings reset to defaults. Vendor prices, trainers, targets and craft-or-buy choices "
+    .. "were cleared; remembered bags and banks were kept."
+
 -- AceConfig options table
 LazyProf.options = {
     name = "LazyProf",
@@ -615,7 +621,9 @@ LazyProf.options = {
                 },
                 resetDB = {
                     name = "Reset All Settings",
-                    desc = "Reset all settings to defaults.\n\n" ..
+                    desc = "Reset all settings to defaults. This also clears the vendor " ..
+                           "prices and trainers LazyProf has seen and every character's " ..
+                           "targets and craft-or-buy choices.\n\n" ..
                            "The bags and banks LazyProf remembers for your characters " ..
                            "are kept: \"Forget remembered characters\" (Display, " ..
                            "\"Your stock\") is the button for those.\n\n" ..
@@ -623,10 +631,12 @@ LazyProf.options = {
                     type = "execute",
                     order = 91,
                     confirm = true,
-                    confirmText = "Are you sure you want to reset all LazyProf settings?",
+                    confirmText = "Reset all settings to their defaults? This also clears the vendor " ..
+                                  "prices and trainers LazyProf has seen and every character's " ..
+                                  "targets and craft-or-buy choices. Remembered bags and banks are kept.",
                     func = function()
                         LazyProf:ResetSettings()
-                        LazyProf:Print("Settings reset to defaults.")
+                        LazyProf:Print(LazyProf.RESET_MESSAGE)
                     end,
                 },
             },
