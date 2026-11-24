@@ -337,7 +337,10 @@ LazyProf.options = {
                            "inventory addon LazyProf remembers your bank itself, as it was " ..
                            "when you last opened it (on WoW Forever; on other clients the " ..
                            "bank needs Syndicator). The tooltip of a \"From bank\" row " ..
-                           "under \"Collect first\" on the Shopping tab says how old that is.\n\n" ..
+                           "under \"Collect first\" on the Shopping tab says how old that is. " ..
+                           "If the bank changed after LazyProf last read it, it is not " ..
+                           "counted until you open the bank again, and the Shopping tab " ..
+                           "says so.\n\n" ..
                            "Example: You need 20 Thorium Bars but have 8 in your bank. " ..
                            "The shopping list shows 12 to buy from the AH.",
                     type = "toggle",

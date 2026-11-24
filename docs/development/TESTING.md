@@ -10,7 +10,7 @@ The pure logic (path, candidate routes, sale value, stages, shopping rows, purch
 bash scripts/run_tests.sh
 ```
 
-The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks every Lua file under `Core`, `Modules` and `Professions` with `luac5.1`. It must end with `OK: 36 suites passed, ...` before every commit; the same command runs on every push. A single suite runs from the repo root, for example `lua5.1 scripts/test_views.lua`.
+The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks every Lua file under `Core`, `Modules` and `Professions` with `luac5.1`. It must end with `OK: 37 suites passed, ...` before every commit; the same command runs on every push. A single suite runs from the repo root, for example `lua5.1 scripts/test_views.lua`.
 
 | Suite | What it covers |
 |-------|----------------|
@@ -32,9 +32,10 @@ The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks ever
 | `test_merchant.lua` | The merchant panel and `/lp diag merchant` |
 | `test_trainers.lua` | Remembered trainers and fees |
 | `test_stockmemory.lua` | Remembered bags and bank per character and the account bank per world: saving, alts of the same world and faction, soulbound items, the 180-day limit, the age wording |
-| `test_stockflow.lua` | Stock through whole sessions on the real WoW Forever adapter, scanner and memory together: saved stock that is not what the addon wrote, a client call that fails, a Self-Found alt, a bank change in the frame the window closes, what a bank visit starts with, two characters of one account |
-| `test_scanner.lua` | Which owned stock counts and how the stock memory is kept: Syndicator's stock unchanged, bank and alts from memory without it, bags saved a moment after a change and at logout, the bank read with each change while its window is open, at the close and in the first moments after opening, the alts' part kept between scans, Self-Found, the stock options, `/lp diag stock` |
-| `test_views.lua` | What the window shows, as data: header, receipt, target model, Path list, Shopping list (with the age of remembered bank and alt stock), recipe search, arrow tooltip |
+| `test_stockflow.lua` | Stock through whole sessions on the real WoW Forever adapter, scanner and memory together: saved stock that is not what the addon wrote, a client call that fails (shown once, counted, reported by the dump), a Self-Found alt, the newest record of a name, the world read again after login, and the bank - when it is read and how often, which read is kept, a move in the frame the window closes or reported after it, a bank marked in doubt until the next visit - with the rule that a scan never counts more of an item than is owned; two characters of one account |
+| `test_stockreset.lua` | "Reset All Settings" and `/lp reset` against the real database library: the remembered stock is kept, counted by the next scan and still saved after logout |
+| `test_scanner.lua` | Which owned stock counts and how the stock memory is kept: Syndicator's stock unchanged, bank and alts from memory without it, a bank in doubt left out, bags saved a moment after a change and at logout, the bank's reading rules as the scanner applies them (spacing, the batch notice, the close, the second after it, the first moments after opening), a scan never reading the bank, every entry point with its client call failing, the frame cache and the alts' part kept between scans, Self-Found, the stock options, `/lp diag stock` |
+| `test_views.lua` | What the window shows, as data: header, receipt, target model, Path list, Shopping list (with the age of remembered bank and alt stock, and the line for a bank that is not counted), recipe search, arrow tooltip |
 | `test_window.lua` | The window's frames on both client families: header, More options, target box and slider, receipt, the two tabs, closed state, combat, planning mode |
 | `test_controls.lua` | The widget layer: tabs, button group, number box, checkbox, search box, slider, resize bounds, the row list |
 | `test_widgets.lua` | The row pool and the per-client dropdown |
@@ -137,12 +138,17 @@ After making changes, run `/reload` and verify:
 2. Put materials in the bank, keep the bank window open, open a profession: a "From bank" row lists them
 3. Close the bank and `/reload`: the "From bank" row is still there
 4. Withdraw them: the row goes and the Have column still counts them (now in the bags)
-5. Withdraw or deposit a stack and press Escape at once: Have is unchanged (the stack is counted once), and `/lp diag stock` says `bank updates while closed: 0`
+5. Withdraw or deposit a stack and press Escape at once. The stack must never be counted twice; which of two outcomes you see depends on when the game reports the move, and `/lp diag stock` says which it was:
+   - Have is unchanged, the "From bank" row is right, and the dump says `after the close: bagUpdates=0 ...` (or `carriedBagsChanged=false`): the move was reported before the window closed and the bank was read with it.
+   - The Shopping tab starts with "Your bank is not counted: it changed after LazyProf last read it. Open the bank to count it again.", Have counts the bags only, and the dump says `after the close: ... carriedBagsChanged=true` (or `bank visit close: ... markedInDoubt=character`): the move was reported after the close, or the bank could not be read at the close. Open the bank again: the line goes and the bank counts.
+   Paste the `bank visit`, `after the close` and `bank updates while closed` lines of the dump either way: they settle what the client does at a close.
 6. Log in an alt of the same world and faction that carries materials, log back: a "From alts" row names it
    (hover it: "<name>: N - bags as seen less than an hour ago"; hover the "From bank" row: "Bank as seen less than an hour ago")
 7. `/lp diag stock` lists both characters with `less than an hour ago` as the age of their bags
 8. Tick Self-Found mode: the "From alts" row goes, "From bank" stays; on the alt, the ticked character is no longer listed under "From alts"
 9. "Forget remembered characters": the "From alts" row goes until the alt is played again
+10. "Reset All Settings" (or `/lp reset`): the settings are back at their defaults, the "From bank" and "From alts" rows are still there
+11. Stand at the open bank and craft, or sort the bank: no stutter; `/lp diag stock` shows `bank visit: ... reads=N` growing by a few per second at most
 
 **Stock and the route (Cheapest):**
 1. Own enough reagents for a whole run of a recipe that is not on the path
@@ -242,7 +248,7 @@ See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for the diagnostic commands (`/lp d
 
 ## Test Checklist for PRs
 
-- [ ] `bash scripts/run_tests.sh` ends with `OK: 36 suites passed`
+- [ ] `bash scripts/run_tests.sh` ends with `OK: 37 suites passed`
 - [ ] Opens without errors on each supported profession
 - [ ] Path and Shopping tabs display correctly
 - [ ] The receipt adds up to the Shopping tab

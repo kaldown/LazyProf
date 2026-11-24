@@ -47,7 +47,7 @@ The addon is built around one loop: open a profession, see the cheapest path fro
 
 1. **Load**: Registry loads profession data from CraftLib
 2. **Detect**: Registry detects which profession window is open (through the client adapter, which also gives the skill and the learned recipes)
-3. **Scan**: Inventory Scanner collects items from the bags and from outside them: with Syndicator from bank, mail, AH listings, alts and guild bank; without it from the remembered bank and alts
+3. **Scan**: Inventory Scanner collects items from the bags and from outside them: with Syndicator from bank, mail, AH listings, alts and guild bank; without it from the remembered bank and alts (a remembered bank that may be behind what is really in it is marked in doubt and left out until it is read again)
 4. **Price**: PriceManager prices every reagent (vendor price first, then TSM / Auctionator, then the vendor sell value as an estimate) and records where each price came from
 5. **Sale value**: SaleValue works out what one craft of each usable recipe sells for (to a vendor by default)
 6. **Check**: Availability module filters recipes by obtainability

@@ -20,7 +20,7 @@ Run these in-game to check addon health:
 /lp diag trainer       -- At a profession trainer: what it lists as LazyProf reads it, and what is remembered (copyable window)
 /lp diag stock         -- Which bags and banks are remembered for your characters; at an open bank, what the bank reads as (copyable window)
 /lp resetpanels        -- Move the LazyProf window and its panels back to their default place and size
-/lp reset              -- Reset database to defaults
+/lp reset              -- Reset every setting to its default (the bags and banks remembered for your characters are kept)
 ```
 
 Enable debug mode in LazyProf settings to see detailed logging.
@@ -196,11 +196,11 @@ the dump says so.
 | Line | Meaning |
 |------|---------|
 | `diag stock: build=.. interface=.. family=..` | Client build and which adapter is active. |
-| `bag[i] slots=N used=N` | Each carried bag as the client reports it. On WoW Forever bags 0 to 5 are read; 5 is the reagent bag. |
+| `bag[i] slots=N used=N` | Each carried bag as the client reports it. On WoW Forever bags 0 to 5 are read; 5 is the reagent bag. On the other clients the line is `bag[i] slots=N`, without `used=`, for bags 0 to 4. |
 | `adapter bags: items=N soulbound=N backpackSlots=N` | The bags as LazyProf reads them: distinct items, how many of those have a soulbound part, and the backpack's slot count. `backpackSlots=0` means the bags could not be read just now; such a read is never remembered. |
 | `bank: open=.. usesPlayerBags=..` | Whether LazyProf saw the bank window open (the bank is only ever read while it is), and whether the client shows the bank's tabs as one page of bag slots. |
 | `bank character: canView=.. lockedReason=.. tabs=N [id:slots/used ...]` | The character bank as the client reports it: whether it may be viewed, the lock reason (`nil` = not locked), and each purchased tab with its container id, slot count and used slots. The same line follows for `bank account` (the account-wide bank). |
-| `adapter bank character: items=N soulbound=N` / `... not readable now` | What LazyProf reads from that bank. `not readable now` = the window is closed, the bank may not be viewed, it is locked, it has no tabs or none reports a slot. Then nothing is saved and what was remembered stays. `items=0` is believed only two seconds after the window opened (the items may not be there yet): before that it is not saved, and the bank is looked at again at that mark. |
+| `adapter bank character: items=N soulbound=N` / `... not readable now` | What LazyProf reads from that bank. `not readable now` = the window is closed, the bank may not be viewed, it is locked, it has no tabs or none reports a slot. Then nothing is saved and what was remembered stays. `items=0` is not taken for an empty bank at once: a bank never seen is remembered as empty two seconds after the window opened, and a bank of which items are remembered only when a second read, on a later frame, finds it empty too (and not in the first two seconds of a visit that has not seen it with items). |
 | `api: C_Container=.. GetContainerItemInfo=.. GetServerTime=..` / `bank: not recorded on this client` | Classic clients only, in place of the bank lines: which container call is used for the bags, and that the bank is not read there. |
 | `world: region=.. regionNumber=.. rp=.. pvp=.. hardcore=.. guidSecret=.. serverTime=..` | What the character's world is made of on WoW Forever (region and ruleset - there are no realms), whether the client withheld the character's id, and the server clock the ages are counted from. A region without a name is written with its number (`region3-pvp`). |
 | `crafting from the bank: restricted=..` | A game rule of this client. If it is `false`, crafts may be able to take reagents straight from the bank: the bank then changes while its window is closed, and the remembered bank is behind until you open it again. Paste the line if "From bank" rows list reagents you have already used. |
@@ -210,15 +210,23 @@ the dump says so.
 | `scan now: whole - ...` / `scan now: bags only - the memory cannot be read: <error>` | What counting your stock does at this moment (not printed with Syndicator). `whole`: bank and alt stock are counted from the memory - an error in the line above is then over. `bags only`: the memory cannot be read right now, for the reason given, and only what you carry is counted. |
 | `identity: guid=.. name=.. world=.. faction=..` | Who LazyProf takes the character for. Without a `guid` nothing is remembered; without a `world` or a `faction` no other character counts as an alt. |
 | `world: unknown - alts and the account bank are not counted` / `faction: unknown - alts are not counted` | Only when the client did not say which world or faction the character belongs to. Nothing can then be told to be an alt of it. |
-| `waiting: bagSave=.. bankRead=.. bankOpen=..` | Whether a save of the bags (two seconds after a bag change) or a read of the bank is still to come. The bank is read in the same moment as the first change of a frame; further changes of that frame leave one read for the next frame, and after opening the bank is looked at again half a second later (and two seconds later when it read as empty or could not be read). |
-| `bank updates while closed: N` / `..., last X s after closing` / `..., before the bank was opened this session` | How many updates of a bank container arrived this session while the bank window was closed, and how long after the last close the latest one came. Such a change cannot be read any more, so the remembered bank misses it until the next visit. `0` after you moved an item and closed the window at once means the client reports the move before the close, as LazyProf expects. Anything else: paste this line with the report. |
+| `waiting: bagSave=.. bankRead=.. bankOpen=..` | Whether a save of the bags (two seconds after a bag change) or a read of the bank is still to come. The bank is read when its window opens, half a second later, and two seconds after the opening when a read before that was refused or found it empty; on a bag update or a change of its tabs at once when the last read is 0.2 s or more ago, otherwise once 0.2 s after that read; and when the client reports a batch of bag updates complete in the frame of a read. |
+| `bank visit: open for X s; reads=N owed=.. carriedBagsUpdated=..` / `bank visit: closed X s ago after Y s; ...` / `bank visit: none this session` | The bank visit in progress, or the last one: how often the bank was read, whether a read is still owed (an update came after the last read), and whether a carried bag was updated during the visit. |
+| `bank visit character: kept=N lastRead=.. slots=N unresolvedEmpty=.. bagsChangedSinceKept=..` | The same visit for the character bank; the line follows for `account`. `kept` = how many reads were remembered. `lastRead` = what the last read gave: `items`, `refused`, `empty, believed` or `empty, not believed`; from the read at the close also `empty` and `items, another slot count`, neither of which is remembered; with `, not saved` added when the character or its world could not be told. `unresolvedEmpty=true` = the bank read as empty and that is not believed yet. `bagsChangedSinceKept=true` = a carried bag was updated in the frame of the last remembered read or later. A bank with a read owed or an unresolved empty read, and `bagsChangedSinceKept=true`, is behind: a scan leaves it out until the next read. |
+| `bank visit close: owed=.. unresolvedEmpty=.. readAgain=.. kept=<banks> markedInDoubt=<banks>` | Only after a close (or a logout with the bank open): what was still open at that moment, whether the bank was read once more, which banks that read was remembered for (it must hold items and have the slot count of the visit's reads) and which were marked in doubt because they were still behind. |
+| `after the close: bagUpdates=N compared=N carriedBagsChanged=..` | The second after the last close. `bagUpdates` = bag updates that arrived in it; after such an update your carried bags are compared with what they held when the window closed. `carriedBagsChanged=true` = a count differed: the answer of a last move arrived after the close, so both remembered banks were marked in doubt. |
+| `bank updates while closed: N` / `..., last X s after closing` / `..., before the bank was opened this session` | How many updates of a bank container arrived this session while the bank window was closed, and how long after the last close the latest one came. The bank cannot be read then. With `carriedBagsChanged=false` above they are the client letting go of the bank and mean nothing; with `true` they belong to a move that was reported late. Paste these lines with a report about bank stock. |
 | `memory: format=1 characters=N accountBanks=N ...` | How much is remembered, account-wide. Any other `format` was written by a version this one does not understand: it is left alone and nothing is counted from it. |
 | `memory: unreadable=N ...` | Only when the saved file holds entries that are not what LazyProf writes (edited by hand, or cut off by a crash). They are skipped; "Forget remembered characters" removes them. |
-| `character: <name> [<what happens to its stock>] world=.. faction=.. bags=N items (<age>) bank=N items (<age>) guid=..` | One line per remembered character. The label is one of: `this character`; `alt, counted`; `alt, not counted (alts off)` ("Include alt characters" is off); `not counted (this character is Self-Found)`; `not counted (Self-Found)` (that character cannot send anything); `other world`; `other faction`; `not counted (an older record of this name)` (a character that is gone, or the same one under an older id); `not counted (no name)`; `not counted (this character's world or faction is unknown)`. `bank=never seen` = the bank was never open on that character. |
-| `account bank: world=.. items=N (<age>)` | The account-wide bank remembered for a world. It counts as bank stock for every character of that world. |
+| `character: <name> [<what happens to its stock>] world=.. faction=.. bags=N items (<age>) bank=N items (<age>) guid=..` | One line per remembered character. The label is one of: `this character`; `alt, counted`; `alt, counted (bags only: bank items are off)` ("Include bank items" is off, so its bank is left out); `alt, not counted (alts off)` ("Include alt characters" is off); `not counted (this character is Self-Found)`; `not counted (Self-Found)` (that character cannot send anything); `other world`; `other faction`; `not counted (an older record of this name)` (a character that is gone, or the same one under an older id - of several records of one name only the one seen last can count); `not counted (no name)`; `not counted (this character's world or faction is unknown)`; `remembered, not used (Syndicator is installed)` (every character, while Syndicator supplies the stock). `bank=never seen` = the bank was never open on that character. `bank=N items (<age>, in doubt: not counted)` = that bank is marked in doubt: it is left out until it is read again on that character. |
+| `account bank: world=.. items=N (<age>)` | The account-wide bank remembered for a world. It counts as bank stock for the characters of that world, with "Include bank items" on and not for a character in Self-Found mode. `(<age>, in doubt: not counted)` = it is marked in doubt and left out until the bank is opened again. |
 
 Reading it: only a character labelled `alt, counted` supplies stock; every other label
-says why not. An
+says why not. A bank marked `in doubt` is one LazyProf has reason to think is behind what is
+really in it - the bags changed while the bank could not be read, at the close or just after
+it. It is not counted (the Shopping tab says so in its first line) until the bank window is
+opened again; the `bank visit` and `after the close` lines of the session in which it
+happened say which rule marked it. An
 age that never becomes `less than an hour ago` on the character you play means its bags
 or bank are not being saved: look at `backpackSlots`, `identity` and, at the bank, the `canView` /
 `lockedReason` / `tabs` values. A character you deleted stays listed until it has not been
@@ -516,8 +524,18 @@ read from it; check in Syndicator / Baganator that it knows the character.
    Forever, the realm elsewhere) **and faction**. Their soulbound items are left out.
 4. An alt's bank needs both options on.
 5. Mail, auctions and the guild bank are never known without Syndicator.
-6. In Self-Found mode (Settings, General) nothing from other characters is counted, and a
-   character with the mode on is no alt for the others: what it holds is not counted for them.
+6. In Self-Found mode (Settings, General) nothing from other characters is counted (nor
+   the guild bank, with Syndicator), and a character with the mode on is no alt for the
+   others: what it holds is not counted for them.
+7. A bank that changed after LazyProf last read it is not counted until you open the bank
+   again. The Shopping tab then starts with a grey line: "Your bank is not counted: it
+   changed after LazyProf last read it. Open the bank to count it again." (or "The account
+   bank ...", or both). It happens when something moved between your bags and the bank
+   while the bank could not be read any more - typically a last withdrawal or deposit that
+   the game reported only after the window had closed. LazyProf then cannot know what is
+   in the bank, and counting the old contents could count a stack twice. Open the bank
+   once and the line goes. `/lp diag stock` shows the mark on the bank (`in doubt: not
+   counted`).
 
 How old the remembered stock is shows in the tooltips under "Collect first" on the
 Shopping tab: a "From bank" row says "Bank as seen 2 days ago" (and "Account bank as seen
@@ -536,7 +554,7 @@ played (the tooltip of the "From alts" row says how long ago that was). A charac
 forgotten when it has not been seen for 180 days. To forget
 everything at once use "Forget remembered characters" (Settings, Display, "Your stock"): the
 character you are on is remembered again right away, the others the next time you play
-them.
+them. "Reset All Settings" and `/lp reset` do not forget them.
 
 ### Nothing Left / Target Reached
 
@@ -703,7 +721,11 @@ WoW Client: <Retail/Classic/TBC/Anniversary>
 
 ## Reset to Defaults
 
-If all else fails, reset LazyProf's database:
+`/lp reset` (or "Reset All Settings" in the options) puts every setting back to its default
+in game; the bags and banks LazyProf remembers for your characters are kept ("Forget
+remembered characters" is the button for those).
+
+If all else fails, remove LazyProf's saved file - this also deletes everything it remembers:
 
 1. Exit WoW completely
 2. Delete or rename SavedVariables:
