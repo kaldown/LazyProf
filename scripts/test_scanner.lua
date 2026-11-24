@@ -1128,6 +1128,39 @@ T.section("init wiring", function()
     LazyProf.Print = function(_, msg) printed[#printed + 1] = msg end
     LazyProf.ClientFamily = "forever"
 
+    -- A stock setting changed in a frame that already scanned: the planning
+    -- that follows must see the new setting, not the frame's earlier scan.
+    do
+        Memory:SaveBags(ALT, { [2589] = 80 }, {}, NOW)
+        local planned
+        LazyProf.Client.GetLine = function() return "tailoring", 100, 150 end
+        LazyProf.Client.IsOpen = function() return false end
+        LazyProf.Pathfinder = { Calculate = function()
+            planned = Inventory:ScanAll()
+            return nil
+        end }
+        local display, general = LazyProf.options.args.display.args, LazyProf.options.args.general.args
+        nextFrame()
+        T.eq("this frame's scan counts the alt", (Inventory:ScanAll())[2589], 85)
+        display.includeAltCharacters.set(nil, false)
+        T.eq("alts turned off in the same frame: the planning scans again", planned[2589], 5)
+        display.includeAltCharacters.set(nil, true)
+        T.eq("and on again", planned[2589], 85)
+        general.selfFoundMode.set(nil, true)
+        T.eq("Self-Found turned on in the same frame", planned[2589], 5)
+        general.selfFoundMode.set(nil, false)
+        T.eq("and off again", planned[2589], 85)
+        Memory:SaveBank(MAIN, { [2589] = 10 }, {}, NOW)
+        Inventory:InvalidateCache()
+        T.eq("with a remembered bank", (Inventory:ScanAll())[2589], 95)
+        display.includeBankItems.set(nil, false)
+        T.eq("bank items turned off in the same frame", planned[2589], 85)
+        display.includeBankItems.set(nil, true)
+        LazyProf.Pathfinder = nil
+        Memory:Forget()
+        Inventory:InvalidateCache()
+    end
+
     -- OnEnable starts the stock memory.
     local events = {}
     LazyProf.RegisterEvent = function(_, event, handler) events[event] = handler end

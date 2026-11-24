@@ -373,6 +373,12 @@ function LazyProf:RefreshShoppingList()
 end
 
 function LazyProf:Recalculate(reason)
+    -- A setting that decides which stock counts may just have changed: this
+    -- frame's earlier scan must not answer for the new plan.
+    if self.Inventory then
+        self.Inventory:InvalidateCache()
+    end
+
     -- Track skill level and profession for OnTradeSkillUpdate optimization (Issue #3)
     local profKey, currentSkill = self.Client:GetLine()
     self.lastCalculatedSkill = currentSkill
