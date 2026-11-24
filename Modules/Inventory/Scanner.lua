@@ -11,7 +11,11 @@
 --     bags and banks of the other characters of the same world and faction.
 --     This file keeps that memory up to date (see "Keeping the memory").
 -- A Self-Found character cannot be sent anything, so nothing that belongs to
--- other characters is counted for it, from either place.
+-- other characters is counted for it, from either place; and it cannot send
+-- anything, so the memory does not offer what it holds to the others.
+--
+-- The memory can never stop the addon: everything that touches it runs
+-- protected (see Protected), and a scan that cannot read it counts the bags.
 local ADDON_NAME, LazyProf = ...
 
 LazyProf.Inventory = {}
@@ -636,12 +640,7 @@ LookAtBank = function(self, redraw)
     return saved
 end
 
--- The bank opened or changed: remember it and let a shown list redraw.
-function Inventory:OnBankSeen()
-    return LookAtBank(self, true)
-end
-
--- The same look without the redraw, for a scan (which is the redraw).
+-- That look without the redraw request, for a scan (which is the redraw).
 function Inventory:LookAtOpenBank()
     return LookAtBank(self, false)
 end
