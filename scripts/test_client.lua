@@ -526,7 +526,8 @@ section("stock", function()
     _G.UnitGUID = function(unit) return unit == "player" and "Player-5555-00ABCDEF" or nil end
     _G.UnitName = function(unit) return unit == "player" and "Thrag" or nil, nil end
     _G.GetRealmName = function() return "Nightslayer" end
-    _G.UnitFactionGroup = function() return "Horde", "Horde" end
+    -- The key first, then the name in the client's language (never a key).
+    _G.UnitFactionGroup = function() return "Horde", "Die Horde" end
     local id = Client:CharacterIdentity()
     check(p .. "identity: guid, name, realm as the world, faction",
         id.guid == "Player-5555-00ABCDEF" and id.name == "Thrag" and id.world == "Nightslayer" and id.faction == "Horde",

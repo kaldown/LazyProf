@@ -114,7 +114,9 @@ function World.install()
     _G.C_GameRules = { IsGameRuleActive = function(rule) return World.rules[rule] == true end }
     _G.GetCurrentRegionName = function() return World.region end
     _G.GetCurrentRegion = function() return World.regionNumber end
-    _G.UnitFactionGroup = function() return World.faction, World.faction end
+    -- The faction's key first, then its name in the client's language: only
+    -- the first is the same for every player, so it alone may be a key.
+    _G.UnitFactionGroup = function() return World.faction, World.faction .. " (in the client's language)" end
     _G.UnitGUID = function(unit) return unit == "player" and World.guid or nil end
     _G.NameUtil = { GetUnmodifiedUnitFullName = function() return World.name end }
     _G.C_PlayerInfo = { IsSelfFoundActive = function() return World.gameSelfFound end }

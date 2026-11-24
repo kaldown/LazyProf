@@ -470,15 +470,47 @@ T.section("Syndicator present: as before, the memory is not used", function()
     Memory:SaveAccountBank("eu-pvp", { [2589] = 9999 }, NOW)
     installSyndicator()
 
-    -- Any use of the memory or of the bank reader fails this section.
+    -- Any use of the memory or of the bank reader fails this section. The
+    -- memory's entry points run protected, so a use would not raise: each
+    -- one is written down as well. Every function of the memory counts.
+    local used = {}
     local saved = {}
-    for _, name in ipairs({ "SaveBags", "SaveBank", "SaveAccountBank", "OwnBank", "AccountBank", "Alts", "Prune", "Forget" }) do
-        saved[name] = Memory[name]
-        Memory[name] = function() error("StockMemory:" .. name .. " used although Syndicator is installed") end
+    for name, fn in pairs(Memory) do
+        if type(fn) == "function" then
+            saved[name] = fn
+            Memory[name] = function()
+                used[#used + 1] = "StockMemory:" .. name
+                error("StockMemory:" .. name .. " used although Syndicator is installed")
+            end
+        end
     end
-    local savedContents = LazyProf.Client.BankContents
-    LazyProf.Client.BankContents = function() error("the bank is read although Syndicator is installed") end
+    local savedContents, savedUsable = LazyProf.Client.BankContents, LazyProf.Client.BankUsable
+    LazyProf.Client.BankContents = function()
+        used[#used + 1] = "Client:BankContents"
+        error("the bank is read although Syndicator is installed")
+    end
+    LazyProf.Client.BankUsable = function()
+        used[#used + 1] = "Client:BankUsable"
+        error("the bank is asked for although Syndicator is installed")
+    end
     client.bankOpen = true
+    -- What the dump says of the bank visit and of what is waiting: none of
+    -- it may change either.
+    local function visitState()
+        local out, kept = {}, {}
+        -- The dump goes on to list what is remembered, which the stand-ins
+        -- above refuse: the lines wanted here come before that, and what the
+        -- dump itself asked of the memory is not held against the scanner.
+        local usedBefore = #used
+        pcall(Inventory.RunDiagnostic, Inventory, out)
+        for i = #used, usedBefore + 1, -1 do used[i] = nil end
+        for _, line in ipairs(out) do
+            if line:find("^bank visit") or line:find("^after the close") or line:find("^waiting:") then
+                kept[#kept + 1] = line
+            end
+        end
+        return table.concat(kept, "\n")
+    end
 
     local ok, err = pcall(function()
         local combined, breakdown, meta = scan()
@@ -498,6 +530,8 @@ T.section("Syndicator present: as before, the memory is not used", function()
 
         -- Nothing is remembered or scheduled while Syndicator is there.
         timers = {}
+        used = {}
+        local stateBefore, bagReadsBefore = visitState(), client.reads.bags
         Inventory:Initialize()
         Inventory:OnBagUpdate(0)
         Inventory:OnBagUpdate(6)
@@ -511,10 +545,17 @@ T.section("Syndicator present: as before, the memory is not used", function()
         client.started.onBankClosed()
         Inventory:OnBagUpdate(0)
         client.started.onLogout()
+        Inventory:OnLogout()
+        Inventory:RequestBagSave(true)
+        Inventory:OnSendingChanged()
+        Inventory:OnSettingsReset()
         T.eq("no timer is asked for", #timers, 0)
+        T.eq("nothing of the bank visit changes and nothing is left waiting", visitState(), stateBefore)
         advance(5)
-        T.check("no save, no bank read, no prune", true)
-        T.check("a save asked for directly does nothing either", Inventory:SaveBags(true) == false)
+        T.eq("no save, no bank read, no prune: neither the memory nor the bank is touched", table.concat(used, ", "), "")
+        T.eq("and the bags are not read for it", client.reads.bags, bagReadsBefore)
+        T.check("a save asked for directly does nothing either", Inventory:SaveBags(true) == false and #used == 0,
+            table.concat(used, ", "))
 
         -- A Self-Found character gets nothing from the alts here either.
         LazyProf.db.char.selfFoundMode = true
@@ -539,7 +580,7 @@ T.section("Syndicator present: as before, the memory is not used", function()
         LazyProf.db.profile.includeGuildBank = false
     end)
     for name, fn in pairs(saved) do Memory[name] = fn end
-    LazyProf.Client.BankContents = savedContents
+    LazyProf.Client.BankContents, LazyProf.Client.BankUsable = savedContents, savedUsable
     T.check("no use of the memory with Syndicator installed", ok, err)
     -- (The memory's entry points run protected: a call that was made and
     -- failed above would not have raised. It would have been counted.)

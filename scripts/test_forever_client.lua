@@ -924,7 +924,8 @@ section("stock", function()
         guidCalls = guidCalls + 1
         return unit == "player" and guid or nil
     end
-    _G.UnitFactionGroup = function() return "Horde", "Horde" end
+    -- The key first, then the name in the client's language (never a key).
+    _G.UnitFactionGroup = function() return "Horde", "Die Horde" end
     _G.NameUtil = { GetUnmodifiedUnitFullName = function(unit) return unit == "player" and "Thrag Ironhide" or nil end }
     _G.C_GameRules = { IsGameRuleActive = function(rule) return rules[rule] == true end }
     _G.GetCurrentRegionName = function() return region end
