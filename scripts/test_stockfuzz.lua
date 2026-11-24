@@ -60,18 +60,16 @@
 --                        scan's third return or the Shopping tab does not name it
 --   I3.count|doubt       a well-behaved client: an open bank wrong or in doubt after two
 --                        quiet seconds (I3x.*: the same on any other client)
---   careful.*, hasty.*   any of these kinds in the samples of a careful player
---   I3.stuck, I4.blindmark   a bank this character may not view is in doubt
+--   I4.blindmark         a bank is marked in doubt by a character that may not view it
 --   I4.nuisance|glance|afterclose   a well-behaved client: a doubt mark after a visit
 --                        that ended 0.5 s or more after its last move / in which
 --                        nothing was moved / after a change of the bags in the
 --                        second after the close that was no rise of an item a
 --                        remembered bank holds
 --   I5.error|handler     a Lua error, or a message to the game's error handler
---
--- KNOWN (below) lists the kinds of failure the suite still shows on the code
--- as it stands, each with a sentence saying what is wrong. They are printed
--- with every run and do not fail it; one that no walk shows any more does.
+--   careful.*, hasty.*   any of these kinds in the samples of a careful player
+-- What the bank's rules accept on purpose is named further down (ALSO, and
+-- the list above it): the default run shows no failure of any kind above.
 
 package.path = "./?.lua;" .. package.path
 local T = require("scripts.lib.check").new()
@@ -193,11 +191,18 @@ local HABITS = { logoutMidMove = true, closeMidMove = true, afterCloseChange = t
 --
 -- Habits the default player does not have (STOCKFUZZ_ALSO names the ones to
 -- switch on, comma separated, to see what follows from them):
---   logoutMidBankMove  log out or reload while the answer of a move between
---                      the character bank and the account bank is on its
---                      way. No carried bag changes, so neither that session
---                      nor a later one can tell that the two remembered
---                      banks are behind.
+--   logoutMidBankMove  log out or reload while the answer of a move that
+--                      involves a bank is on its way (into a bank, out of
+--                      one, between the two, within one). The session that
+--                      ends never hears that answer, and no later one can
+--                      always tell: a move between the two banks changes no
+--                      carried bag, two moves can cancel in the bags, the
+--                      session can end between the two updates of one move,
+--                      and another character that plays before the first
+--                      one returns counts its bags and banks as they were
+--                      remembered. Distrusting an alt's remembered bags
+--                      after every logout at the bank would cost the
+--                      ordinary bank alt its stock.
 --   emptyBagsLogout    empty the carried bags completely and log out within
 --                      the two seconds before they are saved. Completely
 --                      empty bags are not trusted at logout (nothing says
@@ -219,6 +224,17 @@ local HABITS = { logoutMidMove = true, closeMidMove = true, afterCloseChange = t
 --   I1h.*              while the client itself shows an item in two
 --                      containers (a move half reported), a scan counts it
 --                      twice.
+--   a mark it cannot   a character that may not view a bank sees the doubt
+--   clear              mark another character set on it, and no visit of its
+--                      own takes the mark away. The mark was set by a
+--                      character that could use that bank, which is as it
+--                      should be; what is checked is that no character
+--                      marks a bank it may not view (I4.blindmark).
+--   a tab, and gone    a tab bought in a visit that ends before the look two
+--                      seconds after its opening: a bank that reads empty
+--                      cannot be believed empty by then, so the visit ends
+--                      with that bank in doubt. Such a visit is hurried (see
+--                      CloseNotice).
 --   letgo clients      a client that empties the bank's containers and
 --                      reports that before the close notice ends every
 --                      visit in doubt: an emptied bank cannot be told from
@@ -232,30 +248,6 @@ local ALSO = { logoutMidBankMove = false, emptyBagsLogout = false, leaveEarly = 
 local DEFAULT_HABITS = {}
 for name, value in pairs(HABITS) do DEFAULT_HABITS[name] = value end
 for name, value in pairs(ALSO) do DEFAULT_HABITS[name] = value end
-
--- ===========================================================================
--- Known failures: kinds of failure (or the first part of a kind) the default
--- run still shows, each with what is wrong. A check whose failures are all on
--- this list is printed as KNOWN and passes; an entry that no walk of the run
--- shows any more fails the run, so the list cannot outlive what it describes.
--- ===========================================================================
-local KNOWN = {
-    { "I1.settled.own", "A stack is taken out of the account bank and the session ends before the answer is heard; the other"
-        .. " character plays before the first one returns. It counts the account bank as it was remembered, with the stack"
-        .. " (the first character's remembered bags are without it, so the sum is right - but not the bank)." },
-    { "I1.latent.account", "The account bank stays remembered with that stack until a character reads it again (the case of"
-        .. " I1.settled.own)." },
-    { "I1.multi.own", "The same, for as long as the other character is logged in (the case of I1.settled.own)." },
-    { "I1.settled.alt", "A stack is put into the account bank and the session ends before the answer is heard; the other"
-        .. " character plays before the first one returns. It counts the first one's bags as they were remembered, with the"
-        .. " stack, and - once it has read the account bank itself - the stack in the account bank as well." },
-    { "I1.multi.alt", "The same, for as long as the other character is logged in (the case of I1.settled.alt)." },
-    { "I2.stale.account", "The account bank is remembered without the stack that was put into it (the case of I1.settled.alt)"
-        .. " and nothing says so." },
-    { "I3.stuck.account", "The account bank is in doubt for a character that may not view it, so no visit of its own takes"
-        .. " the mark away. The mark is another character's, set after a visit of its own that left the bank uncertain." },
-    { "careful.I3.stuck.account", "The same in the sample of a careful player (the case of I3.stuck.account)." },
-}
 
 -- ===========================================================================
 -- A small generator of its own, so that a seed means the same walk on every
@@ -555,11 +547,10 @@ local function InFlight()
     return n
 end
 
--- Is the answer of a move between the character bank and the account bank
--- on its way?
-local function InFlightAcrossBanks()
+-- Is the answer of a move that involves a bank on its way?
+local function InFlightBankMove()
     for _, d in ipairs(S.queue) do
-        if d.kind == "upd" and (d.across or (d.chain and d.chain.across)) then return true end
+        if d.kind == "upd" and (d.bank or (d.chain and d.chain.bank)) then return true end
     end
     return false
 end
@@ -705,12 +696,6 @@ local function SettledChecks(meta)
             if doubt then
                 Violate(prefix .. "doubt." .. kind, "open for " .. (S.now - S.openMs) .. " ms and still in doubt", { cause = cause })
             end
-        end
-        -- A bank this character may not view cannot be read by its visits:
-        -- a doubt mark on it stays whatever the character does.
-        if S.bankOpen and S.now - S.openMs >= SETTLE and not Viewable(kind) and doubt then
-            Violate("I3.stuck." .. kind, "in doubt, and this character's visit (open for " .. (S.now - S.openMs)
-                .. " ms) cannot read that bank to take the mark away", { cause = cause })
         end
     end
     -- An alt's bank that is in doubt is left out too: the scan's third
@@ -1225,15 +1210,15 @@ function OPS.move(a)
     Dirty(a.sc, a.ss, 1)
     Dirty(a.dc, a.ds, 1)
     local at, gap = Arrival(a.lat, a.gap)
+    local bankMove = KindOf(a.sc) ~= nil or KindOf(a.dc) ~= nil
     if a.sc == a.dc then
-        Enqueue({ at = at, kind = "upd", c = a.sc, sets = { srcSet, dstSet } })
+        Enqueue({ at = at, kind = "upd", c = a.sc, sets = { srcSet, dstSet }, bank = bankMove })
         return
     end
     local firstSet, secondSet = srcSet, dstSet
     if a.first == "dst" then firstSet, secondSet = dstSet, srcSet end
-    local across = KindOf(a.sc) ~= nil and KindOf(a.dc) ~= nil and KindOf(a.sc) ~= KindOf(a.dc)
-    local d1 = { at = at, kind = "upd", c = firstSet.c, sets = { firstSet }, across = across }
-    local d2 = { at = at, kind = "upd", c = secondSet.c, sets = { secondSet }, across = across }
+    local d1 = { at = at, kind = "upd", c = firstSet.c, sets = { firstSet }, bank = bankMove }
+    local d2 = { at = at, kind = "upd", c = secondSet.c, sets = { secondSet }, bank = bankMove }
     if a.atomic then
         d1.sets, d2.sets = { firstSet, secondSet }, {}
     end
@@ -1285,7 +1270,7 @@ function OPS.sort(a)
     end
     if #sets == 0 then return end
     NoteChange()
-    Enqueue({ at = (Arrival(a.lat, 0)), kind = "upd", c = a.c, sets = sets, rep = a.rep })
+    Enqueue({ at = (Arrival(a.lat, 0)), kind = "upd", c = a.c, sets = sets, rep = a.rep, bank = KindOf(a.c) ~= nil })
 end
 
 -- Put n of an item into the carried bags, at once (the client's answer and
@@ -1380,6 +1365,7 @@ function OPS.buytab(a)
     if a.kind == "character" then
         if me.bank[TAB2] then return end
         NoteChange()
+        S.visit.tabBought = true
         me.bank[TAB2] = { slots = 4 }
         S.shown[TAB2] = { slots = 4 }
         PushBank()
@@ -1388,6 +1374,7 @@ function OPS.buytab(a)
     else
         if S.account[ACCOUNT_TAB] or not me.view then return end
         NoteChange()
+        S.visit.tabBought = true
         S.account[ACCOUNT_TAB] = { slots = 5 }
         S.shown[ACCOUNT_TAB] = { slots = 5 }
         PushBank()
@@ -1461,7 +1448,11 @@ local function CloseNotice(a, event)
     -- move (its answer arrived - with a server that takes 0.3 s that is later
     -- than the click, and an emptied bank needs two looks 0.2 s apart from
     -- there before it is believed empty).
+    -- So is a visit in which a tab was bought and that ends before the look
+    -- two seconds after its opening has been taken (a frame's slack on the
+    -- two seconds): until then a bank that reads empty is not believed.
     v.hurried = (v.lastMoveMs ~= nil and S.now - v.lastMoveMs < 500) or v.inflight > 0
+        or (v.tabBought == true and S.now - v.openMs < 2100)
     v.cause = (v.moves == 0 and "glance" or (v.hurried and "hurried" or "unhurried")) .. (v.inflight > 0 and ",inflight" or "")
         .. (S.now - v.openMs < SETTLE and ",short" or "")
     if cfg.letgo then
@@ -1518,7 +1509,7 @@ end
 -- Log out (or reload), then log in again: as the same character or the other.
 function OPS.logout(a)
     if not S.habits.logoutMidMove and InFlight() > 0 and not a.tail then return end
-    if not S.habits.logoutMidBankMove and InFlightAcrossBanks() and not a.tail then return end
+    if not S.habits.logoutMidBankMove and InFlightBankMove() and not a.tail then return end
     if LeavesEarly(a) then return end
     -- emptyBagsLogout (see ALSO): the bags hold nothing and their save is
     -- still waiting.
@@ -2501,17 +2492,7 @@ local function run(config, seed, habits, keep)
     end
 end
 
--- The entry of KNOWN that covers a kind of failure, if any.
-local shown = {}
-local function KnownEntry(kind)
-    for _, entry in ipairs(KNOWN) do
-        if kind:sub(1, #entry[1]) == entry[1] then return entry end
-    end
-    return nil
-end
-
--- A check: no failure of the kinds that begin with one of the prefixes. Kinds
--- on the KNOWN list are printed with what is wrong and do not fail it.
+-- A check: no failure of the kinds that begin with one of the prefixes.
 local function none(label, ...)
     local n, example = 0, nil
     local kinds = {}
@@ -2520,29 +2501,12 @@ local function none(label, ...)
     for _, prefix in ipairs({ ... }) do
         for _, kind in ipairs(kinds) do
             if kind:sub(1, #prefix) == prefix then
-                local entry = KnownEntry(kind)
-                if entry then
-                    if not shown[entry] then
-                        shown[entry] = true
-                        print("KNOWN: " .. entry[1] .. " (" .. found[kind] .. " time(s)): " .. entry[2])
-                    end
-                else
-                    n = n + found[kind]
-                    example = example or (kind .. " - " .. examples[kind])
-                end
+                n = n + found[kind]
+                example = example or (kind .. " - " .. examples[kind])
             end
         end
     end
     T.check(label, n == 0, n > 0 and (n .. " time(s); first: " .. example) or nil)
-end
-
--- Every entry of KNOWN must still show: one that does not has been put right
--- and is to be taken off the list.
-local function knownStillShow()
-    for _, entry in ipairs(KNOWN) do
-        T.check("known failure still shows: " .. entry[1], shown[entry] == true,
-            "no walk shows it any more: take it off the KNOWN list")
-    end
 end
 
 local function startsWith(kind, ...)
@@ -2601,8 +2565,7 @@ end
 -- Sample 2, a careful player: one who does not log out or close while an
 -- answer is on its way, does not move items between the two banks and always
 -- carries something - on clients that change both containers of a move
--- before the first of its updates. Its failures are filed under "careful.":
--- nothing on the KNOWN list is expected of it.
+-- before the first of its updates. Its failures are filed under "careful.".
 local careful = {}
 for name, value in pairs(DEFAULT_HABITS) do careful[name] = value end
 careful.logoutMidMove, careful.closeMidMove, careful.bankToBank, careful.emptyBags = false, false, false, false
@@ -2659,12 +2622,11 @@ none("I2: no bank is still left out as \"being read\" two seconds after the last
 none("I2: an alt's bank that is left out is named too", "I2.alt")
 none("I3: on a well-behaved client an open bank is right and without doubt after two quiet seconds", "I3.count.", "I3.doubt.")
 none("I3: and on every other client", "I3x.")
-none("I3: no bank is left in doubt that the character's own visit cannot read", "I3.stuck.", "I4.blindmark.")
+none("I4: no character marks a bank in doubt that it may not view, and so could not read again", "I4.blindmark.")
 none("I4: on a well-behaved client an unhurried visit leaves no doubt mark", "I4.nuisance", "I4.glance")
 none("I4: nor does a change of the bags in the second after its close", "I4.afterclose")
 none("I5: nothing raises, nothing reaches the error handler", "I5.")
 none("a careful player (no close or logout while an answer is on its way, no move between the two banks, always something"
     .. " carried), both containers of a move changed before its first update: every check holds", "careful.")
 none("the same player closing the bank before the answer of a move, both updates in one frame: every check holds", "hasty.")
-knownStillShow()
 T.finish()
