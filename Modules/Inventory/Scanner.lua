@@ -397,9 +397,17 @@ end
 --   meta               how old the remembered parts are (AddRememberedStock);
 --                      nil when the stock comes from Syndicator
 function Inventory:ScanAll()
-    -- Return cached results if called again in the same frame
+    -- Return cached results if called again in the same frame, unless a
+    -- setting that decides which stock counts has changed since
     local now = GetTime()
-    if scanCache.combined and scanCache.time == now then
+    local profile = LazyProf.db.profile
+    local countBank = profile.includeBankItems and true or false
+    local wantAlts = profile.includeAltCharacters and true or false
+    local countGuild = profile.includeGuildBank and true or false
+    local selfFound = IsSelfFound()
+    if scanCache.combined and scanCache.time == now and scanCache.countBank == countBank
+            and scanCache.wantAlts == wantAlts and scanCache.countGuild == countGuild
+            and scanCache.selfFound == selfFound then
         return scanCache.combined, scanCache.breakdown, scanCache.meta
     end
 
@@ -416,7 +424,7 @@ function Inventory:ScanAll()
     LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items in bags", bagCount))
 
     -- 2. Everything outside the bags
-    local countAlts = LazyProf.db.profile.includeAltCharacters and not IsSelfFound()
+    local countAlts = wantAlts and not selfFound
     if self:UsesSyndicator() then
         AddSyndicatorStock(self, combined, breakdown, countAlts)
     else
@@ -435,6 +443,8 @@ function Inventory:ScanAll()
     scanCache.combined = combined
     scanCache.breakdown = breakdown
     scanCache.meta = meta
+    scanCache.countBank, scanCache.wantAlts = countBank, wantAlts
+    scanCache.countGuild, scanCache.selfFound = countGuild, selfFound
 
     return combined, breakdown, meta
 end

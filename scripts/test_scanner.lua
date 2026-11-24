@@ -361,6 +361,29 @@ T.section("frame cache", function()
     Inventory:ScanAll()
     T.eq("the next frame reads again", client.reads.bags, 2)
 
+    -- A stock setting changed inside the frame is not answered from the
+    -- frame's earlier scan, whoever changed it.
+    Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW)
+    Inventory:ForgetAltsPart()
+    nextFrame()
+    T.eq("alts on", (Inventory:ScanAll())[2589], 65)
+    LazyProf.db.profile.includeAltCharacters = false
+    T.eq("alts turned off in the same frame", (Inventory:ScanAll())[2589], 45)
+    LazyProf.db.profile.includeAltCharacters = true
+    LazyProf.db.profile.includeBankItems = false
+    T.eq("bank turned off in the same frame", (Inventory:ScanAll())[2589], 25)
+    LazyProf.db.profile.includeBankItems = true
+    LazyProf.db.char.selfFoundMode = true
+    T.eq("Self-Found turned on in the same frame", (Inventory:ScanAll())[2589], 45)
+    LazyProf.db.char.selfFoundMode = false
+    client.reads.bags = 0
+    T.eq("everything back on", (Inventory:ScanAll())[2589], 65)
+    Inventory:ScanAll()
+    T.eq("unchanged settings: the frame's scan answers", client.reads.bags, 1)
+    LazyProf.db.global.stock.characters[ALT.guid] = nil
+    Inventory:ForgetAltsPart()
+    nextFrame()
+
     -- A change of the memory must not be hidden by the cache.
     local combined = Inventory:ScanAll()
     T.eq("before the bank is seen again", combined[2589], 45)
