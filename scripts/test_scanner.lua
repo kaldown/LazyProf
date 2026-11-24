@@ -1595,6 +1595,27 @@ T.section("the close", function()
     T.check("the dump: the bank marked in doubt",
         text:find("bank=1 items (less than an hour ago, in doubt: not counted)", 1, true) ~= nil, text)
 
+    -- Only a bank whose record really carries the mark is named: of the
+    -- account bank nothing is remembered here (it can be viewed and has its
+    -- tab, but no read of it ever gave a slot), so there is nothing to mark.
+    fresh()
+    Inventory:Initialize()
+    advance(2.1)
+    client.bankOpen = true
+    client.bank.character = { items = { [2589] = 100 }, slots = 28 }
+    client.usable.account = true
+    client.bank.account = nil
+    client.started.onBankOpened()
+    advance(3)
+    Inventory:OnBagUpdate(0)                               -- read at once
+    Inventory:OnBagUpdate(6)
+    Inventory:OnBagUpdate(15)                              -- both banks unsettled, the read owed
+    client.bank.character = nil
+    close()
+    T.check("fixture: nothing is remembered of the account bank", Memory:AccountBank("eu-pvp") == nil)
+    T.eq("the dump names only the bank that got the mark", closeLine(),
+        "bank visit close: owed=true unsettled=character,account readAgain=true kept=none markedInDoubt=character held=none")
+
     -- A logout with the bank open ends the visit the same way, once.
     visit()
     client.bank.character = { items = { [2589] = 70 }, slots = 28 }

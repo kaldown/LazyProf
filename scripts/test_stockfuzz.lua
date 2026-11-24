@@ -21,11 +21,10 @@
 -- on every machine and every time.
 --
 -- Run from the addon root:  lua5.1 scripts/test_stockfuzz.lua
--- By default it runs a fixed sample of client configurations (a few seconds)
--- and checks everything. Environment:
---   STOCKFUZZ_MODE    suite (default): every check on the sample
---                     guard: a second, different sample for a careful player
---                       (see the end of this file)
+-- By default it runs three fixed samples of client configurations and
+-- players (a few seconds; see the end of this file) and checks everything.
+-- Environment:
+--   STOCKFUZZ_MODE    suite (default): every check on the samples
 --                     campaign: many walks, results as tables (kinds,
 --                       signatures, marginals per switch, visits)
 --                     shrink: cut one failing walk down, write it as a script
@@ -60,7 +59,8 @@
 --   I2.alt               the other character's bank is in doubt and left out, and the
 --                        scan's third return or the Shopping tab does not name it
 --   I3.count|doubt       a well-behaved client: an open bank wrong or in doubt after two
---                        quiet seconds (I3x.*: the same on any other client; not a check)
+--                        quiet seconds (I3x.*: the same on any other client)
+--   careful.*, hasty.*   any of these kinds in the samples of a careful player
 --   I3.stuck, I4.blindmark   a bank this character may not view is in doubt
 --   I4.nuisance|glance|afterclose   a well-behaved client: a doubt mark after a visit
 --                        that ended 0.5 s or more after its last move / in which
@@ -254,6 +254,7 @@ local KNOWN = {
         .. " and nothing says so." },
     { "I3.stuck.account", "The account bank is in doubt for a character that may not view it, so no visit of its own takes"
         .. " the mark away. The mark is another character's, set after a visit of its own that left the bank uncertain." },
+    { "careful.I3.stuck.account", "The same in the sample of a careful player (the case of I3.stuck.account)." },
 }
 
 -- ===========================================================================
@@ -2464,11 +2465,7 @@ if MODE == "shrink" then
 end
 
 -- ===========================================================================
--- The suite: a fixed sample of client configurations and seeds.
---   suite (default)  every check, on every kind of client and player
---   guard            another sample: a player who does not close or log out
---                    while an answer is on its way, does not move items
---                    between the two banks and always carries something
+-- The suite: three fixed samples of client configurations, seeds and players.
 -- ===========================================================================
 local steps = tonumber(os.getenv("STOCKFUZZ_STEPS") or "120")
 local found, examples = {}, {}
@@ -2501,7 +2498,6 @@ end
 -- The entry of KNOWN that covers a kind of failure, if any.
 local shown = {}
 local function KnownEntry(kind)
-    if MODE ~= "suite" then return nil end      -- the list is the default run's
     for _, entry in ipairs(KNOWN) do
         if kind:sub(1, #entry[1]) == entry[1] then return entry end
     end
@@ -2584,83 +2580,57 @@ do
         table.concat(ran, ","))
 end
 
-if MODE == "guard" then
-    -- 1. Any client, any player: nothing raises, the scan's third return and
-    --    the Shopping tab name every bank of this character that is left
-    --    out, nothing stays "being read", and an open bank is right after two
-    --    quiet seconds - on every client but the one that shows a bank
-    --    partly and completes it without a bag update.
-    for index = 0, ComboCount() - 1 do
-        local config = Combo(index)
-        if WellBehaved(config) or index % 61 == 0 then
-            run(config, 1, nil, function(kind, c)
-                if startsWith(kind, "I3x.") then return c.open ~= "partialSilent" end
-                return startsWith(kind, "sanity.", "I5.", "I2.pending.", "I2.noline.", "I2.unsaid.", "I2.uncounted.", "I3.count.", "I3.doubt.")
-            end)
-        end
+-- Sample 1, any player: every well-behaved client twice, every 41st and every
+-- 61st of the others once.
+for index = 0, ComboCount() - 1 do
+    local config = Combo(index)
+    if WellBehaved(config) then
+        run(config, 1)
+        run(config, 2)
+    elseif index % 41 == 0 or index % 61 == 0 then
+        run(config, 1)
     end
-    -- 2. A client that changes both containers of a move before the first
-    --    of its updates, and a player who does not log out or close while an
-    --    answer is on its way, does not move items between the two banks
-    --    and always carries something: nothing is counted twice once things
-    --    have settled; with both updates in one frame not even for a frame;
-    --    and with the bank's items there at the opening nothing is short.
-    local careful = {}
-    for name, value in pairs(DEFAULT_HABITS) do careful[name] = value end
-    careful.logoutMidMove, careful.closeMidMove, careful.bankToBank, careful.emptyBags = false, false, false, false
+end
+
+-- Sample 2, a careful player: one who does not log out or close while an
+-- answer is on its way, does not move items between the two banks and always
+-- carries something - on clients that change both containers of a move
+-- before the first of its updates. Its failures are filed under "careful.":
+-- nothing on the KNOWN list is expected of it.
+local careful = {}
+for name, value in pairs(DEFAULT_HABITS) do careful[name] = value end
+careful.logoutMidMove, careful.closeMidMove, careful.bankToBank, careful.emptyBags = false, false, false, false
+local CHECKED = { "sanity.", "I1.settled.", "I1.latent.", "I1.multi.", "I1.frame.", "I1.mid.", "I2.", "I3.", "I3x.", "I4.", "I5." }
+do
     local n = 0
     for index = 0, ComboCount() - 1 do
         local config = Combo(index)
         if config.spread == "same" or config.spread == "late" then
             n = n + 1
             if n % 23 == 0 then
-                run(config, 2, careful, function(kind, c)
-                    if startsWith(kind, "I1.settled.", "I1.latent.") then return true end
-                    if c.spread == "same" and startsWith(kind, "I1.multi.", "I1.frame.") then return true end
-                    if c.open ~= "partial" and c.open ~= "partialSilent" and startsWith(kind, "I2.stale.") then return true end
-                    return false
-                end)
+                run(config, 2, careful, function(kind) return startsWith(kind, unpack(CHECKED)) and ("careful." .. kind) end)
             end
         end
     end
-    -- 3. The same player, but one who closes the bank while an answer is on
-    --    its way (and then leaves the bags alone and stays logged in for a
-    --    second): on a client with both updates of a move in one frame the
-    --    late answer is noticed - nothing is counted twice once settled.
-    local hasty = {}
-    for name, value in pairs(careful) do hasty[name] = value end
-    hasty.closeMidMove, hasty.afterCloseChange, hasty.logoutAfterClose = true, false, false
-    n = 0
+end
+
+-- Sample 3, the same player, but one who closes the bank while an answer is
+-- on its way (and then leaves the bags alone and stays logged in for a
+-- second) - on clients with both updates of a move in one frame. Filed
+-- under "hasty.".
+local hasty = {}
+for name, value in pairs(careful) do hasty[name] = value end
+hasty.closeMidMove, hasty.afterCloseChange, hasty.logoutAfterClose = true, false, false
+do
+    local n = 0
     for index = 0, ComboCount() - 1 do
         local config = Combo(index)
         if config.spread == "same" then
             n = n + 1
             if n % 19 == 0 then
-                run(config, 3, hasty, function(kind) return startsWith(kind, "I1.settled.") and ("hasty." .. kind) end)
+                run(config, 3, hasty, function(kind) return startsWith(kind, unpack(CHECKED)) and ("hasty." .. kind) end)
             end
         end
-    end
-    print(string.format("%d walks, %d actions, %d scans", walks, totalSteps, scans))
-    none("the walks themselves ran through (the model holds)", "walk", "sanity.")
-    none("nothing raises, nothing reaches the error handler", "I5.")
-    none("a bank of this character that is in doubt is named by the scan and has its line on the Shopping tab", "I2.unsaid.", "I2.noline.", "I2.uncounted.")
-    none("no bank is still left out as \"being read\" two seconds after the last event", "I2.pending.")
-    none("an open bank is right and without doubt after two quiet seconds (well-behaved client; any that shows the whole bank)", "I3.count.", "I3.doubt.", "I3x.")
-    none("careful player, both containers changed before the first update: nothing counted twice once settled", "I1.settled.", "I1.latent.")
-    none("... and with both updates in one frame not at the end of any frame", "I1.multi.", "I1.frame.")
-    none("... and unless the client shows a bank partly at the opening no counted bank is short", "I2.stale.")
-    none("the same player closing before the answer of a move (both updates in one frame): nothing counted twice once settled", "hasty.")
-    T.finish()
-end
-
--- Every well-behaved client twice, every 41st of the others once.
-for index = 0, ComboCount() - 1 do
-    local config = Combo(index)
-    if WellBehaved(config) then
-        run(config, 1)
-        run(config, 2)
-    elseif index % 41 == 0 then
-        run(config, 1)
     end
 end
 
@@ -2682,9 +2652,13 @@ none("I2: a bank in doubt is named by the scan and has its line on the Shopping 
 none("I2: no bank is still left out as \"being read\" two seconds after the last event", "I2.pending.")
 none("I2: an alt's bank that is left out is named too", "I2.alt")
 none("I3: on a well-behaved client an open bank is right and without doubt after two quiet seconds", "I3.count.", "I3.doubt.")
+none("I3: and on every other client", "I3x.")
 none("I3: no bank is left in doubt that the character's own visit cannot read", "I3.stuck.", "I4.blindmark.")
 none("I4: on a well-behaved client an unhurried visit leaves no doubt mark", "I4.nuisance", "I4.glance")
 none("I4: nor does a change of the bags in the second after its close", "I4.afterclose")
 none("I5: nothing raises, nothing reaches the error handler", "I5.")
+none("a careful player (no close or logout while an answer is on its way, no move between the two banks, always something"
+    .. " carried), both containers of a move changed before its first update: every check holds", "careful.")
+none("the same player closing the bank before the answer of a move, both updates in one frame: every check holds", "hasty.")
 knownStillShow()
 T.finish()
