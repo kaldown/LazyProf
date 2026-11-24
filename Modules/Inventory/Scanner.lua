@@ -196,18 +196,29 @@
 --    bank is left out. The Shopping tab shows a line for each. The next
 --    kept read of that bank takes the mark away.
 --
--- What these rules cannot see, and so do not catch:
---    - A move whose answer arrives after the session has ended and changes
---      no carried bag, or none on balance: between the character bank and
---      the account bank, or two moves that cancel in the bags. Both
---      remembered banks are then behind and nothing can tell.
---    - The same for any move, seen from another character that plays before
---      the first one returns: it counts the first one's bags and banks as
---      they were remembered when that session ended. The sum is right until
---      it reads the account bank itself.
---    - A session that ends between the two bag updates of one move, on a
---      client that sends them frames apart and changes each container with
---      its own update: the half that was heard is all the addon ever saw.
+-- What these rules cannot see, or accept on purpose:
+--    - A move that is answered after the session has ended. The session
+--      that ends never hears the answer. The character's next session
+--      notices when its bags are not what the last one left (rule 5c), but
+--      not every such move shows there: one between the character bank and
+--      the account bank changes no carried bag; two moves can cancel in the
+--      bags; and on a client that sends the two bag updates of a move
+--      frames apart, the session can end between them with only half heard.
+--      And another character that plays before the first one returns counts
+--      that character's bags and banks as they were remembered when it
+--      left - the right sum until it reads the account bank itself. Telling
+--      would mean distrusting an alt's remembered bags after every logout
+--      at the bank, which would cost the ordinary bank alt its stock.
+--    - A mark another character set on a bank this one may not view. The
+--      account bank's mark is the account's: a character that could use
+--      that bank set it for a reason, and one that may not view the bank
+--      sees it left out and cannot read it to take the mark away. Only a
+--      character that can open that bank clears it.
+--    - A tab bought in a visit of under two seconds. A change of its tabs
+--      unsettles a bank, and a bank that reads empty is not believed empty
+--      before the look two seconds after the opening (nor when its slot
+--      count is no longer that of the read that saw its items). Such a
+--      visit ends with that bank in doubt.
 --    - On a client that reports the answer of a move for the carried bag
 --      alone once the window is closed: a deposit (the count falls, which
 --      marks nothing), and a withdrawal answered later than CLOSE_WATCH.
