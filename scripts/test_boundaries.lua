@@ -1,7 +1,8 @@
 -- Boundary test: client APIs may only appear inside the client adapter
--- (Core/Client/) and the widget layer (Modules/UI/Widgets/), and calls that
--- do not exist on WoW Forever may only appear in Classic-only code. Strips
--- `--` comments, then fails listing file:line for every forbidden name.
+-- (Core/Client/) and the widget layer (Modules/UI/Widgets/), a few only in
+-- the adapter, and calls that do not exist on WoW Forever may only appear in
+-- Classic-only code. Strips `--` comments, then fails listing file:line for
+-- every forbidden name.
 -- Also: the events of the stock memory are each registered in one place.
 -- Run from the repo root: lua5.1 scripts/test_boundaries.lua
 
@@ -30,6 +31,16 @@ local FORBIDDEN = {
 }
 
 local EXEMPT_DIRS = { "Core/Client/", "Modules/UI/Widgets/" }
+
+-- Calls that only the client adapter may make: not the widget layer either.
+-- The client's own count of an item (the adapter's ClientItemCounts, which
+-- only /lp diag stock may ask until it is known whether that count sees a
+-- closed bank), as a field of C_Item and as the global of older clients, and
+-- whether crafts may take reagents from the bank (printed by the adapter's
+-- stock dump only).
+local ADAPTER_DIR = "Core/Client/"
+local ADAPTER_ONLY = { "C_Item.GetItemCount", "ReagentsFromBankAllowed" }
+local ADAPTER_ONLY_BARE = { "GetItemCount" }
 
 local function strip_comment(line)
     -- Good enough for this codebase: drop from the first `--` outside a string.
@@ -67,6 +78,30 @@ local function hasBareCall(line, name)
         if not prev:match("[%.:%w_]") then return true end
         init = e + 1
     end
+end
+
+-- The checks of the adapter-only calls must see a use and nothing else: a
+-- method of the same name (Inventory:GetItemCount reads the bags) is none.
+local function adapterOnlyUse(line)
+    for _, name in ipairs(ADAPTER_ONLY) do
+        if line:find(name, 1, true) then return name end
+    end
+    for _, name in ipairs(ADAPTER_ONLY_BARE) do
+        if hasBareCall(line, name) then return name .. "(" end
+    end
+    return nil
+end
+local selfCheck = {
+    { "local n = C_Item.GetItemCount(itemId, true, false, false, true)", "C_Item.GetItemCount" },
+    { "if ReagentsFromBankAllowed() then", "ReagentsFromBankAllowed" },
+    { "local n = GetItemCount(itemId, true)", "GetItemCount(" },
+    { "function Inventory:GetItemCount(itemId)", nil },
+    { "local have = LazyProf.Inventory:GetItemCount(2589)", nil },
+    { "local have = Inventory.GetItemCount(Inventory, 2589)", nil },
+}
+for _, case in ipairs(selfCheck) do
+    assert(adapterOnlyUse(case[1]) == case[2], "the adapter-only check reads '" .. case[1] .. "' wrong: "
+        .. tostring(adapterOnlyUse(case[1])))
 end
 
 local function hasBareGetItemInfo(line)
@@ -137,6 +172,19 @@ for event, expected in pairs(REGISTERED_IN) do
     end
 end
 table.sort(offenders)
+
+for _, path in ipairs(files) do
+    if path:sub(1, #ADAPTER_DIR) ~= ADAPTER_DIR then
+        local n = 0
+        for raw in io.lines(path) do
+            n = n + 1
+            local name = adapterOnlyUse(strip_comment(raw))
+            if name then
+                offenders[#offenders + 1] = string.format("%s:%d: %s (only the client adapter may use it)", path, n, name)
+            end
+        end
+    end
+end
 
 for _, path in ipairs(files) do
     if not exempt(path) then
