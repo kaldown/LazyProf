@@ -8,7 +8,10 @@
 -- world), a simulated client whose unknown behaviours are switches (when the
 -- bank can be read, how and when the answer of a move is reported and what
 -- it locks meanwhile, whether bank containers report while the window is
--- closed, how the account bank is shared), a random player, and the checks:
+-- closed, how the account bank is shared, whether an opening notice comes
+-- again while the bank is open), a random player (who also logs out with a
+-- bank move on its way, and now and then crashes: a session ends without
+-- its saved data written), and the checks:
 --   I1  a scan never counts more of an item than is owned
 --   I2  two seconds after the last event no bank is left out or short without
 --       the scan's third return - and the Shopping tab - saying so
@@ -25,8 +28,12 @@
 --
 -- Run from the addon root:  lua5.1 scripts/test_stockfuzz.lua
 -- By default it runs three samples of client configurations and players,
--- drawn from a fixed seed (about seven seconds; see the end of this file),
--- and checks everything.
+-- drawn from a fixed seed (about ten seconds; see the end of this file),
+-- and checks everything. It is one part of the acceptance test for the
+-- bank's rules, not all of it: some rules are guarded only by
+-- scripts/test_scanner.lua and scripts/test_stockflow.lua (the header of
+-- Modules/Inventory/Scanner.lua names them), so the whole suite is what
+-- has to pass.
 -- Environment:
 --   STOCKFUZZ_MODE    suite (default): every check on the samples
 --                     campaign: many walks, results as tables (kinds,
@@ -1513,6 +1520,7 @@ local function Login(who, a)
     S.visit, S.lastVisit, S.closeMs = nil, me.pendingVisit, nil
     me.pendingVisit = nil
     S.bagsCompared, S.compareFrame = false, nil
+    S.withdrew = false
     S.lastArrival = nil
     S.loginMs = S.now
     S.updatesSince = 0
@@ -1686,6 +1694,7 @@ function OPS.move(a)
         from[a.ss], to[a.ds] = target, item
     end
     NoteChange()
+    if KindOf(a.sc) and not KindOf(a.dc) then S.withdrew = true end
     local srcSet = { c = a.sc, s = a.ss, item = CopyItem(from[a.ss]) }
     local dstSet = { c = a.dc, s = a.ds, item = CopyItem(to[a.ds]) }
     Dirty(a.sc, a.ss, 1)
@@ -2184,7 +2193,7 @@ function OPS.logout(a)
     if S.bankOpen and not S.habits.closeBetweenHalves and BetweenHalves() and not a.tail then return end
     -- A crash (habit crash): no notice at all, nothing written. Not of a
     -- session that began with a note of its last one (crashAfterNote).
-    local crash = a.crash and S.habits.crash and not a.tail
+    local crash = (a.crash or (a.crashAfterWithdrawal and S.withdrew)) and S.habits.crash and not a.tail
     if crash and not S.habits.crashAfterNote then
         local record = S.disk.stock and type(S.disk.stock.characters) == "table" and S.disk.stock.characters[GUID[S.cur]]
         if type(record) == "table" and record.bagsAtBank ~= nil then crash = false end
@@ -2378,12 +2387,15 @@ end
 local function GenLogout(rng)
     -- After a crash the player mostly starts the same character again.
     local crash = rng.chance(0.08)
-    local other = rng.chance(crash and 0.2 or 0.5)
+    -- More often in a session that took something out of a bank: that is
+    -- what the comparison with the bags' last save is for (rule 5d).
+    local crashAfterWithdrawal = crash or rng.chance(0.25)
+    local other = rng.chance(crashAfterWithdrawal and 0.2 or 0.5)
     return { op = "logout", next = other and "other" or "same", pick = rng.int(1, 3), closeFirst = rng.chance(0.5), twice = rng.chance(0.3),
              idle = rng.chance(0.5), away = other and rng.pick({ 5000, 60000, 3600000, 10800000 }) or rng.int(2000, 6000),
              loginUpd = rng.chance(0.7), bagsLate = rng.chance(0.15) and rng.int(100, 1500) or 0,
              letgoBatch = rng.chance(0.5), idleAtLogin = rng.chance(0.6) and { rng.int(1, 3000), rng.int(1, 3000) } or nil,
-             crash = crash, midBank = rng.chance(0.3) }
+             crash = crash, crashAfterWithdrawal = crashAfterWithdrawal, midBank = rng.chance(0.3) }
 end
 
 local function GenAction(rng, habits)
@@ -2514,7 +2526,8 @@ local function Describe(a)
     elseif a.op == "close" then
         text = "close the bank" .. (a.twice and " (the notice comes twice)" or "")
     elseif a.op == "logout" then
-        text = (a.crash and "the client is killed (nothing written)" or ("log out" .. (a.closeFirst and "" or " (no close notice)")))
+        text = ((a.crash or a.crashAfterWithdrawal) and "the client is killed (nothing written) when it is so drawn"
+                    or ("log out" .. (a.closeFirst and "" or " (no close notice)")))
             .. ", log in as " .. (a.next == "other" and "the other character" or "the same character")
             .. " " .. tostring(a.away) .. " ms later"
     elseif a.op == "buytab" then
@@ -2703,7 +2716,7 @@ local function ShrinkOnce(config, init, actions, opts, wanted)
         away = { 3000 }, bagsLate = { 0 }, rep = { 1 }, fm = { 16 },
     }
     local FLAGS = { twice = false, idleBefore = false, idle = false, atomic = true, tf = true, letgoBatch = false, closeFirst = true,
-                    loginUpd = true, crash = false }
+                    loginUpd = true, crash = false, crashAfterWithdrawal = false }
     local changed = true
     while changed do
         changed = false
