@@ -522,6 +522,46 @@ Why the plan in hand has to be a candidate, and has to be favoured: once the pla
 
 ---
 
+## ADR-018: LazyProf Remembers Bags and Banks Itself; a Bank It Is Not Sure Of Is Left Out, and Said
+
+**Date:** 2026-11-24
+
+**Status:** Accepted
+
+### Context
+
+The shopping list takes owned stock off, and since ADR-017 owned stock also shapes the route. Stock outside the bags (bank, alts) was known only with Syndicator installed, which many players do not run. On WoW Forever the bank can be read only while its window is open, and what happens to it while it is closed - the answer of a move that arrives after the window closed, a session that ends before its saved data is written - is reported by the client in ways its interface code does not fully show. A count that includes a stack that is no longer there makes the list say "you have it" where the player still has to buy it: that is the error a player acts on.
+
+### Decision
+
+- Without Syndicator, LazyProf remembers every character's bags (saved shortly after a bag change and at logout) and, on WoW Forever only, the character's own bank and the account bank as read while the bank window is open (`Modules/Inventory/StockMemory.lua`, a store with no client calls, under `LazyProfDB.global.stock`; `Modules/Inventory/Scanner.lua` decides when to read, save and count). With Syndicator installed none of it is read or written: one source of stock at a time.
+- Other remembered characters count as alts when they are of the same world (region and ruleset, never the realm name, which is not stable there) and faction, without their soulbound items, and never for or from a Self-Found character. The account bank is remembered once per region with the world and faction of the character whose read it is, and counts only for characters of that world and faction.
+- A remembered bank is counted only while LazyProf has seen every change to it (the rules are stated in the header of `Scanner.lua`). On any sign that it changed unseen - an update of one of its own containers that no kept read followed, a move still on its way when the window closed, a carried count that rose right after the close or by the next session (against what the bags held when a session at the bank ended, or otherwise against the bags as last saved, which also covers a session that crashed), a saved time that cannot be true - the bank is marked in doubt and left out until it is read again, and the Shopping tab says so in a grey line. An account bank read on the other faction or in another world is not counted, and the tab says that too.
+- Only a bank the character could use in the visit can be marked, so no character carries a mark it could never clear.
+- `/lp diag stock` prints what is remembered, what the last bank visit did and why a bank was marked, and the client's own item counts beside the remembered ones.
+
+### Alternatives Considered
+
+- Bank and alts only with Syndicator: leaves them out for most players.
+- Count a remembered bank as last seen, always: a withdrawal answered after the close, or a crash after one, would count a stack twice without a word.
+- Ask the client for a live count of the closed bank: whether it counts a closed bank on WoW Forever is not known yet. The dump prints that count beside the remembered one so that it can be checked; if it holds, most of the bank rules can be replaced by it.
+- Mark the bank in doubt after every visit or every bag change: the grey line would show after ordinary visits and the bank would never count.
+
+### Trade-offs Accepted
+
+- The rules rest on client behaviour that is not measured (in which order a move's two halves are reported, whether its slots show as locked at the close, whether the bank still reports after the close). They are built to stay right whichever way it is, at the price of leaving a bank out more often than needed on some clients.
+- Some changes cannot be seen, and are accepted and named in the scanner's header: a move the game answers only after a logout, as seen by another character that plays first; what a crashed session did that the carried bags do not show (a deposit, a move between the two banks), until that bank is read again; a deposit into an empty bank slot still on its way at the close, on a client that does not report the bank afterwards (it is counted short, never twice).
+- A craft that takes reagents from the closed bank, where the game allows it, puts that bank in doubt when the bank's container reports the change, and is not seen when it does not.
+- Mail, auction listings and the guild bank are known only with Syndicator; Classic clients remember bags and alts, not the bank.
+
+### Consequences
+
+- Bank and alt stock count by default without another addon.
+- A change to the bank rules must keep the whole test suite green: the seeded random walk (`scripts/test_stockfuzz.lua`) together with `test_scanner.lua`, `test_stockflow.lua` and `test_stockmemory.lua`, which alone guard some of the rules (`docs/development/TESTING.md`).
+- Both resets keep the remembered stock; "Forget remembered characters" clears it, and a character not played for 180 days is forgotten.
+
+---
+
 ## Template for New ADRs
 
 ```markdown
