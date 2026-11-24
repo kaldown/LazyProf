@@ -159,6 +159,9 @@ local SWITCHES = {
     --     or one per world and faction (the addon remembers one per region and counts
     --     it only for the world and faction whose read it is)
     { "acctScope", { "account", "world", "faction" } },
+    -- 11. the banker clicked again while the bank is open: a second opening notice
+    --     comes without a close before it
+    { "reopen", { false, true } },
 }
 
 local function ComboCount()
@@ -1707,6 +1710,16 @@ function OPS.craftbank(a)
     end
 end
 
+-- The banker is clicked again while the bank is open (switch 11): the client
+-- sends a second opening notice. Nothing in the world changes. The banks are
+-- read again after it, so for judging the visit it counts like a move: a
+-- visit closed within half a second of it was hurried.
+function OPS.reopen()
+    if not cfg.reopen or not S.bankOpen then return end
+    NoteChange()
+    Fire("BANKFRAME_OPENED")
+end
+
 -- A tab is bought at the banker: the character bank's second, or the account
 -- bank's first. That changes the bank (its slot count), so for judging the
 -- visit it counts like a move: a visit closed right after it was hurried.
@@ -2113,6 +2126,7 @@ local function GenAction(rng, habits)
             a = GenWait(rng)
             if cfg.lock and rng.chance(0.25) then a = { op = "lock", ms = rng.int(100, 2000) } end
             if cfg.bankIdle and rng.chance(0.2) then a = { op = "bankidle", k = rng.int(1, 4) } end
+            if cfg.reopen and rng.chance(0.15) then a = { op = "reopen" } end
         elseif roll <= 830 then
             a = { op = "loot", id = rng.pick(ITEMS), n = rng.int(1, 5) }
         elseif roll <= 880 then
@@ -2219,6 +2233,8 @@ local function Describe(a)
         text = "the client sends an update of a bank container that changes nothing"
     elseif a.op == "craftbank" then
         text = "craft: " .. a.n .. " taken from a closed bank's container"
+    elseif a.op == "reopen" then
+        text = "the banker is clicked again: a second opening notice"
     else
         text = a.op
     end

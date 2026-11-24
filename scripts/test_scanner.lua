@@ -2243,6 +2243,101 @@ T.section("a move still on its way at the close", function()
 end)
 
 -- ===========================================================================
+-- A second opening notice while the bank is open (the banker clicked again)
+-- begins no visit of its own: the visit keeps what it knows - which bank was
+-- usable, which is unsettled, which was refused - and both banks are
+-- unsettled from it on, until a read of each is kept.
+T.section("a second opening notice while the bank is open", function()
+    local function bankDoubt() return (select(3, Memory:OwnBank(MAIN.guid))) end
+    local function accountDoubt() return (select(3, Memory:AccountBank("eu"))) end
+    local function visit()
+        fresh()
+        Inventory:Initialize()
+        advance(2.1)
+        client.bankOpen = true
+        client.bank.character = { items = { [2589] = 100 }, slots = 28 }
+        client.bank.account = { items = { [4306] = 9 }, slots = 98 }
+        client.started.onBankOpened()
+        advance(3)
+    end
+    local function close()
+        client.started.onBankClosing()
+        client.bankOpen = false
+        client.started.onBankClosed()
+    end
+    local function dump()
+        local lines = {}
+        Inventory:RunDiagnostic(lines)
+        return "\n" .. table.concat(lines, "\n") .. "\n"
+    end
+
+    -- The character bank is locked for a moment, and a withdrawal from it is
+    -- answered meanwhile: its own update unsettles it, and no read of it can
+    -- be kept. The banker is clicked again before the lock ends.
+    visit()
+    client.bank.character = nil
+    client.usable.character = false
+    client.bags = { [2589] = 25 }
+    Inventory:OnBagUpdate(6)
+    Inventory:OnBagUpdate(0)
+    advance(0.4)
+    local reads = client.reads.character
+    client.started.onBankOpened()
+    local text = dump()
+    T.check("no visit of its own: the dump shows the visit opened 3.4 s ago, and the second notice",
+        text:find("\nbank visit: open for 3.4 s; reads=6 owed=false openedAgain=1\n", 1, true) ~= nil, text)
+    T.check("the bank is read again at once", client.reads.character == reads + 1, client.reads.character - reads)
+    T.check("the locked bank stays unsettled and usable", text:find("\nbank visit character: usable=true kept=3 lastRead=refused slots=28 "
+        .. "unresolvedEmpty=false unsettled=true\n", 1, true) ~= nil, text)
+    local combined, _, meta = scan()
+    T.check("it is left out meanwhile, the other bank (read back) counts", combined[2589] == 25 and combined[4306] == 9
+        and meta.bankPending == true and meta.accountPending == nil, combined[2589])
+    advance(0.6)
+    close()
+    T.check("still unsettled at the close: marked, as it would have been without the second notice", bankDoubt() == true)
+    T.check("the account bank, read back after the second notice, is not", accountDoubt() == false)
+
+    -- Readable banks: both are read again at once and settled by it.
+    visit()
+    reads = client.reads.account
+    client.started.onBankOpened()
+    combined, _, meta = scan()
+    T.check("both read again at once and kept: both count", combined[2589] == 105 and combined[4306] == 9
+        and meta.bankPending == nil and meta.accountPending == nil and client.reads.account == reads + 1, combined[2589])
+    close()
+    T.check("nothing marked at the close", bankDoubt() == false and accountDoubt() == false)
+
+    -- Within 0.2 s of the last read the read is owed, and until it comes
+    -- both banks are left out.
+    visit()
+    Inventory:OnBagUpdate(0)                          -- read at once
+    client.started.onBankOpened()
+    combined, _, meta = scan()
+    T.check("the second notice right after a read: both banks are left out until the read",
+        combined[2589] == 5 and meta.bankPending == true and meta.accountPending == true, combined[2589])
+    text = dump()
+    T.check("and both are unsettled", text:find("\nbank visit character: [^\n]* unsettled=true\n") ~= nil
+        and text:find("\nbank visit account: [^\n]* unsettled=true\n") ~= nil, text)
+    advance(0.3)
+    combined, _, meta = scan()
+    T.check("the trailing read brings them back", combined[2589] == 105 and combined[4306] == 9 and meta.bankPending == nil
+        and meta.accountPending == nil, combined[2589])
+    close()
+    T.check("and the close marks nothing", bankDoubt() == false and accountDoubt() == false)
+
+    -- A bank that was usable earlier in the visit stays a bank of the visit.
+    visit()
+    client.usable.account = false
+    client.bank.account = nil                         -- locked from now on
+    client.started.onBankOpened()
+    advance(0.5)
+    client.inFlight = true
+    close()
+    T.check("a slot locked at the close marks the bank usable before the second notice too", accountDoubt() == true)
+    client.inFlight = false
+end)
+
+-- ===========================================================================
 -- After the close the bank cannot be read any more. The answer of a last move
 -- may still arrive, and a craft may take reagents from the closed bank: an
 -- update of a bank container marks that bank at once, whenever it comes; a

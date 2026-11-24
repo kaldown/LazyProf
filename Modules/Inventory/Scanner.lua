@@ -113,6 +113,12 @@
 --    carried bag unsettles no bank. An empty read that is not believed
 --    (rule 2) is not kept, so it settles nothing; neither does a read the
 --    adapter refused.
+--    An opening notice that comes again while the bank is open (the banker
+--    clicked again) begins no visit of its own: the visit keeps all it knows
+--    (which bank was usable, which is unsettled, which was refused, what
+--    its reads saw), both banks are unsettled from that notice on as by an
+--    update of their own containers, and they are read again as on a bag
+--    update (rule 1). The dump counts such notices (openedAgain).
 --    While the window is open a scan leaves out, and says so in its third
 --    return (bankPending, accountPending - no line is shown for that):
 --    - a bank that is unsettled;
@@ -1458,6 +1464,29 @@ end
 
 function Inventory:OnBankOpened()
     if self:UsesSyndicator() then return end
+    -- A second opening notice while the bank is open (the banker clicked
+    -- again) begins no visit of its own: the visit keeps what it knows -
+    -- which bank was usable, which is unsettled, which was refused, what its
+    -- reads saw - and both banks are unsettled from here, as by an update of
+    -- each one's own containers, until a read of each is kept (rule 3).
+    local v = visit
+    if v and not v.closedAt and not v.closing then
+        Protected("bank read", function()
+            for _, kind in ipairs(BANK_KINDS) do
+                v[kind].unsettled = true
+                v[kind].emptyAt = nil
+            end
+            v.reopened = (v.reopened or 0) + 1
+            InvalidateFrame()
+            if v.lastReadAt == nil or GetTime() - v.lastReadAt >= BANK_READ_SPACING - CLOCK_SLACK then
+                LookAtBank(self)
+            else
+                v.owed = true
+                ScheduleTrailing(v)
+            end
+        end)
+        return
+    end
     -- A comparison still due from the last close is made before its watch ends.
     if watch and watch.owed then
         Protected("bank close", SettleAfterClose)
@@ -2083,7 +2112,9 @@ local function AddBankVisitLines(add)
         else
             head = string.format("bank visit: open for %.1f s", frame - v.openedAt)
         end
-        add(head .. "; reads=" .. tostring(v.reads) .. " owed=" .. tostring(v.owed))
+        -- How often an opening notice came again while this visit was open.
+        add(head .. "; reads=" .. tostring(v.reads) .. " owed=" .. tostring(v.owed)
+            .. (v.reopened and (" openedAgain=" .. tostring(v.reopened)) or ""))
         for _, kind in ipairs(BANK_KINDS) do
             local state = v[kind]
             add("bank visit " .. kind .. ": usable=" .. tostring(state.usable) .. " kept=" .. tostring(state.kept)

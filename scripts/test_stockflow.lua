@@ -1309,6 +1309,30 @@ T.section("the close", function()
     T.check("and the dump says that a move was on its way", table.concat(lines, "\n"):find("moveInFlight=true", 1, true) ~= nil,
         table.concat(lines, "\n"))
 
+    -- The banker is clicked again while the bank is open, and the client
+    -- sends a second opening notice. The visit goes on with what it knows:
+    -- here, that the bank is unsettled - its own update came while it was
+    -- locked for a moment, and no read of it could be kept since.
+    addon = bankVisit()
+    World.bank[0].locked = 1
+    World.containers[6][1] = nil                               -- 100 withdrawn while the bank is locked
+    World.containers[0][3] = slot(LINEN, 100)
+    World.bagUpdate(addon, 6, 0)
+    World.bagUpdateDelayed(addon)
+    World.advance(0.4)
+    World.event(addon, "BANKFRAME_OPENED")                     -- the banker clicked again
+    World.advance(0.6)
+    World.event(addon, "BANKFRAME_CLOSED")                     -- still locked at the close
+    World.bank[0].locked = nil
+    World.advance(20)
+    total, bags, bank, meta = linen(addon)
+    T.check("a second opening notice while the bank is open: the visit keeps what it knew, the bank is in doubt",
+        total == 105 and bags == 105 and bank == nil and meta.bankInDoubt == true, tostring(total) .. "/" .. tostring(bank))
+    lines = {}
+    addon.Inventory:RunDiagnostic(lines)
+    T.check("and the dump counts the second notice", table.concat(lines, "\n"):find("openedAgain=1", 1, true) ~= nil,
+        table.concat(lines, "\n"))
+
     -- The read taken at the close is kept only when it looks like the reads
     -- of the visit: not refused, at least one item, the same slot count. The
     -- bank's own update is still without a kept read here (the read taken
