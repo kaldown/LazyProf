@@ -157,8 +157,11 @@ function LazyProf:SlashCommand(input)
     elseif cmd == "scan" then
         self:Print("AH scanning not yet implemented.")
     elseif cmd == "reset" then
+        -- The same words as the options' "Reset All Settings": what is
+        -- remembered of the characters' stock is kept, so it is not the
+        -- database that was reset.
         self:ResetSettings()
-        self:Print("Database reset.")
+        self:Print("Settings reset to defaults.")
     elseif cmd == "resetpanels" then
         if self.PanelShell then
             self.PanelShell:ResetPositions()

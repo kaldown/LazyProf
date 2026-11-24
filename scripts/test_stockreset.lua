@@ -138,6 +138,7 @@ T.section("/lp reset keeps the remembered stock", function()
     T.check("fixture: a setting is off its default", default ~= 25)
 
     addon.recalcs = {}
+    addon.printed = {}
     addon:SlashCommand("reset")
     T.eq("the setting is back at its default", addon.db.profile.marginPercent, default)
     T.check("the other account-wide data went with it, as before", addon.db.global.vendorPrices[LINEN] == nil)
@@ -148,7 +149,10 @@ T.section("/lp reset keeps the remembered stock", function()
     local combined = addon.Inventory:ScanAll()
     T.check("the very next scan counts them", combined[LINEN] == 125 and combined[BAR] == 50, combined[LINEN])
     T.check("a recalculation is asked for, so that what is shown is redrawn", #addon.recalcs == 1, #addon.recalcs)
-    T.check("the player is told", #addon.printed > 0)
+    -- The remembered stock is kept, so it is the settings that were reset:
+    -- the message says what the options button says.
+    T.check("the player is told what was reset", #addon.printed == 1 and addon.printed[1] == "Settings reset to defaults.",
+        table.concat(addon.printed, " | "))
 
     World.advance(5)
     total, bars = linen(addon)
@@ -173,7 +177,10 @@ T.section("Reset All Settings keeps the remembered stock", function()
         tostring(button.desc):find("LazyProf remembers for your characters are kept", 1, true) ~= nil
         and tostring(button.desc):find("Forget remembered characters", 1, true) ~= nil, button.desc)
     addon.recalcs = {}
+    addon.printed = {}
     button.func()
+    T.check("the player is told the same as by /lp reset", #addon.printed == 1 and addon.printed[1] == "Settings reset to defaults.",
+        table.concat(addon.printed, " | "))
     T.eq("the setting is back at its default", addon.db.profile.marginPercent, addon.defaults.profile.marginPercent)
     local combined = addon.Inventory:ScanAll()
     T.check("the very next scan counts bank, alt and account bank", combined[LINEN] == 125 and combined[BAR] == 50, combined[LINEN])

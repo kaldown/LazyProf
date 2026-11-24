@@ -2703,7 +2703,19 @@ T.section("diagnostic lines", function()
     local lines = {}
     Inventory:RunDiagnostic(lines)
     local text = table.concat(lines, "\n")
-    T.check("says where stock outside the bags comes from", text:find("source: LazyProf's own memory", 1, true) ~= nil, text)
+    -- Whether a line is in a dump exactly as given, with nothing after it.
+    local function hasLine(dumpText, line)
+        return ("\n" .. dumpText .. "\n"):find("\n" .. line .. "\n", 1, true) ~= nil
+    end
+    -- The addon knows one inventory addon; the line names it.
+    T.check("says where stock outside the bags comes from",
+        lines[1] == "source: LazyProf's own memory (Syndicator is not installed)", lines[1])
+    -- What a scan was tried for, and no more: which stock counts is said by
+    -- the settings line and by each character's label.
+    T.check("scan now: says that the memory reads, and nothing about what counts",
+        hasLine(text, "scan now: the memory reads without error"), text)
+    T.check("the memory line says when characters are dropped",
+        hasLine(text, "memory: format=1 characters=3 accountBanks=1 (characters not seen for 180 days are dropped)"), text)
     T.check("the settings, and beside the Self-Found setting what the game's own flag reads",
         text:find("settings: bank=true alts=true guildBank=false selfFound=false gameSelfFound=false\n", 1, true) ~= nil, text)
     T.check("who the character is", text:find("identity: guid=Player-1-MAIN name=Main Character world=eu-pvp faction=Alliance", 1, true) ~= nil, text)
@@ -2747,6 +2759,14 @@ T.section("diagnostic lines", function()
     LazyProf.db.profile.includeAltCharacters = false
     local _, offDump = labels()
     T.check("label: an alt while alts are off", offDump:find("character: Bank Alt [alt, not counted (alts off)]", 1, true) ~= nil, offDump)
+    -- With bank items and alts both off nothing of the memory is counted:
+    -- the line about the trial must not say that it is.
+    LazyProf.db.profile.includeBankItems = false
+    local _, bothOffDump = labels()
+    T.check("scan now, bank items and alts off: the same line, no word of bank or alt stock being counted",
+        hasLine(bothOffDump, "scan now: the memory reads without error")
+        and not bothOffDump:find("are counted", 1, true), bothOffDump)
+    LazyProf.db.profile.includeBankItems = true
     T.check("label: the other reasons stay as they are", offDump:find("character: Other Side [other faction]", 1, true) ~= nil
         and offDump:find("character: Solo [not counted (Self-Found)]", 1, true) ~= nil)
     LazyProf.db.profile.includeAltCharacters = true
@@ -2756,6 +2776,8 @@ T.section("diagnostic lines", function()
         soloDump:find("character: Bank Alt [not counted (this character is Self-Found)]", 1, true) ~= nil, soloDump)
     T.check("the settings line: the setting on, the game's flag off",
         soloDump:find("settings: bank=true alts=true guildBank=false selfFound=true gameSelfFound=false\n", 1, true) ~= nil, soloDump)
+    T.check("scan now, Self-Found: the same line, no word of alt stock being counted",
+        hasLine(soloDump, "scan now: the memory reads without error") and not soloDump:find("are counted", 1, true), soloDump)
     LazyProf.db.char.selfFoundMode = false
     -- Self-Found by the game's own flag, with the setting off: printed apart,
     -- and the alts are labelled as for the setting.
@@ -2839,7 +2861,24 @@ T.section("diagnostic lines", function()
         and text:find("character: Main Character [remembered, not used (Syndicator is installed)]", 1, true) ~= nil
         and text:find("character: Other Side [remembered, not used (Syndicator is installed)]", 1, true) ~= nil, text)
     T.check("and no trial of the memory is made", not text:find("scan now:", 1, true), text)
+    -- Nothing is dropped from the memory while Syndicator is installed: the
+    -- line does not say that it is.
+    T.check("with Syndicator the memory line does not speak of dropping characters",
+        hasLine(text, "memory: format=1 characters=3 accountBanks=1") and not text:find("are dropped", 1, true), text)
+    T.check("with Syndicator the source line names it",
+        lines[1] == "source: Syndicator (LazyProf's own memory is not used and not updated)", lines[1])
     _G.Syndicator = nil
+    -- A memory that cannot be read: what a scan counts then, and why.
+    do
+        local realOwnBank = Memory.OwnBank
+        Memory.OwnBank = function() error("bank table gone") end
+        local _, brokenDump = labels()
+        Memory.OwnBank = realOwnBank
+        local line = brokenDump:match("scan now: [^\n]*")
+        T.check("scan now, the memory cannot be read: bags only, with the error",
+            line ~= nil and line:find("scan now: bags only - the memory cannot be read: ", 1, true) == 1
+            and line:find("bank table gone", 1, true) ~= nil, brokenDump)
+    end
 
     -- "waiting" names every read of the bank that is still to come: a look
     -- after the opening, a trailing read, a read that is owed.

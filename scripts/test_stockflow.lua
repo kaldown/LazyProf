@@ -224,7 +224,8 @@ T.section("a failing client call", function()
         and text:find("IsGameRuleActive", 1, true) ~= nil and where == "scan", text)
     T.check("and how many there were", tonumber(howMany) ~= nil and tonumber(howMany) > 3, howMany)
     T.check("and that a scan right now counts the bags only",
-        text:find("scan now: bags only", 1, true) ~= nil and not text:find("scan now: whole", 1, true), text)
+        text:find("scan now: bags only - the memory cannot be read: ", 1, true) ~= nil
+        and not text:find("scan now: the memory reads", 1, true), text)
     local before = tonumber(howMany)
     dump()
     T.eq("the dump itself counts no failure", tonumber((dump():match("; (%d+) this session"))), before)
@@ -236,7 +237,7 @@ T.section("a failing client call", function()
     combined = World.scan(addon)
     T.eq("the call works again: the alt counts", combined[LINEN], 25)
     text = dump()
-    T.check("the dump: a scan is whole again", text:find("scan now: whole", 1, true) ~= nil
+    T.check("the dump: the memory reads again", text:find("scan now: the memory reads without error\n", 1, true) ~= nil
         and not text:find("scan now: bags only", 1, true), text)
     T.check("the dump: the failure is still on record", text:find("last error:", 1, true) ~= nil
         and tonumber((text:match("; (%d+) this session"))) == before, text)
@@ -251,7 +252,7 @@ T.section("a failing client call", function()
     World.advance(3)
     text = dump()
     T.check("a healthy session: no error line", not text:find("last error", 1, true))
-    T.check("a healthy session: a scan is whole", text:find("scan now: whole", 1, true) ~= nil, text)
+    T.check("a healthy session: the memory reads", text:find("scan now: the memory reads without error\n", 1, true) ~= nil, text)
     T.eq("a healthy session: nothing logged", #addon.debugLines, 0)
     T.eq("a healthy session: nothing handed to the error handler", #World.errors, 0)
 
@@ -274,7 +275,7 @@ T.section("a failing client call", function()
     T.eq("ten minutes later bank and alts are counted", (World.scan(addon))[LINEN], 25)
     text = dump()
     T.check("the dump names that one failure", text:find("(in: bag save; 1 this session", 1, true) ~= nil, text)
-    T.check("and says a scan is whole", text:find("scan now: whole", 1, true) ~= nil, text)
+    T.check("and says that the memory reads", text:find("scan now: the memory reads without error\n", 1, true) ~= nil, text)
     T.check("the later save went through (no flag was left set)",
         addon.db.global.stock.characters[MAIN_GUID] ~= nil and addon.db.global.stock.characters[MAIN_GUID].bags ~= nil
         and text:find("bagSave=false", 1, true) ~= nil, text)

@@ -394,8 +394,8 @@ end
 -- a session is handed to the game's error handler, so the player's error
 -- display shows it once (the debug log gets it too, but drops it while
 -- debugging is off); every one is counted, and /lp diag stock prints the
--- last one, where it happened, how many there were and whether a scan right
--- now is whole.
+-- last one, where it happened, how many there were and whether the memory
+-- reads right now.
 local memoryErrors = { count = 0, last = nil, where = nil }
 
 -- Hand a message to the game's error handler. geterrorhandler() returns it
@@ -1673,7 +1673,7 @@ function Inventory:RunDiagnostic(lines)
     if self:UsesSyndicator() then
         add("source: Syndicator (LazyProf's own memory is not used and not updated)")
     else
-        add("source: LazyProf's own memory (no inventory addon)")
+        add("source: LazyProf's own memory (Syndicator is not installed)")
     end
     -- The Self-Found setting and the game's own flag, apart: either makes
     -- the character Self-Found for stock. The flag is asked here without
@@ -1690,10 +1690,14 @@ function Inventory:RunDiagnostic(lines)
     end
     -- What a scan does right now: tried here, on tables that are thrown
     -- away, so that a failure long over does not read as stock left out.
+    -- The line says only what was tried - that the memory reads. Which of
+    -- its stock counts is said by the settings line and by each character's
+    -- label (with bank items and alts off, or on a client without a bank,
+    -- nothing of it may count at all).
     if not self:UsesSyndicator() then
         local whole, err = pcall(AddRememberedStock, self, {}, {}, profile.includeAltCharacters and not selfFound, selfFound)
         if whole then
-            add("scan now: whole - bank and alt stock are counted from the memory")
+            add("scan now: the memory reads without error")
         else
             add("scan now: bags only - the memory cannot be read: " .. tostring(err))
         end
@@ -1804,9 +1808,11 @@ function Inventory:RunDiagnostic(lines)
         add("memory: format=" .. tostring(summary.schema) .. " - not a format this version reads; it is left alone")
         return
     end
+    -- Old characters are dropped at the start of a session that uses the
+    -- memory. With Syndicator installed none is, so the line leaves that out.
     add("memory: format=" .. tostring(summary.schema) .. " characters=" .. tostring(#summary.characters)
         .. " accountBanks=" .. tostring(#summary.account)
-        .. " (characters not seen for " .. tostring(Memory.KEEP_DAYS) .. " days are dropped)")
+        .. (self:UsesSyndicator() and "" or (" (characters not seen for " .. tostring(Memory.KEEP_DAYS) .. " days are dropped)")))
     if summary.unreadable > 0 then
         add("memory: unreadable=" .. tostring(summary.unreadable)
             .. " (saved entries that are not what LazyProf writes; they are skipped, and Forget remembered characters removes them)")
