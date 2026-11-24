@@ -780,23 +780,29 @@ end
 --   world    WorldKey() above
 --   faction  UnitFactionGroup("player"), its first return
 --            (UnitDocumentation.lua:1207-1222)
--- None of them changes during a session, so a complete read is kept.
+-- Guid, name and faction do not change during a session, so a complete read
+-- of the three is kept. The world is worked out again at every ask (three
+-- rule reads and the region): whether the game rules read true from the very
+-- first moment after login is not known, and a world kept from a moment in
+-- which they read false would file the character under the wrong world for
+-- the whole session.
 -- Verify in game: the GUID is the same after a relog and on another shard.
-local identity = nil
+local who = nil
 
 function Client:CharacterIdentity()
-    if identity then return identity end
-    local guid = Readable(UnitGUID("player"))
-    local result = {
-        guid = type(guid) == "string" and guid or nil,
-        name = Readable(NameUtil.GetUnmodifiedUnitFullName("player")),
-        world = WorldKey(),
-        faction = Readable((UnitFactionGroup("player"))),
-    }
-    if result.guid and result.name and result.world and result.faction then
-        identity = result
+    local known = who
+    if not known then
+        local guid = Readable(UnitGUID("player"))
+        known = {
+            guid = type(guid) == "string" and guid or nil,
+            name = Readable(NameUtil.GetUnmodifiedUnitFullName("player")),
+            faction = Readable((UnitFactionGroup("player"))),
+        }
+        if known.guid and known.name and known.faction then
+            who = known
+        end
     end
-    return result
+    return { guid = known.guid, name = known.name, world = WorldKey(), faction = known.faction }
 end
 
 -- Server time in seconds (SystemTimeDocumentation.lua:30-36): the same on

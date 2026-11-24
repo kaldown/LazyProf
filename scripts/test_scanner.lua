@@ -556,6 +556,23 @@ T.section("the alts' part is kept between scans", function()
     nextFrame()
     T.eq("after the start dropped the old one: only the other", (Inventory:ScanAll())[2589], 5 + 7)
 
+    -- It is kept for the world and faction the character is of right now.
+    fresh()
+    Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW)
+    Memory:SaveBags(HORDE, { [2589] = 7000 }, {}, NOW)
+    Memory:SaveBags({ guid = "Player-1-NORMAL", name = "Elsewhere", world = "eu-normal", faction = "Alliance" }, { [2589] = 300 }, {}, NOW)
+    nextFrame()
+    T.eq("the alts of this world and faction", (Inventory:ScanAll())[2589], 25)
+    client.identity = { guid = MAIN.guid, name = MAIN.name, world = "eu-normal", faction = "Alliance" }
+    nextFrame()
+    T.eq("the world reads differently: the part of the other world is not used", (Inventory:ScanAll())[2589], 305)
+    client.identity = { guid = MAIN.guid, name = MAIN.name, world = "eu-pvp", faction = "Horde" }
+    nextFrame()
+    T.eq("the faction reads differently: neither", (Inventory:ScanAll())[2589], 7005)
+    client.identity = MAIN
+    nextFrame()
+    T.eq("and back", (Inventory:ScanAll())[2589], 25)
+
     -- While who the character is cannot be read, nothing is kept.
     fresh()
     Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW)

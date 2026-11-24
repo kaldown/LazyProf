@@ -979,6 +979,20 @@ section("stock", function()
     id = client:CharacterIdentity()
     check(p .. "identity: a complete read is kept", id.guid == "Player-4444-0A1B2C3D" and guidCalls == 0, guidCalls)
     guid = "Player-4444-0A1B2C3D"
+    -- The world is not kept: the game rules can read false in the first
+    -- moments after login, and a world frozen then would be wrong for good.
+    rules = {}
+    id, client = identityOf()
+    check(p .. "identity: the rules read false at first", id.world == "eu-normal" and id.guid ~= nil, id.world)
+    rules = { [213] = true }
+    guidCalls = 0
+    id = client:CharacterIdentity()
+    check(p .. "identity: the world is worked out again at every ask", id.world == "eu-pvp", id.world)
+    check(p .. "identity: while who the character is stays the kept read", id.guid == "Player-4444-0A1B2C3D"
+        and id.name == "Thrag Ironhide" and id.faction == "Horde" and guidCalls == 0, guidCalls)
+    rules = { [10] = true, [213] = true }
+    check(p .. "identity: and again", client:CharacterIdentity().world == "eu-hc-pvp", client:CharacterIdentity().world)
+    rules = { [213] = true }
 
     -- The clock ----------------------------------------------------------------
     _G.GetServerTime = function() return 1763900000 end

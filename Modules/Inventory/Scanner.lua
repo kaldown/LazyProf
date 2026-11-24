@@ -288,21 +288,23 @@ end
 
 -- The alts' part of a scan, kept between scans. Building it copies every
 -- alt's stock, and the light refresh scans up to three times a second while
--- crafting. It depends on who the character is, on whether banks count and
--- on the other characters' saved records - so it is kept under those and
--- built again when the character or that setting differs, when the saved
--- table was replaced as a whole, and when the other characters changed
--- (Forget, and dropping old ones at the start). What the character itself
--- saves does not touch it. Its tables are handed to every scan as they are:
--- read them, do not change them.
---   { guid, countBank, token,
+-- crafting. It depends on who the character is (its id, and the world and
+-- faction it is of right now - the world is read again at every ask and can
+-- differ from the one read at login), on whether banks count and on the other
+-- characters' saved records - so it is kept under those and built again when
+-- any of them differs, when the saved table was replaced as a whole, and when
+-- the other characters changed (Forget, and dropping old ones at the start).
+-- What the character itself saves does not touch it. Its tables are handed to
+-- every scan as they are: read them, do not change them.
+--   { guid, world, faction, countBank, token,
 --     totals  = { [itemId] = count over all alts },
 --     sources = { [itemId] = { [name] = { bags, bank } } },
 --     seen    = { [name] = { bags = time, bank = time } } }
 local altsPart = nil
 
 local function BuildAltsPart(identity, countBank)
-    local part = { guid = identity.guid, countBank = countBank, totals = {}, sources = {}, seen = {} }
+    local part = { guid = identity.guid, world = identity.world, faction = identity.faction, countBank = countBank,
+                   totals = {}, sources = {}, seen = {} }
     local where = {}
     for _, alt in ipairs(LazyProf.StockMemory:Alts(identity)) do
         local seen = {}
@@ -326,7 +328,8 @@ end
 local function AltsPart(identity, countBank)
     local token = LazyProf.StockMemory:Token()
     local part = altsPart
-    if part and token ~= nil and part.token == token and part.guid == identity.guid and part.countBank == countBank then
+    if part and token ~= nil and part.token == token and part.guid == identity.guid
+            and part.world == identity.world and part.faction == identity.faction and part.countBank == countBank then
         return part
     end
     part = BuildAltsPart(identity, countBank)

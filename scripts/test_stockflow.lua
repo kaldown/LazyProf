@@ -324,6 +324,50 @@ T.section("the newest record of a name decides", function()
 end)
 
 -- ===========================================================================
+-- The game rules that name the world can read false in the first moments
+-- after login. The character must not be filed under that world for the rest
+-- of the session.
+-- ===========================================================================
+T.section("the world is read again, not kept from login", function()
+    local now = World.serverTime
+    World.reset()
+    World.rules = {}                               -- not there yet: the world reads as eu-normal
+    World.containers = { [0] = { slots = 16, slot(LINEN, 5) } }
+    local saved = { stock = { schema = 1, account = { ["eu-pvp"] = { items = { [BAR] = 50 }, at = now - 100 } },
+        characters = { ALT = { name = "Alt Goldtooth", world = "eu-pvp", faction = "Horde", seen = now - 100,
+            bags = { items = { [LINEN] = 20 }, at = now - 100 } } } } }
+    local addon = World.login(saved)
+    local combined = World.scan(addon)
+    T.check("while the rules read false nothing of eu-pvp counts", combined[LINEN] == 5 and combined[BAR] == nil, combined[LINEN])
+    World.advance(3)
+    T.eq("the first save files the character under what was read", saved.stock.characters[MAIN_GUID].world, "eu-normal")
+    T.check("the start-up cleaning left the real world's account bank alone", saved.stock.account["eu-pvp"] ~= nil)
+
+    World.rules = { [213] = true }                 -- the rules are there
+    World.nextFrame()
+    combined = World.scan(addon)
+    T.eq("the alt of the real world counts as soon as the rules read true", combined[LINEN], 25)
+    T.eq("and so does that world's account bank", combined[BAR], 50)
+    local lines = {}
+    addon.Inventory:RunDiagnostic(lines)
+    T.check("the dump names the world as it is now",
+        table.concat(lines, "\n"):find("identity: guid=" .. MAIN_GUID .. " name=Main Goldtooth world=eu-pvp faction=Horde", 1, true) ~= nil,
+        table.concat(lines, "\n"))
+    World.bagUpdate(addon, 0)
+    World.advance(3)
+    T.eq("the next save puts the record right", saved.stock.characters[MAIN_GUID].world, "eu-pvp")
+
+    -- Seen from the alt, the character is now one of its world.
+    World.event(addon, "PLAYER_LOGOUT")
+    World.reset()
+    World.guid, World.name = "ALT", "Alt Goldtooth"
+    World.containers = { [0] = { slots = 16, slot(LINEN, 20) } }
+    local alt = World.login(saved)
+    World.advance(3)
+    T.eq("and its alt counts it", (World.scan(alt))[LINEN], 25)
+end)
+
+-- ===========================================================================
 -- An item moves between the bags and the bank and the window closes in the
 -- same frame. What is owned (105 linen: 5 carried, 100 in the bank) must come
 -- out of the scan afterwards, not 165 and not 100.
