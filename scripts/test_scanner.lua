@@ -374,6 +374,145 @@ T.section("frame cache", function()
 end)
 
 -- ===========================================================================
+-- Building the alts' part of a scan copies every alt's stock. The light
+-- refresh scans up to three times a second while crafting, so that part is
+-- kept between scans and built again only when it can have changed.
+T.section("the alts' part is kept between scans", function()
+    fresh()
+    for i = 1, 20 do
+        local alt = { guid = "Player-1-ALT" .. i, name = "Alt Number " .. i, world = "eu-pvp", faction = "Alliance" }
+        local bags, bank, bound = {}, {}, {}
+        for k = 1, 40 do
+            bags[3000 + ((i * 31 + k) % 500)] = 20
+            bank[3000 + ((i * 17 + k) % 500)] = 10
+            if k % 9 == 0 then bound[3000 + ((i * 31 + k) % 500)] = 5 end
+        end
+        Memory:SaveBags(alt, bags, bound, NOW - i * 3600)
+        Memory:SaveBank(alt, bank, {}, NOW - i * 7200)
+    end
+    Memory:SaveBank(MAIN, { [2589] = 40 }, {}, NOW)
+    Inventory:Initialize()
+    advance(2.1)
+
+    local built = 0
+    local realAlts = Memory.Alts
+    Memory.Alts = function(...)
+        built = built + 1
+        return realAlts(...)
+    end
+    local function same(a, b)
+        if type(a) ~= type(b) then return false end
+        if type(a) ~= "table" then return a == b end
+        for k, v in pairs(a) do if not same(v, b[k]) then return false end end
+        for k in pairs(b) do if a[k] == nil then return false end end
+        return true
+    end
+    -- What a scan gives when nothing is kept.
+    local function uncached()
+        Inventory:ForgetAltsPart()
+        local before = built
+        local combined, breakdown, meta = scan()
+        built = before
+        Inventory:ForgetAltsPart()
+        return combined, breakdown, meta
+    end
+    local wantCombined, wantBreakdown, wantMeta = uncached()
+    T.check("fixture: the alts hold stock", count(wantMeta.alts) == 20 and count(wantCombined) > 100, count(wantCombined))
+
+    built = 0
+    local allSame = true
+    for _ = 1, 50 do
+        nextFrame()
+        local combined, breakdown, meta = Inventory:ScanAll()
+        if not (same(combined, wantCombined) and same(breakdown, wantBreakdown) and same(meta, wantMeta)) then allSame = false end
+    end
+    T.eq("fifty scans build the alts' part once", built, 1)
+    T.check("and each gives what an uncached scan gives", allSame)
+
+    -- What the character itself does leaves it alone.
+    client.bags = { [2589] = 6, [765] = 2 }
+    Inventory:SaveBags(true)
+    client.bankOpen = true
+    client.bank.character = { items = { [2589] = 41 } }
+    built = 0
+    client.started.onBankOpened()
+    advance(3)
+    client.bankOpen = false
+    Inventory:InvalidateCache()              -- as every recalculation does
+    local combined, breakdown, meta = Inventory:ScanAll()
+    T.eq("the character's own saves, a bank visit and a recalculation do not build it again", built, 0)
+    T.check("while its own stock is the new one", breakdown[2589].bags == 6 and breakdown[2589].bank == 41)
+
+    -- Bank items off: another part (no alt banks), built once.
+    LazyProf.db.profile.includeBankItems = false
+    built = 0
+    for _ = 1, 5 do nextFrame(); combined, breakdown, meta = Inventory:ScanAll() end
+    T.eq("another setting for the bank: built once more", built, 1)
+    local anyBank = false
+    for _, where in pairs(breakdown) do
+        for _, sources in pairs(where.alts or {}) do if sources.bank then anyBank = true end end
+    end
+    T.check("and without the alts' banks", anyBank == false)
+    LazyProf.db.profile.includeBankItems = true
+    nextFrame()
+    Inventory:ScanAll()
+
+    -- Alts off or Self-Found: not asked for at all.
+    LazyProf.db.profile.includeAltCharacters = false
+    built = 0
+    nextFrame()
+    combined, breakdown, meta = Inventory:ScanAll()
+    T.check("alts off: not built, nothing of them counted", built == 0 and next(meta.alts) == nil)
+    LazyProf.db.profile.includeAltCharacters = true
+    LazyProf.db.char.selfFoundMode = true
+    nextFrame()
+    Inventory:InvalidateCache()
+    combined, breakdown, meta = Inventory:ScanAll()
+    T.check("Self-Found: not built, nothing of them counted", built == 0 and next(meta.alts) == nil)
+    LazyProf.db.char.selfFoundMode = false
+
+    -- Forget: the other characters changed.
+    nextFrame()
+    Inventory:ScanAll()
+    built = 0
+    Inventory:ForgetRemembered()
+    combined, breakdown, meta = Inventory:ScanAll()
+    T.eq("after Forget it is built again", built, 1)
+    T.check("and holds nobody", next(meta.alts) == nil and count(combined) == count(client.bags))
+
+    -- The saved table was replaced as a whole (a database reset): the part of the old one is not used.
+    Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW)
+    Inventory:ForgetAltsPart()
+    nextFrame()
+    T.eq("an alt again", (Inventory:ScanAll())[2589], 26)
+    LazyProf.db.global = { characters = {} }
+    nextFrame()
+    built = 0
+    T.eq("the saved table replaced: its alts are gone from the scan", (Inventory:ScanAll())[2589], 6)
+
+    -- Dropping old characters at the start is a change of the others too.
+    fresh()
+    Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW - 181 * DAY)
+    Memory:SaveBags(FARMER, { [2589] = 7 }, {}, NOW)
+    nextFrame()
+    T.eq("before the start: both alts", (Inventory:ScanAll())[2589], 5 + 20 + 7)
+    Inventory:Initialize()
+    nextFrame()
+    T.eq("after the start dropped the old one: only the other", (Inventory:ScanAll())[2589], 5 + 7)
+
+    -- While who the character is cannot be read, nothing is kept.
+    fresh()
+    Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW)
+    client.identity = { guid = MAIN.guid, faction = "Alliance" }     -- no world yet, no name
+    nextFrame()
+    T.eq("the character is not known yet: no alts", (Inventory:ScanAll())[2589], 5)
+    client.identity = MAIN
+    nextFrame()
+    T.eq("known a moment later: the alts count", (Inventory:ScanAll())[2589], 25)
+    Memory.Alts = realAlts
+end)
+
+-- ===========================================================================
 T.section("the bags are remembered a moment after they change", function()
     fresh()
     Inventory:Initialize()

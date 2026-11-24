@@ -267,6 +267,17 @@ function StockMemory:Alts(identity)
     return list
 end
 
+-- The saved table of characters itself, as a token: a caller that keeps
+-- something worked out from the other characters can tell by it that the
+-- whole saved table was replaced (a database reset). Not for reading. nil
+-- while nothing is saved or the saved table is in another format.
+function StockMemory:Token()
+    local global = LazyProf.db and LazyProf.db.global
+    local stock = type(global) == "table" and global.stock or nil
+    if type(stock) ~= "table" or (stock.schema ~= nil and stock.schema ~= SCHEMA) then return nil end
+    return type(stock.characters) == "table" and stock.characters or nil
+end
+
 -- Drop the characters not seen for KEEP_DAYS days (a deleted character must
 -- not supply stock for ever) and whatever is saved in a record's place
 -- without being one, and the account banks of worlds no remembered character

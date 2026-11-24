@@ -282,6 +282,63 @@ local function AddSyndicatorStock(self, combined, breakdown, countAlts)
     end
 end
 
+-- The alts' part of a scan, kept between scans. Building it copies every
+-- alt's stock, and the light refresh scans up to three times a second while
+-- crafting. It depends on who the character is, on whether banks count and
+-- on the other characters' saved records - so it is kept under those and
+-- built again when the character or that setting differs, when the saved
+-- table was replaced as a whole, and when the other characters changed
+-- (Forget, and dropping old ones at the start). What the character itself
+-- saves does not touch it. Its tables are handed to every scan as they are:
+-- read them, do not change them.
+--   { guid, countBank, token,
+--     totals  = { [itemId] = count over all alts },
+--     sources = { [itemId] = { [name] = { bags, bank } } },
+--     seen    = { [name] = { bags = time, bank = time } } }
+local altsPart = nil
+
+local function BuildAltsPart(identity, countBank)
+    local part = { guid = identity.guid, countBank = countBank, totals = {}, sources = {}, seen = {} }
+    local where = {}
+    for _, alt in ipairs(LazyProf.StockMemory:Alts(identity)) do
+        local seen = {}
+        if alt.bags then
+            mergeSource(alt.bags, "bags", alt.name, part.totals, where)
+            seen.bags = alt.bagsAt
+        end
+        if countBank and alt.bank then
+            mergeSource(alt.bank, "bank", alt.name, part.totals, where)
+            seen.bank = alt.bankAt
+        end
+        part.seen[alt.name] = seen
+    end
+    for itemId, entry in pairs(where) do
+        part.sources[itemId] = entry.alts
+    end
+    return part
+end
+
+-- The alts' part for this character and setting: the kept one, or a new one.
+local function AltsPart(identity, countBank)
+    local token = LazyProf.StockMemory:Token()
+    local part = altsPart
+    if part and token ~= nil and part.token == token and part.guid == identity.guid and part.countBank == countBank then
+        return part
+    end
+    part = BuildAltsPart(identity, countBank)
+    part.token = token
+    -- Kept only once the character is fully known: before that nothing is
+    -- an alt, and that answer must not stick.
+    local known = identity.guid and identity.name and identity.world and identity.faction
+    altsPart = (token ~= nil and known) and part or nil
+    return part
+end
+
+-- The other characters' saved records changed: build the alts' part anew.
+function Inventory:ForgetAltsPart()
+    altsPart = nil
+end
+
 -- Stock from LazyProf's own memory. Returns how old each part is:
 --   { remembered = true,
 --     bankSeenAt     when the character's bank was seen (nil: never, or not counted)
@@ -317,18 +374,17 @@ local function AddRememberedStock(self, combined, breakdown, countAlts)
     end
 
     if countAlts then
-        for _, alt in ipairs(Memory:Alts(identity)) do
-            local seen = {}
-            if alt.bags then
-                mergeSource(alt.bags, "bags", alt.name, combined, breakdown)
-                seen.bags = alt.bagsAt
+        local part = AltsPart(identity, countBank)
+        for itemId, count in pairs(part.totals) do
+            combined[itemId] = (combined[itemId] or 0) + count
+            local entry = breakdown[itemId]
+            if not entry then
+                entry = {}
+                breakdown[itemId] = entry
             end
-            if countBank and alt.bank then
-                mergeSource(alt.bank, "bank", alt.name, combined, breakdown)
-                seen.bank = alt.bankAt
-            end
-            meta.alts[alt.name] = seen
+            entry.alts = part.sources[itemId]
         end
+        meta.alts = part.seen
     end
     return meta
 end
@@ -391,7 +447,9 @@ local function InvalidateFrame()
     scanCache.meta = nil
 end
 
--- Invalidate the ScanAll cache (call when inventory changes mid-frame)
+-- Invalidate the ScanAll cache (call when inventory or a stock setting
+-- changes mid-frame). The alts' part is not dropped by this: it is kept under
+-- what it depends on (see AltsPart).
 function Inventory:InvalidateCache()
     InvalidateFrame()
 end
@@ -682,6 +740,7 @@ function Inventory:Initialize()
             LazyProf.StockMemory:Prune(Client:Now(), identity.guid)
         end
     end)
+    self:ForgetAltsPart()
     self:RequestBagSave()
 end
 
@@ -702,6 +761,7 @@ end
 function Inventory:ForgetRemembered()
     LazyProf.StockMemory:Forget()
     self:InvalidateCache()
+    self:ForgetAltsPart()
     visitSlots = {}
     Protected("bank read", self.LookAtOpenBank, self)
     self:RequestBagSave()
