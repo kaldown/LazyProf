@@ -1820,8 +1820,10 @@ T.section("after the close", function()
         and meta.bankPending == true, combined[2589])
     client.bags = { [2589] = 5 }
     Inventory:OnBagUpdate(0)
+    refreshes = 0
     nextFrame()
     T.check("and the comparison finds nothing risen: no mark", inDoubt() == false and (scan())[2589] == 105)
+    T.check("a shown list is asked to redraw: the scan that left the bank out may have been drawn", refreshes >= 1, refreshes)
 
     -- A count that fell marks nothing, nor one that rose for an item no
     -- remembered bank of the visit holds.
@@ -1885,11 +1887,13 @@ T.section("after the close", function()
     -- Nothing changed in the bags: no doubt.
     closedVisit()
     advance(0.08)
+    refreshes = 0
     Inventory:OnBagUpdate(0)
     Inventory:OnBagUpdate(1)
     nextFrame()
     T.check("updates that change no count mark nothing", inDoubt() == false and accountDoubt() == false)
     T.eq("they were compared once", client.reads.bags, 1)
+    T.eq("and ask for no redraw: no scan left a bank out meanwhile", refreshes, 0)
     -- Bags that cannot be read are not compared: that decides nothing and
     -- the comparison stays due.
     client.bags, client.backpackSlots = { [2589] = 65 }, 0

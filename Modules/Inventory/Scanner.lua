@@ -792,6 +792,7 @@ local closedBankUpdates = { count = 0, lastAfter = nil }
 --                     and how long after the close the last one came
 --   bagUpdates, bagLast     the same for carried bags inside CLOSE_WATCH
 --   owed, pending     a comparison is due; its timer is waiting
+--   scanLeftOut       a scan left a bank out for the comparison that is due
 --   compared          how many comparisons were made
 --   done[kind]        the remembered bank carries the doubt mark: nothing
 --                     more to find out about it
@@ -1359,6 +1360,18 @@ SettleAfterClose = function()
         end
     end
     LowerNote(w.note, items)
+    -- A scan that left a bank out for this comparison may have been drawn:
+    -- when nothing was marked the bank counts again, and nothing else would
+    -- say so.
+    if w.scanLeftOut then
+        w.scanLeftOut = false
+        if not marked then
+            InvalidateFrame()
+            if LazyProf.ScheduleShoppingListRefresh then
+                LazyProf:ScheduleShoppingListRefresh()
+            end
+        end
+    end
     return marked
 end
 
@@ -1380,6 +1393,9 @@ RisenAfterClose = function(bagItems)
         end
     end
     LowerNote(w.note, bagItems)
+    if leaveOut then
+        w.scanLeftOut = true
+    end
     return leaveOut
 end
 
