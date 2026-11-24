@@ -1364,8 +1364,10 @@ T.section("the whole calculation", function()
     PF:SetTargetSkill("leatherworking", 120, 100, milestones)
 
     -- The stock the scan reports reaches the planner.
-    LazyProf.Inventory.ScanAll = function() return { [LEATHER] = 80 }, { [LEATHER] = { bank = 80 } } end
+    local stockMeta = { remembered = true, bankSeenAt = 1000, alts = {} }
+    LazyProf.Inventory.ScanAll = function() return { [LEATHER] = 80 }, { [LEATHER] = { bank = 80 } }, stockMeta end
     path = build()
+    T.check("scanned stock: how old it is travels on the path", path.stockMeta == stockMeta)
     local stockCandidate
     for _, c in ipairs(path.route.candidates) do
         if c.key == "stock" then stockCandidate = c end
@@ -1375,6 +1377,8 @@ T.section("the whole calculation", function()
     T.eq("scanned stock: the market route is costed with it too", path.route.candidates[1].spend, 0)
     T.check("scanned stock: the path carries it", path.inventory[LEATHER] == 80)
     LazyProf.Inventory.ScanAll = function() return {}, {} end
+    store.route = nil
+    T.check("a scan without ages (an inventory addon's stock): none on the path", build().stockMeta == nil)
     store.route = nil
 
     LazyProf.db.profile.saleValueMode = "none"

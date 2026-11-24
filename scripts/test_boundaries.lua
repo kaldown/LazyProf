@@ -1,7 +1,9 @@
 -- Boundary test: client APIs may only appear inside the client adapter
--- (Core/Client/) and the widget layer (Modules/UI/Widgets/), and calls that
--- do not exist on WoW Forever may only appear in Classic-only code. Strips
--- `--` comments, then fails listing file:line for every forbidden name.
+-- (Core/Client/) and the widget layer (Modules/UI/Widgets/), a few only in
+-- the adapter, and calls that do not exist on WoW Forever may only appear in
+-- Classic-only code. Strips `--` comments, then fails listing file:line for
+-- every forbidden name.
+-- Also: the events of the stock memory are each registered in one place.
 -- Run from the repo root: lua5.1 scripts/test_boundaries.lua
 
 local FORBIDDEN = {
@@ -14,9 +16,31 @@ local FORBIDDEN = {
     -- Trainer window calls and the map (the adapter's TrainerInfo / TrainerServices)
     "GetTrainer", "GetNumTrainerServices", "IsTradeskillTrainer", "BuyTrainerService", "ClassTrainerFrame",
     "C_Map", "GetRealZoneText", "GetSubZoneText",
+    -- Bags and the bank (the adapter's BagContents / BankContents / IsBankOpen),
+    -- and the locks of their slots (the adapter's MoveInFlight / BagContents)
+    "C_Container", "GetContainerItemInfo", "GetContainerNumSlots", "C_Bank", "BANKFRAME", "BANK_TABS_CHANGED",
+    "isLocked", "ITEM_LOCK",
+    -- The world a character belongs to and the server clock (the adapter's
+    -- CharacterIdentity / Now): a realm name is no stable key on every client
+    "C_GameRules", "GetCurrentRegion", "GetRealmName", "GetServerTime",
+    -- Which container is which and which bank is which, the client's way of
+    -- writing a full name, the game's own Self-Found flag and its error
+    -- handler (the adapter's BagContents / BankKindOfBag / CharacterIdentity /
+    -- IsSelfFoundCharacter / ShowError)
+    "Enum.BagIndex", "Enum.BankType", "NameUtil", "C_PlayerInfo", "geterrorhandler",
 }
 
 local EXEMPT_DIRS = { "Core/Client/", "Modules/UI/Widgets/" }
+
+-- Calls that only the client adapter may make: not the widget layer either.
+-- The client's own count of an item (the adapter's ClientItemCounts, which
+-- only /lp diag stock may ask until it is known whether that count sees a
+-- closed bank), as a field of C_Item and as the global of older clients, and
+-- whether crafts may take reagents from the bank (printed by the adapter's
+-- stock dump only).
+local ADAPTER_DIR = "Core/Client/"
+local ADAPTER_ONLY = { "C_Item.GetItemCount", "ReagentsFromBankAllowed" }
+local ADAPTER_ONLY_BARE = { "GetItemCount" }
 
 local function strip_comment(line)
     -- Good enough for this codebase: drop from the first `--` outside a string.
@@ -56,9 +80,37 @@ local function hasBareCall(line, name)
     end
 end
 
+-- The checks of the adapter-only calls must see a use and nothing else: a
+-- method of the same name (Inventory:GetItemCount reads the bags) is none.
+local function adapterOnlyUse(line)
+    for _, name in ipairs(ADAPTER_ONLY) do
+        if line:find(name, 1, true) then return name end
+    end
+    for _, name in ipairs(ADAPTER_ONLY_BARE) do
+        if hasBareCall(line, name) then return name .. "(" end
+    end
+    return nil
+end
+local selfCheck = {
+    { "local n = C_Item.GetItemCount(itemId, true, false, false, true)", "C_Item.GetItemCount" },
+    { "if ReagentsFromBankAllowed() then", "ReagentsFromBankAllowed" },
+    { "local n = GetItemCount(itemId, true)", "GetItemCount(" },
+    { "function Inventory:GetItemCount(itemId)", nil },
+    { "local have = LazyProf.Inventory:GetItemCount(2589)", nil },
+    { "local have = Inventory.GetItemCount(Inventory, 2589)", nil },
+}
+for _, case in ipairs(selfCheck) do
+    assert(adapterOnlyUse(case[1]) == case[2], "the adapter-only check reads '" .. case[1] .. "' wrong: "
+        .. tostring(adapterOnlyUse(case[1])))
+end
+
 local function hasBareGetItemInfo(line)
     return hasBareCall(line, "GetItemInfo")
 end
+
+-- Global calls WoW Forever does not have (their C_Item / C_Container forms
+-- are the ones to use there).
+local FOREVER_BARE_FORBIDDEN = { "GetItemInfo", "GetContainerItemInfo", "GetContainerNumSlots" }
 
 -- Client globals that may only be called inside the adapter: the character's
 -- professions (spell-book list on WoW Forever) and money.
@@ -77,7 +129,63 @@ for f in p:lines() do files[#files + 1] = f end
 p:close()
 assert(#files > 0, "no Lua files found (run from the repo root)")
 
+-- The addon object has one handler per event: a second registration of an
+-- event silently replaces the first. So each event of the stock memory is
+-- registered in exactly one place: the bank window's events and logout in the
+-- client adapter (logout once in each adapter - one of the two loads), the
+-- two bag events in Core/Init.lua, which passes them on to the scanner.
+-- [event] = { [file] = how often it is registered there }; anywhere else: never.
+local REGISTERED_IN = {
+    PLAYER_LOGOUT = { ["Core/Client/Classic.lua"] = 1, ["Core/Client/Forever.lua"] = 1 },
+    BANKFRAME_OPENED = { ["Core/Client/Forever.lua"] = 1 },
+    BANKFRAME_CLOSED = { ["Core/Client/Forever.lua"] = 1 },
+    BANK_TABS_CHANGED = { ["Core/Client/Forever.lua"] = 1 },
+    BAG_UPDATE = { ["Core/Init.lua"] = 1 },
+    BAG_UPDATE_DELAYED = { ["Core/Init.lua"] = 1 },
+}
+
 local offenders = {}
+
+local registered = {}   -- [event] = { [file] = count }
+for _, path in ipairs(files) do
+    for raw in io.lines(path) do
+        for event in strip_comment(raw):gmatch("RegisterEvent%s*%(%s*[\"']([%w_]+)[\"']") do
+            if REGISTERED_IN[event] then
+                registered[event] = registered[event] or {}
+                registered[event][path] = (registered[event][path] or 0) + 1
+            end
+        end
+    end
+end
+for event, expected in pairs(REGISTERED_IN) do
+    local found = registered[event] or {}
+    for path, count in pairs(found) do
+        if (expected[path] or 0) ~= count then
+            offenders[#offenders + 1] = string.format("%s: %s is registered %d time(s) here, expected %d", path, event, count,
+                expected[path] or 0)
+        end
+    end
+    for path, count in pairs(expected) do
+        if found[path] == nil then
+            offenders[#offenders + 1] = string.format("%s: %s is not registered here, expected %d time(s)", path, event, count)
+        end
+    end
+end
+table.sort(offenders)
+
+for _, path in ipairs(files) do
+    if path:sub(1, #ADAPTER_DIR) ~= ADAPTER_DIR then
+        local n = 0
+        for raw in io.lines(path) do
+            n = n + 1
+            local name = adapterOnlyUse(strip_comment(raw))
+            if name then
+                offenders[#offenders + 1] = string.format("%s:%d: %s (only the client adapter may use it)", path, n, name)
+            end
+        end
+    end
+end
+
 for _, path in ipairs(files) do
     if not exempt(path) then
         local n = 0
@@ -102,8 +210,8 @@ for _, path in ipairs(files) do
 end
 
 -- Forever runs the shared code too, so no file may use the legacy UI calls
--- or the global item-info call (C_Item.GetItemInfo instead) - except the
--- Classic adapter and the Classic section of the dropdown widget, which only
+-- or the global item-info and container calls (C_Item / C_Container instead)
+-- - except the Classic adapter and the Classic section of the dropdown widget, which only
 -- run on Classic clients. That section runs from the "-- Classic ---" line to
 -- the "-- Forever ---" line of Modules/UI/Widgets/Dropdown.lua.
 local FOREVER_FORBIDDEN = {
@@ -140,9 +248,13 @@ for _, path in ipairs(files) do
                         offenders[#offenders + 1] = string.format("%s:%d: %s (not on Forever)", path, n, name)
                     end
                 end
-                -- Outside the exempt directories the general check above already reports it.
-                if exempt(path) and hasBareGetItemInfo(line) then
-                    offenders[#offenders + 1] = string.format("%s:%d: GetItemInfo( (not on Forever)", path, n)
+                -- Outside the exempt directories the general check above already reports them.
+                if exempt(path) then
+                    for _, name in ipairs(FOREVER_BARE_FORBIDDEN) do
+                        if hasBareCall(line, name) then
+                            offenders[#offenders + 1] = string.format("%s:%d: %s( (not on Forever)", path, n, name)
+                        end
+                    end
                 end
             end
         end
@@ -165,7 +277,8 @@ end
 
 if #offenders > 0 then
     for _, o in ipairs(offenders) do print(o) end
-    print(string.format("FAIL: %d forbidden client-API use(s) (outside the adapter, or a call that does not exist on Forever)", #offenders))
+    print(string.format("FAIL: %d forbidden client-API use(s) (outside the adapter, or a call that does not exist on Forever) "
+        .. "or event registration(s) out of place", #offenders))
     os.exit(1)
 end
 print(string.format("boundaries: OK (%d files scanned)", #files))

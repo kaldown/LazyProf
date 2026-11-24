@@ -628,6 +628,460 @@ function Client:RunTrainerDiagnostic(lines)
     end)
 end
 
+-- Stock: bags, the bank, who the character is, the clock ------------------------
+-- Paths below are under Blizzard_APIDocumentationGenerated/ unless they name
+-- another folder.
+
+-- Add what a container holds to `items` ({ [itemId] = count }), the
+-- soulbound part of it to `bound` and, when `locked` is given, the part in
+-- slots that read as locked (a move of them on its way, see MoveInFlight) to
+-- it; returns the container's slot count.
+-- C_Container.GetContainerNumSlots(containerIndex) returns a number
+-- (ContainerDocumentation.lua:313-326); GetContainerItemInfo(containerIndex,
+-- slotIndex) returns a table with itemID, stackCount, isBound and isLocked,
+-- or nothing for an empty slot (ContainerDocumentation.lua:192-207, 766-783).
+local function ReadContainer(container, items, bound, locked)
+    local slots = C_Container.GetContainerNumSlots(container)
+    for slot = 1, slots do
+        local info = C_Container.GetContainerItemInfo(container, slot)
+        if info and info.itemID and info.stackCount then
+            items[info.itemID] = (items[info.itemID] or 0) + info.stackCount
+            if info.isBound then
+                bound[info.itemID] = (bound[info.itemID] or 0) + info.stackCount
+            end
+            if locked and info.isLocked then
+                locked[info.itemID] = (locked[info.itemID] or 0) + info.stackCount
+            end
+        end
+    end
+    return slots
+end
+
+-- What the character carries: items, the soulbound part of them, the
+-- backpack's slot count (zero means the bags could not be read just now),
+-- and the part of the items in slots that read as locked.
+-- Carried bags are Enum.BagIndex.Backpack (0) to ReagentBag (5): four bag
+-- slots and the reagent-bag slot (BagIndexConstantsDocumentation.lua:18-52;
+-- the client's counts are in the dump, LuaEnum.lua:9729-9735). Blizzard's
+-- own bag searches run over the same range
+-- (Blizzard_UIPanels_Game/Mainline/ContainerFrame.lua:400-427 with
+-- Blizzard_FrameXMLBase/Constants.lua:165-170). The keyring (-1) is not stock.
+function Client:BagContents()
+    local items, bound, locked = {}, {}, {}
+    local backpackSlots = 0
+    for bag = Enum.BagIndex.Backpack, Enum.BagIndex.ReagentBag do
+        local slots = ReadContainer(bag, items, bound, locked)
+        if bag == Enum.BagIndex.Backpack then
+            backpackSlots = slots
+        end
+    end
+    return items, bound, backpackSlots, locked
+end
+
+-- The bank. This client has the tab-based C_Bank bank
+-- (Blizzard_UIPanels_Game/Blizzard_UIPanels_Game.toc:137-142 loads
+-- Mainline/BankFrameTemplates.lua and Camelot/BankFrame.lua). A bank type
+-- (Enum.BankType: Character = 0, Account = 2, ItemConstantsDocumentation.lua:17-27)
+-- has purchased tabs, each a container of its own (Enum.BagIndex
+-- CharacterBankTab_1..9 = 6..14, AccountBankTab_1..9 = 15..23,
+-- BagIndexConstantsDocumentation.lua:18-52). Here the tabs after the first
+-- are shown as bank bag slots (Blizzard_UIPanels_Game/Camelot/BankFrame.lua:136-191)
+-- and a bought slot may be without a bag (Enum.BankTabFlags.AllowMissingBag,
+-- ItemConstantsDocumentation.lua:5-15), so a single tab that reports no slots
+-- is not taken for an unreadable bank.
+-- Whether a bank's containers can be read while its window is closed could
+-- not be settled from source, so they are only read between BANKFRAME_OPENED
+-- and BANKFRAME_CLOSED (events without payload, BankDocumentation.lua:389-400).
+local bankOpen = false
+
+local function BankType(kind)
+    if kind == "character" then return Enum.BankType.Character end
+    if kind == "account" then return Enum.BankType.Account end
+    return nil
+end
+
+-- Whether this adapter reads the bank at all: on this client it does, while
+-- its window is open (see above). The scanner follows bank visits only where
+-- it does.
+function Client:ReadsBank()
+    return true
+end
+
+function Client:IsBankOpen()
+    return bankOpen
+end
+
+-- What a bank holds right now: items, the soulbound part of them, how many
+-- slots its tabs have together (a caller can tell by it whether two reads
+-- saw the same bank), and the part of the items in slots that read as
+-- locked (a move of them on its way, see MoveInFlight). kind is "character"
+-- or "account". nil when it cannot be read now - the window is closed, the
+-- bank may not be viewed, it is locked, it has no tabs or none of them
+-- reports a slot - so that "could not read" is never taken for "empty".
+-- The gates and the reading are the bank window's own: C_Bank.CanViewBank
+-- (Blizzard_UIPanels_Game/Mainline/BankFrameTemplates.lua:70), a non-nil
+-- C_Bank.FetchBankLockedReason is locked (same file :872-874),
+-- C_Bank.FetchPurchasedBankTabData(bankType) lists the tabs (:974-976;
+-- BankDocumentation.lua:241-255, each with its container `ID`, :440-451),
+-- read slot by slot (:1064-1070, :1126-1130, :578).
+-- Verify in game (/lp diag stock with the bank open): the tab ids, their slot
+-- counts and whether the account bank can be viewed at all.
+function Client:BankContents(kind)
+    local bankType = BankType(kind)
+    if not bankOpen or bankType == nil then return nil end
+    if not C_Bank.CanViewBank(bankType) then return nil end
+    if C_Bank.FetchBankLockedReason(bankType) ~= nil then return nil end
+    local tabs = C_Bank.FetchPurchasedBankTabData(bankType)
+    if not tabs or #tabs == 0 then return nil end
+    local items, bound, locked = {}, {}, {}
+    local slots = 0
+    for _, tab in ipairs(tabs) do
+        slots = slots + ReadContainer(tab.ID, items, bound, locked)
+    end
+    if slots == 0 then return nil end
+    return items, bound, slots, locked
+end
+
+-- Whether a bank can be used right now: its window is open, the bank may be
+-- viewed, it is not locked and it has at least one purchased tab. These are
+-- the first gates of BankContents above (the same calls, at the same lines of
+-- the bank window's source); no slot is read. A bank that is not usable at
+-- any moment of a visit cannot have been changed through that visit, which
+-- is what the scanner asks this for. kind is "character" or "account".
+function Client:BankUsable(kind)
+    local bankType = BankType(kind)
+    if not bankOpen or bankType == nil then return false end
+    if not C_Bank.CanViewBank(bankType) then return false end
+    if C_Bank.FetchBankLockedReason(bankType) ~= nil then return false end
+    local tabs = C_Bank.FetchPurchasedBankTabData(bankType)
+    return (tabs ~= nil and #tabs > 0) and true or false
+end
+
+-- Whether a slot of the container reads as locked, how many of its slots
+-- hold an item, and how many slots it has.
+local function LookAtSlots(container)
+    local slots = C_Container.GetContainerNumSlots(container)
+    local locked, occupied = false, 0
+    for slot = 1, slots do
+        local info = C_Container.GetContainerItemInfo(container, slot)
+        if info then
+            occupied = occupied + 1
+            if info.isLocked then locked = true end
+        end
+    end
+    return locked, occupied, slots
+end
+
+-- Whether a move of items is still on its way: a slot of the carried bags,
+-- or of a bank that can be read right now (the gates of BankContents above),
+-- reads as locked. The client locks a slot from the click until the move is
+-- answered: ContainerItemInfo.isLocked (ContainerDocumentation.lua:766-783,
+-- the field at :772), by which the bag and bank windows grey such a slot
+-- (Blizzard_UIPanels_Game/Mainline/ContainerFrame.lua:1285-1289,
+-- BankFrameTemplates.lua:594-596). A slot is also locked while its item is
+-- on the cursor; that reads as a move on its way too. An empty slot has no
+-- item to carry the lock: a move into one is seen by its source alone.
+-- The second return says which banks could be looked at: { [kind] = how
+-- many of its slots hold an item }, nothing for a bank that could not be
+-- (its window is closed, it may not be viewed, it is locked, or none of its
+-- tabs reports a slot) - its locks were not seen.
+-- Verify in game: whether the slots of a move read as locked at the bank's
+-- closing notice, and for which containers (/lp diag stock after a close:
+-- the "bank visit close" line).
+function Client:MoveInFlight()
+    local inFlight = false
+    for bag = Enum.BagIndex.Backpack, Enum.BagIndex.ReagentBag do
+        if LookAtSlots(bag) then inFlight = true end
+    end
+    local looked = {}
+    if not bankOpen then return inFlight, looked end
+    for _, kind in ipairs({ "character", "account" }) do
+        local bankType = BankType(kind)
+        if C_Bank.CanViewBank(bankType) and C_Bank.FetchBankLockedReason(bankType) == nil then
+            local occupied, slots = 0, 0
+            for _, tab in ipairs(C_Bank.FetchPurchasedBankTabData(bankType) or {}) do
+                local locked, held, count = LookAtSlots(tab.ID)
+                if locked then inFlight = true end
+                occupied, slots = occupied + held, slots + count
+            end
+            if slots > 0 then looked[kind] = occupied end
+        end
+    end
+    return inFlight, looked
+end
+
+-- Which bank a container id belongs to ("character" | "account"), nil for
+-- the carried bags and anything else. A BAG_UPDATE carries the container id
+-- (ContainerDocumentation.lua:659-667); the bank window reads it the same
+-- way (Blizzard_UIPanels_Game/Mainline/BankFrameTemplates.lua:791-795).
+function Client:BankKindOfBag(bagId)
+    if type(bagId) ~= "number" then return nil end
+    local index = Enum.BagIndex
+    if bagId >= index.CharacterBankTab_1 and bagId <= index.CharacterBankTab_9 then
+        return "character"
+    elseif bagId >= index.AccountBankTab_1 and bagId <= index.AccountBankTab_9 then
+        return "account"
+    end
+    return nil
+end
+
+-- The world a character lives in: region and ruleset, "eu-pvp", "us-normal",
+-- "eu-rppvp", "eu-hc-pvp". This client has no realms - the realm name is a
+-- shard that changes under the player - so stored data is scoped by this
+-- key, never by a realm name. C_GameRules.IsGameRuleActive(gameRule)
+-- (GameRulesDocumentation.lua:225-238) with Enum.GameRule.RPRuleset,
+-- PvPRuleset and HardcoreRuleset (dump, LuaEnum.lua:3441, 3587-3588);
+-- GetCurrentRegionName() is the region's short name (compared with "US" at
+-- Blizzard_GroupFinder/Mainline/LFGList.lua:2422). Where the region has no
+-- name its number stands in, "region3-pvp": GetCurrentRegion() returns a
+-- number (LocaleDocumentation.lua:39-47; dump, GlobalAPI.lua:5382). nil when
+-- there is neither: then nothing is taken for a character of the same world.
+-- The second return is the region alone ("eu", "region3"), the key of what
+-- a whole region shares (the account bank is remembered per region).
+local function WorldKey()
+    local region = GetCurrentRegionName()
+    if type(region) == "string" and region ~= "" then
+        region = region:lower()
+    else
+        local number = GetCurrentRegion()
+        if type(number) ~= "number" then return nil, nil end
+        region = "region" .. tostring(number)
+    end
+    local on, rule = C_GameRules.IsGameRuleActive, Enum.GameRule
+    local ruleset = (on(rule.RPRuleset) and "rp" or "") .. (on(rule.PvPRuleset) and "pvp" or "")
+    if ruleset == "" then ruleset = "normal" end
+    if on(rule.HardcoreRuleset) then ruleset = "hc-" .. ruleset end
+    return region .. "-" .. ruleset, region
+end
+
+-- Who the character is: { guid, name, world, faction, region }. A part that
+-- cannot be read is nil (the caller saves nothing without a guid and counts
+-- no alts without a world and a faction).
+--   guid     UnitGUID("player") (UnitDocumentation.lua:1241-1255)
+--   name     first name and surname, the way the client writes a full name
+--            (NameUtil.GetUnmodifiedUnitFullName,
+--            Blizzard_FrameXMLUtil/Camelot/NameUtil.lua:14-21)
+--   world    WorldKey() above
+--   region   the region part of it, WorldKey()'s second return
+--   faction  UnitFactionGroup("player"), its first return
+--            (UnitDocumentation.lua:1207-1222)
+-- Guid, name and faction do not change during a session, so a complete read
+-- of the three is kept. The world is worked out again at every ask (three
+-- rule reads and the region): whether the game rules read true from the very
+-- first moment after login is not known, and a world kept from a moment in
+-- which they read false would file the character under the wrong world for
+-- the whole session.
+-- Verify in game: the GUID is the same after a relog and on another shard.
+local who = nil
+
+function Client:CharacterIdentity()
+    local known = who
+    if not known then
+        local guid = Readable(UnitGUID("player"))
+        known = {
+            guid = type(guid) == "string" and guid or nil,
+            name = Readable(NameUtil.GetUnmodifiedUnitFullName("player")),
+            faction = Readable((UnitFactionGroup("player"))),
+        }
+        if known.guid and known.name and known.faction then
+            who = known
+        end
+    end
+    local world, region = WorldKey()
+    return { guid = known.guid, name = known.name, world = world, faction = known.faction, region = region }
+end
+
+-- Whether the game itself marks the character Self-Found: such a character
+-- can neither be sent anything nor send anything.
+-- C_PlayerInfo.IsSelfFoundActive() returns a boolean
+-- (PlayerInfoDocumentation.lua:322-329; in the client's function list, dump,
+-- GlobalAPI.lua:3359). It is asked at every call: whether the flag can change
+-- during a session is not known. Anything but true is false.
+-- Verify in game: the gameSelfFound value of /lp diag stock on a character
+-- that is Self-Found and on one that is not.
+function Client:IsSelfFoundCharacter()
+    return C_PlayerInfo.IsSelfFoundActive() == true
+end
+
+-- Hand a message to the game's error handler, which shows it when Lua
+-- errors are displayed. geterrorhandler() returns the handler (a global of
+-- this client: dump, GlobalAPI.lua:6884; Blizzard's UI source calls it the
+-- same way, Blizzard_SharedXMLBase/ErrorUtil.lua:3 and :18-19). Asking for
+-- the handler and calling it both run protected: a handler that is missing
+-- or fails itself changes nothing, and nothing is raised from here.
+function Client:ShowError(message)
+    local found, handler = pcall(geterrorhandler)
+    if found and type(handler) == "function" then
+        pcall(handler, message)
+    end
+end
+
+-- What the client itself counts of an item: carried only, with the bank,
+-- and with the bank and the account bank.
+-- C_Item.GetItemCount(itemInfo, includeBank, includeUses, includeReagentBank,
+-- includeAccountBank) returns a number (ItemDocumentation.lua:451-467; in the
+-- client's function list, dump, GlobalAPI.lua:2517). All five arguments are
+-- passed, as Blizzard does (Blizzard_FrameXMLUtil/ItemUtil.lua:320); charges
+-- and the reagent bank are never asked for.
+-- Whether this count sees a bank while its window is closed is not known,
+-- so nothing is worked out from it: only /lp diag stock prints the three
+-- numbers beside what is remembered, and one paste taken away from the bank
+-- settles it. Nothing else may use this until then.
+-- Without an item id nothing is asked of the client and the three are zero:
+-- the caller learns from it that this client has such a count (the Classic
+-- adapter answers nil).
+function Client:ClientItemCounts(itemId)
+    if itemId == nil then return 0, 0, 0 end
+    local carried = C_Item.GetItemCount(itemId, false, false, false, false)
+    local withBank = C_Item.GetItemCount(itemId, true, false, false, false)
+    local withAccountBank = C_Item.GetItemCount(itemId, true, false, false, true)
+    return carried, withBank, withAccountBank
+end
+
+-- Server time in seconds (SystemTimeDocumentation.lua:30-36): the same on
+-- every character and computer, which the computer's own clock is not.
+function Client:Now()
+    return GetServerTime()
+end
+
+-- Bank window and logout reports.
+-- callbacks: onBankOpened(), onBankChanged(kind), onBankClosing(),
+-- onBankClosed(), onLogout().
+-- BANK_TABS_CHANGED carries the bank type (BankDocumentation.lua:379-388; the
+-- bank window rebuilds itself on it, Blizzard_UIPanels_Game/Mainline/
+-- BankFrameTemplates.lua:778-782); PLAYER_LOGOUT has no payload
+-- (SystemDocumentation.lua:157-161).
+-- The opening is reported after the bank counts as open: the caller reads
+-- it in that very call.
+-- A close is reported in two steps. onBankClosing runs while the bank still
+-- counts as open, so a read that is still owed for a change of this very
+-- frame can be taken; whether the client still holds the bank's contents
+-- when BANKFRAME_CLOSED arrives could not be settled from source, so the
+-- caller must not take such a read for more than it is (the scanner only
+-- keeps one that looks like the reads before it, and marks the remembered
+-- bank as in doubt when one of its containers reported a change that no
+-- kept read came after). Then the bank counts as closed and onBankClosed
+-- runs: from there on nothing is read.
+-- Verify in game (/lp diag stock after a visit): the "bank visit close",
+-- "after the close" and "bank updates while closed" lines; and after a
+-- logout at the bank and the next login, the "bags at the bank" line.
+-- BAG_UPDATE and BAG_UPDATE_DELAYED are not registered here: the addon
+-- object has one handler per event and Core/Init.lua owns those two; it
+-- passes them on.
+function Client:StartStock(callbacks)
+    LazyProf:RegisterEvent("BANKFRAME_OPENED", function()
+        bankOpen = true
+        callbacks.onBankOpened()
+    end)
+    LazyProf:RegisterEvent("BANK_TABS_CHANGED", function(_, bankType)
+        if not bankOpen then return end
+        if bankType == Enum.BankType.Character then
+            callbacks.onBankChanged("character")
+        elseif bankType == Enum.BankType.Account then
+            callbacks.onBankChanged("account")
+        end
+    end)
+    LazyProf:RegisterEvent("BANKFRAME_CLOSED", function()
+        if not bankOpen then return end   -- the event can fire twice per close
+        callbacks.onBankClosing()
+        bankOpen = false
+        callbacks.onBankClosed()
+    end)
+    LazyProf:RegisterEvent("PLAYER_LOGOUT", function()
+        callbacks.onLogout()
+    end)
+end
+
+-- /lp diag stock: the raw bag, bank and identity values and what the adapter
+-- makes of them. Read-only.
+function Client:RunStockDiagnostic(lines)
+    local function add(text) lines[#lines + 1] = text end
+    local function section(name, fn)
+        local ok, err = pcall(fn)
+        if not ok then add("SECTION ERROR: " .. name .. ": " .. tostring(err)) end
+    end
+    local function Count(t)
+        local n = 0
+        for _ in pairs(t) do n = n + 1 end
+        return n
+    end
+    -- "slots/used" of a container
+    local function Usage(container)
+        local slots = C_Container.GetContainerNumSlots(container)
+        local used = 0
+        for slot = 1, slots do
+            if C_Container.GetContainerItemInfo(container, slot) then used = used + 1 end
+        end
+        return slots, used
+    end
+    section("bags", function()
+        for bag = Enum.BagIndex.Backpack, Enum.BagIndex.ReagentBag do
+            local slots, used = Usage(bag)
+            add("bag[" .. tostring(bag) .. "] slots=" .. tostring(slots) .. " used=" .. tostring(used))
+        end
+        local items, bound, backpackSlots = self:BagContents()
+        add("adapter bags: items=" .. tostring(Count(items)) .. " soulbound=" .. tostring(Count(bound))
+            .. " backpackSlots=" .. tostring(backpackSlots))
+    end)
+    -- C_Bank.ShouldUsePlayerBagsInBank() returns a boolean
+    -- (BankDocumentation.lua:322-329); the bank window asks it to decide
+    -- how its tabs are laid out (Blizzard_UIPanels_Game/Mainline/
+    -- BankFrameTemplates.lua:687, 793). Only reported here.
+    section("bank", function()
+        add("bank: open=" .. tostring(bankOpen)
+            .. " usesPlayerBags=" .. tostring(C_Bank.ShouldUsePlayerBagsInBank()))
+    end)
+    for _, kind in ipairs({ "character", "account" }) do
+        section("bank " .. kind, function()
+            local bankType = BankType(kind)
+            local tabs = C_Bank.FetchPurchasedBankTabData(bankType) or {}
+            local parts = {}
+            for _, tab in ipairs(tabs) do
+                local slots, used = Usage(tab.ID)
+                parts[#parts + 1] = tostring(tab.ID) .. ":" .. tostring(slots) .. "/" .. tostring(used)
+            end
+            add("bank " .. kind .. ": canView=" .. tostring(C_Bank.CanViewBank(bankType))
+                .. " lockedReason=" .. tostring(C_Bank.FetchBankLockedReason(bankType))
+                .. " tabs=" .. tostring(#tabs) .. " [" .. table.concat(parts, " ") .. "]")
+            local items, bound = self:BankContents(kind)
+            if items then
+                add("adapter bank " .. kind .. ": items=" .. tostring(Count(items))
+                    .. " soulbound=" .. tostring(Count(bound)))
+            else
+                add("adapter bank " .. kind .. ": not readable now")
+            end
+        end)
+    end
+    section("identity", function()
+        local on, rule = C_GameRules.IsGameRuleActive, Enum.GameRule
+        local guid = UnitGUID("player")
+        local secret = issecretvalue ~= nil and guid ~= nil and issecretvalue(guid) or false
+        add("world: region=" .. tostring(GetCurrentRegionName()) .. " regionNumber=" .. tostring(GetCurrentRegion())
+            .. " rp=" .. tostring(on(rule.RPRuleset))
+            .. " pvp=" .. tostring(on(rule.PvPRuleset)) .. " hardcore=" .. tostring(on(rule.HardcoreRuleset))
+            .. " guidSecret=" .. tostring(secret) .. " serverTime=" .. tostring(GetServerTime()))
+    end)
+    -- Whether crafts may take reagents out of the bank. If they may, a craft
+    -- changes the bank while its window is closed and the remembered bank is
+    -- then behind until the next visit. The profession window decides it with
+    -- ReagentsFromBankAllowed(), which returns a boolean
+    -- (PlayerScriptDocumentation.lua:1601-1608; in the client's function
+    -- list, dump, GlobalAPI.lua:6338): only when it is true does it count
+    -- reagents in the bank (Blizzard_FrameXMLUtil/ItemUtil.lua:314-320).
+    -- Enum.GameRule.CraftFromBankRestricted is in the client's enum table
+    -- (dump, LuaEnum.lua:3586), but no Blizzard UI code reads it and what it
+    -- does in play is not documented. Both are only reported here.
+    section("rules", function()
+        local rule = Enum.GameRule.CraftFromBankRestricted
+        local restricted = "none (this client has no such rule)"
+        if rule ~= nil then
+            restricted = tostring(C_GameRules.IsGameRuleActive(rule))
+        end
+        add("crafting from the bank: reagentsFromBankAllowed=" .. tostring(ReagentsFromBankAllowed())
+            .. " restrictedRule=" .. restricted)
+    end)
+end
+
 -- /lp diag forever: a read-only dump of the client facts and of what this
 -- adapter makes of them (documented in docs/development/TROUBLESHOOTING.md).
 -- Each section runs under pcall so one failure prints "SECTION ERROR" and the

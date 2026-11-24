@@ -212,6 +212,11 @@ function GuideWindow:BuildView(path, mode, plain)
     view.skill = path.actualSkill
     view.hideOwned = LazyProf.CharStore:Get().hideOwned and true or false
     view.advanced = LazyProf.db.profile.showAdvanced and true or false
+    -- How old the remembered part of the stock is (the bank as last opened,
+    -- alts as last played), and the server time to count it from. Both nil
+    -- when the stock outside the bags comes from an inventory addon.
+    view.stockMeta = path.stockMeta
+    view.now = path.stockMeta and LazyProf.Client:Now() or nil
 
     -- The account of the whole path: its shopping list from the stages'
     -- quantities (so the margin is in it), less what the crafts sell for,
@@ -251,7 +256,7 @@ end
 function GuideWindow:MerchantRows()
     local path = self.shoppingPath
     if not path then return nil end
-    path.inventory, path.sourceBreakdown = LazyProf.Inventory:ScanAll()
+    path.inventory, path.sourceBreakdown, path.stockMeta = LazyProf.Inventory:ScanAll()
     local view = self:BuildView(path, path.planning and "planning" or "closed", true)
     return view.missing and view.missing.rows or {}, tostring(path.profession)
 end

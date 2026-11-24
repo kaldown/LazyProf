@@ -81,8 +81,9 @@ function Pathfinder:BuildPath(run)
         LazyProf:Debug("pathfinder", string.format("Active pins (%d): %s", #pins, table.concat(pinDetails, ", ")))
     end
 
-    -- Get inventory (bags + all enabled sources)
-    local inventory, sourceBreakdown = LazyProf.Inventory:ScanAll()
+    -- Get inventory (bags + all enabled sources); stockMeta says how old the
+    -- remembered part of it is (nil when none of it is remembered)
+    local inventory, sourceBreakdown, stockMeta = LazyProf.Inventory:ScanAll()
 
     -- Log owned materials summary (guarded: GetItemInfo + string building per
     -- owned item runs every recalc and is wasted when debug logging is off)
@@ -191,6 +192,7 @@ function Pathfinder:BuildPath(run)
         prices = prices,
         inventory = inventory,
         sourceBreakdown = sourceBreakdown,
+        stockMeta = stockMeta,
         -- What the crafts sell for (SaleValue:Build) and which candidate
         -- route was kept (PlanRoutes)
         sale = sale,

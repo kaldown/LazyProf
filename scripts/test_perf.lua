@@ -8,6 +8,11 @@
 --   5. LazyProf:ScheduleRecalculation() / ScheduleShoppingListRefresh() /
 --      ScheduleDebugWindowUpdate() (Core/Init.lua) - first-wins debounces;
 --      C_Timer.After returns nothing
+--   6. LazyProf:OnBagUpdate (Core/Init.lua) with the stock memory behind it
+--      (Modules/Inventory/Scanner.lua): a burst of bag updates is one light
+--      refresh and one remembered snapshot, never a recalculation
+--   7. Inventory:ScanAll (Modules/Inventory/Scanner.lua) builds its debug
+--      lines only while debugging is on
 --
 -- Run from the addon root:  lua5.1 scripts/test_perf.lua
 -- Not shipped: scripts/ is excluded from the package via .pkgmeta.
@@ -380,6 +385,157 @@ section("I", function()
     advance(0.6)
     check("I window closed: visit noted, no recalc", #clears == 1 and #recalcs == 0, #recalcs)
     LP.PriceManager, LP.Client = savedPM, savedClient
+end)
+
+-- ===========================================================================
+-- J: a burst of bag updates (batch crafting) with the stock memory wired in:
+-- one light refresh, one bag snapshot, no recalculation
+-- ===========================================================================
+section("J", function()
+    assert(loadfile("Modules/Inventory/StockMemory.lua"))("LazyProf", LP)
+    assert(loadfile("Modules/Inventory/Scanner.lua"))("LazyProf", LP)
+    local savedClient, savedDb = LP.Client, LP.db
+    local bagReads, bankReads = 0, 0
+    LP.db = { profile = { includeBankItems = true, includeAltCharacters = true }, char = {}, global = {} }
+    LP.Client = {
+        IsOpen = function() return true end,
+        BagContents = function() bagReads = bagReads + 1; return { [1] = 1 }, {}, 16 end,
+        IsBankOpen = function() return false end,
+        BankContents = function() bankReads = bankReads + 1; return nil end,
+        BankKindOfBag = function() return nil end,
+        CharacterIdentity = function() return { guid = "Player-1-PERF", name = "Perf", world = "eu-pvp", faction = "Horde" } end,
+        IsSelfFoundCharacter = function() return false end,
+        Now = function() return 1763900000 end,
+    }
+    _G.Syndicator = nil
+    local recalcs, refreshes = 0, 0
+    LP.Recalculate = function() recalcs = recalcs + 1 end
+    LP.RefreshShoppingList = function() refreshes = refreshes + 1 end
+    LP.MerchantPanel = nil
+    LP.GuideWindow = nil
+
+    flush(); recalcs, refreshes, bagReads = 0, 0, 0
+    for _ = 1, 40 do                      -- forty crafts' worth of bag updates within a second
+        LP:OnBagUpdate("BAG_UPDATE", 0)
+        LP:OnBagUpdate("BAG_UPDATE", 1)
+        advance(0.02)
+    end
+    check("J no bag read inside the burst", bagReads == 0, bagReads)
+    advance(3)
+    check("J one bag snapshot for the burst", bagReads == 1, bagReads)
+    check("J the bank is not read while it is closed", bankReads == 0, bankReads)
+    check("J light refreshes only (debounced)", refreshes >= 1 and refreshes <= 4, refreshes)
+    check("J no recalculation", recalcs == 0, recalcs)
+    check("J the snapshot is in the saved table",
+        LP.db.global.stock.characters["Player-1-PERF"].bags.items[1] == 1)
+    flush()
+    LP.Client, LP.db = savedClient, savedDb
+end)
+
+-- ===========================================================================
+-- K: a stock scan builds no debug lines while debugging is off. A scan runs
+-- for every calculation and up to three times a second while crafting;
+-- counting each source's items and formatting a line per source is work for
+-- the debug log only.
+-- ===========================================================================
+section("K", function()
+    local Inventory = LP.Inventory                       -- loaded in J
+    check("K the scanner is loaded", type(Inventory) == "table" and type(Inventory.ScanAll) == "function")
+    local savedClient, savedDb, savedDebug = LP.Client, LP.db, LP.Debug
+    LP.db = { profile = { debug = false, debugCategories = { pathfinder = true },
+                          includeBankItems = true, includeAltCharacters = true, includeGuildBank = true },
+              char = {}, global = {} }
+    LP.Client = {
+        IsOpen = function() return true end,
+        BagContents = function() return { [1] = 1, [2] = 5 }, {}, 16 end,
+        IsBankOpen = function() return false end,
+        BankContents = function() return nil end,
+        BankUsable = function() return false end,
+        BankKindOfBag = function() return nil end,
+        CharacterIdentity = function() return { guid = "Player-1-PERF", name = "Perf", world = "eu-pvp", faction = "Horde" } end,
+        IsSelfFoundCharacter = function() return false end,
+        Now = function() return 1763900000 end,
+    }
+    local function slots(itemId, count) return { { itemID = itemId, itemCount = count } } end
+    local syndicator = { API = {
+        GetCurrentCharacter = function() return "Perf-Realm" end,
+        GetAllCharacters = function() return { "Perf-Realm", "Alt-Realm" } end,
+        GetByCharacterFullName = function(name)
+            if name == "Alt-Realm" then return { bags = { slots(1, 7) }, bank = { slots(3, 2) } } end
+            return { bank = { slots(1, 3) }, mail = slots(2, 1), auctions = {} }
+        end,
+        GetCurrentGuild = function() return "Guild-Realm" end,
+        GetByGuildFullName = function() return { bank = { { isViewable = true, slots = slots(1, 50) } } } end,
+    } }
+
+    -- Every line handed to the debug log, and every string.format call made on the way.
+    local messages, formats = {}, 0
+    LP.Debug = function(_self, _category, message) messages[#messages + 1] = tostring(message) end
+    local realFormat = string.format
+    local function scan()
+        messages, formats = {}, 0
+        Inventory:InvalidateCache()
+        string.format = function(...)
+            formats = formats + 1
+            return realFormat(...)
+        end
+        local ok, combined = pcall(Inventory.ScanAll, Inventory)
+        string.format = realFormat
+        return ok, combined
+    end
+    local function logged(text)
+        for _, message in ipairs(messages) do
+            if message == text then return true end
+        end
+        return false
+    end
+
+    _G.Syndicator = nil
+    local ok, combined = scan()
+    check("K debug OFF, own memory: the scan works", ok and type(combined) == "table" and combined[2] == 5, combined)
+    check("K debug OFF, own memory: nothing is formatted", formats == 0, formats)
+    check("K debug OFF, own memory: nothing is handed to the debug log", #messages == 0, messages[1])
+    _G.Syndicator = syndicator
+    ok, combined = scan()
+    check("K debug OFF, Syndicator: the scan works", ok and type(combined) == "table" and combined[1] == 1 + 3 + 7 + 50, combined)
+    check("K debug OFF, Syndicator: nothing is formatted", formats == 0, formats)
+    check("K debug OFF, Syndicator: nothing is handed to the debug log", #messages == 0, messages[1])
+    LP.db.profile.includeBankItems, LP.db.profile.includeAltCharacters, LP.db.profile.includeGuildBank = false, false, false
+    scan()
+    check("K debug OFF, Syndicator, every source switched off: nothing is formatted or logged either",
+        formats == 0 and #messages == 0, messages[1])
+    LP.db.profile.includeBankItems, LP.db.profile.includeAltCharacters, LP.db.profile.includeGuildBank = true, true, true
+
+    -- Switched on, the lines are there as before.
+    LP.db.profile.debug = true
+    ok, combined = scan()
+    check("K debug ON, Syndicator: the same counts", ok and combined[1] == 1 + 3 + 7 + 50, combined)
+    check("K debug ON, Syndicator: the bags line", logged("Inventory scan: 2 unique items in bags"), table.concat(messages, " | "))
+    check("K debug ON, Syndicator: a line per source", logged("Inventory scan: 1 unique items in bank")
+        and logged("Inventory scan: 1 unique items in mail") and logged("Inventory scan: 0 unique items in auctions"),
+        table.concat(messages, " | "))
+    check("K debug ON, Syndicator: the alts and the guild bank", logged("Inventory scan: 1 unique items from alts")
+        and logged("Inventory scan: 1 unique items in guild bank"), table.concat(messages, " | "))
+    check("K debug ON: the lines are formatted", formats >= 5, formats)
+    LP.db.profile.includeBankItems, LP.db.profile.includeAltCharacters, LP.db.profile.includeGuildBank = false, false, false
+    scan()
+    check("K debug ON, Syndicator: what is switched off is said", logged("Inventory scan: bank disabled")
+        and logged("Inventory scan: alts not counted") and logged("Inventory scan: guild bank disabled"),
+        table.concat(messages, " | "))
+    LP.db.profile.includeBankItems, LP.db.profile.includeAltCharacters, LP.db.profile.includeGuildBank = true, true, true
+    _G.Syndicator = nil
+    scan()
+    check("K debug ON, own memory: the bags line", logged("Inventory scan: 2 unique items in bags"), table.concat(messages, " | "))
+
+    -- The category decides too.
+    LP.db.profile.debugCategories.pathfinder = false
+    _G.Syndicator = syndicator
+    scan()
+    check("K debug ON but the category off: nothing is formatted or logged", formats == 0 and #messages == 0, formats)
+
+    _G.Syndicator = nil
+    Inventory:InvalidateCache()
+    LP.Client, LP.db, LP.Debug = savedClient, savedDb, savedDebug
 end)
 
 print(string.format("\n%d/%d checks passed", total - failures, total))

@@ -18,8 +18,9 @@ Run these in-game to check addon health:
 /lp diag prices        -- List every reagent price of the path, where it came from and which route was kept (copyable window)
 /lp diag merchant      -- At a merchant: what it sells as LazyProf reads it, and what would be bought (copyable window)
 /lp diag trainer       -- At a profession trainer: what it lists as LazyProf reads it, and what is remembered (copyable window)
+/lp diag stock         -- Which bags and banks are remembered for your characters; at an open bank, what the bank reads as (copyable window)
 /lp resetpanels        -- Move the LazyProf window and its panels back to their default place and size
-/lp reset              -- Reset database to defaults
+/lp reset              -- Reset every setting to its default; also clears the vendor prices and trainers LazyProf has seen and every character's targets, pins, kept routes and craft-or-buy choices (the bags and banks remembered for your characters are kept)
 ```
 
 Enable debug mode in LazyProf settings to see detailed logging.
@@ -184,6 +185,75 @@ WoW Forever only; on other clients the dump says so.
 | `this trainer: profession=.. services=N` | The profession LazyProf matched this trainer to: the one most of whose recipe names appear in its list. `nil` means no listed service is a recipe LazyProf knows (a class trainer, a filter hiding everything, or a client language whose recipe names differ from the recipe data). |
 | `known <profession> trainer: Name - Zone (x, y) mapId=.. faction=.. recipesListed=N` | Each remembered trainer of that profession. A recipe still to learn names a trainer only when the trainer listed that recipe; a "Train the next rank" row names every remembered trainer of the profession. Only trainers visited by a character of your faction are shown. |
 
+### `/lp diag stock` - remembered bags and banks, and what the bank reads as
+
+**When to use:** reagents in your bank or on an alt are not counted (or are counted although
+they are gone), a character is missing from "From alts", or the bank's contents look wrong.
+Run it anywhere for what is remembered; run it **with the bank window open** for the bank
+lines. Works on every client; the bank is read on WoW Forever only, and on the other clients
+the dump says so. The client's own part comes first (bags, bank, world, game rules), then
+LazyProf's (where stock comes from, who the character is, the bank visit, what is
+remembered). If a part fails it prints `SECTION ERROR: <part>: <message>` and the rest still
+prints.
+
+| Line | Meaning |
+|------|---------|
+| `diag stock: build=.. interface=.. family=..` | Client build and which adapter is active. |
+| `bag[i] slots=N used=N` | Each carried bag as the client reports it. On WoW Forever bags 0 to 5 are read; 5 is the reagent bag. On the other clients the line is `bag[i] slots=N`, without `used=`, for bags 0 to 4. |
+| `adapter bags: items=N soulbound=N backpackSlots=N` | The bags as LazyProf reads them: distinct items, how many of those have a soulbound part, and the backpack's slot count. `backpackSlots=0` means the bags could not be read just now; such a read is never remembered. |
+| `bank: open=.. usesPlayerBags=..` | WoW Forever. Whether LazyProf saw the bank window open (the bank is only ever read while it is), and whether the client shows the bank's tabs as one page of bag slots. |
+| `bank character: canView=.. lockedReason=.. tabs=N [id:slots/used ...]` | WoW Forever. The character bank as the client reports it: whether it may be viewed, the lock reason (`nil` = not locked), and each purchased tab with its container id, slot count and used slots. The same line follows for `bank account` (the account-wide bank). |
+| `adapter bank character: items=N soulbound=N` / `... not readable now` | What LazyProf reads from that bank. `not readable now` = the window is closed, the bank may not be viewed, it is locked, it has no tabs or none reports a slot. Then nothing is saved and what was remembered stays. `items=0` is not taken for an empty bank at once. A bank of which no items are remembered is remembered as empty from two seconds after the window opened (while one of its containers has reported a change that no remembered read came after, only when a second read on a later frame finds it empty too). A bank of which items are remembered is remembered as empty only when a second read, on a later frame and after the bank's last change of its own, finds it empty too - and not in the first two seconds of a visit, unless the visit has already seen it with items in the same number of slots. |
+| `api: C_Container=.. GetContainerItemInfo=.. GetServerTime=..` / `bank: not recorded on this client` | Classic clients only, in place of the bank lines: which container call is used for the bags, and that the bank is not read there. |
+| `world: region=.. regionNumber=.. rp=.. pvp=.. hardcore=.. guidSecret=.. serverTime=..` | What the character's world is made of on WoW Forever (region and ruleset - there are no realms), whether the client withheld the character's id, and the server clock the ages are counted from. A region without a name is written with its number (`region3-pvp`). |
+| `crafting from the bank: reagentsFromBankAllowed=.. restrictedRule=..` | WoW Forever. Whether crafts may take reagents straight from the bank. `reagentsFromBankAllowed` is what the game's profession window asks before it counts reagents in the bank: `true` means a craft can change the bank while its window is closed. If the game reports the bank's container then, LazyProf stops counting the remembered bank until you open it again (see `bank updates while closed`); if it does not, the remembered bank is behind until the next visit. `restrictedRule` is the game rule `CraftFromBankRestricted`, which no part of the game's own interface reads; `none (this client has no such rule)` when the client's list of rules does not name it. Paste the line if "From bank" rows list reagents you have already used. |
+| `source: ...` | `LazyProf's own memory (Syndicator is not installed)`, or `Syndicator (LazyProf's own memory is not used and not updated)`: then the stock comes from Syndicator. |
+| `settings: bank=.. alts=.. guildBank=.. selfFound=.. gameSelfFound=..` | The stock options, and what the game says. `selfFound` is LazyProf's own Self-Found setting; `gameSelfFound` is whether the game itself marks the character Self-Found (`false` on a client without that mode; `not readable: <error>` when the game could not be asked, and then what is saved meanwhile is saved as not to be offered to the others). With either of them `true` nothing that belongs to other characters is counted (alts, the account bank, the guild bank) and, without Syndicator, what the character holds is not counted for the others (with Syndicator every character it knows counts for the others, Self-Found or not). |
+| `last error: <message> (in: <where>; N this session; ...)` | Only when something went wrong while the memory was started, read or updated: the last error, the step it happened in and how many there were this session. LazyProf carries on. The first one of a session is handed to the game's error display, once (you see it when Lua errors are shown or an error collector is installed), and is written to the debug log when debugging is on. Paste this line with a bug report. |
+| `scan now: the memory reads without error` / `scan now: bags only - the memory cannot be read: <error>` | Reading the memory, tried at this moment with what a scan reads now (the alts only when they count: "Include alt characters" on and the character not Self-Found). Not printed with Syndicator. `the memory reads without error`: an error in the line above is then over. The line says nothing about what counts: that is the `settings` line and the label of each character. `bags only`: the memory cannot be read right now, for the reason given, and only what you carry is counted. |
+| `identity: guid=.. name=.. world=.. faction=.. region=..` | Who LazyProf takes the character for. Without a `guid` the character's bags and bank are not remembered (the account bank still is, under the region); without a `world` or a `faction` no other character counts as an alt and the account bank does not count. `region` = the region part of the world (`eu`, `us`, or `region<N>`): the account bank is remembered once per region. |
+| `identity: could not be read: <error>` | Only when asking the client who the character is failed. The `identity` line then follows with `nil` for every value: nothing is remembered and nobody counts as an alt while that lasts. Paste the line. |
+| `world: unknown - alts and the account bank are not counted` / `faction: unknown - alts are not counted` | Only without Syndicator, and only when the client did not say which world or faction the character belongs to. Nothing can then be told to be an alt of it, and without a world no account bank is counted. |
+| `bank: not followed (Syndicator is installed)` | With Syndicator installed, in place of the bank visit's lines below: LazyProf neither reads the bank nor follows its visits then; the bank comes from Syndicator. |
+| `waiting: bagSave=..` + `bank: not followed on this client` | Clients other than WoW Forever, without Syndicator, in place of the bank visit's lines below: whether a save of the bags (two seconds after a bag change) is still to come, and that the bank is not read on this client. |
+| `waiting: bagSave=.. bankRead=.. bankOpen=..` | WoW Forever, without Syndicator. Whether a save of the bags (two seconds after a bag change) or a read of the bank is still to come, and whether the bank counts as open. The bank is read when its window opens, half a second later and two seconds after the opening; on a bag update or a change of its tabs at once when the last read is 0.2 s or more ago, otherwise once 0.2 s after that read; when the client reports a batch of bag updates complete, at once when the last read was in that frame or 0.2 s ago; and again every half second for as long as a bank usable in the visit has a change of its own that no remembered read came after, an empty read not believed yet, or its last read refused. |
+| `bank visit: open for X s; reads=N owed=..[ openedAgain=N]` / `bank visit: closed X s ago after Y s; ...` / `bank visit: none this session` | WoW Forever, without Syndicator. The bank visit in progress, or the last one: how often the bank was read, and whether a read is still owed (an update of any container came after the last read and the read waits for the 0.2 s between reads). While a read is owed a scan leaves out every bank usable in the visit. `openedAgain` (only when there was one) = how often the game reported the bank opening again while it was open (clicking the banker again, say): such a notice begins no visit of its own, the visit keeps what it knows, and both banks are read again (a scan leaves them out until a read of each is remembered). Paste the line if you see it: it says that the game sends that notice. |
+| `bank visit character: usable=.. kept=N lastRead=.. slots=N unresolvedEmpty=.. unsettled=..` | The same visit for the character bank; the line follows for `account`. `usable=true` = at some read of the visit the bank could be used (window open, the bank may be viewed, is not locked and has a tab); a bank that never was cannot have been changed through the visit and is neither left out nor marked by it. `kept` = how many reads were remembered. `lastRead` = what the last read gave: `items`, `refused`, `empty, believed` or `empty, not believed`; from the read at the close also `empty` and `items, another slot count`, neither of which is remembered; with `, not saved` added when the character or its world could not be told; `none` when no read of the visit got as far as this bank (a read that failed before it: see `last error`). `unresolvedEmpty=true` = the bank read as empty and that is not believed yet. `unsettled=true` = an update of one of this bank's own containers (or a change of its tabs) arrived and no read of the bank taken after it has been remembered. While the window is open a scan leaves a usable bank out while it is unsettled, its empty read is unresolved or its last read was refused; the next remembered read brings it back. |
+| `bank visit close: owed=.. unsettled=<banks> readAgain=.. kept=<banks> markedInDoubt=<banks> held=<banks> moveInFlight=..[ unreadable=<banks>]` | Only after a close (or a logout with the bank open). `owed` and `unsettled` = what was still open at that moment; `readAgain` = whether the bank was read once more because of it; `kept` = the banks that read was remembered for (it must hold items and have the slot count of the visit's reads); `markedInDoubt` = the banks used in the visit whose remembered contents now carry the doubt mark: they were still unsettled (unless an empty read of them came after their last change of their own and LazyProf remembers them empty or not at all), an empty read of them was still not believed while items of them are remembered (a sign that the bank was emptied), or a move was on its way (a bank of which nothing is remembered is never marked); `held` = the banks that were not marked but could not be read back either (a read was owed, the closing read was not remembered for them, and items of them are remembered): for a second after the close they are left out, in case their own update is still to come; `moveInFlight` = whether a slot of the carried bags or of a bank that could be read was locked at that moment, or a remembered read of a bank in this visit saw one of its slots locked and no update of that bank's own containers came after it (`true`: the game had not answered a move yet, and every bank used in the visit was marked; `unknown`: the locks could not be read, taken for `true`) - closing the bank a moment after moving something shows `true`: paste the line, it says whether the game locks the slots of a move; `unreadable` (only when there is one) = the banks used in the visit that could not be looked at for locks at that moment (not readable then, or showing no item while items of them are remembered): for three seconds after the close, not one, a carried count that rises for an item such a bank holds marks it. Seen after an ordinary close, it says that the game lets go of the bank before the closing notice. |
+| `after the close: bankUpdates=N (last X s after the close) bagUpdates=N (last X s after the close) compared=N marked=<bank> (<reason>), ...` / `... marked=none` | What arrived after the last close. `bankUpdates` = updates of bank containers in the ten seconds after it (each marks its bank; so do later ones, see `bank updates while closed`); `bagUpdates` = updates of carried bags in the watch after it (one second; three for a bank named `unreadable` on the close line); each with how long after the close the last one came (left out when there was none). `compared` = how often the carried bags were compared with what they held when the window closed (on the frame after a carried bag's update, when the bank is opened again and at logout). `marked` names each bank this marked in doubt, with the reason: `bank container updated` (an update of one of its containers arrived in the ten seconds after the close), `carried count rose: <itemId>` (within the watch the carried count of that item rose and the bank is remembered to hold it), `no note of the bags` (the bags could not be read at the close, and a carried bag was updated within that bank's watch), `not read back before the session ended` (the bank was held and the session ended inside that second), `bags not readable for the comparison` (a carried bag was updated within the watch and the bags could not be read for the comparison until the watch was over, or the session ended first). |
+| `bags at the bank (from the last session): compared, equal` / `... compared, different: <banks> marked in doubt[; account read since the note, not marked][; <banks> not marked (nothing it holds rose)]` / `... unknown[ (the note's time is damaged)]: <banks> marked in doubt[; ...]` / `... not compared yet` | Only when this character's last session ended with the bank open or within ten seconds after a close: it left a note of what the carried bags held, and which banks its visit could use, because the answer of a last move may have arrived after that session ended. This session compares its bags with the note - on the frame after the first update of a carried bag, at the first save of the bags two seconds after the start (tried again every two seconds while the character cannot be told apart yet), when the bank is opened, or at a logout that comes first (with bags that hold something). `not compared yet`: the banks the note names are left out until then. `equal`: nothing arrived, they count. `different`: a bank is marked in doubt only when the carried count of an item it is remembered to hold rose against the note; otherwise it is named as `not marked (nothing it holds rose)` (a count that fell marks nothing: a deposit still on its way at the close is seen by its locked slot). The account bank, when its record was saved after the note was written (read by another character since) and both times are sound, is not marked and is named as `read since the note, not marked`; the character's own bank has no such exception. `unknown`: the note did not say what the bags held (they could not be read when that session ended, or the note is not what LazyProf writes), its time is damaged (not a number above zero, or more than a day ahead of now), or this session's bags could not be read by the first save, or read as completely empty without a bag update having come while the note says they held something; every bank the note names is then marked, but for an account bank read since the note. |
+| `bags as last saved (no note from the last session): compared, equal` / `... compared, different: <banks> marked in doubt[; <banks> not marked (nothing it holds rose)]` / `... unknown[ (the record's time is damaged)]: <banks> marked in doubt` / `... not compared yet` | Every session whose last one left no note, when LazyProf remembers this character's bags: a session that ends without saving (the game closed by force, or crashed) leaves nothing, so the next one starts from what the session before saved, and a withdrawal made in the lost session would be in the bags and still in the remembered bank. The bags are compared with what LazyProf last saved of them, at the same moments and in the same way as with a note, and until then the character's own bank and the account bank are left out. A bank is marked only when the carried count of an item it is remembered to hold rose against that save: the character's own bank, and the account bank when it counts for this character, the character is not Self-Found and has read the account bank before (one that may not view it cannot have changed it). `unknown` marks each of them that holds something. After an ordinary logout this should say `compared, equal`; paste it if it says anything else although nothing was moved at the bank. |
+| `bank updates while closed: N` / `..., last X s after closing (in the first 10 s of the session, only counted: Q; marked a bank in doubt: M)` / `..., before the bank was opened this session (...)` | WoW Forever, without Syndicator. How many updates of a bank container arrived this session while the bank window was closed, and how long after the last close the latest one came. The bank cannot be read then, so such an update marks its bank in doubt at once, whenever it comes (`M` = how many set a new mark) - the character's own bank, or the account bank of its region whoever's read that copy is - except in the first ten seconds of a session that has not opened the bank yet, when the game may still be loading the bank's containers (`Q` = how many came then and were only counted). If `Q` is above zero after a plain login, the game loads the bank's containers at login: paste the line. If the count rises after every visit although nothing was moved, the game reports the bank's containers when it lets go of them, and every visit ends in doubt: paste these lines. |
+| `client count <itemId>: carried=N withBank=N withAccountBank=N; remembered: bags now=N bank=N accountBank=N` | WoW Forever, without Syndicator. For up to five items of this character's remembered bank (the lowest item ids, so two dumps print the same items): what the game itself counts of the item - carried only, with the bank, with the bank and the account bank - and beside it what LazyProf reads in the bags right now and what it remembers of the two banks (`accountBank=never seen` when no account bank is remembered for this region; `accountBank=read in another world or by the other faction` when the one remembered is not counted for this character). Nothing in LazyProf uses the game's count yet: whether it sees a bank while the bank window is closed is not known, and these lines settle it. To read them, run the dump **away from the bank**, after a visit. If `withBank - carried` equals the remembered `bank` (and `withAccountBank - withBank` the remembered `accountBank`), the game counts the bank while it is closed; if `withBank` equals `carried`, it does not. Paste the lines either way. |
+| `client count: nothing remembered of this bank to compare` | In place of those lines when no bank is remembered for this character, or it is remembered as empty. Open the bank once, walk away and run the dump again. |
+| `SECTION ERROR: client count: <error>` | The game's count could not be asked. The rest of the dump is not affected. Paste the line. |
+| `memory: format=1 characters=N accountBanks=N (characters not seen for 180 days are dropped)` | How much is remembered, account-wide. With Syndicator installed the parenthesis is left out: nothing is dropped while the memory is not in use. A saved memory that is not a table at all (a damaged file) reads as `format=1` with nothing in it until the next save replaces it. |
+| `memory: format=<other> - not a format this version reads; it is left alone` | The saved memory was written by a version this one does not understand. It is left alone, nothing is counted from it, and no character lines follow. |
+| `memory: unreadable=N ...` | Only when the saved file holds entries that are not what LazyProf writes (edited by hand, or cut off by a crash). They are skipped; "Forget remembered characters" removes them. |
+| `character: <name> [<what happens to its stock>] world=.. faction=.. bags=N items (<age>) bank=N items (<age>) guid=..` | One line per remembered character. The label is one of: `this character`; `alt, counted`; `alt, counted (bags only: bank items are off)` ("Include bank items" is off, so its bank is left out); `alt, not counted (alts off)` ("Include alt characters" is off); `not counted (this character is Self-Found)`; `not counted (Self-Found)` (that character cannot send anything); `other world`; `other faction`; `not counted (an older record of this name)` (a character that is gone, or the same one under an older id - of several records of one name only the one seen last can count, and of two seen at the same moment the one whose id sorts first); `not counted (no name)`; `not counted (no time it was last seen)` (the saved time of its last save is missing or is no time - a damaged saved file; such a record is dropped at the next start); `not counted (this character's world or faction is unknown)`; `remembered, not used (Syndicator is installed)` (every character, while Syndicator supplies the stock). `bank=never seen` = the bank was never open on that character. `bank=N items (<age>, in doubt: not counted)` = that bank is marked in doubt: it is left out until it is read again on that character. `(time damaged: not counted)` in place of an age = the saved time of those bags or that bank is missing, is no number above zero, or is more than a day ahead of now (a damaged saved file): they are not counted - such a bank is named on the Shopping tab like one in doubt - until the next save of them on that character. |
+| `account bank: region=.. read by world=.. faction=.. items=N (<age>) - <whether it counts here>` | The account-wide bank remembered for a region: one copy per region, as the last character that read it saw it, with that character's world and faction. Whether the game shares the account bank across worlds and factions is not known, so it counts only for characters of that world and faction; when a character of another world or of the other faction reads the account bank, the copy becomes that character's. The end of the line says what it is for the character the dump runs on: `counted`; `not counted (read in another world or by the other faction)` (a read of the account bank on this character makes it count here; when the copy holds something the Shopping tab says so: "The account bank is not counted: LazyProf last read it on a character of another faction or world. It counts again once a character of this faction and world reads it at the bank."); `not counted (bank items are off)`; `not counted (this character is Self-Found)`; `not counted (in doubt)`; `not counted (its time is damaged)`; `not counted (another region)`; `remembered, not used (Syndicator is installed)`. `(<age>, in doubt: not counted)` = it is marked in doubt and left out until a character that may view the account bank reads it again; `(time damaged: not counted)` = its saved time is damaged (see the character line). |
+
+Reading it: only a character labelled `alt, counted` supplies stock; every other label
+says why not. A bank marked `in doubt` is one LazyProf has reason to think changed without
+being read. It is always the bank's own sign, or the carried bags where the bank can no
+longer report: one of its containers reported a change that no remembered read came after
+(still unsettled at the close, or a container update while the bank was closed - at any time
+except in the first ten seconds of a session that has not opened the bank); a move was on
+its way at the close (a slot still locked, or locked at a remembered read and not answered
+since); a read found it empty while items of it are remembered and the visit ended before that
+was believed; in the watch after the close the carried count of an item it holds rose; or the
+next session's bags hold more of an item it holds than the last session left at the bank or,
+when it left no note, than LazyProf last saved of them. A bank whose saved time is damaged is
+left out the same way. It is not counted (the Shopping tab says so)
+until the bank is read again - the character's own bank on that character, the account bank
+by any character that may view it; the `bank visit`, `after the close`, `bags at the bank`,
+`bags as last saved` and `bank updates while closed` lines of the session in which it happened
+say which rule marked it. An age that never becomes `less than an hour ago` on the character you play means
+its bags or bank are not being saved: look at `backpackSlots`, `identity` and, at the bank,
+the `canView` / `lockedReason` / `tabs` values. A character you deleted stays listed until it
+has not been seen for 180 days, or until "Forget remembered characters" (Settings, Display,
+"Your stock") is used.
+
 ### Adding a new diagnostic
 
 `/lp diag` is meant to grow. To add `/lp diag <topic>`: add an `elseif cmd == "diag <topic>"`
@@ -195,8 +265,9 @@ in combat-adjacent situations. Document the new topic's output lines in this sec
 Lines that read the profession window or other client APIs belong in the client
 adapter (`Core/Client/Classic.lua` for Classic clients, `Core/Client/Forever.lua` for
 WoW Forever): `/lp diag learned` gets its lines from `LazyProf.Client:RunDiagnostic(lines)`,
-`/lp diag merchant` from `Client:RunMerchantDiagnostic(lines)` and `/lp diag trainer` from
-`Client:RunTrainerDiagnostic(lines)`, so each client family reports what its own API sees.
+`/lp diag merchant` from `Client:RunMerchantDiagnostic(lines)`, `/lp diag trainer` from
+`Client:RunTrainerDiagnostic(lines)` and `/lp diag stock` from
+`Client:RunStockDiagnostic(lines)`, so each client family reports what its own API sees.
 
 ---
 
@@ -381,8 +452,8 @@ Under the Cheapest strategy four things decide the route besides the reagent pri
    auction price of a crafted item, or sale values that arrived after the first calculation
    can move the route.
 2. **Your stock.** Reagents you own count when the route is chosen, against whole runs of
-   a recipe: your bags, and with Syndicator your bank, mail, auctions and alts (the guild
-   bank if it is turned on). A bag change alone never plans again; the route is planned
+   a recipe: your bags, your bank and your alts (with Syndicator also mail, your auctions
+   and, if it is turned on, the guild bank). A bag change alone never plans again; the route is planned
    again when the profession window opens, your skill changes, you change the target, the
    strategy, a recipe or a setting, item data arrives, you close the auction house, or a
    merchant shows a vendor price LazyProf had not seen (with the profession window open).
@@ -455,11 +526,101 @@ per craft in an opened row (More options).
 
 **Symptoms:** Reagents in your bank or on an alt are still on the list to buy
 
-Stock outside your bags (bank, mail, your auctions, alts, guild bank) is read from the
-Syndicator addon. "Include bank items" and "Include alt characters" are on by default
-(Settings, Display, "Your stock"); without Syndicator they are greyed out and only your
-bags count. "Include guild bank" is off by default. Stock that is counted but not in your
-bags is listed under "Collect first" on the Shopping tab.
+"Include bank items" and "Include alt characters" are on by default (Settings, Display,
+"Your stock"); "Include guild bank" is off by default. Stock that is counted but not in
+your bags is listed under "Collect first" on the Shopping tab.
+
+**With Syndicator** stock outside your bags (bank, mail, your auctions, alts, guild bank) is
+read from it; check in Syndicator / Baganator that it knows the character.
+
+**Without Syndicator** LazyProf counts what it has seen itself:
+
+1. A character's bags are remembered while you play it (two seconds after a bag change and
+   at logout; a stack whose move the game has not answered yet is left out of that save).
+   An alt you have not logged in since this was added is not known yet.
+2. A bank is remembered only while its window is open, on WoW Forever. Open the bank once
+   on every character whose bank should count, and again when the bank changed while
+   LazyProf was not running (the addon switched off, or another computer). The account
+   bank is remembered once per region, as the character that read it last saw it, and
+   counts only for characters of that character's world and faction (whether the game
+   shares it wider is not known). On other clients the bank is not remembered and
+   "Include bank items" is greyed out.
+3. Alts are the remembered characters of the **same world** (region and ruleset on WoW
+   Forever, the realm elsewhere) **and faction**. Their soulbound items are left out.
+4. An alt's bank needs both options on.
+5. Mail, auctions and the guild bank are never known without Syndicator.
+6. In Self-Found mode (Settings, General) nothing from other characters is counted (nor
+   the account bank, nor the guild bank with Syndicator), and a character with the mode on
+   is no alt for the others: what it holds is not counted for them. A character the game itself marks
+   Self-Found is treated the same with the setting off (`/lp diag stock` prints both:
+   `selfFound=.. gameSelfFound=..`).
+7. A bank that may have changed after LazyProf last read it is not counted until you open
+   the bank again. The Shopping tab then starts with a grey line: "Your bank is not
+   counted: it may have changed after LazyProf last read it. Open the bank to count it
+   again." For the account bank the line ends "It counts again once it is read at the
+   bank." instead: only a character that may view the account bank can read it, and that
+   read is what clears the mark ("Your bank and the account bank are not counted: ... They
+   count again once they are read at the bank." when both are left out). An alt's bank
+   that is left out has a line of its own: "The bank of <name> is not counted: it may have
+   changed after LazyProf last read it. Open the bank on that character to count it
+   again." It happens when LazyProf has a sign that the bank changed without being read:
+   one of its containers reported a change that no read could be kept after - at the
+   close, or at any time while the bank is closed (a last withdrawal or deposit the game
+   reported after the window had closed; a craft that takes reagents from the closed bank,
+   if the game reports it), except in the first ten seconds of a session that has not
+   opened the bank; a move still on its way when the window closed (its slot still
+   locked, or locked when the open bank was last read and not answered since); the bank
+   read as empty while items of it are remembered, and the window closed before that was
+   confirmed; a carried count of an item the bank holds rose in the second after the
+   close, or by the first comparison at the next login - against what the bags held when
+   the last session ended at the bank, or, when it did not, against what LazyProf last
+   saved of them (a session that ended without saving, because the game was closed by
+   force or crashed, leaves nothing behind); or the time saved with the bank, or with the
+   bags at the end of the last session, is damaged. LazyProf then cannot know what is in the bank, and
+   counting the old contents could count a stack twice. Open the bank once and the line
+   goes (the account bank: on a character that may view it). `/lp diag stock` shows the
+   mark on the bank (`in doubt: not counted`) and, for the session in which it was set,
+   why. Looting or crafting an item in the second after you close the bank (three seconds
+   when the bank could not be looked at as it closed), or at the next login before the
+   bags are compared, marks a bank that holds the same item: it cannot be told from a
+   withdrawal that was answered late. Not every change is seen: another character that
+   plays before you log in again counts your bags as LazyProf last saved them (a stack you
+   put into the bank just before logging out may still be counted there); a move the game
+   answers only after a logout, with none of its slots locked at the logout, can be missed
+   - by another character that plays first, and by the same one when it changes no carried
+   bag (a move between your bank and the account bank) - and a craft from the closed bank in
+   the first ten seconds of a session leaves the remembered bank as it was until the next
+   visit. After a session that ended without saving, what it did that the carried bags do
+   not show (a deposit, a move between the two banks, a craft from the closed bank, a
+   withdrawal that was used up again before the end) is missed until the bank is read
+   again, and another character that plays before it counts its bags and banks as they
+   were before that session.
+8. The account bank is remembered once per region and counts only for the characters of
+   the world and faction of the character that read it last. On a character of another
+   faction or world, when that copy holds something, the Shopping tab says: "The account
+   bank is not counted: LazyProf last read it on a character of another faction or world.
+   It counts again once a character of this faction and world reads it at the bank."
+   Opening the bank on this character makes the copy its own (and so no longer counted on
+   the other side).
+
+How old the remembered stock is shows in the tooltips under "Collect first" on the
+Shopping tab: a "From bank" row says "Bank as seen 2 days ago" (and "Account bank as seen
+..." when an account-wide bank is remembered), a "From alts" row names each character with
+the age of the bags or the bank its items are in. Ages are elapsed time on the server
+clock: "less than an hour ago", then whole hours up to 23, then whole days of 24 hours.
+`/lp diag stock` lists every remembered character and account bank, whether it counts for
+the character you are on, and how old its bags and bank are.
+
+### Stock of a Character That Is Gone Is Still Counted
+
+**Symptoms:** "From alts" names a character you deleted, or reagents you no longer have
+
+Without Syndicator the stock of other characters is a memory of when they were last
+played (the tooltip of the "From alts" row says how long ago that was). A character is
+forgotten when it has not been seen for 180 days. To forget
+everything at once use "Forget remembered characters" (Settings, Display, "Your stock"): the
+character you are on is remembered again right away, the others the next time you play
+them. "Reset All Settings" and `/lp reset` do not forget them.
 
 ### Nothing Left / Target Reached
 
@@ -626,7 +787,14 @@ WoW Client: <Retail/Classic/TBC/Anniversary>
 
 ## Reset to Defaults
 
-If all else fails, reset LazyProf's database:
+`/lp reset` (or "Reset All Settings" in the options) puts every setting back to its default
+in game. It also clears the vendor prices and the trainers LazyProf has seen and every
+character's targets and choices (recipes chosen, craft-or-buy, the route it follows). The
+bags and banks LazyProf remembers for your characters are kept ("Forget remembered
+characters" is the button for those). The question before the reset and the message after
+it say so.
+
+If all else fails, remove LazyProf's saved file - this also deletes everything it remembers:
 
 1. Exit WoW completely
 2. Delete or rename SavedVariables:

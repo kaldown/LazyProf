@@ -63,6 +63,7 @@ local FILES = {
     "Core/Utils.lua",
     "Core/Config.lua",
     "Core/CharStore.lua",
+    "Modules/Inventory/StockMemory.lua",
     "Modules/Pathfinder/Pins.lua",
     "Modules/Guide/Text.lua",
     "Modules/Guide/Stages.lua",
@@ -113,6 +114,7 @@ function M.load(family, extraFiles)
         GetItemInfo = function() return nil end,
         PlayerSkill = function() return env.playerSkill or 0 end,
         ProfessionRank = function() return env.playerSkill or 0, env.playerCap end,
+        Now = function() return env.now or 1 end,
     }
     addon.Pathfinder = {
         currentPath = nil,
@@ -181,7 +183,7 @@ function M.load(family, extraFiles)
         end,
     }
     addon.Inventory = {
-        ScanAll = function() return env.stock or {}, env.stockSources or {} end,
+        ScanAll = function() return env.stock or {}, env.stockSources or {}, env.stockMeta end,
         ScanBags = function() return env.stock or {} end,
     }
     addon.RecipeDetails = {
