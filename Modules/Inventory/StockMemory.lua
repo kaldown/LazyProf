@@ -65,8 +65,12 @@
 -- `noSend`, `doubt` and a note's banks are set by any value but nothing and
 -- false; a part whose `bound` is there but cannot be read (not a table, or
 -- an entry that is no count of an item) is not offered to the other
--- characters at all; and a time that is not a finite number is no time - a
--- record without a usable `seen` is no alt of anyone and is dropped by Prune.
+-- characters at all; a time that is not a finite number is no time - a
+-- record without a usable `seen` is no alt of anyone and is dropped by Prune;
+-- and the time of a part, a bank or a note that is not a number greater
+-- than zero and not later than one day after now is damaged (SoundTime): a
+-- part or a bank with such a time is not counted, a note with one is taken
+-- as not known.
 --
 -- This file is pure: who the character is, what it holds and what time it is
 -- are passed in (the client adapter supplies them).
@@ -143,6 +147,17 @@ end
 local function Time(value)
     if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then return nil end
     return value
+end
+
+-- A time read back that can be trusted: a number greater than zero and not
+-- later than one day after `now` (the caller's server time). Anything else
+-- is a damaged time - nothing, not a number, zero or below, or so far ahead
+-- that no clock of this account wrote it - and leans towards not counting:
+-- a part or a bank whose time is damaged is not handed out as stock (Alts;
+-- the scanner does the same for the character's own banks), and a note
+-- whose time is damaged is taken as not known (the scanner's rule 5c).
+function StockMemory.SoundTime(value, now)
+    return Time(value) ~= nil and value > 0 and type(now) == "number" and value <= now + DAY
 end
 
 -- A saved yes / no that must lean towards not counting when damaged: any
@@ -459,12 +474,12 @@ end
 -- The other remembered characters of this character's world and faction, by
 -- name: { { guid, name, bags, bagsAt, bank, bankAt, bankDoubt }, ... } -
 -- those standing as "alt" above. bags / bank are what could be sent over
--- (soulbound counts taken off); a part never seen is nil, and so is the time
--- of a part that has none, and a part whose soulbound share cannot be read
--- (see Sendable) is nil with its time. A bank in doubt is not handed out:
--- bankDoubt is then true and bank / bankAt are nil, while the bags still
--- count.
-function StockMemory:Alts(identity)
+-- (soulbound counts taken off); a part never seen is nil, and so is a part
+-- whose soulbound share cannot be read (see Sendable) or whose time is
+-- damaged (see SoundTime; now: the caller's server time), with its time. A
+-- bank in doubt, or with a damaged time, is not handed out: bankDoubt is
+-- then true and bank / bankAt are nil, while the bags still count.
+function StockMemory:Alts(identity, now)
     local list = {}
     local characters = Store()
     if not characters then return list end
@@ -473,16 +488,16 @@ function StockMemory:Alts(identity)
             local record = characters[guid]
             local alt = { guid = guid, name = record.name }
             local bags, bank = Part(record, "bags"), Part(record, "bank")
-            local sendable = bags and Sendable(bags)
+            local sendable = bags and StockMemory.SoundTime(bags.at, now) and Sendable(bags)
             if sendable then
-                alt.bags, alt.bagsAt = sendable, Time(bags.at)
+                alt.bags, alt.bagsAt = sendable, bags.at
             end
-            if bank and InDoubt(bank) then
+            if bank and (InDoubt(bank) or not StockMemory.SoundTime(bank.at, now)) then
                 alt.bankDoubt = true
             elseif bank then
                 sendable = Sendable(bank)
                 if sendable then
-                    alt.bank, alt.bankAt = sendable, Time(bank.at)
+                    alt.bank, alt.bankAt = sendable, bank.at
                 end
             end
             list[#list + 1] = alt
@@ -547,17 +562,20 @@ function StockMemory:Forget()
     for region in pairs(account) do account[region] = nil end
 end
 
--- What is remembered, for the diagnostic:
+-- What is remembered, for the diagnostic (now: the caller's server time):
 --   { usable, schema, unreadable,
---     characters = { { guid, name, world, faction, seen, canSend, bagItems, bagsAt, bankItems, bankAt, bankDoubt }, ... },
---     account = { { region, world, faction, items, at, doubt }, ... } }
+--     characters = { { guid, name, world, faction, seen, canSend, bagItems, bagsAt, bagsDamaged,
+--                      bankItems, bankAt, bankDoubt, bankDamaged }, ... },
+--     account = { { region, world, faction, items, at, doubt, damaged }, ... } }
 -- bagItems / bankItems count distinct items (nil for a part never seen);
--- bankDoubt / doubt say whether that bank is marked in doubt; an account
--- bank's world and faction are those of the character whose read it is.
+-- bankDoubt / doubt say whether that bank is marked in doubt, bagsDamaged /
+-- bankDamaged / damaged whether the time of a part that was seen is damaged
+-- (see SoundTime: it is then not counted); an account bank's world and
+-- faction are those of the character whose read it is.
 -- usable is false when there is no database or the saved table is in another
 -- format (schema then says which). unreadable counts the entries that are
 -- not what this file writes and are skipped.
-function StockMemory:Summary()
+function StockMemory:Summary(now)
     local characters, account, schema = Store()
     local summary = { usable = characters ~= nil, schema = schema, unreadable = 0, characters = {}, account = {} }
     if not characters then return summary end
@@ -568,8 +586,10 @@ function StockMemory:Summary()
                 guid = guid, name = Text(record.name), world = Text(record.world), faction = Text(record.faction),
                 seen = Time(record.seen), canSend = not Set(record.noSend),
                 bagItems = bags and Size(Counts(bags.items)) or nil, bagsAt = bags and Time(bags.at) or nil,
+                bagsDamaged = (bags and not StockMemory.SoundTime(bags.at, now)) or false,
                 bankItems = bank and Size(Counts(bank.items)) or nil, bankAt = bank and Time(bank.at) or nil,
                 bankDoubt = (bank and InDoubt(bank)) or false,
+                bankDamaged = (bank and not StockMemory.SoundTime(bank.at, now)) or false,
             }
         else
             summary.unreadable = summary.unreadable + 1
@@ -586,7 +606,8 @@ function StockMemory:Summary()
         local bank = AccountEntry(account, region)
         if bank then
             summary.account[#summary.account + 1] = { region = region, world = bank.world, faction = bank.faction,
-                                                      items = Size(Counts(bank.items)), at = Time(bank.at), doubt = InDoubt(bank) }
+                                                      items = Size(Counts(bank.items)), at = Time(bank.at), doubt = InDoubt(bank),
+                                                      damaged = not StockMemory.SoundTime(bank.at, now) }
         else
             summary.unreadable = summary.unreadable + 1
         end

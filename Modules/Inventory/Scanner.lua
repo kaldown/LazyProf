@@ -236,14 +236,18 @@
 --        the note names out (bankPending, accountPending). A carried count
 --        that has risen against the note for an item a noted bank is
 --        remembered to hold marks that bank in doubt; a note that is not
---        known and bags that cannot be compared mark every bank it names. A
+--        known, a note whose time is damaged (not a number greater than
+--        zero and not later than a day after now: StockMemory.SoundTime)
+--        and bags that cannot be compared mark every bank it names. A
 --        count that fell, or rose for an item no noted bank holds, marks
 --        nothing: the answer of a deposit is seen on its way at the close
 --        or the logout (its carried slot is locked), so such a difference
---        is the new session's own. Nor is a bank marked whose record was
---        saved after the note was written (the account bank, read by
---        another character since): that read is newer than anything the
---        note is about. In every case the note is removed.
+--        is the new session's own. Nor is the account bank marked when its
+--        record was saved after the note was written (read by another
+--        character since) and both times are sound: that read is newer than
+--        anything the note is about. The character's own bank has no such
+--        exception: nothing but damage can make it look saved after its own
+--        last session's note. In every case the note is removed.
 --    Which banks a visit can mark (rules 4, 5b and 5c), or leave out by
 --    rule 3: only a bank that was USABLE at some moment of the visit - the
 --    adapter says so (window open, the bank may be viewed, is not locked,
@@ -260,7 +264,9 @@
 --    the account bank - and the scan's third return says so: bankInDoubt,
 --    accountInDoubt, and altBanksInDoubt with the names of the alts whose
 --    bank is left out. The Shopping tab shows a line for each. The next
---    kept read of that bank takes the mark away.
+--    kept read of that bank takes the mark away. A bank whose time read
+--    back is damaged is left out and named the same way (the dump says
+--    "time damaged"); an alt's bags with a damaged time are not counted.
 --
 -- What these rules cannot see, or accept on purpose:
 --    - A move that is answered after the session has ended, where its locks
@@ -680,7 +686,8 @@ local function BuildAltsPart(identity, countBank)
                    totals = {}, sources = {}, seen = {}, bankDoubt = {} }
     local where = {}
     -- The memory hands the alts out by name, so bankDoubt is in that order.
-    for _, alt in ipairs(LazyProf.StockMemory:Alts(identity)) do
+    -- A part whose time is damaged is not handed out (its bank is in doubt).
+    for _, alt in ipairs(LazyProf.StockMemory:Alts(identity, LazyProf.Client:Now())) do
         local seen = {}
         if alt.bags then
             mergeSource(alt.bags, "bags", alt.name, part.totals, where)
@@ -765,9 +772,14 @@ local function AddRememberedStock(self, combined, breakdown, countAlts, selfFoun
     local countBank = LazyProf.db.profile.includeBankItems and true or false
     local identity = Client:CharacterIdentity() or {}
     local meta = { remembered = true, alts = {} }
+    local now = Client:Now()
 
     if countBank then
+        -- A bank whose time read back is damaged (StockMemory.SoundTime) is
+        -- left out as a bank in doubt is: nothing says what it holds is of
+        -- this side of anything.
         local items, seenAt, doubt = Memory:OwnBank(identity.guid)
+        doubt = doubt or (items ~= nil and not Memory.SoundTime(seenAt, now))
         if items and doubt then
             meta.bankInDoubt = true
         elseif items and (BankPending("character") or HeldAfterClose("character") or (leaveOut and leaveOut.character)
@@ -779,6 +791,7 @@ local function AddRememberedStock(self, combined, breakdown, countAlts, selfFoun
         end
         if not selfFound then
             items, seenAt, doubt = AccountBankOf(identity)
+            doubt = doubt or (items ~= nil and not Memory.SoundTime(seenAt, now))
             if items and doubt then
                 meta.accountInDoubt = true
             elseif items and (BankPending("account") or HeldAfterClose("account") or (leaveOut and leaveOut.account)
@@ -1060,8 +1073,14 @@ local function CompareLastSession(items)
     local ls = lastSession
     if ls.state ~= "waiting" then return end
     local note = ls.note
-    if not note.known or not items then
+    local Memory = LazyProf.StockMemory
+    local now = LazyProf.Client:Now()
+    -- A note whose time is damaged leans towards not counting: it is taken
+    -- as not known, whatever the bags hold.
+    local damaged = not Memory.SoundTime(note.at, now)
+    if not note.known or not items or damaged then
         ls.state = "unknown"
+        ls.damaged = damaged or nil
     elseif SameCounts(note.items, items) then
         ls.state = "equal"
     else
@@ -1069,18 +1088,17 @@ local function CompareLastSession(items)
     end
     if ls.state ~= "equal" then
         -- The region is asked for now: it may not have been readable when
-        -- the note was looked up. A bank whose record was saved after the
-        -- note was written (the account bank, read by another character
-        -- meanwhile) is newer than anything the note can be about: it is
-        -- not marked by it.
-        local Memory = LazyProf.StockMemory
+        -- the note was looked up. An account bank whose record was saved
+        -- after the note was written (read by another character meanwhile)
+        -- is newer than anything the note can be about: it is not marked by
+        -- it - when both times are sound. Nothing but damage can make the
+        -- character's own bank look saved after its own note: no exception
+        -- for it.
         local identity = LazyProf.Client:CharacterIdentity() or {}
         for _, kind in ipairs(BANK_KINDS) do
             if note[kind] then
                 local savedAt
-                if kind == "character" then
-                    savedAt = select(2, Memory:OwnBank(ls.guid))
-                else
+                if kind == "account" then
                     savedAt = select(2, Memory:AccountBank(identity.region))
                 end
                 -- Bags that are only different, not risen for an item the
@@ -1089,7 +1107,7 @@ local function CompareLastSession(items)
                 -- its way at the close: its carried slot is locked), so
                 -- the difference is the new session's own (a craft, a sale).
                 local held = kind == "character" and Memory:OwnBank(ls.guid) or Memory:AccountBank(identity.region)
-                if note.at and savedAt and savedAt > note.at then
+                if kind == "account" and not damaged and Memory.SoundTime(savedAt, now) and savedAt > note.at then
                     ls.newer = ls.newer or {}
                     ls.newer[kind] = true
                 elseif ls.state == "unknown" or (held and RisenItem(note.items, items, held)) then
@@ -2213,7 +2231,7 @@ local function AddBankVisitLines(add)
             waiting = "not compared yet",
             equal = "compared, equal",
             different = "compared, different: " .. banks,
-            unknown = "unknown: " .. banks,
+            unknown = "unknown" .. (lastSession.damaged and " (the note's time is damaged)" or "") .. ": " .. banks,
         }
         add("bags at the bank (from the last session): " .. said[lastSession.state])
     end
@@ -2317,7 +2335,7 @@ function Inventory:RunDiagnostic(lines)
         end
     end
 
-    local summary = Memory:Summary()
+    local summary = Memory:Summary(now)
     if not summary.usable then
         add("memory: format=" .. tostring(summary.schema) .. " - not a format this version reads; it is left alone")
         return
@@ -2344,8 +2362,9 @@ function Inventory:RunDiagnostic(lines)
         unknown = "not counted (this character's world or faction is unknown)",
     }
     local standing = Memory:Standing(identity)
-    local function part(label, items, at, doubt)
+    local function part(label, items, at, doubt, damaged)
         if items == nil then return label .. "=never seen" end
+        if damaged then return label .. "=" .. tostring(items) .. " items (time damaged: not counted)" end
         return label .. "=" .. tostring(items) .. " items (" .. tostring(Memory.AgeText(now, at) or "no time")
             .. (doubt and ", in doubt: not counted" or "") .. ")"
     end
@@ -2366,8 +2385,8 @@ function Inventory:RunDiagnostic(lines)
             end
         end
         add("character: " .. tostring(c.name) .. " [" .. tostring(label) .. "] world=" .. tostring(c.world)
-            .. " faction=" .. tostring(c.faction) .. " " .. part("bags", c.bagItems, c.bagsAt)
-            .. " " .. part("bank", c.bankItems, c.bankAt, c.bankDoubt) .. " guid=" .. tostring(c.guid))
+            .. " faction=" .. tostring(c.faction) .. " " .. part("bags", c.bagItems, c.bagsAt, false, c.bagsDamaged)
+            .. " " .. part("bank", c.bankItems, c.bankAt, c.bankDoubt, c.bankDamaged) .. " guid=" .. tostring(c.guid))
     end
     -- The account bank of each region: whose read it is, and whether it
     -- counts for this character (only for the world and faction of that
@@ -2388,12 +2407,19 @@ function Inventory:RunDiagnostic(lines)
             counts = "not counted (this character is Self-Found)"
         elseif bank.doubt then
             counts = "not counted (in doubt)"
+        elseif bank.damaged then
+            counts = "not counted (its time is damaged)"
         else
             counts = "counted"
         end
+        local age
+        if bank.damaged then
+            age = "time damaged: not counted"
+        else
+            age = tostring(Memory.AgeText(now, bank.at) or "no time") .. (bank.doubt and ", in doubt: not counted" or "")
+        end
         add("account bank: region=" .. tostring(bank.region) .. " read by world=" .. tostring(bank.world)
-            .. " faction=" .. tostring(bank.faction) .. " items=" .. tostring(bank.items)
-            .. " (" .. tostring(Memory.AgeText(now, bank.at) or "no time") .. (bank.doubt and ", in doubt: not counted" or "") .. ")"
+            .. " faction=" .. tostring(bank.faction) .. " items=" .. tostring(bank.items) .. " (" .. age .. ")"
             .. " - " .. counts)
     end
 end

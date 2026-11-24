@@ -93,7 +93,8 @@ T.section("damaged saved stock", function()
         { "a name that is a number", function() return { schema = 1, characters = { X = (function() local r = goodAlt(); r.name = 12; return r end)(),
             Y = goodAlt() }, account = {} } end, 25 },
         { "seen is a string", function() return with(function(r) r.seen = "yesterday" end) end, 5 },
-        { "a part without a time", function() return with(function(r) r.bags.at = nil end) end, 25 },
+        { "a part without a time", function() return with(function(r) r.bags.at = nil end) end, 5 },
+        { "a part whose time is far ahead", function() return with(function(r) r.bags.at = 1e300 end) end, 5 },
     }
     for _, case in ipairs(cases) do
         local label, make, want = case[1], case[2], case[3]
@@ -2675,6 +2676,73 @@ end)
 -- ===========================================================================
 -- Two characters of one account: what the first one holds reaches the second.
 -- ===========================================================================
+-- The times of a note and of a bank are read back from the saved table, and
+-- a damaged one leans towards not counting: a note whose time is not a
+-- number greater than zero and not later than a day after now marks the
+-- banks it names. The exception for a bank read after the note holds only
+-- for the account bank (another character may have read it since): nothing
+-- but damage can make the character's own bank look read after its own
+-- last session's note.
+T.section("damaged times of a note and of a bank", function()
+    local T0 = 20000 * 86400 + 3600
+    -- The last session ended at the bank with a withdrawal of 20 linen on
+    -- its way; its answer came after the logout: the linen is carried, the
+    -- remembered bank still holds it.
+    local function run(note, change)
+        World.reset()
+        local saved = { stock = { schema = 1, account = {}, characters = {
+            [MAIN_GUID] = { name = "Main Goldtooth", world = "eu-pvp", faction = "Horde", region = "eu", seen = T0 - 100,
+                            bags = { items = { [HEARTHSTONE] = 1 }, at = T0 - 100 },
+                            bank = { items = { [LINEN] = 20 }, at = T0 - 100 },
+                            bagsAtBank = note } } } }
+        if change then change(saved.stock) end
+        World.containers = { [0] = { slots = 16, slot(HEARTHSTONE, 1, true), slot(LINEN, 20) } }
+        World.bank = { [0] = { tabs = { { ID = 6 } } }, [2] = { tabs = { { ID = 15 } } } }
+        local addon = World.login(saved)
+        World.bagUpdate(addon, 0)
+        World.bagUpdateDelayed(addon)
+        World.advance(3)
+        local total, _, _, meta = linen(addon)
+        local lines = {}
+        addon.Inventory:RunDiagnostic(lines)
+        return total, meta, ("\n" .. table.concat(lines, "\n") .. "\n"):match("\n(bags at the bank [^\n]*)\n")
+    end
+    local function note(at) return { items = { [HEARTHSTONE] = 1 }, banks = { character = true }, at = at } end
+    local total, meta, line = run(note(T0 - 100))
+    T.check("(a sound note: the risen linen marks the bank it names)", total == 20 and meta.bankInDoubt == true, total)
+    for _, case in ipairs({ { "zero", 0 }, { "far back", -1e300 }, { "text", "x" }, { "missing", nil },
+                            { "more than a day ahead", T0 + 2 * 86400 } }) do
+        total, meta, line = run(note(case[2]))
+        T.check("a note whose time is " .. case[1] .. ": the bank it names is in doubt, the linen counts once",
+            total == 20 and meta.bankInDoubt == true, tostring(total))
+        T.eq("and the dump says why", line,
+            "bags at the bank (from the last session): unknown (the note's time is damaged): character marked in doubt")
+    end
+    -- Bags that equal the note: a damaged note still marks.
+    World.reset()
+    total, meta = run(note(0), function(stock) stock.characters[MAIN_GUID].bagsAtBank.items = { [HEARTHSTONE] = 1, [LINEN] = 20 } end)
+    T.check("a damaged note marks even when the bags equal it", meta.bankInDoubt == true, tostring(total))
+    -- The character's own bank looks read after the note: not an exception.
+    total, meta, line = run(note(T0 - 100), function(stock) stock.characters[MAIN_GUID].bank.at = T0 - 50 end)
+    T.check("the own bank saved after its own note is marked all the same", total == 20 and meta.bankInDoubt == true, tostring(total))
+    T.eq("the dump says so", line, "bags at the bank (from the last session): compared, different: character marked in doubt")
+    total, meta = run(note(T0 - 100), function(stock) stock.characters[MAIN_GUID].bank.at = 1e300 end)
+    T.check("the own bank's time far ahead: not counted (and marked)", total == 20 and meta.bankInDoubt == true, tostring(total))
+    -- The account bank read after the note: the exception holds while both
+    -- times are sound.
+    local function withAccount(noteAt, accountAt)
+        return run({ items = { [HEARTHSTONE] = 1 }, banks = { character = true, account = true }, at = noteAt }, function(stock)
+            stock.account.eu = { items = { [LINEN] = 7 }, at = accountAt, world = "eu-pvp", faction = "Horde" }
+        end)
+    end
+    total, meta = withAccount(T0 - 100, T0 - 50)
+    T.check("the account bank read after a sound note is not marked by it", meta.accountInDoubt == nil and total == 27, tostring(total))
+    total, meta = withAccount(0, T0 - 50)
+    T.check("after a damaged note it is", meta.accountInDoubt == true and total == 20, tostring(total))
+    total, meta = withAccount(T0 - 100, T0 + 3 * 86400)
+    T.check("and an account bank whose time is damaged is not counted", meta.accountInDoubt == true and total == 20, tostring(total))
+end)
+
 T.section("two characters", function()
     local THREAD, WOOL, HERB = 2320, 2592, 765
     local DAY = 86400

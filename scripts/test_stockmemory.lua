@@ -47,7 +47,7 @@ T.section("store", function()
     T.check("the format number is not a default", LazyProf.defaults.global.stock.schema == nil)
     fresh()
     T.check("nothing remembered at first: no bank", Memory:OwnBank(MAIN.guid) == nil)
-    T.eq("nothing remembered at first: no alts", #Memory:Alts(MAIN), 0)
+    T.eq("nothing remembered at first: no alts", #Memory:Alts(MAIN, NOW), 0)
     T.check("reading makes nothing", LazyProf.db.global.stock == nil)
     Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW)
     T.eq("the store carries its format number from the first save", LazyProf.db.global.stock.schema, 1)
@@ -62,7 +62,7 @@ T.section("store", function()
             bags = { items = { [2589] = 20 }, at = NOW } } } }
     LazyProf.db.global = { stock = bare }
     T.check("a table without a format number is read", (Memory:OwnBank(MAIN.guid))[2589] == 40
-        and (Memory:AccountBank("eu"))[2770] == 5 and #Memory:Alts(MAIN) == 1 and Memory:Standing(MAIN)[MAIN.guid] == "self"
+        and (Memory:AccountBank("eu"))[2770] == 5 and #Memory:Alts(MAIN, NOW) == 1 and Memory:Standing(MAIN)[MAIN.guid] == "self"
         and #Memory:Summary().characters == 2 and Memory:BagsAtBank(MAIN.guid) ~= nil and Memory:Token() == bare.characters)
     T.check("and no reader writes the format number", bare.schema == nil, bare.schema)
     Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW)
@@ -140,7 +140,7 @@ T.section("nothing is saved without a character or a time", function()
     local saved = LazyProf.db
     LazyProf.db = nil
     T.check("no database: a save does nothing", Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW) == false)
-    T.check("no database: nothing to read", Memory:OwnBank(MAIN.guid) == nil and #Memory:Alts(MAIN) == 0
+    T.check("no database: nothing to read", Memory:OwnBank(MAIN.guid) == nil and #Memory:Alts(MAIN, NOW) == 0
         and Memory:AccountBank("eu") == nil)
     T.check("no database: prune and forget do not fail", pcall(Memory.Prune, Memory, NOW) and pcall(Memory.Forget, Memory))
     LazyProf.db = saved
@@ -159,7 +159,7 @@ T.section("alts", function()
     Memory:SaveBags(horde, { [2589] = 500 }, {}, NOW)
     Memory:SaveBags(other, { [2589] = 700 }, {}, NOW)
 
-    local alts = Memory:Alts(MAIN)
+    local alts = Memory:Alts(MAIN, NOW)
     T.eq("same world and faction only, and never the character itself", #alts, 2)
     T.check("sorted by name", alts[1].name == "Amy Alt" and alts[2].name == "Zed Alt")
     T.eq("guid is given", alts[2].guid, "Player-1-ZED")
@@ -175,17 +175,17 @@ T.section("alts", function()
 
     -- What is handed out is not the saved table.
     alts[2].bags[2589] = 1
-    T.eq("the list is a copy", Memory:Alts(MAIN)[2].bags[2589], 20)
+    T.eq("the list is a copy", Memory:Alts(MAIN, NOW)[2].bags[2589], 20)
 
     -- The owner's own bank is not thinned.
     Memory:SaveBank(MAIN, { [6948] = 1 }, { [6948] = 1 }, NOW)
     T.eq("soulbound stays in the owner's own bank", (Memory:OwnBank(MAIN.guid))[6948], 1)
 
-    T.eq("seen from the other faction", #Memory:Alts(horde), 0)
-    T.eq("seen from the other world", #Memory:Alts(other), 0)
-    T.eq("without a world nothing is an alt", #Memory:Alts({ guid = "Player-1-X", faction = "Alliance" }), 0)
-    T.eq("without a faction nothing is an alt", #Memory:Alts({ guid = "Player-1-X", world = "eu-pvp" }), 0)
-    T.eq("without a guid nothing is an alt", #Memory:Alts({ world = "eu-pvp", faction = "Alliance" }), 0)
+    T.eq("seen from the other faction", #Memory:Alts(horde, NOW), 0)
+    T.eq("seen from the other world", #Memory:Alts(other, NOW), 0)
+    T.eq("without a world nothing is an alt", #Memory:Alts({ guid = "Player-1-X", faction = "Alliance" }, NOW), 0)
+    T.eq("without a faction nothing is an alt", #Memory:Alts({ guid = "Player-1-X", world = "eu-pvp" }, NOW), 0)
+    T.eq("without a guid nothing is an alt", #Memory:Alts({ world = "eu-pvp", faction = "Alliance" }, NOW), 0)
 end)
 
 T.section("one name, one character", function()
@@ -195,11 +195,11 @@ T.section("one name, one character", function()
     fresh()
     Memory:SaveBags(MAIN, { [2589] = 9 }, {}, NOW)
     Memory:SaveBags(who("Player-1-OLDMAIN", "Main Character"), { [2589] = 50 }, {}, NOW - 10 * DAY)
-    T.eq("a record under the asking character's own name is not an alt", #Memory:Alts(MAIN), 0)
+    T.eq("a record under the asking character's own name is not an alt", #Memory:Alts(MAIN, NOW), 0)
 
     Memory:SaveBags(who("Player-1-GONE", "Bank Alt"), { [2589] = 30 }, {}, NOW - 20 * DAY)
     Memory:SaveBags(who("Player-1-NEW", "Bank Alt"), { [2589] = 4 }, {}, NOW - DAY)
-    local alts = Memory:Alts(MAIN)
+    local alts = Memory:Alts(MAIN, NOW)
     T.eq("two records under one name count once", #alts, 1)
     T.eq("the one seen last", alts[1].guid, "Player-1-NEW")
     T.eq("with its own stock", alts[1].bags[2589], 4)
@@ -212,7 +212,7 @@ T.section("one name, one character", function()
         Memory:SaveBags(MAIN, { [2589] = 9 }, {}, NOW)
         Memory:SaveBags(who("Player-1-GONE", "Bank Alt"), { [2589] = 30 }, {}, NOW - 20 * DAY)
         newer()
-        return Memory:Alts(MAIN), Memory:Standing(MAIN)
+        return Memory:Alts(MAIN, NOW), Memory:Standing(MAIN)
     end
     local list, standing = named(function()
         Memory:SaveBags(who("Player-1-NEW", "Bank Alt"), { [2589] = 4 }, {}, NOW - DAY, false)
@@ -269,10 +269,10 @@ T.section("one name, one character", function()
 
     -- A record whose name could not be read cannot be shown, so it is not counted.
     Memory:SaveBags({ guid = "Player-1-NONAME", world = "eu-pvp", faction = "Alliance" }, { [2589] = 77 }, {}, NOW)
-    T.eq("a record without a name is not an alt", #Memory:Alts(MAIN), 1)
+    T.eq("a record without a name is not an alt", #Memory:Alts(MAIN, NOW), 1)
     -- A save brings the name up to date: a character can be renamed.
     Memory:SaveBags(who("Player-1-NEW", "Renamed Alt"), { [2589] = 5 }, {}, NOW - DAY + 60)
-    alts = Memory:Alts(MAIN)
+    alts = Memory:Alts(MAIN, NOW)
     T.check("a save under a new name renames the record", #alts == 2 and alts[2].guid == "Player-1-NEW"
         and alts[2].name == "Renamed Alt" and alts[2].bags[2589] == 5, alts[1] and alts[1].name)
     T.check("the older record of the old name is the character of that name again",
@@ -280,13 +280,13 @@ T.section("one name, one character", function()
     Memory:SaveBags(who("Player-1-NEW", "Bank Alt"), { [2589] = 4 }, {}, NOW - DAY + 120)
     -- The same for the world and the faction it is filed under.
     Memory:SaveBags(who("Player-1-MOVED", "Moved Alt", "eu-normal", "Horde"), { [2589] = 2 }, {}, NOW)
-    T.eq("fixture: another world and faction is no alt", #Memory:Alts(MAIN), 1)
+    T.eq("fixture: another world and faction is no alt", #Memory:Alts(MAIN, NOW), 1)
     Memory:SaveBags(who("Player-1-MOVED", "Moved Alt"), { [2589] = 2 }, {}, NOW)
-    T.eq("a save under another world and faction refiles the record", #Memory:Alts(MAIN), 2)
+    T.eq("a save under another world and faction refiles the record", #Memory:Alts(MAIN, NOW), 2)
     LazyProf.db.global.stock.characters["Player-1-MOVED"] = nil
     -- A later save that cannot read the name keeps the one it had.
     Memory:SaveBags({ guid = "Player-1-NEW", world = "eu-pvp", faction = "Alliance" }, { [2589] = 6 }, {}, NOW)
-    alts = Memory:Alts(MAIN)
+    alts = Memory:Alts(MAIN, NOW)
     T.check("a save without a name keeps the remembered name", #alts == 1 and alts[1].name == "Bank Alt"
         and alts[1].bags[2589] == 6)
     -- The same for the world and the faction: a save that could not read one
@@ -300,7 +300,7 @@ T.section("one name, one character", function()
     Memory:NoteBagsAtBank({ guid = "Player-1-NEW" }, { [2589] = 7 }, { character = true }, NOW)
     T.check("a note without any of them keeps all three", record.name == "Bank Alt" and record.world == "eu-pvp"
         and record.faction == "Alliance")
-    alts = Memory:Alts(MAIN)
+    alts = Memory:Alts(MAIN, NOW)
     T.check("so it is still the alt of that name, with what the saves held", #alts == 1 and alts[1].guid == "Player-1-NEW"
         and alts[1].bags[2589] == 7 and alts[1].bank[2589] == 50, alts[1] and alts[1].guid)
 end)
@@ -314,7 +314,7 @@ T.section("a character that cannot send", function()
     Memory:SaveBags(MAIN, { [2589] = 9 }, {}, NOW)
     Memory:SaveBags(solo, { [2589] = 80 }, {}, NOW, false)
     Memory:SaveBank(solo, { [2589] = 300 }, {}, NOW, false)
-    T.eq("it is not an alt", #Memory:Alts(MAIN), 0)
+    T.eq("it is not an alt", #Memory:Alts(MAIN, NOW), 0)
     T.check("its own bank is still its own", (Memory:OwnBank(solo.guid))[2589] == 300)
     local s = Memory:Summary()
     T.check("the summary says it cannot send", s.characters[2].guid == solo.guid and s.characters[2].canSend == false
@@ -322,17 +322,17 @@ T.section("a character that cannot send", function()
 
     -- The mode goes off: its next save says so, whichever part is saved.
     Memory:SaveBags(solo, { [2589] = 80 }, {}, NOW + 60, true)
-    local alts = Memory:Alts(MAIN)
+    local alts = Memory:Alts(MAIN, NOW)
     T.check("a later save that can send makes it an alt again, bank included",
         #alts == 1 and alts[1].bags[2589] == 80 and alts[1].bank[2589] == 300)
     Memory:SaveBank(solo, { [2589] = 300 }, {}, NOW + 120, false)
-    T.eq("and a bank save that cannot send takes it out again", #Memory:Alts(MAIN), 0)
+    T.eq("and a bank save that cannot send takes it out again", #Memory:Alts(MAIN, NOW), 0)
     Memory:SaveBags(solo, { [2589] = 80 }, {}, NOW + 180)
-    T.eq("a save that does not say counts as able to send", #Memory:Alts(MAIN), 1)
+    T.eq("a save that does not say counts as able to send", #Memory:Alts(MAIN, NOW), 1)
 
     -- The setting can change without a save: the record is told directly.
-    T.check("told that it cannot send", Memory:SetCanSend(solo.guid, false) == true and #Memory:Alts(MAIN) == 0)
-    T.check("told that it can again", Memory:SetCanSend(solo.guid, true) == true and #Memory:Alts(MAIN) == 1)
+    T.check("told that it cannot send", Memory:SetCanSend(solo.guid, false) == true and #Memory:Alts(MAIN, NOW) == 0)
+    T.check("told that it can again", Memory:SetCanSend(solo.guid, true) == true and #Memory:Alts(MAIN, NOW) == 1)
     T.check("a character that is not remembered: nothing to tell", Memory:SetCanSend("Player-1-NOBODY", false) == false
         and Memory:Summary().characters[3] == nil)
     T.check("no guid: nothing to tell", Memory:SetCanSend(nil, false) == false)
@@ -342,12 +342,12 @@ T.section("a character that cannot send", function()
     LazyProf.db.global.stock = { schema = 1, account = {}, characters = { [solo.guid] = {
         name = "Solo Alt", world = "eu-pvp", faction = "Alliance", seen = NOW,
         bags = { items = { [2589] = 80 }, at = NOW } } } }
-    T.eq("a record without the field is an alt", #Memory:Alts(MAIN), 1)
+    T.eq("a record without the field is an alt", #Memory:Alts(MAIN, NOW), 1)
     T.check("and the summary says it can send", Memory:Summary().characters[1].canSend == true)
     -- Seen from the character that cannot send itself: the others are still
     -- listed (whether it counts them is the scanner's decision).
     Memory:SaveBags(MAIN, { [2589] = 9 }, {}, NOW)
-    T.eq("the store does not judge the asking character", #Memory:Alts(solo), 1)
+    T.eq("the store does not judge the asking character", #Memory:Alts(solo, NOW), 1)
 end)
 
 -- Why each remembered character is or is not an alt of the asking one (the
@@ -376,7 +376,7 @@ T.section("standing", function()
     T.eq("an older record under an alt's name", standing["G-OLDALT"], "name")
     T.eq("no name", standing["G-NONAME"], "noname")
     T.check("what is not a record has no standing", standing["G-JUNK"] == nil)
-    local alts = Memory:Alts(MAIN)
+    local alts = Memory:Alts(MAIN, NOW)
     T.check("Alts is the ones standing as alt", #alts == 1 and alts[1].guid == "G-ALT")
     -- A world or faction that is not known: nobody can be told to be an alt.
     standing = Memory:Standing({ guid = MAIN.guid, name = "Main Character", faction = "Alliance" })
@@ -483,12 +483,12 @@ T.section("a bank in doubt", function()
     Memory:SaveBags(zed, { [2589] = 20 }, {}, NOW - DAY)
     Memory:SaveBank(zed, { [2589] = 100 }, {}, NOW - 2 * DAY)
     T.check("an alt's bank can be marked", Memory:MarkBankDoubt(zed.guid) == true)
-    local alts = Memory:Alts(MAIN)
+    local alts = Memory:Alts(MAIN, NOW)
     T.check("the alt is still an alt, with its bags", #alts == 1 and alts[1].bags[2589] == 20 and alts[1].bagsAt == NOW - DAY)
     T.check("its bank is not handed out, and the list says why", alts[1].bank == nil and alts[1].bankAt == nil
         and alts[1].bankDoubt == true)
     Memory:SaveBank(zed, { [2589] = 100 }, {}, NOW)
-    alts = Memory:Alts(MAIN)
+    alts = Memory:Alts(MAIN, NOW)
     T.check("after its next bank save it is handed out again", alts[1].bank ~= nil and alts[1].bank[2589] == 100
         and alts[1].bankDoubt == nil)
 
@@ -517,7 +517,7 @@ T.section("a bank in doubt", function()
         records.account.eu.doubt = value
         T.check(what .. ": the own bank and the account bank are in doubt", select(3, Memory:OwnBank(MAIN.guid)) == true
             and select(3, Memory:AccountBank("eu")) == true)
-        local list = Memory:Alts(MAIN)
+        local list = Memory:Alts(MAIN, NOW)
         T.check(what .. ": an alt's bank is not handed out", #list == 1 and list[1].bank == nil and list[1].bankDoubt == true
             and list[1].bags[2589] == 20)
         local sum = Memory:Summary()
@@ -530,7 +530,7 @@ T.section("a bank in doubt", function()
     records.characters[zed.guid].bank.doubt = false
     records.account.eu.doubt = false
     T.check("false is no mark", select(3, Memory:OwnBank(MAIN.guid)) == false and select(3, Memory:AccountBank("eu")) == false
-        and Memory:Alts(MAIN)[1].bank ~= nil and Memory:Summary().characters[1].bankDoubt == false)
+        and Memory:Alts(MAIN, NOW)[1].bank ~= nil and Memory:Summary().characters[1].bankDoubt == false)
     records.characters[MAIN.guid].bank.doubt = "yes"
     Memory:SaveBank(MAIN, { [2589] = 41 }, {}, NOW)
     T.check("the next save takes a damaged mark away too", select(3, Memory:OwnBank(MAIN.guid)) == false)
@@ -728,7 +728,7 @@ T.section("forget", function()
     Memory:SaveAccountBank(MAIN, { [1] = 1 }, NOW)
     Memory:Forget()
     T.check("no bank", Memory:OwnBank(MAIN.guid) == nil)
-    T.eq("no alts", #Memory:Alts(MAIN), 0)
+    T.eq("no alts", #Memory:Alts(MAIN, NOW), 0)
     T.check("no account bank", Memory:AccountBank("eu") == nil)
     T.eq("no records", count(LazyProf.db.global.stock.characters), 0)
     T.check("saving works again afterwards", Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW) == true)
@@ -740,7 +740,7 @@ T.section("another format is left alone", function()
     fresh()
     local theirs = { schema = 2, characters = { [MAIN.guid] = { something = "else" } } }
     LazyProf.db.global.stock = theirs
-    T.check("nothing is read from it", Memory:OwnBank(MAIN.guid) == nil and #Memory:Alts(MAIN) == 0)
+    T.check("nothing is read from it", Memory:OwnBank(MAIN.guid) == nil and #Memory:Alts(MAIN, NOW) == 0)
     T.check("nothing is saved into it", Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW) == false
         and Memory:SaveBank(MAIN, { [1] = 1 }, {}, NOW) == false
         and Memory:SaveAccountBank(MAIN, { [1] = 1 }, NOW) == false)
@@ -772,7 +772,7 @@ T.section("saved data that is not what the addon wrote", function()
         local ok, err = pcall(function()
             out.bank = Memory:OwnBank(MAIN.guid)
             out.account = Memory:AccountBank("eu")
-            out.alts = Memory:Alts(MAIN)
+            out.alts = Memory:Alts(MAIN, NOW)
             out.summary = Memory:Summary()
         end)
         out.ok, out.err = ok, err
@@ -823,8 +823,10 @@ T.section("saved data that is not what the addon wrote", function()
         { "a world that is a table", { schema = 1, characters = { X = (function() local r = goodAlt(); r.world = {}; return r end)() }, account = {} }, 0 },
         { "seen is a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.seen = "yesterday"; return r end)() }, account = {} }, 0 },
         { "two records of one name, one with seen as a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.seen = "x"; r.bags.items[2589] = 99; return r end)(), [ALT.guid] = goodAlt() }, account = {} }, 20 },
-        { "a part without a time", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.at = nil; return r end)() }, account = {} }, 20 },
-        { "a part whose time is a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.at = "noon"; return r end)() }, account = {} }, 20 },
+        { "a part without a time", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.at = nil; return r end)() }, account = {} }, 0 },
+        { "a part whose time is a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.at = "noon"; return r end)() }, account = {} }, 0 },
+        { "a part whose time is zero", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.at = 0; return r end)() }, account = {} }, 0 },
+        { "a part whose time is far ahead", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.at = 1e300; return r end)() }, account = {} }, 0 },
         { "a key that is a number", { schema = 1, characters = { [7] = goodAlt(), [8] = goodAlt() }, account = {} }, 20 },
     }
     for _, case in ipairs(cases) do
@@ -848,15 +850,17 @@ T.section("saved data that is not what the addon wrote", function()
         and partless.characters[1].bagItems == nil and partless.characters[1].bankItems == nil
         and partless.characters[2].bagItems == nil and partless.characters[2].bankItems == nil
         and partless.characters[1].bankDoubt == false and partless.characters[2].bankDoubt == false)
-    local partlessAlts = Memory:Alts(MAIN)
+    local partlessAlts = Memory:Alts(MAIN, NOW)
     T.check("an alt's parts without items are not handed out, nor is its bank called in doubt", #partlessAlts == 1
         and partlessAlts[1].bags == nil and partlessAlts[1].bank == nil and partlessAlts[1].bankDoubt == nil)
     T.check("and there is no bank to mark", Memory:MarkBankDoubt(MAIN.guid) == false
         and LazyProf.db.global.stock.characters[MAIN.guid].bank.doubt == nil)
 
-    -- A part without a usable time is counted but has no age.
+    -- A part without a usable time is not offered (a damaged time leans
+    -- towards not counting), and has no age.
     local out = read({ schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.at = "noon"; return r end)() }, account = {} })
-    T.check("a part without a usable time has no time", out.alts[1] ~= nil and out.alts[1].bagsAt == nil)
+    T.check("a part without a usable time is not offered and has no time", out.alts[1] ~= nil and out.alts[1].bags == nil
+        and out.alts[1].bagsAt == nil)
     -- The summary says how many records it could not read.
     out = read({ schema = 1, characters = { X = true, Y = "gone", [ALT.guid] = goodAlt() }, account = { eu = true } })
     T.check("the summary lists what it can read and counts the rest",
@@ -924,7 +928,7 @@ T.section("damaged values lean towards not counting", function()
     end
     local function counted()
         local n = 0
-        for _, a in ipairs(Memory:Alts(MAIN)) do n = n + ((a.bags or {})[2589] or 0) + ((a.bank or {})[2589] or 0) end
+        for _, a in ipairs(Memory:Alts(MAIN, NOW)) do n = n + ((a.bags or {})[2589] or 0) + ((a.bank or {})[2589] or 0) end
         return n
     end
 
@@ -951,16 +955,52 @@ T.section("damaged values lean towards not counting", function()
                                 ["a table with an id that is text"] = { ["2589"] = 3 },
                                 ["a table with a negative count"] = { [2589] = -2 } }) do
         alt(function(r) r.bags.bound = bound end)
-        local alts = Memory:Alts(MAIN)
+        local alts = Memory:Alts(MAIN, NOW)
         T.check("a soulbound part that is " .. label .. ": those bags are not offered, the bank still is",
             #alts == 1 and alts[1].bags == nil and alts[1].bagsAt == nil and alts[1].bank[2589] == 7, counted())
     end
     alt(function(r) r.bank.bound = "x" end)
-    local alts = Memory:Alts(MAIN)
+    local alts = Memory:Alts(MAIN, NOW)
     T.check("the same for a bank: its soulbound part cannot be read, it is not offered",
         alts[1].bank == nil and alts[1].bankAt == nil and alts[1].bags[2589] == 20)
     alt(function(r) r.bags.bound = { [2589] = 5 } end)
     T.eq("(a soulbound part that can be read is taken off as before)", counted(), 15 + 7)
+
+    -- A time read back is sound only when it is a number greater than zero
+    -- and not later than one day after now; anything else is damaged.
+    for _, case in ipairs({ { NOW, true }, { NOW - 400 * DAY, true }, { NOW + DAY, true }, { 1, true },
+                            { NOW + DAY + 1, false }, { 0, false }, { -1, false }, { -1e300, false }, { 1e300, false },
+                            { 0 / 0, false }, { math.huge, false }, { -math.huge, false }, { "noon", false }, { true, false } }) do
+        T.eq("a time of " .. tostring(case[1]) .. (case[2] and " is sound" or " is damaged"), Memory.SoundTime(case[1], NOW), case[2])
+    end
+    T.eq("no time at all is damaged", Memory.SoundTime(nil, NOW), false)
+    T.eq("without a now to compare with, no time is sound", Memory.SoundTime(NOW, nil), false)
+    -- An alt's part with a damaged time is not handed out as stock: its bags
+    -- are not offered, its bank is left out as a bank in doubt is (and so
+    -- named by the scan).
+    for _, at in ipairs({ 0, -1e300, 1e300, NOW + 2 * DAY, "noon", false }) do
+        alt(function(r) r.bags.at = at end)
+        local list = Memory:Alts(MAIN, NOW)
+        T.check("bags whose time is " .. tostring(at) .. ": not offered, the bank still is", #list == 1 and list[1].bags == nil
+            and list[1].bagsAt == nil and list[1].bank[2589] == 7, counted())
+        alt(function(r) r.bank.at = at end)
+        list = Memory:Alts(MAIN, NOW)
+        T.check("a bank whose time is " .. tostring(at) .. ": not handed out, said to be in doubt; the bags still count",
+            list[1].bank == nil and list[1].bankAt == nil and list[1].bankDoubt == true and list[1].bags[2589] == 20)
+    end
+    alt(function(r) r.bags.at = nil; r.bank.at = nil end)
+    T.eq("parts without a time: nothing of them counts", counted(), 0)
+    -- The summary says which time is damaged, for the dump.
+    local record = alt(function(r) r.bags.at = 0; r.bank.at = 1e300 end)
+    local summary = Memory:Summary(NOW).characters[1]
+    T.check("the summary says which part's time is damaged", summary.bagsDamaged == true and summary.bankDamaged == true)
+    record.bags.at, record.bank.at = NOW - 100, NOW - 100
+    summary = Memory:Summary(NOW).characters[1]
+    T.check("(and that a sound one is not)", summary.bagsDamaged == false and summary.bankDamaged == false)
+    LazyProf.db.global.stock.account = { eu = { items = { [2589] = 3 }, at = 0, world = "eu-pvp", faction = "Alliance" } }
+    T.eq("and so for an account bank", Memory:Summary(NOW).account[1].damaged, true)
+    LazyProf.db.global.stock.account.eu.at = NOW
+    T.eq("(a sound one)", Memory:Summary(NOW).account[1].damaged, false)
 
     for _, seen in ipairs({ 0 / 0, math.huge, -math.huge, "noon" }) do
         alt(function(r) r.seen = seen end)

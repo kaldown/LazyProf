@@ -391,6 +391,42 @@ T.section("no inventory addon: a bank in doubt is not counted", function()
     combined, breakdown, meta = scan()
     T.eq("a damaged doubt mark: neither bank is counted", combined[2589], 5 + 20)
     T.check("and the scan says that both are in doubt", meta.bankInDoubt == true and meta.accountInDoubt == true)
+
+    -- A bank whose time read back is damaged (not a number greater than
+    -- zero and not later than a day after now) is not counted either: the
+    -- scan says it is in doubt, the dump says why, a kept read heals it.
+    fresh()
+    Memory:SaveBank(MAIN, { [2589] = 40 }, {}, NOW - DAY)
+    Memory:SaveAccountBank(MAIN, { [2589] = 10 }, NOW - DAY)
+    Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW - DAY)
+    Memory:SaveBank(ALT, { [2589] = 100 }, {}, NOW - DAY)
+    Memory:SaveBags(FARMER, { [2589] = 3 }, {}, NOW - DAY)
+    local stock = LazyProf.db.global.stock
+    stock.characters[MAIN.guid].bank.at = 0
+    stock.account.eu.at = NOW + 2 * DAY
+    stock.characters[ALT.guid].bank.at = -1e300
+    stock.characters[FARMER.guid].bags.at = 1e300
+    Inventory:ForgetAltsPart()
+    combined, breakdown, meta = scan()
+    T.eq("damaged times: none of those banks counts, nor the bags with one", combined[2589], 5 + 20)
+    T.check("the scan says the character's banks are in doubt", meta.bankInDoubt == true and meta.accountInDoubt == true
+        and meta.bankSeenAt == nil and meta.accountSeenAt == nil)
+    T.check("and names the alt whose bank is left out", meta.altBanksInDoubt ~= nil and #meta.altBanksInDoubt == 1
+        and meta.altBanksInDoubt[1] == "Bank Alt")
+    local lines = {}
+    Inventory:RunDiagnostic(lines)
+    local text = "\n" .. table.concat(lines, "\n") .. "\n"
+    T.check("the dump says which time is damaged", text:find("character: Main Character [this character] world=eu-pvp faction=Alliance "
+        .. "bags=never seen bank=1 items (time damaged: not counted) guid=Player-1-MAIN", 1, true) ~= nil, text)
+    T.check("an alt's too", text:find(" bags=1 items (1 day ago) bank=1 items (time damaged: not counted) guid=Player-1-ALT", 1, true) ~= nil
+        and text:find(" bags=1 items (time damaged: not counted) bank=never seen guid=Player-1-FARM", 1, true) ~= nil, text)
+    T.check("and the account bank's", text:find("account bank: region=eu read by world=eu-pvp faction=Alliance items=1 "
+        .. "(time damaged: not counted) - not counted (its time is damaged)", 1, true) ~= nil, text)
+    Memory:SaveBank(MAIN, { [2589] = 41 }, {}, NOW)
+    Memory:SaveAccountBank(MAIN, { [2589] = 11 }, NOW)
+    combined, breakdown, meta = scan()
+    T.eq("saved again: both count", combined[2589], 5 + 41 + 11 + 20)
+    T.check("and nothing is in doubt", meta.bankInDoubt == nil and meta.accountInDoubt == nil)
 end)
 
 -- ===========================================================================
@@ -1086,7 +1122,7 @@ T.section("the bags are remembered a moment after they change", function()
 
     -- What was saved is what an alt will be offered: soulbound taken off.
     client.identity = ALT
-    local alts = Memory:Alts(ALT)
+    local alts = Memory:Alts(ALT, NOW)
     T.check("the save holds the items and what is soulbound", #alts == 1 and alts[1].bags[2589] == 8 and alts[1].bags[2592] == nil)
     client.identity = MAIN
 
@@ -1106,7 +1142,7 @@ T.section("the bags are remembered a moment after they change", function()
     advance(2.1)
     T.eq("a backpack without slots: the snapshot keeps its time", Memory:Summary().characters[1].bagsAt, NOW + 60)
     client.identity = ALT
-    T.eq("a backpack without slots: and its content", Memory:Alts(ALT)[1].bags[2589], 8)
+    T.eq("a backpack without slots: and its content", Memory:Alts(ALT, NOW)[1].bags[2589], 8)
     client.identity = MAIN
     client.backpackSlots = 16
     Inventory:OnBagUpdate(0)
