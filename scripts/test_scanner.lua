@@ -1041,6 +1041,45 @@ T.section("the bank is read only while its window is open", function()
     client.started.onBankClosed()
     T.check("closed before the second look: in doubt", select(3, Memory:OwnBank(MAIN.guid)) == true)
 
+    -- An empty read is a second look only when the first one came after the
+    -- bank's last own update. The bank is emptied (one empty read, not
+    -- believed), a stack is put back in before the second look, and then
+    -- the client lets go of the bank: that empty read is the first since
+    -- the deposit, and the one from before it is no second opinion.
+    fresh()
+    Inventory:Initialize()
+    advance(2.1)
+    client.bankOpen = true
+    client.bank.character = { items = { [2589] = 6 }, slots = 28 }
+    client.started.onBankOpened()
+    advance(3)
+    client.bank.character = { items = {}, slots = 28 }
+    Inventory:OnBagUpdate(6)                              -- read at once: empty, not believed
+    advance(0.19)
+    client.bank.character = { items = { [2589] = 1 }, slots = 28 }
+    Inventory:OnBagUpdate(6)                              -- a deposit, before the second look: the read is owed
+    advance(0.0099)                                       -- 0.2 s after the last read, ahead of the trailing read
+    client.bank.character = { items = {}, slots = 28 }    -- the client lets go
+    Inventory:OnBagUpdate(6)                              -- read at once: empty again
+    T.check("an empty read after a deposit is not believed on the strength of an empty read from before it",
+        (bankOf())[2589] == 6, (bankOf())[2589])
+    client.started.onBankClosing()
+    client.bankOpen = false
+    client.started.onBankClosed()
+    T.check("closed then: what is remembered stays, in doubt", (bankOf())[2589] == 6 and select(3, Memory:OwnBank(MAIN.guid)) == true)
+    -- Left alone, the second look after the update still settles it.
+    client.bankOpen = true
+    client.bank.character = { items = { [2589] = 6 }, slots = 28 }
+    client.started.onBankOpened()
+    advance(3)
+    client.bank.character = { items = {}, slots = 28 }
+    Inventory:OnBagUpdate(6)
+    Inventory:OnBagUpdate(6)                              -- a second update of the same move: the read is owed
+    advance(0.25)
+    T.check("two updates of one move: the first empty read after them is not believed yet", (bankOf())[2589] == 6)
+    advance(0.2)
+    T.check("the look after it is", next((bankOf())) == nil)
+
     -- Without a GUID nothing is saved; the account bank needs the world.
     fresh()
     Inventory:Initialize()

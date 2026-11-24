@@ -77,9 +77,12 @@
 --    - Without a single item while items are remembered: believed only when
 --      (a) this visit already kept a read with items of the same slot count,
 --      or it is 2 s or more after the opening, and (b) an earlier read of
---      this visit, taken on an earlier frame, found the bank empty too.
---      Until then the empty read is unresolved and one more read is taken:
---      the trailing read when only (b) is missing, else the look at 2 s.
+--      this visit, taken on an earlier frame and after the bank's last own
+--      update, found the bank empty too (an empty read from before an
+--      update says nothing about the bank after it: a stack may have gone
+--      in). Until then the empty read is unresolved and one more read is
+--      taken: the trailing read when only (b) is missing, else the look at
+--      2 s.
 --    - Without a single item while nothing with items is remembered for that
 --      bank: kept 2 s or more after the opening ("seen, nothing in it") -
 --      and, while the bank is unsettled (rule 3), only on a second look as
@@ -775,6 +778,7 @@ local bagUpdateSeen = false     -- a bag update asked for the waiting save
 --     slots      slot count of the last read kept
 --     keptItems  a read with items was kept
 --     emptyAt    frame of the first empty read not believed yet (unresolved)
+--                since the bank's last own update
 --     usable     the adapter called the bank usable at some read of this visit
 --     unsettled  an update of one of its containers (or a change of its
 --                tabs) arrived that no kept read of it has come after
@@ -1145,10 +1149,13 @@ function Inventory:OnBankChange(kind)
     local v = OpenVisit()
     if not v then return end
     -- That bank is unsettled from here until a read of it is kept (the read
-    -- below, taken in this very call, comes after the update). Which banks a
-    -- scan leaves out may change with that, so the frame's scan is dropped.
+    -- below, taken in this very call, comes after the update). An empty read
+    -- from before this update is no first look for one after it (rule 2).
+    -- Which banks a scan leaves out may change with that, so the frame's
+    -- scan is dropped.
     if kind and v[kind] then
         v[kind].unsettled = true
+        v[kind].emptyAt = nil
     end
     InvalidateFrame()
     if v.lastReadAt == nil or GetTime() - v.lastReadAt >= BANK_READ_SPACING - CLOCK_SLACK then

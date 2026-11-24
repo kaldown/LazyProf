@@ -555,6 +555,7 @@ end
 
 local NOT_COUNTED = "Your bank and the account bank are not counted: they may have changed after LazyProf last read them. "
     .. "Open the bank to count them again."
+local BANK_NOT_COUNTED_LINE = "Your bank is not counted: it may have changed after LazyProf last read it. Open the bank to count it again."
 
 -- A scan never counts more linen than is owned.
 local function notOver(label, addon)
@@ -1367,6 +1368,31 @@ T.section("the close", function()
     linenLeft, inDoubt, barsLeft, accountDoubt = letGoThen("BANKFRAME_CLOSED", 15)
     T.check("the same told by an account bank container's update: the account bank is in doubt", linenLeft == 100 and barsLeft == 50
         and inDoubt == false and accountDoubt == true, tostring(linenLeft) .. "/" .. tostring(barsLeft))
+    -- The same client, after the bank was emptied and one stack put back:
+    -- the empty read of the emptied bank, taken before the deposit, must not
+    -- stand in as the second look for the empty read the client's letting
+    -- go gives. The bank holds the 5 linen; it must not end up remembered
+    -- as empty without a word.
+    addon = bankVisit(30)
+    World.containers[6] = { slots = 28 }
+    World.containers[0][3] = slot(LINEN, 100)
+    World.bagUpdate(addon, 6, 0)                 -- emptied: one empty read, not believed
+    World.advance(0.19)
+    World.containers[6][2] = slot(LINEN, 5)
+    World.containers[0][2] = nil
+    World.bagUpdate(addon, 6, 0)                 -- the 5 carried linen go in, before the second look
+    World.time = World.time + 0.01               -- the frame the second look is due in, ahead of its timer
+    World.containers[6] = { slots = 28 }         -- the client lets go and says so
+    World.bagUpdate(addon, 6)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.containers[6] = { slots = 28, [2] = slot(LINEN, 5) }   -- what the bank really holds
+    World.advance(5)
+    do
+        local items, inDoubtNow = bankOf(addon)
+        T.check("emptied, a stack put back, then let go of: not remembered as empty", items[LINEN] == 100 and inDoubtNow == true,
+            tostring(items[LINEN]) .. "/" .. tostring(inDoubtNow))
+        T.eq("and the Shopping tab says the bank is not counted", firstShoppingRow(addon), BANK_NOT_COUNTED_LINE)
+    end
     -- Several updates and the batch notice in that frame: the bank is read
     -- twice in it, and two reads of one frame are not a second look.
     addon = bankVisit(30)
