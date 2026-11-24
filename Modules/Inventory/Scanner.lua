@@ -383,6 +383,13 @@ local function mergeSource(items, sourceKey, charName, combined, breakdown)
     end
 end
 
+-- How many items a source holds: for a debug line only (see ScanAll).
+local function CountItems(items)
+    local count = 0
+    for _ in pairs(items) do count = count + 1 end
+    return count
+end
+
 -- Is the Syndicator addon there to read stock from?
 function Inventory:UsesSyndicator()
     return (Syndicator and Syndicator.API) and true or false
@@ -463,8 +470,8 @@ local scanCache = { time = 0, combined = nil, breakdown = nil, meta = nil }
 
 -- Stock from Syndicator: the character's bank, mail and auctions, the alts,
 -- the guild bank (the last two not for a Self-Found character: selfFound,
--- as the scan found it).
-local function AddSyndicatorStock(self, combined, breakdown, countAlts, selfFound)
+-- as the scan found it). logLines: build the lines for the debug log.
+local function AddSyndicatorStock(self, combined, breakdown, countAlts, selfFound, logLines)
     local charName = Syndicator.API.GetCurrentCharacter()
     local charData = charName and Syndicator.API.GetByCharacterFullName(charName)
 
@@ -475,10 +482,10 @@ local function AddSyndicatorStock(self, combined, breakdown, countAlts, selfFoun
                 local items = self[scanMethod](self, charData)
                 mergeSource(items, source.key, nil, combined, breakdown)
 
-                local count = 0
-                for _ in pairs(items) do count = count + 1 end
-                LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items in %s", count, source.key))
-            else
+                if logLines then
+                    LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items in %s", CountItems(items), source.key))
+                end
+            elseif logLines then
                 LazyProf:Debug("pathfinder", "Inventory scan: " .. source.key .. " disabled")
             end
         end
@@ -508,14 +515,18 @@ local function AddSyndicatorStock(self, combined, breakdown, countAlts, selfFoun
                             end
                         end
 
-                        for itemId in pairs(altBags) do totalAltItems = totalAltItems + 1 end
+                        if logLines then
+                            totalAltItems = totalAltItems + CountItems(altBags)
+                        end
                     end
                 end
             end
         end
 
-        LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items from alts", totalAltItems))
-    else
+        if logLines then
+            LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items from alts", totalAltItems))
+        end
+    elseif logLines then
         LazyProf:Debug("pathfinder", "Inventory scan: alts not counted")
     end
 
@@ -525,10 +536,10 @@ local function AddSyndicatorStock(self, combined, breakdown, countAlts, selfFoun
         local guildItems = self:ScanGuildBank()
         mergeSource(guildItems, "guildBank", nil, combined, breakdown)
 
-        local guildCount = 0
-        for _ in pairs(guildItems) do guildCount = guildCount + 1 end
-        LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items in guild bank", guildCount))
-    else
+        if logLines then
+            LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items in guild bank", CountItems(guildItems)))
+        end
+    elseif logLines then
         LazyProf:Debug("pathfinder", "Inventory scan: guild bank disabled")
     end
 end
@@ -717,19 +728,23 @@ function Inventory:ScanAll()
     local combined = {}
     local breakdown = {}
     local meta = nil
+    -- The lines for the debug log - counting each source's items, a
+    -- formatted line per source - are built only while that log takes them:
+    -- a scan runs for every calculation and for every light refresh.
+    local logLines = LazyProf:IsDebugEnabled("pathfinder")
 
     -- 1. Current character bags (read live, always on)
     local bagItems, _, backpackSlots = self:ScanBags()
     mergeSource(bagItems, "bags", nil, combined, breakdown)
 
-    local bagCount = 0
-    for _ in pairs(bagItems) do bagCount = bagCount + 1 end
-    LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items in bags", bagCount))
+    if logLines then
+        LazyProf:Debug("pathfinder", string.format("Inventory scan: %d unique items in bags", CountItems(bagItems)))
+    end
 
     -- 2. Everything outside the bags
     local countAlts = wantAlts and not selfFound
     if self:UsesSyndicator() then
-        AddSyndicatorStock(self, combined, breakdown, countAlts, selfFound)
+        AddSyndicatorStock(self, combined, breakdown, countAlts, selfFound, logLines)
     else
         local ok, result = Protected("scan", ScanMemory, self, combined, breakdown, countAlts, selfFound, bagItems, backpackSlots)
         if ok then
