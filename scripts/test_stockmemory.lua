@@ -313,6 +313,84 @@ T.section("account bank", function()
     T.check("no world asked: nothing", Memory:AccountBank(nil) == nil)
 end)
 
+-- A remembered bank can be marked "in doubt": the addon has reason to think
+-- it is behind. It stays remembered - the mark only says that it must not be
+-- counted - and the next save of that bank takes the mark away.
+T.section("a bank in doubt", function()
+    fresh()
+    local zed = who("Player-1-ZED", "Zed Alt")
+    T.check("nothing remembered: nothing to mark", Memory:MarkBankDoubt(MAIN.guid) == false
+        and Memory:MarkAccountBankDoubt("eu-pvp") == false)
+    T.check("marking makes nothing", LazyProf.db.global.stock == nil)
+    Memory:SaveBags(MAIN, { [2589] = 9 }, {}, NOW)
+    T.check("bags only: no bank to mark", Memory:MarkBankDoubt(MAIN.guid) == false
+        and LazyProf.db.global.stock.characters[MAIN.guid].bank == nil)
+
+    Memory:SaveBank(MAIN, { [2589] = 40 }, {}, NOW - DAY)
+    local items, at, doubt = Memory:OwnBank(MAIN.guid)
+    T.check("a saved bank is not in doubt", items[2589] == 40 and doubt == false, doubt)
+    T.check("marking says that the mark is new", Memory:MarkBankDoubt(MAIN.guid) == true)
+    items, at, doubt = Memory:OwnBank(MAIN.guid)
+    T.check("the bank stays remembered, with its time, and says it is in doubt",
+        items ~= nil and items[2589] == 40 and at == NOW - DAY and doubt == true, doubt)
+    T.check("marking it again changes nothing", Memory:MarkBankDoubt(MAIN.guid) == false)
+    local summary = Memory:Summary()
+    T.check("the summary names the mark", summary.characters[1].bankDoubt == true and summary.characters[1].bankItems == 1)
+    Memory:SaveBags(MAIN, { [2589] = 10 }, {}, NOW)
+    T.check("a save of the bags leaves the mark", select(3, Memory:OwnBank(MAIN.guid)) == true)
+    Memory:SaveBank(MAIN, { [2589] = 41 }, {}, NOW)
+    items, at, doubt = Memory:OwnBank(MAIN.guid)
+    T.check("the next save of the bank takes it away", items[2589] == 41 and doubt == false, doubt)
+    T.check("and the summary follows", Memory:Summary().characters[1].bankDoubt == false)
+
+    -- An alt whose bank is in doubt: its bags still count, its bank does not.
+    Memory:SaveBags(zed, { [2589] = 20 }, {}, NOW - DAY)
+    Memory:SaveBank(zed, { [2589] = 100 }, {}, NOW - 2 * DAY)
+    T.check("an alt's bank can be marked", Memory:MarkBankDoubt(zed.guid) == true)
+    local alts = Memory:Alts(MAIN)
+    T.check("the alt is still an alt, with its bags", #alts == 1 and alts[1].bags[2589] == 20 and alts[1].bagsAt == NOW - DAY)
+    T.check("its bank is not handed out, and the list says why", alts[1].bank == nil and alts[1].bankAt == nil
+        and alts[1].bankDoubt == true)
+    Memory:SaveBank(zed, { [2589] = 100 }, {}, NOW)
+    alts = Memory:Alts(MAIN)
+    T.check("after its next bank save it is handed out again", alts[1].bank ~= nil and alts[1].bank[2589] == 100
+        and alts[1].bankDoubt == nil)
+
+    -- The account bank of a world.
+    Memory:SaveAccountBank("eu-pvp", { [2770] = 50 }, NOW - DAY)
+    items, at, doubt = Memory:AccountBank("eu-pvp")
+    T.check("a saved account bank is not in doubt", items[2770] == 50 and doubt == false, doubt)
+    T.check("another world's cannot be marked", Memory:MarkAccountBankDoubt("eu-normal") == false)
+    T.check("marking says that the mark is new", Memory:MarkAccountBankDoubt("eu-pvp") == true)
+    T.check("marking it again changes nothing", Memory:MarkAccountBankDoubt("eu-pvp") == false)
+    items, at, doubt = Memory:AccountBank("eu-pvp")
+    T.check("the account bank stays remembered and says it is in doubt", items[2770] == 50 and at == NOW - DAY and doubt == true)
+    T.check("the summary names it", Memory:Summary().account[1].doubt == true)
+    Memory:SaveAccountBank("eu-pvp", { [2770] = 51 }, NOW)
+    items, at, doubt = Memory:AccountBank("eu-pvp")
+    T.check("its next save takes the mark away", items[2770] == 51 and doubt == false and Memory:Summary().account[1].doubt == false)
+
+    -- Only the mark this file writes is one.
+    LazyProf.db.global.stock.characters[MAIN.guid].bank.doubt = "yes"
+    LazyProf.db.global.stock.account["eu-pvp"].doubt = 1
+    T.check("a value that is not the mark is none", select(3, Memory:OwnBank(MAIN.guid)) == false
+        and select(3, Memory:AccountBank("eu-pvp")) == false)
+    T.check("nothing to mark without a character or a world", Memory:MarkBankDoubt(nil) == false
+        and Memory:MarkAccountBankDoubt(nil) == false)
+    LazyProf.db.global.stock.characters["Player-1-JUNK"] = true
+    LazyProf.db.global.stock.account["eu-rp"] = "x"
+    T.check("what is not a record cannot be marked", Memory:MarkBankDoubt("Player-1-JUNK") == false
+        and Memory:MarkAccountBankDoubt("eu-rp") == false and LazyProf.db.global.stock.characters["Player-1-JUNK"] == true)
+
+    -- Another format is not marked either.
+    fresh()
+    local theirs = { schema = 2, characters = { [MAIN.guid] = { bank = { items = { [1] = 1 } } } }, account = { ["eu-pvp"] = { items = {} } } }
+    LazyProf.db.global.stock = theirs
+    T.check("another format: nothing is marked", Memory:MarkBankDoubt(MAIN.guid) == false
+        and Memory:MarkAccountBankDoubt("eu-pvp") == false and theirs.characters[MAIN.guid].bank.doubt == nil
+        and theirs.account["eu-pvp"].doubt == nil)
+end)
+
 T.section("prune", function()
     fresh()
     local old = who("Player-1-OLD", "Old Alt")

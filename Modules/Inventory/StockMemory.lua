@@ -13,14 +13,19 @@
 --       noSend,                  true when it cannot send anything to other
 --                                characters (Self-Found); absent otherwise
 --       bags = { items = { [itemId] = count }, bound = { [itemId] = count }, at },
---       bank = { items = ..., bound = ..., at },
+--       bank = { items = ..., bound = ..., at, doubt },
 --   }
---   stock.account[world] = { items = { [itemId] = count }, at }
+--   stock.account[world] = { items = { [itemId] = count }, at, doubt }
 -- `bound` holds how many of an item's count are soulbound (left out when
 -- there are none): they stay in the owner's own bank, but another character
 -- cannot be sent them. Times are server time in seconds. A save replaces the
 -- record's table; nothing is ever appended. Characters not seen for
 -- KEEP_DAYS days are dropped by Prune.
+-- `doubt` is true on a bank the caller has reason to think is behind what is
+-- really in it (MarkBankDoubt / MarkAccountBankDoubt; absent otherwise). The
+-- bank stays remembered, but it is handed out with that mark, and an alt's
+-- bank that carries it is not handed out at all. The next save of the bank
+-- replaces its table and with it the mark.
 --
 -- The format number is written here and is deliberately not among the
 -- database defaults: the database strips saved values that equal a default
@@ -211,21 +216,43 @@ function StockMemory:SaveAccountBank(world, items, now)
 end
 
 -- A character's own bank as last seen: a copy of its items (soulbound ones
--- included) and the time. nil when it was never seen.
+-- included), the time, and whether it is in doubt (then it must not be
+-- counted). nil when it was never seen.
 function StockMemory:OwnBank(guid)
     local characters = Store()
     local bank = characters and guid ~= nil and Part(characters[guid], "bank")
     if not bank then return nil end
-    return Counts(bank.items), Time(bank.at)
+    return Counts(bank.items), Time(bank.at), bank.doubt == true
 end
 
--- The account-wide bank of a world as last seen: a copy of its items and the
--- time. nil when it was never seen.
+-- The account-wide bank of a world as last seen: a copy of its items, the
+-- time, and whether it is in doubt. nil when it was never seen.
 function StockMemory:AccountBank(world)
     local _, account = Store()
     local bank = account and world ~= nil and account[world]
     if type(bank) ~= "table" or type(bank.items) ~= "table" then return nil end
-    return Counts(bank.items), Time(bank.at)
+    return Counts(bank.items), Time(bank.at), bank.doubt == true
+end
+
+-- Mark a character's remembered bank as in doubt: it is behind what is
+-- really in the bank, as far as the caller can tell. Returns whether the
+-- mark is new (false when no bank is remembered for it, or it is marked
+-- already). The next save of that bank takes the mark away.
+function StockMemory:MarkBankDoubt(guid)
+    local characters = Store()
+    local bank = characters and guid ~= nil and Part(characters[guid], "bank")
+    if not bank or bank.doubt == true then return false end
+    bank.doubt = true
+    return true
+end
+
+-- The same for the account-wide bank of a world.
+function StockMemory:MarkAccountBankDoubt(world)
+    local _, account = Store()
+    local bank = account and world ~= nil and account[world]
+    if type(bank) ~= "table" or type(bank.items) ~= "table" or bank.doubt == true then return false end
+    bank.doubt = true
+    return true
 end
 
 -- Where each remembered character stands for the asking one:
@@ -298,10 +325,11 @@ function StockMemory:Standing(identity)
 end
 
 -- The other remembered characters of this character's world and faction, by
--- name: { { guid, name, bags, bagsAt, bank, bankAt }, ... } - those standing
--- as "alt" above. bags / bank are what could be sent over (soulbound counts
--- taken off); a part never seen is nil, and so is the time of a part that
--- has none.
+-- name: { { guid, name, bags, bagsAt, bank, bankAt, bankDoubt }, ... } -
+-- those standing as "alt" above. bags / bank are what could be sent over
+-- (soulbound counts taken off); a part never seen is nil, and so is the time
+-- of a part that has none. A bank in doubt is not handed out: bankDoubt is
+-- then true and bank / bankAt are nil, while the bags still count.
 function StockMemory:Alts(identity)
     local list = {}
     local characters = Store()
@@ -314,7 +342,9 @@ function StockMemory:Alts(identity)
             if bags then
                 alt.bags, alt.bagsAt = Sendable(bags), Time(bags.at)
             end
-            if bank then
+            if bank and bank.doubt == true then
+                alt.bankDoubt = true
+            elseif bank then
                 alt.bank, alt.bankAt = Sendable(bank), Time(bank.at)
             end
             list[#list + 1] = alt
@@ -381,9 +411,10 @@ end
 
 -- What is remembered, for the diagnostic:
 --   { usable, schema, unreadable,
---     characters = { { guid, name, world, faction, seen, canSend, bagItems, bagsAt, bankItems, bankAt }, ... },
---     account = { { world, items, at }, ... } }
--- bagItems / bankItems count distinct items (nil for a part never seen).
+--     characters = { { guid, name, world, faction, seen, canSend, bagItems, bagsAt, bankItems, bankAt, bankDoubt }, ... },
+--     account = { { world, items, at, doubt }, ... } }
+-- bagItems / bankItems count distinct items (nil for a part never seen);
+-- bankDoubt / doubt say whether that bank is marked in doubt.
 -- usable is false when there is no database or the saved table is in another
 -- format (schema then says which). unreadable counts the entries that are
 -- not what this file writes and are skipped.
@@ -399,6 +430,7 @@ function StockMemory:Summary()
                 seen = Time(record.seen), canSend = record.noSend ~= true,
                 bagItems = bags and Size(Counts(bags.items)) or nil, bagsAt = bags and Time(bags.at) or nil,
                 bankItems = bank and Size(Counts(bank.items)) or nil, bankAt = bank and Time(bank.at) or nil,
+                bankDoubt = (bank and bank.doubt == true) or false,
             }
         else
             summary.unreadable = summary.unreadable + 1
@@ -413,7 +445,8 @@ function StockMemory:Summary()
     end)
     for world, bank in pairs(account) do
         if type(bank) == "table" and type(bank.items) == "table" then
-            summary.account[#summary.account + 1] = { world = world, items = Size(Counts(bank.items)), at = Time(bank.at) }
+            summary.account[#summary.account + 1] = { world = world, items = Size(Counts(bank.items)), at = Time(bank.at),
+                                                      doubt = bank.doubt == true }
         else
             summary.unreadable = summary.unreadable + 1
         end

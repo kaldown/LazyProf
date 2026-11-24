@@ -255,6 +255,61 @@ T.section("no inventory addon: bank and alts from memory", function()
 end)
 
 -- ===========================================================================
+-- A remembered bank that is marked in doubt is behind what is really in it,
+-- as far as the addon can tell: no scan counts it, and the scan says so.
+T.section("no inventory addon: a bank in doubt is not counted", function()
+    fresh()
+    Memory:SaveBank(MAIN, { [2589] = 40, [6948] = 1 }, {}, NOW - 2 * DAY)
+    Memory:SaveAccountBank("eu-pvp", { [2589] = 10, [4306] = 3 }, NOW - 5 * DAY)
+    Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW - DAY)
+    Memory:SaveBank(ALT, { [2589] = 100 }, {}, NOW - 30 * DAY)
+    local combined, breakdown, meta = scan()
+    T.eq("nothing in doubt: everything counts", combined[2589], 5 + 40 + 10 + 20 + 100)
+    T.check("and the scan says nothing of doubt", meta.bankInDoubt == nil and meta.accountInDoubt == nil)
+
+    Memory:MarkBankDoubt(MAIN.guid)
+    combined, breakdown, meta = scan()
+    T.eq("own bank in doubt: it is not counted", combined[2589], 5 + 10 + 20 + 100)
+    T.check("nothing of it is", combined[6948] == nil and breakdown[2589].bank == 10)
+    T.check("the scan says that the own bank is in doubt", meta.bankInDoubt == true and meta.accountInDoubt == nil)
+    T.check("and gives it no age, the account bank keeps its own", meta.bankSeenAt == nil and meta.accountSeenAt == NOW - 5 * DAY)
+
+    Memory:MarkAccountBankDoubt("eu-pvp")
+    combined, breakdown, meta = scan()
+    T.eq("account bank in doubt too: neither is counted", combined[2589], 5 + 20 + 100)
+    T.check("no bank stock at all", breakdown[2589].bank == nil and combined[4306] == nil)
+    T.check("the scan says both", meta.bankInDoubt == true and meta.accountInDoubt == true and meta.accountSeenAt == nil)
+
+    -- Nothing of the bank counts with the setting off: there is nothing to say.
+    LazyProf.db.profile.includeBankItems = false
+    combined, breakdown, meta = scan()
+    T.check("bank items off: no word of doubt", combined[2589] == 5 + 20 and meta.bankInDoubt == nil and meta.accountInDoubt == nil)
+    LazyProf.db.profile.includeBankItems = true
+    -- The account bank is not a Self-Found character's stock: nothing to say of it.
+    LazyProf.db.char.selfFoundMode = true
+    combined, breakdown, meta = scan()
+    T.check("Self-Found: only the own bank's doubt is named", combined[2589] == 5 and meta.bankInDoubt == true
+        and meta.accountInDoubt == nil)
+    LazyProf.db.char.selfFoundMode = false
+
+    -- An alt whose bank is in doubt supplies its bags only.
+    Memory:MarkBankDoubt(ALT.guid)
+    Inventory:ForgetAltsPart()
+    combined, breakdown, meta = scan()
+    T.eq("an alt's bank in doubt: its bags only", combined[2589], 5 + 20)
+    T.check("named as bags, with their age and no bank age", breakdown[2589].alts["Bank Alt"].bags == 20
+        and breakdown[2589].alts["Bank Alt"].bank == nil and meta.alts["Bank Alt"].bags == NOW - DAY
+        and meta.alts["Bank Alt"].bank == nil)
+
+    -- The next save of a bank takes its mark away.
+    Memory:SaveBank(MAIN, { [2589] = 41 }, {}, NOW)
+    Memory:SaveAccountBank("eu-pvp", { [2589] = 11 }, NOW)
+    combined, breakdown, meta = scan()
+    T.eq("saved again: both count", combined[2589], 5 + 41 + 11 + 20)
+    T.check("and nothing is in doubt", meta.bankInDoubt == nil and meta.accountInDoubt == nil and meta.bankSeenAt == NOW)
+end)
+
+-- ===========================================================================
 T.section("no inventory addon: a character that cannot be told apart counts nothing", function()
     fresh()
     Memory:SaveBank(MAIN, { [2589] = 40 }, {}, NOW)

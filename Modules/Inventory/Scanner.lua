@@ -368,10 +368,15 @@ end
 --   { remembered = true,
 --     bankSeenAt     when the character's bank was seen (nil: never, or not counted)
 --     accountSeenAt  when the account bank of its world was seen
+--     bankInDoubt    true when the character's bank is remembered but in doubt
+--     accountInDoubt true when the account bank of its world is
 --     alts = { [name] = { bags = time, bank = time } } }   the alts counted
 -- The character's own bank and the account bank are both bank stock (the
 -- account bank is other characters' stock too, so a character that cannot
 -- receive anything does not count it). An alt's bank needs both settings.
+-- A bank in doubt (see "Keeping the memory") is not counted: not the
+-- character's own, not the account bank, and not an alt's (its bags still
+-- are). The two marks are only set for a bank that would count otherwise.
 local function AddRememberedStock(self, combined, breakdown, countAlts)
     local Memory, Client = LazyProf.StockMemory, LazyProf.Client
     local countBank = LazyProf.db.profile.includeBankItems and true or false
@@ -379,14 +384,18 @@ local function AddRememberedStock(self, combined, breakdown, countAlts)
     local meta = { remembered = true, alts = {} }
 
     if countBank then
-        local items, seenAt = Memory:OwnBank(identity.guid)
-        if items then
+        local items, seenAt, doubt = Memory:OwnBank(identity.guid)
+        if items and doubt then
+            meta.bankInDoubt = true
+        elseif items then
             mergeSource(items, "bank", nil, combined, breakdown)
             meta.bankSeenAt = seenAt
         end
         if not IsSelfFound() then
-            items, seenAt = Memory:AccountBank(identity.world)
-            if items then
+            items, seenAt, doubt = Memory:AccountBank(identity.world)
+            if items and doubt then
+                meta.accountInDoubt = true
+            elseif items then
                 mergeSource(items, "bank", nil, combined, breakdown)
                 meta.accountSeenAt = seenAt
             end
