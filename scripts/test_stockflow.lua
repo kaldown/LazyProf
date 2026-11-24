@@ -540,6 +540,22 @@ local function ownedLinen()
     return n
 end
 
+-- The first row of the Shopping tab as the window would draw it from a scan
+-- made now (the line that says a bank is not counted, when there is one).
+local function firstShoppingRow(addon)
+    if not addon.GuideViews then
+        for _, path in ipairs({ "Core/Utils.lua", "Modules/Guide/Text.lua", "Modules/Guide/Views.lua" }) do
+            assert(loadfile(path))("LazyProf", addon)
+        end
+    end
+    local _, _, meta = World.scan(addon)
+    local rows = addon.GuideViews.Shopping({ path = {}, missing = { rows = {} }, stockMeta = meta, now = World.serverTime })
+    return rows[1] and rows[1].text
+end
+
+local NOT_COUNTED = "Your bank and the account bank are not counted: they changed after LazyProf last read them. "
+    .. "Open the bank to count them again."
+
 -- A scan never counts more linen than is owned.
 local function notOver(label, addon)
     local total = linen(addon) or 0
@@ -1172,6 +1188,7 @@ T.section("the answer of a last move arrives after the close", function()
             meta.bankInDoubt == true and meta.accountInDoubt == true)
         local items, doubt = bankOf(addon)
         T.check(label .. ": the bank stays remembered, marked", items[LINEN] == 100 and doubt == true, items[LINEN])
+        T.eq(label .. ": the Shopping tab says so in its first row", firstShoppingRow(addon), NOT_COUNTED)
         World.advance(5)
         T.eq(label .. ": and five seconds later", notOver(label, addon), 65)
         T.check(label .. ": a shown list is asked to redraw", addon.refreshes > refreshes, addon.refreshes - refreshes)
@@ -1221,6 +1238,8 @@ T.section("the answer of a last move arrives after the close", function()
     total, bags, bank, meta = linen(addon)
     T.check("a bank container's update alone after the close: no doubt, the bank counts", total == 105 and bank == 100
         and meta.bankInDoubt == nil and meta.accountInDoubt == nil, total)
+    T.check("and the Shopping tab has no such line", firstShoppingRow(addon) ~= NOT_COUNTED
+        and not tostring(firstShoppingRow(addon)):find("not counted", 1, true), firstShoppingRow(addon))
     T.eq("it is counted for the dump", closedUpdates(addon), "bank updates while closed: 2, last 0.1 s after closing")
 
     -- A carried bag's update that changes no count (a stack moved to another slot).
@@ -1292,6 +1311,11 @@ T.section("a bank in doubt until the next visit", function()
     T.check("in doubt: the own bank is not counted", total == 65 and bank == nil and meta.bankInDoubt == true, total)
     local combined = World.scan(addon)
     T.check("nor the account bank", combined[BAR] == nil and meta.accountInDoubt == true)
+    T.eq("the Shopping tab's first row says so", firstShoppingRow(addon), NOT_COUNTED)
+    addon.db.profile.includeBankItems = false
+    T.check("with \"Include bank items\" off there is nothing to say", not tostring(firstShoppingRow(addon)):find("not counted", 1, true),
+        firstShoppingRow(addon))
+    addon.db.profile.includeBankItems = true
     World.event(addon, "PLAYER_LOGOUT")
 
     -- Another character of the account: the first one's bags count, its bank does not.
@@ -1307,6 +1331,8 @@ T.section("a bank in doubt until the next visit", function()
         combined[LINEN])
     T.check("the account bank is in doubt for this character too", combined[BAR] == nil and meta.accountInDoubt == true
         and meta.bankInDoubt == nil)
+    T.eq("its Shopping tab names the account bank alone", firstShoppingRow(crafter),
+        "The account bank is not counted: it changed after LazyProf last read it. Open the bank to count it again.")
     World.event(crafter, "PLAYER_LOGOUT")
 
     -- Back on the first character: the next visit's kept read clears the mark.
@@ -1326,6 +1352,8 @@ T.section("a bank in doubt until the next visit", function()
     total, bags, bank, meta = linen(addon)
     T.check("the next visit's first kept read clears it", total == 106 and bank == 40 and meta.bankInDoubt == nil
         and meta.accountInDoubt == nil, total)
+    T.check("and the line is gone from the Shopping tab", not tostring(firstShoppingRow(addon)):find("not counted", 1, true),
+        firstShoppingRow(addon))
     World.advance(3)
     World.event(addon, "BANKFRAME_CLOSED")
     World.event(addon, "PLAYER_LOGOUT")

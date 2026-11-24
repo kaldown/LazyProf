@@ -1537,6 +1537,62 @@ T.section("collect first: how old remembered stock is", function()
     end
 end)
 
+-- A remembered bank that is marked in doubt is not counted. The player has
+-- to be told, or the Have column is simply lower without a word: one grey
+-- line on top of the Shopping tab, before "Collect first".
+T.section("shopping: a bank that is not counted says so", function()
+    local SILK = 165
+    local DAY = 86400
+    local NOW = 20000 * DAY + 3600
+    local robe = recipe(50, "Robe", 100, 150, 160, 170, { reagents = { { itemId = SILK, count = 3, name = "Silk" } } })
+    local function rowsWith(meta, inventory, breakdown, extra)
+        local fields = { complete = true, gaps = {}, currentSkill = 100, actualSkill = 100, prices = { [SILK] = 200 },
+            steps = { step(robe, 100, 110, 10, 0) }, inventory = inventory or {}, sourceBreakdown = breakdown or {}, stockMeta = meta }
+        for k, v in pairs(extra or {}) do fields[k] = v end
+        local v = shopView(makePath(fields), { inventory = inventory or {}, breakdown = breakdown })
+        v.stockMeta, v.now = meta, meta and NOW or nil
+        return Views.Shopping(v)
+    end
+    local OWN = "Your bank is not counted: it changed after LazyProf last read it. Open the bank to count it again."
+    local ACCOUNT = "The account bank is not counted: it changed after LazyProf last read it. Open the bank to count it again."
+    local BOTH = "Your bank and the account bank are not counted: they changed after LazyProf last read them. "
+        .. "Open the bank to count them again."
+
+    local plain = rowsWith({ remembered = true, alts = {} })
+    local rows = rowsWith({ remembered = true, alts = {}, bankInDoubt = true })
+    T.eq("own bank in doubt: the line is the first row", rows[1].text, OWN)
+    T.check("a plain grey line that wraps", rows[1].kind == "line" and rows[1].wrap == true
+        and rows[1].color[1] == 0.7 and rows[1].color[2] == 0.7 and rows[1].color[3] == 0.7)
+    T.check("nothing to click or hover on it", rows[1].onClick == nil and rows[1].button == nil and rows[1].itemId == nil)
+    T.eq("the list follows as it would without it", #rows, #plain + 1)
+    T.eq("its next row is the list's first", rows[2].text, plain[1].text)
+
+    -- Before "Collect first" when there is something to collect.
+    local stock, where = { [SILK] = 10 }, { [SILK] = { alts = { ["Zed Alt"] = { bags = 10 } } } }
+    rows = rowsWith({ remembered = true, alts = { ["Zed Alt"] = { bags = NOW - DAY } }, bankInDoubt = true }, stock, where)
+    T.eq("with stock to collect: still the first row", rows[1].text, OWN)
+    T.eq("before the collect block", rows[2].text, "Collect first")
+
+    rows = rowsWith({ remembered = true, alts = {}, accountInDoubt = true })
+    T.eq("the account bank in doubt", rows[1].text, ACCOUNT)
+    rows = rowsWith({ remembered = true, alts = {}, bankInDoubt = true, accountInDoubt = true })
+    T.eq("both in doubt: one line for the two", rows[1].text, BOTH)
+    T.check("and only one", rows[2].text ~= OWN and rows[2].text ~= ACCOUNT and #rows == #plain + 1)
+
+    -- Nothing to say.
+    T.check("nothing in doubt: no line", plain[1].text ~= OWN and plain[1].text ~= ACCOUNT and plain[1].text ~= BOTH)
+    rows = rowsWith(nil)
+    T.eq("stock from an inventory addon: no line", #rows, #plain)
+    rows = rowsWith({ remembered = true, alts = {}, bankPending = true, accountPending = true })
+    T.eq("a bank that is only being read again: no line", #rows, #plain)
+    rows = rowsWith({ remembered = true, alts = {}, bankInDoubt = true },
+        nil, nil, { steps = {}, nothingLeft = true, actualSkill = 300, currentSkill = 300, totalCost = 0 })
+    T.check("nothing left to level: the notice alone", #rows >= 1 and rows[1].text ~= OWN)
+    for _, text in ipairs({ OWN, ACCOUNT, BOTH }) do
+        T.check("plain ASCII: " .. text:sub(1, 24), not text:find("[\128-\255]"))
+    end
+end)
+
 -- The target slider's model: from the real skill to the last cap.
 T.section("target", function()
     local function target(extra)

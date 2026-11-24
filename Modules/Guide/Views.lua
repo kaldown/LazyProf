@@ -1097,8 +1097,28 @@ local function TotalRow(label, copper)
     return { kind = "cols", total = true, text = label, color = GOLD, cols = { "", "", "", Money(copper or 0) } }
 end
 
+-- A remembered bank that is marked in doubt is not counted (the scan says
+-- which: view.stockMeta.bankInDoubt / accountInDoubt, set only while bank
+-- items count at all). The line that tells the player, nil when there is
+-- nothing to tell. A bank that is merely being read again says nothing.
+local function DoubtLine(meta)
+    if not meta then return nil end
+    local rest = "it changed after LazyProf last read it. Open the bank to count it again."
+    if meta.bankInDoubt and meta.accountInDoubt then
+        return "Your bank and the account bank are not counted: they changed after LazyProf last read them. "
+            .. "Open the bank to count them again."
+    elseif meta.bankInDoubt then
+        return "Your bank is not counted: " .. rest
+    elseif meta.accountInDoubt then
+        return "The account bank is not counted: " .. rest
+    end
+    return nil
+end
+
 -- The shopping list. view.missing is the shopping list of the whole path
 -- (the account's, Pathfinder:CalculateMissingMaterials of every run). In order:
+--   a grey line when a remembered bank is not counted because it is in doubt
+--     (DoubtLine above)
 --   "Collect first": owned stock that is not in the bags; a bank or an alt
 --     that LazyProf remembers itself says in its tooltip how old that is
 --     (view.stockMeta, view.now)
@@ -1127,6 +1147,11 @@ function Views.Shopping(view, ctx)
     end
     local missing = view.missing or {}
     local rows = {}
+
+    local doubt = DoubtLine(view.stockMeta)
+    if doubt then
+        rows[#rows + 1] = { kind = "line", wrap = true, color = GREY, text = doubt }
+    end
 
     local collect = {}
     for _, section in ipairs(COLLECT) do
