@@ -274,13 +274,23 @@ end
 --   craftFromBank     craft with reagents taken from the closed bank: the
 --                     bank's count of an item falls, and its container
 --                     reports the change
+--   logoutMidBankMove log out or reload while the answer of a move that
+--                     involves a bank is on its way, when a lock of it can be
+--                     seen at that moment with the bank open, or could be at
+--                     the close it outlived (rule 4 marks the banks of the
+--                     visit then; one a kept read saw counts too). Taken for
+--                     three logouts in ten that come at such a moment. The
+--                     character's next session must be right or marked
+--                     (rules 4, 5c and 5d); what another character sees in
+--                     between is filed under "midBankMove:" (see below)
 --   crash             a session ends without its saved data written (the
 --                     client is killed or crashes): no logout notice, and the
 --                     next session starts from what the last ordinary logout
 --                     wrote. What follows from it that the bank's rules
 --                     cannot see is filed under "crash:" (see below)
 local HABITS = { logoutMidMove = true, closeMidMove = true, afterCloseChange = true, quickVisit = true,
-                 bankToBank = true, emptyBags = true, logoutAfterClose = true, craftFromBank = true, crash = true }
+                 bankToBank = true, emptyBags = true, logoutAfterClose = true, craftFromBank = true, crash = true,
+                 logoutMidBankMove = true }
 
 -- Decided behaviour: what the bank's rules accept on purpose. The test is
 -- told each by name - a habit the default player does not have, a kind of
@@ -289,18 +299,17 @@ local HABITS = { logoutMidMove = true, closeMidMove = true, afterCloseChange = t
 --
 -- Habits the default player does not have (STOCKFUZZ_ALSO names the ones to
 -- switch on, comma separated, to see what follows from them):
---   logoutMidBankMove  log out or reload while the answer of a move that
---                      involves a bank is on its way (into a bank, out of
---                      one, between the two, within one). The session that
---                      ends never hears that answer, and no later one can
---                      always tell: a move between the two banks changes no
---                      carried bag, two moves can cancel in the bags, the
---                      session can end between the two updates of one move,
---                      and another character that plays before the first
---                      one returns counts its bags and banks as they were
---                      remembered. Distrusting an alt's remembered bags
---                      after every logout at the bank would cost the
---                      ordinary bank alt its stock.
+--   logoutBetweenHalves  log out or reload while the answer of a move that
+--                      involves a bank is on its way, none of whose locks can
+--                      be seen at that moment (with the bank open) or could be
+--                      at the close it outlived (habit logoutMidBankMove is
+--                      the rest of such logouts): its carried part answered
+--                      already and its bank's part going into an empty slot,
+--                      or a bank that cannot be read then, or a move between
+--                      bank containers of such a bank. The session that ends
+--                      never hears that answer, and no later one can always
+--                      tell: a move between the two banks changes no carried
+--                      bag, two moves can cancel in the bags.
 --   emptyBagsLogout    empty the carried bags completely and log out within
 --                      the two seconds before they are saved. Completely
 --                      empty bags are not trusted at logout (nothing says
@@ -380,20 +389,33 @@ local HABITS = { logoutMidMove = true, closeMidMove = true, afterCloseChange = t
 --      visits          the closed bank: the mark that follows is needed, and
 --                      the no-nuisance checks do not judge it.
 --   slowOpen:*         see SLOW_OPEN above.
+--   midBankMove:*      after a logout with the answer of a move that
+--                      involves a bank on its way (habit logoutMidBankMove):
+--                      an I1 failure of the alts' part in the session of
+--                      another character before that one plays again. It
+--                      counts that character's bags as they were remembered
+--                      when it left (its banks were marked at the logout or
+--                      the close); distrusting an alt's remembered bags after
+--                      every logout at the bank would cost the ordinary bank
+--                      alt its stock.
 --   crash:*            after a crash (habit crash), what the rules cannot
---                      see: (1) every I1 and I2.stale failure in the sessions
---                      of other characters until the crashed one plays
---                      again (they count its bags and banks, and the account
---                      bank, as the last ordinary logout wrote them); (2) of
---                      a bank the lost session changed, I1 and I2.stale
---                      failures that involve it until it is read again -
---                      unless the crashed character's next session must
---                      mark it, which is when a carried count has risen
+--                      see: (1) an I1 failure of the alts' part in the
+--                      session of a character whose alt crashed, until the
+--                      crashed one plays again (its bags and bank are counted
+--                      as the last ordinary logout wrote them); (2) of a bank
+--                      the lost session changed, I1 and I2.stale failures
+--                      that involve it until it is read again - in every
+--                      character's sessions, but from the crashed character's
+--                      next login on not when that session must mark it,
+--                      which is when a carried count has risen
 --                      against its record of the bags for an item the bank
---                      is remembered to hold (rule 5d). In the first 2.1 s
---                      of that next session the player leaves the bags
---                      alone, so that what is compared is what the model
---                      expects.
+--                      is remembered to hold (rule 5d; the account bank
+--                      only when that character has read it before). Also
+--                      the I4 failures of the first visit to such a bank (a
+--                      glance at a bank the lost session emptied ends in
+--                      doubt). In the first 2.1 s of that next session the
+--                      player leaves the bags alone, so that what is
+--                      compared is what the model expects.
 -- Not modelled at all: a clock that runs backwards; a client that crafts
 -- from the closed bank without reporting its container (nothing could see
 -- that); a client without slot locks.
@@ -403,7 +425,7 @@ local HABITS = { logoutMidMove = true, closeMidMove = true, afterCloseChange = t
 --                      next one compares it again - an account bank read by
 --                      another character after that note is not marked by
 --                      it, though the lost session may have changed it.
-local ALSO = { logoutMidBankMove = false, emptyBagsLogout = false, leaveEarly = false, closeBetweenHalves = false,
+local ALSO = { logoutBetweenHalves = false, emptyBagsLogout = false, leaveEarly = false, closeBetweenHalves = false,
                craftFromBankAtLogin = false, crashAfterNote = false }
 local DEFAULT_HABITS = {}
 for name, value in pairs(HABITS) do DEFAULT_HABITS[name] = value end
@@ -543,9 +565,12 @@ local function Emit(line)
     if S.trace then S.trace[#S.trace + 1] = line end
 end
 
-local CrashExcused          -- defined with the sessions: a failure that follows from a crash
+local Excused              -- defined with the sessions: the named class a failure falls in, if any
 local function Violate(kind, detail, extra)
-    if CrashExcused(kind) then kind = "crash:" .. kind end
+    if not kind:find(":", 1, true) then
+        local prefix = Excused(kind)
+        if prefix then kind = prefix .. kind end
+    end
     local v = { kind = kind, step = S.step, at = S.now, detail = detail, cause = (extra and extra.cause) or S.cause or "?" }
     if extra then for k, value in pairs(extra) do if v[k] == nil then v[k] = value end end end
     S.violations[#S.violations + 1] = v
@@ -812,9 +837,11 @@ local function JudgeVisit(v)
             local detail = string.format("visit of %d ms, %d changes, closed %s ms after the last one; marks: character=%s account=%s",
                 v.closeMs - v.openMs, v.moves, tostring(v.lastMoveMs and (v.closeMs - v.lastMoveMs) or "-"),
                 tostring(v.marks.character > 0 and charDoubt), tostring(v.marks.account > 0 and accountDoubt))
-            if class == "unhurried" then Violate("I4.nuisance", detail, { cause = v.cause })
-            elseif class == "glance" then Violate("I4.glance", detail, { cause = v.cause })
-            elseif class == "unhurried+after" or class == "glance+after" then Violate("I4.afterclose", detail, { cause = v.cause }) end
+            -- The first visit to a bank a crash left behind (see crash:*).
+            local prefix = v.crashStale and "crash:" or ""
+            if class == "unhurried" then Violate(prefix .. "I4.nuisance", detail, { cause = v.cause })
+            elseif class == "glance" then Violate(prefix .. "I4.glance", detail, { cause = v.cause })
+            elseif class == "unhurried+after" or class == "glance+after" then Violate(prefix .. "I4.afterclose", detail, { cause = v.cause }) end
         end
     end
 end
@@ -831,6 +858,8 @@ end
 local function FinishEpisode(e, how)
     local class = e.sightings == 0 and "mid" or (e.sightings == 1 and "frame" or "multi")
     local kind = (e.inherent and "I1h." or "I1.") .. class .. "." .. e.part
+    -- Over since a moment that falls in a named class (crash:*, midBankMove:*).
+    if e.prefix then kind = e.prefix .. kind end
     local detail = string.format("item %d: counted %d, owned %d (over by %d at most) for %d ms, seen at %d frame(s), ended by %s",
         e.id, e.scan, e.truth, e.max, e.t1 - e.t0, e.sightings, how)
     Violate(kind, detail, { cause = e.cause, ms = e.t1 - e.t0 })
@@ -839,7 +868,8 @@ local function FinishEpisode(e, how)
     if e.t1 - e.t0 > (S.stats.longest[kind] or -1) then S.stats.longest[kind] = e.t1 - e.t0 end
     -- Over, and gone again without ever having been seen settled: how long?
     if not e.settled and how == "a later scan" and e.sightings >= 2 and e.visit ~= nil and e.visit == S.visit then
-        Violate((e.inherent and "I1ht." or "I1t.") .. e.part, detail, { cause = e.cause, ms = e.t1 - e.t0 })
+        Violate((e.prefix or "") .. (e.inherent and "I1ht." or "I1t.") .. e.part, detail,
+            { cause = e.cause, ms = e.t1 - e.t0 })
     end
 end
 
@@ -855,7 +885,7 @@ local function Track(level, part, id, scan, truth, inherent)
     end
     if not e then
         e = { part = part, id = id, t0 = S.now, sightings = 0, lastFrame = -1, inherent = true, max = 0, cause = Cause(),
-              visit = S.visit }
+              visit = S.visit, prefix = Excused("I1." .. part, id) }
         S.episodes[key] = e
     end
     e.t1, e.scan, e.truth = S.now, scan, truth
@@ -867,7 +897,7 @@ local function Track(level, part, id, scan, truth, inherent)
     end
     if level == "settled" and not e.settled then
         e.settled = true
-        Violate("I1.settled." .. part, string.format("item %d: counted %d, owned %d, %d ms after the last event (over since %d ms)",
+        Violate((e.prefix or "") .. "I1.settled." .. part, string.format("item %d: counted %d, owned %d, %d ms after the last event (over since %d ms)",
             id, scan, truth, S.now - S.lastEvent, S.now - e.t0), { cause = e.cause })
     end
 end
@@ -1335,21 +1365,48 @@ end
 
 -- A failure that follows from a crash in a way the rules cannot see (see
 -- crash:* at the top).
-CrashExcused = function(kind)
+-- id: the item, for a failure of the character's own part - excused only
+-- when a bank the crash left behind is remembered with more of it than it
+-- holds (that bank is the reason).
+local function CrashExcused(kind, id)
     if not S or not S.crashPending then return false end
     if not (kind:sub(1, 2) == "I1" or kind:sub(1, 9) == "I2.stale.") then return false end
-    for who in pairs(S.crashPending) do
-        if who ~= S.cur then return true end
-    end
     local part = kind:match("%.(%a+)$")
-    if S.crashStale.char[S.cur] and (part == "own" or part == "character") then return true end
-    if S.chars[S.cur] and S.crashStale.account[ScopeKey(Me())] and (part == "own" or part == "account") then return true end
+    local staleChar = S.crashStale.char[S.cur]
+    local staleAccount = S.chars[S.cur] and S.crashStale.account[ScopeKey(Me())]
+    if part == "character" then return staleChar and true or false end
+    if part == "account" then return staleAccount and true or false end
+    if part == "own" then
+        local function over(kind2)
+            local items = Remembered(kind2)
+            return items ~= nil and (id == nil or (items[id] or 0) > (BankTruth(kind2)[id] or 0))
+        end
+        return (staleChar and over("character")) or (staleAccount and over("account")) or false
+    end
     if part == "alt" then
         for _, who in ipairs(AltsOf()) do
-            if S.crashStale.char[who] then return true end
+            if S.crashStale.char[who] or S.crashPending[who] then return true end
         end
     end
     return false
+end
+
+-- A failure in the session of a character other than one that logged out
+-- while the answer of a move that involves a bank was on its way, before
+-- that one plays again (see midBankMove:* at the top).
+local function MidMoveExcused(kind)
+    if not S or not S.midMovePending then return false end
+    if not (kind:sub(1, 2) == "I1" and kind:match("%.(%a+)$") == "alt") then return false end
+    for who in pairs(S.midMovePending) do
+        if who ~= S.cur then return true end
+    end
+    return false
+end
+
+Excused = function(kind, id)
+    if CrashExcused(kind, id) then return "crash:" end
+    if MidMoveExcused(kind) then return "midBankMove:" end
+    return nil
 end
 
 local function Login(who, a)
@@ -1426,6 +1483,7 @@ local function Login(who, a)
     -- rule 5d must mark them now (see crash:* above).
     local lost = S.crashPending[who]
     S.crashPending[who] = nil
+    S.midMovePending[who] = nil
     S.crashQuietUntil = nil
     if lost then
         local memory = S.addon.StockMemory
@@ -1440,11 +1498,12 @@ local function Login(who, a)
             end
             return false
         end
-        if lost.char and not marked((memory:OwnBank(GUID[who]))) then S.crashStale.char[who] = true end
-        if lost.account then
+        if lost.char and marked((memory:OwnBank(GUID[who]))) then S.crashStale.char[who] = nil end
+        if lost.account and S.crashStale.account[lost.account] then
             local held, _, _, world, faction = memory:AccountBank(REGION)
-            if not marked((world == me.world and faction == me.faction) and held or nil) then
-                S.crashStale.account[lost.account] = true
+            local counts = world == me.world and faction == me.faction and memory:ReadsAccountBank(GUID[who]) and held or nil
+            if marked(counts) then
+                S.crashStale.account[lost.account] = nil
             end
         end
         S.crashQuietUntil = S.now + 2100
@@ -1894,6 +1953,7 @@ function OPS.open(a)
     S.lastArrival = nil
     local me = Me()
     S.bankOpen, S.openMs, S.refused, S.locked = true, S.now, false, false
+    S.unseenAtClose = nil
     S.epoch = S.epoch + 1
     me.visited = true
     S.visitedThisSession = true
@@ -1937,9 +1997,11 @@ function OPS.open(a)
     -- one begins after.
     S.visit = nil
     S.lockSeen = {}
+    local crashStale = S.crashStale.char[S.cur] or S.crashStale.account[ScopeKey(me)]
     Fire("BANKFRAME_OPENED")
     JudgeVisit(S.lastVisit)
-    S.visit = { who = S.cur, openMs = S.now, moves = 0, marks = { character = 0, account = 0 }, cause = "visit" }
+    S.visit = { who = S.cur, openMs = S.now, moves = 0, marks = { character = 0, account = 0 }, cause = "visit",
+                crashStale = crashStale }
 end
 
 -- What the client does to the bank around its closing notice (switches 3 and
@@ -2019,16 +2081,20 @@ end
 -- its way none of whose locks can be seen at this moment: what is left of
 -- its answer goes into slots that were empty (an empty slot shows no lock),
 -- or into a bank that cannot be read now.
-local function BetweenHalves()
-    if not cfg.drop then return false end
-    -- A lock a kept read of this visit saw in a bank, not answered since by
-    -- an update of that bank's containers, is a move on its way at the
-    -- close (rule 4): every bank of the visit is marked, nothing is missed.
-    if S.lockSeen.character or S.lockSeen.account then return false end
+-- The moves on their way none of whose locks can be seen at this moment
+-- (bankOnly: only those that involve a bank): { [move] = true }, nil when
+-- there is none. A lock a kept read of this visit saw in a bank, not
+-- answered since by an update of that bank's containers, is a move on its
+-- way at the close (rule 4): every bank of the visit is marked then, and
+-- nothing is missed - but not on a client that lets go of the bank before
+-- the closing notice: the updates it sends for that clear what was seen.
+local function UnseenMoves(bankOnly)
+    if not cfg.letgo and (S.lockSeen.character or S.lockSeen.account) then return nil end
     local bankReadable = cfg.closeRead == "readable" and not S.locked and not cfg.letgo
     local seen = {}
     local function look(d)
         if d.kind ~= "upd" or not d.move then return end
+        if bankOnly and not (d.bank or (d.chain and d.chain.bank)) then return end
         if seen[d.move] == nil then seen[d.move] = false end
         for _, key in ipairs(d.unlock or {}) do
             local container, index = floor(key / 100), key % 100
@@ -2039,10 +2105,34 @@ local function BetweenHalves()
         if d.chain then look(d.chain) end
     end
     for _, d in ipairs(S.queue) do look(d) end
-    for _, visible in pairs(seen) do
-        if not visible then return true end
+    local unseen = nil
+    for move, visible in pairs(seen) do
+        if not visible then
+            unseen = unseen or {}
+            unseen[move] = true
+        end
     end
-    return false
+    return unseen
+end
+
+local function BetweenHalves()
+    return cfg.drop and UnseenMoves(false) ~= nil
+end
+
+-- logoutMidBankMove / logoutBetweenHalves: is a move that involves a bank on
+-- its way, none of whose locks could be seen at its last chance - now, with
+-- the bank open, or at the close it outlived?
+local function LogoutUnseen()
+    if S.bankOpen then return UnseenMoves(true) ~= nil end
+    local unseen = S.unseenAtClose
+    if not unseen then return false end
+    local found = false
+    local function look(d)
+        if d.kind == "upd" and d.move and unseen[d.move] then found = true end
+        if d.chain then look(d.chain) end
+    end
+    for _, d in ipairs(S.queue) do look(d) end
+    return found
 end
 
 -- leaveEarly (see ALSO): the visit would end before the whole of a bank
@@ -2064,6 +2154,8 @@ function OPS.close(a)
     if LeavesEarly(a) then return end
     if not S.habits.closeBetweenHalves and BetweenHalves() and not a.tail then return end
     if cfg.idle and a.idleBefore then BagUpdate(BACKPACK) end
+    -- For a logout that comes before the answer (see LogoutUnseen).
+    S.unseenAtClose = UnseenMoves(true)
     CloseNotice(a, "BANKFRAME_CLOSED")
     if cfg.idle and a.idleAfter then
         if a.idleAfter == 0 then BagUpdate(BACKPACK) else Enqueue({ at = S.now + a.idleAfter, kind = "idle", c = BACKPACK }) end
@@ -2073,7 +2165,14 @@ end
 -- Log out (or reload), then log in again: as the same character or the other.
 function OPS.logout(a)
     if not S.habits.logoutMidMove and InFlight() > 0 and not a.tail then return end
-    if not S.habits.logoutMidBankMove and InFlightBankMove() and not a.tail then return end
+    local midBankMove = InFlightBankMove()
+    if midBankMove and not a.tail then
+        if LogoutUnseen() then
+            if not S.habits.logoutBetweenHalves then return end
+        elseif not (S.habits.logoutMidBankMove and a.midBank) then
+            return
+        end
+    end
     if LeavesEarly(a) then return end
     -- emptyBagsLogout (see ALSO): the bags hold nothing and their save is
     -- still waiting.
@@ -2099,10 +2198,18 @@ function OPS.logout(a)
             end
             return true
         end
-        S.crashPending[S.cur] = {
+        local lost = {
             char = not same(BankTruth("character"), S.diskTruth.char[S.cur] or {}),
             account = (not same(AccountOf() and BankTruth("account") or {}, S.diskTruth.account[key] or {})) and key or nil,
         }
+        S.crashPending[S.cur] = lost
+        -- The memory goes back to the last write, and so does what was known
+        -- to be behind in it then (a read in the lost session healed nothing).
+        -- What the lost session changed is behind from now on, for every
+        -- character (see crash:*).
+        S.crashStale = DeepCopy(S.diskStale)
+        if lost.char then S.crashStale.char[S.cur] = true end
+        if lost.account then S.crashStale.account[key] = true end
         Emit("-- (the client is killed: nothing of this session is written)")
         Emit("saved = deepcopy(disk)")
         S.saved = DeepCopy(S.disk)
@@ -2141,9 +2248,12 @@ function OPS.logout(a)
             Fire("PLAYER_LOGOUT")
         end
     end
+    -- The answer of a bank move lands after this logout (see midBankMove:*).
+    if midBankMove then S.midMovePending[S.cur] = true end
     -- What the logout writes, and what the world held then.
     S.disk = DeepCopy(S.saved)
     S.diskTruth = TruthAtWrite()
+    S.diskStale = DeepCopy(S.crashStale)
     Emit("disk = deepcopy(saved)")
     if atBank and S.lastVisit and not S.lastVisit.judged then
         Me().pendingVisit = S.lastVisit
@@ -2266,12 +2376,14 @@ local function GenWait(rng)
 end
 
 local function GenLogout(rng)
-    local other = rng.chance(0.5)
+    -- After a crash the player mostly starts the same character again.
+    local crash = rng.chance(0.08)
+    local other = rng.chance(crash and 0.2 or 0.5)
     return { op = "logout", next = other and "other" or "same", pick = rng.int(1, 3), closeFirst = rng.chance(0.5), twice = rng.chance(0.3),
              idle = rng.chance(0.5), away = other and rng.pick({ 5000, 60000, 3600000, 10800000 }) or rng.int(2000, 6000),
              loginUpd = rng.chance(0.7), bagsLate = rng.chance(0.15) and rng.int(100, 1500) or 0,
              letgoBatch = rng.chance(0.5), idleAtLogin = rng.chance(0.6) and { rng.int(1, 3000), rng.int(1, 3000) } or nil,
-             crash = rng.chance(0.06) }
+             crash = crash, midBank = rng.chance(0.3) }
 end
 
 local function GenAction(rng, habits)
@@ -2475,7 +2587,8 @@ local function NewWalk(config, init, opts)
         trace = opts.trace and {} or nil, wanted = opts.wanted,
         stats = { scans = 0, frames = 0, visits = {}, episodes = {}, longest = {}, doubtNeeded = 0, doubtIdle = 0,
                   doubtSettled = 0, elsewhere = 0, healChecks = 0, settled = 0 },
-        disk = {}, crashPending = {}, crashStale = { char = {}, account = {} },
+        disk = {}, crashPending = {}, crashStale = { char = {}, account = {} }, midMovePending = {},
+        diskStale = { char = {}, account = {} },
     }
     local world = CopyInit(init)
     S.chars, S.account = world.chars, world.account
