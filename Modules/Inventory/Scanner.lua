@@ -138,13 +138,13 @@
 --    bank is kept from that read only when the read is not refused, holds
 --    at least one item and has the slot count of the last read kept in this
 --    visit. Then a bank of the visit is marked in doubt
---    - when it is still unsettled - except when its last read (not the
---      closing one) found it empty with no update of its own after that
---      read, and it is remembered as empty or not at all: what is
---      remembered then agrees with what was read;
---    - when its last read found it empty without being believed (rule 2)
---      and items of it are remembered: that is a sign that it was emptied,
---      and the old contents must not count again after the close;
+--    - when it is still unsettled - except when a read of it taken since
+--      its last own update (before the closing notice) found it empty and
+--      was not believed (rule 2), and it is remembered as empty or not at
+--      all: what is remembered then agrees with what was read;
+--    - when such an unbelieved empty read, taken since its last own update,
+--      stands and items of it are remembered: that is a sign that it was
+--      emptied, and the old contents must not count again after the close;
 --    - when a move is still on its way: the client locks the slots of a
 --      move from the click until its answer, and when a slot of the
 --      carried bags or of a bank that can be read reads as locked (the
@@ -211,8 +211,9 @@
 --        session ends) with it still due, the visit's banks of which items
 --        are remembered are marked.
 --        When no note could be taken at the close (the bags could not be
---        read), an update of a carried bag within that second marks the
---        visit's banks at once.
+--        read), an update of a carried bag marks at once each bank of the
+--        visit whose watch it comes in (the second, or the three seconds of
+--        a bank whose locks could not be seen).
 --    (c) The end of the session. An answer that arrives after the session
 --        has ended (a logout or a reload) cannot be seen by that session;
 --        the next one can tell, because nothing else changes the carried
@@ -1954,7 +1955,8 @@ end
 
 -- Rule 5b: an update of a carried bag while the bank is closed. Inside the
 -- watch after a close it asks for the comparison on the next frame; without
--- a note of the bags it marks the visit's banks at once.
+-- a note of the bags it marks at once each bank of the visit whose watch it
+-- is inside.
 local function WatchBagUpdate()
     local w = watch
     if not w then return end
@@ -1964,7 +1966,9 @@ local function WatchBagUpdate()
     w.bagLast = after
     if not w.note then
         for _, kind in ipairs(BANK_KINDS) do
-            WatchMark(w, kind, "no note of the bags")
+            if after <= w.watchFor[kind] + CLOCK_SLACK then
+                WatchMark(w, kind, "no note of the bags")
+            end
         end
         return
     end

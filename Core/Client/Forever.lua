@@ -757,7 +757,6 @@ function Client:BankUsable(kind)
     return (tabs ~= nil and #tabs > 0) and true or false
 end
 
--- Whether a slot of the container reads as locked.
 -- Whether a slot of the container reads as locked, how many of its slots
 -- hold an item, and how many slots it has.
 local function LookAtSlots(container)
@@ -777,7 +776,7 @@ end
 -- or of a bank that can be read right now (the gates of BankContents above),
 -- reads as locked. The client locks a slot from the click until the move is
 -- answered: ContainerItemInfo.isLocked (ContainerDocumentation.lua:766-783,
--- the field at :773), by which the bag and bank windows grey such a slot
+-- the field at :772), by which the bag and bank windows grey such a slot
 -- (Blizzard_UIPanels_Game/Mainline/ContainerFrame.lua:1285-1289,
 -- BankFrameTemplates.lua:594-596). A slot is also locked while its item is
 -- on the cursor; that reads as a move on its way too. An empty slot has no

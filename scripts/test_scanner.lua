@@ -2816,6 +2816,14 @@ T.section("after the close", function()
     advance(1.5)
     Inventory:OnBagUpdate(0)
     T.check("without a note too only inside the second", inDoubt() == false and accountDoubt() == false)
+    -- Each bank's own watch: three seconds for a bank whose locks could not
+    -- be seen at the close, a second for the other.
+    closedVisit(function() client.bags, client.backpackSlots = { [2589] = 65 }, 0; client.bank.account = nil end)
+    client.backpackSlots = 16
+    advance(2)
+    Inventory:OnBagUpdate(0)
+    T.check("without a note, two seconds after the close: the bank not looked at is marked, the other is not",
+        accountDoubt() == true and inDoubt() == false)
 
     -- A session without a visit: updates of bank containers are only counted.
     fresh()
