@@ -31,14 +31,24 @@
 -- while its window is open, and never by a scan: a scan counts what is
 -- remembered. What is remembered of a bank is either what a read that can be
 -- trusted saw, or it is marked IN DOUBT and not counted until the next
--- visit. It is never replaced by "nothing" on weak evidence, and never
--- counted while there is reason to think it changed without being read.
+-- visit. It is never replaced by "nothing" on weak evidence, and it stops
+-- being counted as soon as there is reason to think it changed without being
+-- read.
+-- That reason is always the bank's own: one of ITS containers reported a
+-- change that no kept read has seen. A change of the carried bags is no
+-- such sign by itself - they change for many reasons that have nothing to do
+-- with a bank, and a move between the two banks changes none of them. Only
+-- where the bank can no longer report (after the close on a client that
+-- does not send its updates then, and after the session) the carried bags
+-- are all there is to go by, and then only a count that rose, or bags that
+-- are not what the last session left.
 -- Not known about the client, and so not assumed either way: whether the bank
 -- can still be read inside the close notice; whether the bag updates of a
--- last move can arrive after the window closed; whether the client empties
--- the bank's containers (keeping their slots) and sends bag updates before
--- the close notice; whether the items are all there the moment the window
--- opens.
+-- last move can arrive after the window closed, and for which containers;
+-- whether the client empties the bank's containers (keeping their slots) and
+-- sends bag updates before or after the close notice; whether the two bag
+-- updates of one move come in one frame; whether the items are all there the
+-- moment the window opens.
 --
 -- 1. When the bank is read.
 --    - At once when the window opens, and again BANK_SETTLE (0.5 s) and
@@ -64,37 +74,36 @@
 -- 2. Which read is kept, bank by bank.
 --    - Refused by the adapter: not kept.
 --    - With items: kept.
---    - Without a single item while nothing with items is remembered for that
---      bank: kept 2 s or more after the opening ("seen, nothing in it") -
---      and, while the bank is unsettled (rule 3), only on a second look, as
---      in (b) below: a deposit may just have gone in and the client may be
---      letting go of the bank.
 --    - Without a single item while items are remembered: believed only when
 --      (a) this visit already kept a read with items of the same slot count,
 --      or it is 2 s or more after the opening, and (b) an earlier read of
 --      this visit, taken on an earlier frame, found the bank empty too.
 --      Until then the empty read is unresolved and one more read is taken:
 --      the trailing read when only (b) is missing, else the look at 2 s.
+--    - Without a single item while nothing with items is remembered for that
+--      bank: kept 2 s or more after the opening ("seen, nothing in it") -
+--      and, while the bank is unsettled (rule 3), only on a second look as
+--      in (b): a deposit may just have gone in, and the client may be
+--      letting go of the bank.
 --    A kept read replaces what is remembered and takes a doubt mark away.
 -- 3. Unsettled. A bank is UNSETTLED from the moment an update of one of its
 --    own containers arrives, or its tabs change, until a read of that bank
 --    taken after that update is kept. That is a matter of order, not of
 --    frames: a read taken in the handler of the update itself comes after
 --    it; a read taken earlier in the same frame does not. An update of a
---    carried bag unsettles no bank (the carried bags change for many reasons
---    that have nothing to do with a bank, and a move between the two banks
---    changes none of them). An empty read that is not believed (rule 2) is
---    not kept, so it settles nothing; neither does a read the adapter
---    refused.
+--    carried bag unsettles no bank. An empty read that is not believed
+--    (rule 2) is not kept, so it settles nothing; neither does a read the
+--    adapter refused.
 --    While the window is open a scan leaves out, and says so in its third
---    return (bankPending, accountPending - no line is shown for that): a
---    bank that is unsettled; both banks while a read is owed, that is, an
---    update of any container has arrived since the last read and the read
---    waits for the 0.2 s spacing; and a bank whose last read found it empty
---    without being believed (its last stack may just have gone into the
---    other bank, whose update came first - the emptied bank's own update is
---    still to come). The next read that is kept brings them back. Only a
---    bank that was usable in the visit (see below) is left out so.
+--    return (bankPending, accountPending - no line is shown for that):
+--    - a bank that is unsettled;
+--    - both banks while a read is owed, that is, an update of any container
+--      has arrived since the last read and the read waits for the 0.2 s
+--      spacing;
+--    - a bank whose last read found it empty without being believed (its
+--      last stack may just have gone into the other bank, whose update came
+--      first - the emptied bank's own update is still to come).
+--    The next read that is kept brings them back.
 -- 4. The close: the adapter's closing notice, which comes while the bank
 --    still counts as open, and likewise a logout with the bank open. When a
 --    bank is unsettled or a read is owed, the bank is read once more, and a
@@ -104,40 +113,44 @@
 --    Nothing else marks at the close: not an empty read that was merely not
 --    believed while the bank is not unsettled, not a read that was owed for
 --    an update of a carried bag, not such an update itself.
---    Such a bank - one that is not unsettled, was not kept from the closing
---    read although a read was owed or its last read found it empty without
---    being believed, and of which items are remembered - is HELD instead:
---    for CLOSE_WATCH (1 s) after the close a scan leaves it out, as being
---    read. Its own update may be the one that is still to come (a client
---    can change both containers of a move with the carried bag's update and
---    report the bank's container later); when it comes, rule 5a marks the
---    bank. When none comes in that second the bank counts again, unmarked.
---    When the session ends inside that second the bank is marked: its
---    update could never be heard.
+--    A bank that is not unsettled but could not be read back either - the
+--    closing read was not kept for it although a read was owed, or its last
+--    read found it empty without being believed - and of which items are
+--    remembered is HELD instead: for CLOSE_WATCH (1 s) after the close a
+--    scan leaves it out, as being read. Its own update may be the one that
+--    is still to come (a client can change both containers of a move with
+--    the carried bag's update and report the bank's container later); when
+--    it comes, rule 5a marks the bank. When none comes in that second the
+--    bank counts again, unmarked. When the session ends inside that second
+--    the bank is marked: its update could never be heard.
 -- 5. After the close the bank cannot be read. What may still arrive is the
 --    answer of a last move.
 --    (a) An update of a bank container that arrives within CLOSE_WATCH_BANK
 --        (10 s) after the close marks that bank in doubt at once, in the
 --        handler of the update. Later ones, and those of a session without
---        a visit, are only counted for /lp diag stock.
+--        a visit, are only counted for /lp diag stock. (On a client that
+--        empties the bank's containers after the close and reports it,
+--        every visit ends in doubt by this rule; the dump shows whether a
+--        client does.)
 --    (b) The carried bags' contents (item -> count) are noted at the closing
 --        notice. When, within CLOSE_WATCH (1 s) after the close, the carried
 --        count of an item has RISEN against that note and a remembered bank
---        of the visit holds that item, that bank is marked in doubt. A count
+--        of the visit holds that item, that bank is marked in doubt - also
+--        when it was loot or a craft: the two cannot be told apart. A count
 --        that fell, or rose for an item no remembered bank of the visit
 --        holds, marks nothing. The note follows a count that falls (what is
 --        used up after the close must not hide a stack that arrives after
---        it). The comparison is made on the next frame
---        after an update of a carried bag, when the bank is opened again,
---        and at logout; bags that cannot be read then are not compared, and
---        the comparison stays due. A scan that comes before it does not
---        mark: it leaves a bank out of its own count (as being read) when
---        the count it has just read has risen for an item that bank holds.
---        Within one frame a stack on its way from one carried bag to
---        another can show in both; by the next frame the count is what it
---        was. When no note could be taken at the close (the bags could not
---        be read), an update of a carried bag within that second marks the
---        visit's banks at once.
+--        it). The comparison is made on the next frame after an update of a
+--        carried bag, when the bank is opened again, and at logout; bags
+--        that cannot be read then are not compared, and the comparison
+--        stays due. A scan that comes before it does not mark: it leaves a
+--        bank out of its own count (as being read) when the count it has
+--        just read has risen for an item that bank holds. Within one frame
+--        a stack on its way from one carried bag to another can show in
+--        both; by the next frame the count is what it was. When no note
+--        could be taken at the close (the bags could not be read), an
+--        update of a carried bag within that second marks the visit's banks
+--        at once.
 --    (c) The end of the session. An answer that arrives after the session
 --        has ended (a logout or a reload) cannot be seen by that session;
 --        the next one can tell, because nothing else changes the carried
@@ -149,25 +162,26 @@
 --        note of the close; when there is neither, the fact that it is not
 --        known. The note names the banks the visit could use.
 --        The next session of that character compares its bags with the
---        note: at its first bag update of a carried bag (bags without
---        backpack slots wait for the next one), at the first save of the
---        bags two seconds after the start - by then bags that cannot be
---        read, or that read as completely empty without a bag update having
---        come, are no read to compare with -, when the bank is opened, and
---        at a logout that comes before all of those (with bags that hold
+--        note: at its first update of a carried bag (bags without backpack
+--        slots wait for the next one), at the first save of the bags two
+--        seconds after the start - by then bags that cannot be read, or
+--        that read as completely empty without a bag update having come,
+--        are no read to compare with -, when the bank is opened, and at a
+--        logout that comes before all of those (with bags that hold
 --        something; else the note stays for the session after). Until then
 --        a scan leaves the banks the note names out (bankPending,
 --        accountPending). Any difference, a note that is not known and
 --        bags that cannot be compared mark those banks in doubt; in every
 --        case the note is removed.
--- Which banks a visit can mark (rules 4 and 5): only a bank that was USABLE
---    at some moment of it - the adapter says so (window open, the bank may
---    be viewed, is not locked, has a tab), and it is asked at every read of
---    the visit, the closing one included. A bank that never was (one this
---    character may not view, say) cannot have been changed through the
---    visit: it is neither left out nor marked, whatever is moved in the
---    other one. And a mark is only ever set on a bank of which something is
---    remembered.
+--    Which banks can be marked (rules 4 and 5), or left out by rule 3: only
+--    a bank that was USABLE at some moment of the visit - the adapter says
+--    so (window open, the bank may be viewed, is not locked, has a tab),
+--    and it is asked at every read of the visit, the closing one included.
+--    A bank that never was (one this character may not view, say) cannot
+--    have been changed through the visit: it is neither left out nor
+--    marked, whatever is moved in the other one, and the note of rule 5c
+--    does not name it. And a mark is only ever set on a bank of which
+--    something is remembered.
 -- 6. In doubt is a mark saved with the remembered bank (StockMemory.lua). A
 --    bank that carries it is not counted by any scan - not for its own
 --    character, not as an alt's bank (the alt's bags still count), not as
@@ -175,6 +189,22 @@
 --    accountInDoubt, and altBanksInDoubt with the names of the alts whose
 --    bank is left out. The Shopping tab shows a line for each. The next
 --    kept read of that bank takes the mark away.
+--
+-- What these rules cannot see, and so do not catch:
+--    - A move whose answer arrives after the session has ended and changes
+--      no carried bag, or none on balance: between the character bank and
+--      the account bank, or two moves that cancel in the bags. Both
+--      remembered banks are then behind and nothing can tell.
+--    - The same for any move, seen from another character that plays before
+--      the first one returns: it counts the first one's bags and banks as
+--      they were remembered when that session ended. The sum is right until
+--      it reads the account bank itself.
+--    - A session that ends between the two bag updates of one move, on a
+--      client that sends them frames apart and changes each container with
+--      its own update: the half that was heard is all the addon ever saw.
+--    - On a client that reports the answer of a move for the carried bag
+--      alone once the window is closed: a deposit (the count falls, which
+--      marks nothing), and a withdrawal answered later than CLOSE_WATCH.
 local ADDON_NAME, LazyProf = ...
 
 LazyProf.Inventory = {}
@@ -777,6 +807,20 @@ local watch = nil
 --   marked[kind]   the comparison left that bank's record with the doubt mark
 local lastSession = { looked = false, marked = {} }
 
+-- Mark the remembered bank of that kind in doubt. Returns whether that
+-- changed what is remembered (there is such a bank, and it was not marked),
+-- and whether the remembered bank carries the mark now (false when nothing
+-- is remembered of it: there is nothing to mark then).
+local function MarkDoubt(kind, guid, world)
+    local Memory = LazyProf.StockMemory
+    if kind == "character" then
+        if Memory:MarkBankDoubt(guid) then return true, true end
+        return false, select(3, Memory:OwnBank(guid)) == true
+    end
+    if Memory:MarkAccountBankDoubt(world) then return true, true end
+    return false, select(3, Memory:AccountBank(world)) == true
+end
+
 -- Rule 5c: the note the character's last session left, looked up once.
 local function LastSession(identity)
     local ls = lastSession
@@ -823,25 +867,19 @@ local function CompareLastSession(items)
         ls.state = "different"
     end
     if ls.state ~= "equal" then
+        -- The world is asked for now: it may not have been readable when
+        -- the note was looked up.
         local identity = LazyProf.Client:CharacterIdentity() or {}
-        for _, kind in ipairs({ "character", "account" }) do
+        for _, kind in ipairs(BANK_KINDS) do
             if note[kind] then
-                local _, marked
-                if kind == "character" then
-                    LazyProf.StockMemory:MarkBankDoubt(ls.guid)
-                    marked = select(3, LazyProf.StockMemory:OwnBank(ls.guid)) == true
-                else
-                    LazyProf.StockMemory:MarkAccountBankDoubt(identity.world)
-                    marked = select(3, LazyProf.StockMemory:AccountBank(identity.world)) == true
-                end
+                local _, marked = MarkDoubt(kind, ls.guid, identity.world)
                 ls.marked[kind] = marked or nil
             end
         end
     end
     LazyProf.StockMemory:ClearBagsAtBank(ls.guid)
     -- The banks count again, or are in doubt now: either way another scan.
-    scanCache.time = 0
-    scanCache.combined, scanCache.breakdown, scanCache.meta = nil, nil, nil
+    InvalidateFrame()
     if LazyProf.ScheduleShoppingListRefresh then
         LazyProf:ScheduleShoppingListRefresh()
     end
@@ -949,20 +987,6 @@ local function SaveBank(kind, identity, items, bound, now)
         return LazyProf.StockMemory:SaveBank(identity, items, bound, now, not IsSelfFound())
     end
     return LazyProf.StockMemory:SaveAccountBank(identity.world, items, now)
-end
-
--- Mark the remembered bank of that kind in doubt. Returns whether that
--- changed what is remembered (there is such a bank, and it was not marked),
--- and whether the remembered bank carries the mark now (false when nothing
--- is remembered of it: there is nothing to mark then).
-local function MarkDoubt(kind, guid, world)
-    local Memory = LazyProf.StockMemory
-    if kind == "character" then
-        if Memory:MarkBankDoubt(guid) then return true, true end
-        return false, select(3, Memory:OwnBank(guid)) == true
-    end
-    if Memory:MarkAccountBankDoubt(world) then return true, true end
-    return false, select(3, Memory:AccountBank(world)) == true
 end
 
 -- One read of the open bank, both kinds, keeping what rule 2 allows (rule 4

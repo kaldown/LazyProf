@@ -841,10 +841,12 @@ end
 -- when BANKFRAME_CLOSED arrives could not be settled from source, so the
 -- caller must not take such a read for more than it is (the scanner only
 -- keeps one that looks like the reads before it, and marks the remembered
--- bank as in doubt when it may be behind). Then the bank counts as closed
--- and onBankClosed runs: from there on nothing is read.
+-- bank as in doubt when one of its containers reported a change that no
+-- kept read came after). Then the bank counts as closed and onBankClosed
+-- runs: from there on nothing is read.
 -- Verify in game (/lp diag stock after a visit): the "bank visit close",
--- "after the close" and "bank updates while closed" lines.
+-- "after the close" and "bank updates while closed" lines; and after a
+-- logout at the bank and the next login, the "bags at the bank" line.
 -- BAG_UPDATE and BAG_UPDATE_DELAYED are not registered here: the addon
 -- object has one handler per event and Core/Init.lua owns those two; it
 -- passes them on.
