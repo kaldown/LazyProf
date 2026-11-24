@@ -148,7 +148,9 @@ LazyProf.ScheduleShoppingListRefresh = function() refreshes = refreshes + 1 end
 
 local function fresh(profile)
     -- Let what the section before left waiting run out (a save asked for and
-    -- never run would keep its "waiting" flag for the rest of the suite).
+    -- never run would keep its "waiting" flag for the rest of the suite),
+    -- on a client that can tell the character apart (a save waits for that).
+    client.identity = MAIN
     advance(10)
     LazyProf.db.global = { characters = {} }
     LazyProf.db.char = { learnedRecipes = {}, selfFoundMode = false }
@@ -965,6 +967,20 @@ T.section("the bags are remembered a moment after they change", function()
     T.check("start: the bags are saved after the delay", #summary.characters == 1 and summary.characters[1].guid == MAIN.guid
         and summary.characters[1].bagsAt == NOW)
 
+    -- The character's id cannot be read when the first save is due: it is
+    -- tried again every two seconds until it can be, and then no more.
+    fresh()
+    client.identity = { name = MAIN.name, world = MAIN.world, faction = MAIN.faction, region = MAIN.region }
+    Inventory:Initialize()
+    advance(2.1)
+    T.check("no id: nothing saved, and the save waits again", Memory:Summary().characters[1] == nil and #timers == 1, #timers)
+    advance(4)
+    T.check("still no id: still waiting, one timer", Memory:Summary().characters[1] == nil and #timers == 1, #timers)
+    client.identity = MAIN
+    advance(2.1)
+    T.check("the id readable: saved", Memory:Summary().characters[1] ~= nil and Memory:Summary().characters[1].guid == MAIN.guid)
+    T.eq("and nothing waits any more", #timers, 0)
+
     -- A burst of bag updates: one save.
     client.reads.bags = 0
     client.bags = { [2589] = 8, [2592] = 3 }
@@ -1202,6 +1218,16 @@ T.section("the bank is read only while its window is open", function()
     advance(1)
     T.check("only the account bank readable: it is saved, the character bank kept",
         (Memory:AccountBank("eu"))[4306] == 1 and (bankOf())[2589] == 61)
+    -- While a bank of the visit was refused at its last read it is read
+    -- again every half second; readable again, it is read and kept.
+    client.bank.character = { items = { [2589] = 61 } }
+    local readsBefore = client.reads.character
+    advance(0.6)
+    T.check("the refused bank is read again by itself and kept", client.reads.character > readsBefore and (bankOf())[2589] == 61
+        and select(3, scan()).bankPending == nil, client.reads.character - readsBefore)
+    readsBefore = client.reads.character
+    advance(2)
+    T.eq("and once nothing wants another look, nothing reads it", client.reads.character, readsBefore)
 
     -- The bank reads without a single item, long into the visit: one such
     -- read is not believed (and asks for no redraw), the second look is.
@@ -1365,7 +1391,7 @@ T.section("unsettled", function()
     combined, _, meta = scan()
     T.check("it stays out while no read of it is kept", combined[2589] == 5 and meta.bankPending == true, combined[2589])
     client.bank.character = { items = { [2589] = 90 }, slots = 28 }
-    Inventory:OnBagUpdate(0)                               -- any update reads the bank: kept
+    advance(0.6)                                           -- read again every half second while unsettled: kept
     combined, _, meta = scan()
     T.check("a kept read settles it", combined[2589] == 95 and meta.bankPending == nil, combined[2589])
 
@@ -2569,6 +2595,19 @@ T.section("the end of a session at the bank", function()
     T.check("a bank already in doubt: the note is left all the same", note() ~= nil
         and select(3, Memory:OwnBank(MAIN.guid)) == true)
 
+    -- A comparison after the close still due at logout, the bags not
+    -- readable: it can never be made - the banks of the visit are marked.
+    visit()
+    close()
+    advance(0.3)
+    client.bags = { [2589] = 65 }
+    Inventory:OnBagUpdate(0)
+    client.backpackSlots = 0
+    client.started.onLogout()
+    T.check("a comparison due and the bags unreadable at logout: both banks in doubt",
+        select(3, Memory:OwnBank(MAIN.guid)) == true and select(3, Memory:AccountBank("eu")) == true)
+    client.backpackSlots = 16
+
     -- With Syndicator nothing is noted.
     visit()
     _G.Syndicator = { API = {} }
@@ -2717,7 +2756,9 @@ T.section("the first moments after opening", function()
     client.bank.character = { items = {} }
     Inventory:OnBagUpdate(6)
     T.eq("emptied one second after opening: the first empty read is not believed", (bankOf())[2589], 74)
-    advance(0.25)
+    -- (The account bank reads empty too and is read again every half
+    -- second: the read for this update may wait for the spacing.)
+    advance(0.45)
     T.check("the second look is", next((bankOf())) == nil)
 
     -- One bank has its items at once, the other not yet: each is judged alone.
@@ -2753,7 +2794,7 @@ T.section("the first moments after opening", function()
     for _, t in ipairs(timers) do
         if t.due > fakeNow + 0.05 then looks = looks + 1 end
     end
-    T.eq("the half-second look, the two-second look and the trailing read are each waiting once", looks, 3)
+    T.eq("the half-second look, the two-second look, the trailing read and the repeated read are each waiting once", looks, 4)
 
     -- Opened again shortly after: the looks are counted from the new opening.
     start()

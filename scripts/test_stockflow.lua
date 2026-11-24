@@ -962,19 +962,32 @@ T.section("how often the open bank is read", function()
     World.advance(0.3)
     World.event(addon, "BANKFRAME_CLOSED")
     World.advance(0.1)
-    reads = countReads(addon)
+    -- When each read of the second visit is taken, counted from its opening
+    -- (the bank reads empty, so it is also read again every half second).
+    local readAt = {}
+    local opened
+    local realRead = addon.Client.BankContents
+    addon.Client.BankContents = function(self, kind)
+        if kind == "character" then readAt[#readAt + 1] = string.format("%.2f", World.time - opened) end
+        return realRead(self, kind)
+    end
+    opened = World.time
     World.event(addon, "BANKFRAME_OPENED")           -- the second visit, 0.4 s after the first
-    T.eq("the second visit: its read at the opening", reads.n, 1)
+    T.eq("the second visit: its read at the opening", table.concat(readAt, ","), "0.00")
     World.advance(0.05)                              -- the first visit's half-second mark has passed
-    T.eq("the first visit's half-second look does not read in the second", reads.n, 1)
+    T.eq("the first visit's half-second look does not read in the second", table.concat(readAt, ","), "0.00")
     World.advance(0.45)
-    T.eq("the second visit has its own half-second look", reads.n, 2)
+    T.eq("the second visit has its own half-second look", table.concat(readAt, ","), "0.00,0.50")
     World.advance(1.2)                               -- 1.7 s: the first visit's two-second mark has passed
-    T.eq("the first visit's two-second look does not read either", reads.n, 2)
+    T.eq("the first visit's two-second look does not read either: only the second visit's half-second reads",
+        table.concat(readAt, ","), "0.00,0.50,1.00,1.50")
     T.eq("nothing was believed meanwhile", (bankOf(addon))[LINEN], 100)
     World.advance(0.31)
-    T.eq("the second visit's own two-second look", reads.n, 3)
+    T.eq("the second visit's own two-second look", readAt[#readAt], "2.00")
     T.check("which believes the empty bank: it was seen empty before, in this visit", next((bankOf(addon))) == nil)
+    World.advance(3)
+    T.eq("and nothing reads it after that", readAt[#readAt], "2.00")
+    addon.Client.BankContents = realRead
 end)
 
 -- ===========================================================================
@@ -2325,6 +2338,167 @@ T.section("a bank in doubt until the next visit", function()
     combined = World.scan(crafter)
     T.check("and the other character counts bank and account bank again", combined[LINEN] == 106 and combined[BAR] == 50, combined[LINEN])
     T.check("with no alt named any more", select(3, World.scan(crafter)).altBanksInDoubt == nil)
+end)
+
+-- ===========================================================================
+-- A read, a comparison or a save that cannot be made when it is due is tried
+-- again until it can be: what waits for it is left out meanwhile, and must
+-- not stay left out without a word.
+-- ===========================================================================
+T.section("what cannot be done at once is tried again", function()
+    -- The bank is refused for a moment after the two-second mark, while a
+    -- deposit is answered; it can be read again without any event saying so.
+    local addon = bankVisit(4)
+    World.bank[0].locked = 1
+    World.containers[0][2] = nil
+    World.containers[6][2] = slot(LINEN, 5)
+    World.bagUpdate(addon, 0, 6)
+    World.bagUpdateDelayed(addon)
+    World.advance(0.3)
+    World.bank[0].locked = nil                    -- readable again; no event
+    World.advance(0.7)
+    local total, bags, bank, meta = linen(addon)
+    T.check("a bank refused while unsettled is read again while the window is open: counted, not left out",
+        total == 105 and bank == 105 and meta.bankPending == nil, tostring(total))
+    World.advance(30)
+    T.check("and nothing goes on reading it once it is settled", (function()
+        local reads = 0
+        local real = addon.Client.BankContents
+        addon.Client.BankContents = function(self, kind) reads = reads + 1 return real(self, kind) end
+        World.advance(5)
+        addon.Client.BankContents = real
+        return reads == 0
+    end)())
+    World.event(addon, "BANKFRAME_CLOSED")
+    -- A bank this character may not view is not read again and again.
+    World.reset()
+    World.containers = { [0] = { slots = 16, slot(HEARTHSTONE, 1, true), slot(LINEN, 5) }, [6] = { slots = 28, slot(LINEN, 100) },
+                         [15] = { slots = 98, slot(BAR, 50) } }
+    World.bank = { [0] = { tabs = { { ID = 6 } } }, [2] = { tabs = { { ID = 15 } }, canView = false } }
+    addon = World.login({})
+    World.advance(3)
+    World.event(addon, "BANKFRAME_OPENED")
+    World.bagUpdate(addon, 15)
+    World.advance(5)
+    local reads = 0
+    local real = addon.Client.BankContents
+    addon.Client.BankContents = function(self, kind) reads = reads + 1 return real(self, kind) end
+    World.advance(5)
+    addon.Client.BankContents = real
+    T.eq("a bank that cannot be used is not read again", reads, 0)
+    World.event(addon, "BANKFRAME_CLOSED")
+
+    -- The comparison after the close is due, and the bags cannot be read on
+    -- the frame after the update: it is made on a later frame.
+    addon = bankVisit()
+    World.containers[0][4] = slot(SILK, 2)
+    World.bagUpdate(addon, 0)
+    World.advance(3)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(0.3)
+    World.containers[0][4] = nil                  -- a craft used the silk: a count that fell
+    World.bagUpdate(addon, 0)
+    local carried = World.containers[0]
+    World.containers[0] = { slots = 0 }           -- the next frame the bags report no slots
+    World.nextFrame()
+    World.containers[0] = carried
+    World.advance(1)
+    total, bags, bank, meta = linen(addon)
+    T.check("the comparison is made once the bags can be read: nothing marked, nothing left out",
+        total == 105 and meta.bankPending == nil and meta.bankInDoubt == nil, tostring(total))
+    World.advance(300)
+    World.containers[0][4] = slot(LINEN, 3)       -- loot, minutes later
+    World.bagUpdate(addon, 0)
+    World.advance(1)
+    total, bags, bank, meta = linen(addon)
+    T.check("and a loot minutes later is no reason to leave the bank out", total == 108 and meta.bankPending == nil, tostring(total))
+    -- The bags stay unreadable until the watch is over: the banks are marked.
+    addon = bankVisit()
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(0.3)
+    World.containers[0][3] = slot(LINEN, 60)      -- a count that rose; the bank holds linen
+    World.bagUpdate(addon, 0)
+    carried = World.containers[0]
+    World.containers[0] = { slots = 0 }
+    World.advance(1)
+    World.containers[0] = carried
+    World.advance(1)
+    total, bags, bank, meta = linen(addon)
+    T.check("the bags not readable until the second is over: the visit's banks are in doubt",
+        meta.bankInDoubt == true and meta.accountInDoubt == true and meta.bankPending == nil, tostring(total))
+    local lines = {}
+    addon.Inventory:RunDiagnostic(lines)
+    T.check("and the dump says why", table.concat(lines, "\n"):find("marked=character (bags not readable for the comparison)", 1, true) ~= nil,
+        table.concat(lines, "\n"))
+
+    -- The session ended at the bank, and the character's id cannot be read
+    -- for the first moments of the next one: the comparison with the note
+    -- is tried again until it can be.
+    local saved = {}
+    addon = bankVisit(3, saved)
+    World.event(addon, "PLAYER_LOGOUT")           -- with the bank open: a note is left
+    local guid = World.guid
+    World.guid = nil
+    World.timers = {}
+    World.time = World.time + 30
+    addon = World.login(saved)
+    World.bagUpdate(addon, 0)
+    World.advance(3)
+    World.guid = guid
+    World.advance(2.5)
+    total, bags, bank, meta = linen(addon)
+    T.check("the id readable from the third second: within the next save the bags are compared",
+        total == 105 and meta.bankPending == nil and meta.accountPending == nil and meta.bankInDoubt == nil, tostring(total))
+    World.advance(600)
+    total, bags, bank, meta = linen(addon)
+    T.check("and the banks stay counted without any bag update", total == 105 and meta.bankPending == nil, tostring(total))
+    World.event(addon, "PLAYER_LOGOUT")
+end)
+
+-- ===========================================================================
+-- The note a session left at the bank names the banks its last visit could
+-- use. A bank that another character read after the note was written is not
+-- marked by it: that read is newer than anything the note could be about.
+-- ===========================================================================
+T.section("a note does not mark a bank read after it", function()
+    local saved = {}
+    local addon = bankVisit(3, saved)
+    World.containers[0][2] = slot(LINEN, 5)
+    World.event(addon, "PLAYER_LOGOUT")           -- the note: 5 linen carried
+    -- The other character plays and reads the account bank.
+    World.timers = {}
+    World.time = World.time + 100
+    World.serverTime = World.serverTime + 100
+    local mainGuid, mainName = World.guid, World.name
+    World.guid, World.name = "Player-4444-000000BB", "Alt Goldtooth"
+    local mainBags = World.containers[0]
+    World.containers[0] = { slots = 16, slot(HEARTHSTONE, 1, true) }
+    local alt = World.login(saved)
+    World.bagUpdate(alt, 0)
+    World.advance(3)
+    World.event(alt, "BANKFRAME_OPENED")
+    World.advance(3)
+    World.event(alt, "BANKFRAME_CLOSED")
+    World.advance(15)
+    World.event(alt, "PLAYER_LOGOUT")
+    -- The first character returns with other bags than the note says.
+    World.timers = {}
+    World.time = World.time + 100
+    World.serverTime = World.serverTime + 100
+    World.guid, World.name = mainGuid, mainName
+    World.containers[0] = mainBags
+    World.containers[0][3] = slot(LINEN, 7)
+    addon = World.login(saved)
+    World.bagUpdate(addon, 0)
+    local total, bags, bank, meta = linen(addon)
+    T.check("its own bank, named by the note, is in doubt", meta.bankInDoubt == true, tostring(total))
+    T.check("the account bank, read by the other character since, is not", meta.accountInDoubt == nil
+        and (select(2, World.scan(addon)))[BAR].bank == 50)
+    local lines = {}
+    addon.Inventory:RunDiagnostic(lines)
+    T.check("the dump says so", table.concat(lines, "\n"):find(
+        "bags at the bank (from the last session): compared, different: character marked in doubt; account read since the note, not marked",
+        1, true) ~= nil, table.concat(lines, "\n"))
 end)
 
 -- ===========================================================================

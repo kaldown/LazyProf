@@ -349,11 +349,12 @@ function StockMemory:NoteBagsAtBank(identity, items, banks, now)
 end
 
 -- The note a character's last session left, nil when there is none:
---   { known, items, character, account }
+--   { known, items, character, account, at }
 -- known: the bags' contents are known (items is then a copy of them; nil
--- otherwise). character / account: whether the note is about that bank. A
--- note that is not what this file writes counts as not known, for both
--- banks. Reading changes nothing.
+-- otherwise). character / account: whether the note is about that bank. at:
+-- when it was written (nil when that cannot be read). A note that is not
+-- what this file writes counts as not known, for both banks. Reading changes
+-- nothing.
 function StockMemory:BagsAtBank(guid)
     local characters = Store()
     local record = characters and guid ~= nil and characters[guid]
@@ -367,6 +368,7 @@ function StockMemory:BagsAtBank(guid)
         items = note.items ~= nil and Counts(note.items) or nil,
         character = Set(note.banks.character),
         account = Set(note.banks.account),
+        at = Time(note.at),
     }
 end
 

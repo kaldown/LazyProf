@@ -60,9 +60,13 @@
 --      BANK_EMPTY_TRUST (2 s) after the opening, whatever the reads before
 --      gave: a bank that was there only in part at the opening and
 --      completed without a bag update is then read whole while its window
---      is still open. (A visit that begins without its opening having been
---      reported gets the look at 2 s when a read before that mark was
---      refused or found a bank empty without being believed.)
+--      is still open. (A look finds nothing to do when another read was
+--      taken at or after its mark.)
+--    - Again BANK_SETTLE after the last read, for as long as the window is
+--      open and a bank usable in the visit is unsettled (rule 3), has an
+--      empty read not believed yet, or was refused at its last read: no
+--      event may come to say that it can be read again (a bank that is
+--      locked for a moment, say). One timer at most.
 --    - On a bag update (of any container: an item may have gone into the
 --      bank or come out of it) or a change of the bank's tabs: at once when
 --      the last read is BANK_READ_SPACING (0.2 s) or more ago. Otherwise the
@@ -85,9 +89,9 @@
 --      this visit, taken on an earlier frame and after the bank's last own
 --      update, found the bank empty too (an empty read from before an
 --      update says nothing about the bank after it: a stack may have gone
---      in). Until then the empty read is unresolved and one more read is
---      taken: the trailing read when only (b) is missing, else the look at
---      2 s.
+--      in). Until then the empty read is unresolved and more reads are
+--      taken: the trailing read when only (b) is missing, else the reads
+--      every BANK_SETTLE and the look at 2 s.
 --    - Without a single item while nothing with items is remembered for that
 --      bank: kept 2 s or more after the opening ("seen, nothing in it") -
 --      and, while the bank is unsettled (rule 3), only on a second look as
@@ -174,6 +178,10 @@
 --        Within one frame a stack on its way from one carried bag to
 --        another can show in both, or in neither; by the next frame the
 --        count is what it was.
+--        A comparison that is due while the bags cannot be read is tried on
+--        every later frame until they can; when the second is over (or the
+--        session ends) with it still due, the visit's banks of which items
+--        are remembered are marked.
 --        When no note could be taken at the close (the bags could not be
 --        read), an update of a carried bag within that second marks the
 --        visit's banks at once.
@@ -193,13 +201,17 @@
 --        slots wait for the next one), at the first save of the bags two
 --        seconds after the start - by then bags that cannot be read, or
 --        that read as completely empty without a bag update having come,
---        are no read to compare with -, when the bank is opened, and at a
---        logout that comes before all of those (with bags that hold
---        something; else the note stays for the session after). Until then
---        a scan leaves the banks the note names out (bankPending,
---        accountPending). Any difference, a note that is not known and
---        bags that cannot be compared mark those banks in doubt; in every
---        case the note is removed.
+--        are no read to compare with; while the character's id cannot be
+--        read, that save, and the comparison with it, is tried again every
+--        two seconds -, when the bank is opened, and at a logout that comes
+--        before all of those (with bags that hold something; else the note
+--        stays for the session after). Until then a scan leaves the banks
+--        the note names out (bankPending, accountPending). Any difference,
+--        a note that is not known and bags that cannot be compared mark
+--        those banks in doubt - except a bank whose record was saved after
+--        the note was written (the account bank, read by another character
+--        since): that read is newer than anything the note is about. In
+--        every case the note is removed.
 --    Which banks a visit can mark (rules 4, 5b and 5c), or leave out by
 --    rule 3: only a bank that was USABLE at some moment of the visit - the
 --    adapter says so (window open, the bank may be viewed, is not locked,
@@ -974,12 +986,27 @@ local function CompareLastSession(items)
     end
     if ls.state ~= "equal" then
         -- The region is asked for now: it may not have been readable when
-        -- the note was looked up.
+        -- the note was looked up. A bank whose record was saved after the
+        -- note was written (the account bank, read by another character
+        -- meanwhile) is newer than anything the note can be about: it is
+        -- not marked by it.
+        local Memory = LazyProf.StockMemory
         local identity = LazyProf.Client:CharacterIdentity() or {}
         for _, kind in ipairs(BANK_KINDS) do
             if note[kind] then
-                local _, marked = MarkDoubt(kind, ls.guid, identity.region)
-                ls.marked[kind] = marked or nil
+                local savedAt
+                if kind == "character" then
+                    savedAt = select(2, Memory:OwnBank(ls.guid))
+                else
+                    savedAt = select(2, Memory:AccountBank(identity.region))
+                end
+                if note.at and savedAt and savedAt > note.at then
+                    ls.newer = ls.newer or {}
+                    ls.newer[kind] = true
+                else
+                    local _, marked = MarkDoubt(kind, ls.guid, identity.region)
+                    ls.marked[kind] = marked or nil
+                end
             end
         end
     end
@@ -1025,9 +1052,29 @@ function Inventory:SaveBags(trustEmpty)
     return LazyProf.StockMemory:SaveBags(Client:CharacterIdentity(), items, bound, Client:Now(), CanSend())
 end
 
--- The save a request asked for, BAG_SAVE_DELAY later.
+local ArmBagSave
+
+-- Can the character be told apart right now (its id read)? A failure of the
+-- call counts as yes: what follows then fails for itself and is counted, and
+-- nothing is tried again for ever.
+local function IdentityReadable()
+    local Client = LazyProf.Client
+    local ok, identity = Protected("bag save", Client.CharacterIdentity, Client)
+    return not ok or (type(identity) == "table" and identity.guid ~= nil)
+end
+
+-- The save a request asked for, BAG_SAVE_DELAY later. While the character's
+-- id cannot be read it is asked for again, BAG_SAVE_DELAY after that: the
+-- bags cannot be saved without it, and the comparison with the last
+-- session's note (rule 5c) waits for it too.
 local function TimedBagSave()
     if not bagSavePending then return end   -- written at logout meanwhile
+    if not IdentityReadable() then
+        if not Protected("bag save", ArmBagSave) then
+            bagSavePending = false
+        end
+        return
+    end
     bagSavePending = false
     local trustEmpty = bagUpdateSeen
     bagUpdateSeen = false
@@ -1037,7 +1084,7 @@ local function TimedBagSave()
     Protected("bag save", Inventory.SaveBags, Inventory, trustEmpty)
 end
 
-local function ArmBagSave()
+ArmBagSave = function()
     C_Timer.After(BAG_SAVE_DELAY, TimedBagSave)
 end
 
@@ -1111,9 +1158,7 @@ end
 
 -- One read of the open bank, both kinds, keeping what rule 2 allows (rule 4
 -- for the read at the closing notice: `closing`, which also has the kinds it
--- kept noted in keptNow). Returns whether what is remembered changed, and
--- whether a kind was refused or found empty without being believed before
--- the two-second mark (the look at that mark is then wanted).
+-- kept noted in keptNow). Returns whether what is remembered changed.
 -- Whether a bank is left out may be different after any read, so the frame's
 -- scan is dropped first.
 local function ReadBank(v, closing, keptNow)
@@ -1126,7 +1171,7 @@ local function ReadBank(v, closing, keptNow)
     v.reads = v.reads + 1
     v.owed = false
     v.confirm = false
-    local changed, lookWanted = false, false
+    local changed = false
     for _, kind in ipairs(BANK_KINDS) do
         local state = v[kind]
         -- Asked at every read: usable once is enough for the visit.
@@ -1135,9 +1180,9 @@ local function ReadBank(v, closing, keptNow)
         end
         local items, bound, slots = Client:BankContents(kind)
         local keep = false
+        state.refused = not items
         if not items then
             state.last = "refused"
-            lookWanted = lookWanted or not late
         elseif next(items) ~= nil then
             keep = not closing or (state.slots ~= nil and slots == state.slots)
             state.last = keep and "items" or "items, another slot count"
@@ -1161,7 +1206,6 @@ local function ReadBank(v, closing, keptNow)
                 -- here on, and when it was unsettled it stays so.
                 state.last = "empty, not believed"
                 state.emptyAt = state.emptyAt or frame
-                lookWanted = lookWanted or not late
                 -- Only the second look is missing: it comes with the trailing read.
                 if (remembered and (late or sameBank)) or (not remembered and late) then
                     v.confirm = true
@@ -1186,19 +1230,21 @@ local function ReadBank(v, closing, keptNow)
             end
         end
     end
-    return changed, lookWanted
+    return changed
 end
 
 local LookAtBank
 
 -- The look `mark` seconds after this visit's opening; one per mark is waiting
--- at most. A visit that is over by then is not looked at.
+-- at most. A visit that is over by then is not looked at, nor is one that
+-- has had a read since that mark (another timer of the same moment).
 local function ScheduleLook(v, mark)
     if v.lookPending[mark] then return end
     v.lookPending[mark] = true
     C_Timer.After(math.max(0, v.openedAt + mark - GetTime()), function()
         v.lookPending[mark] = nil
         if visit ~= v or v.closedAt then return end
+        if v.lastReadAt and v.lastReadAt >= v.openedAt + mark - CLOCK_SLACK then return end
         Protected("bank read", LookAtBank, Inventory)
     end)
 end
@@ -1227,19 +1273,56 @@ local function ScheduleTrailing(v)
     C_Timer.After(math.max(0, (v.lastReadAt or GetTime()) + BANK_READ_SPACING - GetTime()), fire)
 end
 
--- Read the open bank now and ask for what the read leaves open: the look at
--- the two-second mark, the second look at an empty bank. A shown list is
--- asked to redraw when the read changed what is remembered. Returns whether
--- it did.
+-- Does a bank of the visit want another read: usable in it, and unsettled,
+-- with an empty read not believed yet, or refused at its last read? Nothing
+-- else would read it again before something changes, and a scan leaves it
+-- out meanwhile (rule 3) - or a refused bank stays as last kept while it
+-- may have changed.
+local function WantsAnotherLook(v)
+    for _, kind in ipairs(BANK_KINDS) do
+        local state = v[kind]
+        if state.usable and (state.unsettled or state.emptyAt ~= nil or state.refused) then return true end
+    end
+    return false
+end
+
+-- Read again BANK_SETTLE after the last read while a bank wants another
+-- look; one timer at most (a pending flag), moved on by any read taken
+-- meanwhile. A visit that is over by then is not read.
+local function ScheduleRepeat(v)
+    if v.repeatPending then return end
+    v.repeatPending = true
+    local function fire()
+        if visit ~= v or v.closedAt or v.closing then
+            v.repeatPending = false
+            return
+        end
+        local wait = (v.lastReadAt or 0) + BANK_SETTLE - GetTime()
+        if wait > CLOCK_SLACK then
+            C_Timer.After(wait, fire)
+            return
+        end
+        v.repeatPending = false
+        if WantsAnotherLook(v) then
+            Protected("bank read", LookAtBank, Inventory)
+        end
+    end
+    C_Timer.After(math.max(0, (v.lastReadAt or GetTime()) + BANK_SETTLE - GetTime()), fire)
+end
+
+-- Read the open bank now and ask for what the read leaves open: the second
+-- look at an empty bank, another read of a bank that wants one. A shown list
+-- is asked to redraw when the read changed what is remembered. Returns
+-- whether it did.
 LookAtBank = function(self)
     local v = OpenVisit()
     if not v then return false end
-    local changed, lookWanted = ReadBank(v, false)
-    if lookWanted then
-        ScheduleLook(v, BANK_EMPTY_TRUST)
-    end
+    local changed = ReadBank(v, false)
     if v.confirm then
         ScheduleTrailing(v)
+    end
+    if WantsAnotherLook(v) then
+        ScheduleRepeat(v)
     end
     if changed and LazyProf.ScheduleShoppingListRefresh then
         LazyProf:ScheduleShoppingListRefresh()
@@ -1587,10 +1670,41 @@ local function ClosedBankUpdate(kind)
     end
 end
 
+-- Rule 5b: a comparison that can no longer be made (the watch is over, or
+-- the session ends, and the bags still cannot be read for it): the visit's
+-- banks of which items are remembered are marked.
+local function GiveUpComparison(w)
+    w.owed = false
+    for _, kind in ipairs(BANK_KINDS) do
+        local held = WatchedBank(w, kind)
+        if held and next(held) ~= nil then
+            WatchMark(w, kind, "bags not readable for the comparison")
+        end
+    end
+end
+
+-- Rule 5b: the comparison that is due, on the next frame (one timer, a
+-- pending flag) and on every frame after that while the bags cannot be read
+-- for it, until the watch is over.
+local function SettleSoon(w)
+    if w.pending then return end
+    w.pending = true
+    C_Timer.After(0, function()
+        w.pending = false
+        if watch ~= w or not w.owed then return end
+        Protected("bank close", SettleAfterClose)
+        if not w.owed then return end
+        if GetTime() - w.at > CLOSE_WATCH + CLOCK_SLACK then
+            GiveUpComparison(w)
+        else
+            SettleSoon(w)
+        end
+    end)
+end
+
 -- Rule 5b: an update of a carried bag while the bank is closed. Inside
--- CLOSE_WATCH after a close it asks for the comparison on the next frame
--- (one timer, a pending flag); without a note of the bags it marks the
--- visit's banks at once.
+-- CLOSE_WATCH after a close it asks for the comparison on the next frame;
+-- without a note of the bags it marks the visit's banks at once.
 local function WatchBagUpdate()
     local w = watch
     if not w then return end
@@ -1607,14 +1721,7 @@ local function WatchBagUpdate()
     if not WatchOpen(w) then return end
     w.owed = true
     InvalidateFrame()
-    if w.pending then return end
-    w.pending = true
-    C_Timer.After(0, function()
-        w.pending = false
-        if watch == w then
-            Protected("bank close", SettleAfterClose)
-        end
-    end)
+    SettleSoon(w)
 end
 
 local function BagUpdated(self, bagId)
@@ -1708,9 +1815,12 @@ function Inventory:OnLogout()
         Protected("logout", CloseVisit, self)
     end
     -- A comparison still due after a close (rule 5b) has no next frame to
-    -- wait for.
+    -- wait for: it is made now, or given up.
     if watch and watch.owed then
         Protected("logout", SettleAfterClose)
+        if watch.owed then
+            Protected("logout", GiveUpComparison, watch)
+        end
     end
     Protected("logout", EndSession)
     if not bagSavePending then return end
@@ -1888,7 +1998,7 @@ function Inventory:RunDiagnostic(lines)
     end
     local v = visit
     local bankReadWaiting = v ~= nil and not v.closedAt
-        and (v.owed or v.confirm or v.trailingPending or next(v.lookPending) ~= nil) or false
+        and (v.owed or v.confirm or v.trailingPending or v.repeatPending or next(v.lookPending) ~= nil) or false
     add("waiting: bagSave=" .. tostring(bagSavePending) .. " bankRead=" .. tostring(bankReadWaiting)
         .. " bankOpen=" .. tostring(Client:IsBankOpen()))
     -- The bank visit in progress or the last one: which rules fired.
@@ -1950,6 +2060,13 @@ function Inventory:RunDiagnostic(lines)
             if lastSession.marked[kind] then marks[#marks + 1] = kind end
         end
         local banks = (#marks > 0 and table.concat(marks, ",") or "none") .. " marked in doubt"
+        local newer = {}
+        for _, kind in ipairs(BANK_KINDS) do
+            if lastSession.newer and lastSession.newer[kind] then newer[#newer + 1] = kind end
+        end
+        if #newer > 0 then
+            banks = banks .. "; " .. table.concat(newer, ",") .. " read since the note, not marked"
+        end
         local said = {
             waiting = "not compared yet",
             equal = "compared, equal",

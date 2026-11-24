@@ -529,6 +529,7 @@ T.section("the bags at the bank", function()
     T.check("the note holds the counts", note ~= nil and note.known == true and note.items[2589] == 5 and note.items[6948] == 1
         and count(note.items) == 2)
     T.check("and which banks it is about", note.character == true and note.account == false)
+    T.eq("and when it was written", note.at, NOW)
     held[2589] = 99
     T.eq("it is a copy of what was passed", Memory:BagsAtBank(MAIN.guid).items[2589], 5)
     note.items[2589] = 77
@@ -586,6 +587,11 @@ T.section("the bags at the bank", function()
     record.bagsAtBank = { items = { [2589] = 5, [4306] = -3, bad = 2, [765] = "x" }, banks = { character = true }, at = NOW }
     note = Memory:BagsAtBank(MAIN.guid)
     T.check("counts that are no counts are left out", note.known == true and note.items[2589] == 5 and count(note.items) == 1)
+    for _, at in ipairs({ "noon", 0 / 0, math.huge }) do
+        record.bagsAtBank = { items = {}, banks = { character = true }, at = at }
+        T.check("a time that is no time (" .. tostring(at) .. ") is none", Memory:BagsAtBank(MAIN.guid).at == nil)
+    end
+    record.bagsAtBank = { items = { [2589] = 5, [4306] = -3, bad = 2, [765] = "x" }, banks = { character = true }, at = NOW }
     T.check("reading changed nothing", record.bagsAtBank.items[4306] == -3)
     T.check("a damaged note can be cleared", Memory:ClearBagsAtBank(MAIN.guid) == true and record.bagsAtBank == nil)
     LazyProf.db.global.stock.characters["Player-1-JUNK"] = "gone"
