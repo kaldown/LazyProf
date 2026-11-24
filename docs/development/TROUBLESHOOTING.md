@@ -738,8 +738,10 @@ WoW Client: <Retail/Classic/TBC/Anniversary>
 ## Reset to Defaults
 
 `/lp reset` (or "Reset All Settings" in the options) puts every setting back to its default
-in game; the bags and banks LazyProf remembers for your characters are kept ("Forget
-remembered characters" is the button for those).
+in game. It also clears the vendor prices and the trainers LazyProf has seen and each
+character's targets and choices (recipes chosen, craft-or-buy, the route it follows). The
+bags and banks LazyProf remembers for your characters are kept ("Forget remembered
+characters" is the button for those).
 
 If all else fails, remove LazyProf's saved file - this also deletes everything it remembers:
 
