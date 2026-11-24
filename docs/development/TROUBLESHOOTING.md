@@ -541,7 +541,10 @@ read from it; check in Syndicator / Baganator that it knows the character.
 7. A bank that may have changed after LazyProf last read it is not counted until you open
    the bank again. The Shopping tab then starts with a grey line: "Your bank is not
    counted: it may have changed after LazyProf last read it. Open the bank to count it
-   again." (or "The account bank ...", or both). An alt's bank that is left out has a line
+   again." For the account bank the line ends "It counts again once it is read at the
+   bank." instead: only a character that may view the account bank can read it, and that
+   read is what clears the mark ("Your bank and the account bank are not counted: ... They
+   count again once they are read at the bank." when both are left out). An alt's bank that is left out has a line
    of its own: "The bank of <name> is not counted: it may have changed after LazyProf last
    read it. Open the bank on that character to count it again." It happens when the bank
    reported a change that LazyProf could no longer read - typically a last withdrawal or

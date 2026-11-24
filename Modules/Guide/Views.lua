@@ -1102,16 +1102,19 @@ end
 -- items count at all). The line that tells the player, nil when there is
 -- nothing to tell. A bank that is merely being read again says nothing.
 -- The addon cannot know that such a bank changed, only that it may have.
+-- The account bank's mark goes only with a read of it, which a character
+-- that may not view that bank cannot take: its line says what clears it
+-- instead of asking every character to open the bank.
 local function DoubtLine(meta)
     if not meta then return nil end
-    local rest = "it may have changed after LazyProf last read it. Open the bank to count it again."
     if meta.bankInDoubt and meta.accountInDoubt then
         return "Your bank and the account bank are not counted: they may have changed after LazyProf last read them. "
-            .. "Open the bank to count them again."
+            .. "They count again once they are read at the bank."
     elseif meta.bankInDoubt then
-        return "Your bank is not counted: " .. rest
+        return "Your bank is not counted: it may have changed after LazyProf last read it. Open the bank to count it again."
     elseif meta.accountInDoubt then
-        return "The account bank is not counted: " .. rest
+        return "The account bank is not counted: it may have changed after LazyProf last read it. "
+            .. "It counts again once it is read at the bank."
     end
     return nil
 end

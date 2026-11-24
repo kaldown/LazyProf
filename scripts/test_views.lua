@@ -1563,9 +1563,12 @@ T.section("shopping: a bank that is not counted says so", function()
         return Views.Shopping(v)
     end
     local OWN = "Your bank is not counted: it may have changed after LazyProf last read it. Open the bank to count it again."
-    local ACCOUNT = "The account bank is not counted: it may have changed after LazyProf last read it. Open the bank to count it again."
+    -- The account bank may be one this character cannot view: the line says
+    -- what clears it, a read at the bank, not "open the bank".
+    local ACCOUNT = "The account bank is not counted: it may have changed after LazyProf last read it. "
+        .. "It counts again once it is read at the bank."
     local BOTH = "Your bank and the account bank are not counted: they may have changed after LazyProf last read them. "
-        .. "Open the bank to count them again."
+        .. "They count again once they are read at the bank."
     local ONE_ALT = "The bank of Zed Alt is not counted: it may have changed after LazyProf last read it. "
         .. "Open the bank on that character to count it again."
     local TWO_ALTS = "The banks of Amy Alt and Zed Alt are not counted: they may have changed after LazyProf last read them. "

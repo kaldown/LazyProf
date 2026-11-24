@@ -759,7 +759,7 @@ local function firstShoppingRow(addon)
 end
 
 local NOT_COUNTED = "Your bank and the account bank are not counted: they may have changed after LazyProf last read them. "
-    .. "Open the bank to count them again."
+    .. "They count again once they are read at the bank."
 local BANK_NOT_COUNTED_LINE = "Your bank is not counted: it may have changed after LazyProf last read it. Open the bank to count it again."
 
 -- A scan never counts more linen than is owned.
@@ -1619,7 +1619,8 @@ T.section("the close", function()
     T.check("the bank whose container reported it is in doubt, and the other one that read empty", inDoubt == true and accountDoubt == true)
     T.eq("so neither is counted", (linen(addon)), 5)
     T.eq("and the Shopping tab says so", firstShoppingRow(addon),
-        "Your bank and the account bank are not counted: they may have changed after LazyProf last read them. Open the bank to count them again.")
+        "Your bank and the account bank are not counted: they may have changed after LazyProf last read them. "
+            .. "They count again once they are read at the bank.")
     linenLeft, inDoubt, barsLeft, accountDoubt = letGoThen("BANKFRAME_CLOSED", 15)
     T.check("the same told by an account bank container's update: both in doubt", linenLeft == 100 and barsLeft == 50
         and inDoubt == true and accountDoubt == true, tostring(linenLeft) .. "/" .. tostring(barsLeft))
@@ -2395,7 +2396,8 @@ T.section("a bank in doubt until the next visit", function()
     T.check("the account bank is in doubt for this character too", combined[BAR] == nil and meta.accountInDoubt == true
         and meta.bankInDoubt == nil)
     T.eq("its Shopping tab names the account bank", firstShoppingRow(crafter),
-        "The account bank is not counted: it may have changed after LazyProf last read it. Open the bank to count it again.")
+        "The account bank is not counted: it may have changed after LazyProf last read it. "
+            .. "It counts again once it is read at the bank.")
     -- The first character's bank is left out of this one's counts as well:
     -- the scan names it, and the Shopping tab has a second line for it.
     T.check("the scan names the alt whose bank is not counted", type(meta.altBanksInDoubt) == "table"
