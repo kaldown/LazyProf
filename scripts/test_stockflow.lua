@@ -265,6 +265,42 @@ T.section("a Self-Found alt", function()
 end)
 
 -- ===========================================================================
+-- A name belongs to one character of a world: the record seen last. An older
+-- record of that name never counts in its place.
+-- ===========================================================================
+T.section("the newest record of a name decides", function()
+    local now = World.serverTime
+    local function linenWith(newer)
+        World.reset()
+        World.containers = { [0] = { slots = 16, slot(LINEN, 5) } }
+        local older = { name = "Alt Goldtooth", world = "eu-pvp", faction = "Horde", seen = now - 5000,
+            bags = { items = { [LINEN] = 20 }, at = now - 5000 } }
+        local saved = { stock = { schema = 1, characters = { G1 = older, G2 = newer }, account = {} } }
+        local addon = World.login(saved)
+        World.advance(3)
+        local lines = {}
+        addon.Inventory:RunDiagnostic(lines)
+        return (World.scan(addon))[LINEN], table.concat(lines, "\n")
+    end
+    local function record(change)
+        local r = { name = "Alt Goldtooth", world = "eu-pvp", faction = "Horde", seen = now - 100,
+            bags = { items = { [LINEN] = 7 }, at = now - 100 } }
+        if change then change(r) end
+        return r
+    end
+    local total, dump = linenWith(record(function(r) r.noSend = true end))
+    T.eq("the newest record of the name is Self-Found: only the bags count", total, 5)
+    T.check("the dump says why for both records",
+        dump:find("character: Alt Goldtooth [not counted (Self-Found)]", 1, true) ~= nil
+        and dump:find("character: Alt Goldtooth [not counted (an older record of this name)]", 1, true) ~= nil, dump)
+    total, dump = linenWith(record(function(r) r.faction = "Alliance" end))
+    T.eq("the newest record of the name is of the other faction: only the bags count", total, 5)
+    T.check("the dump says so", dump:find("character: Alt Goldtooth [other faction]", 1, true) ~= nil
+        and dump:find("character: Alt Goldtooth [not counted (an older record of this name)]", 1, true) ~= nil, dump)
+    T.eq("the newest record of the name can send: it counts, the older one does not", (linenWith(record())), 12)
+end)
+
+-- ===========================================================================
 -- An item moves between the bags and the bank and the window closes in the
 -- same frame. What is owned (105 linen: 5 carried, 100 in the bank) must come
 -- out of the scan afterwards, not 165 and not 100.

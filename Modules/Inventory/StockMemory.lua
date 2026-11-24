@@ -234,43 +234,55 @@ end
 --            | "noname"   its name was never readable: it could not be shown
 --            | "name"     an older record under a name in use
 --            | "unknown"  the asking character's world or faction is not known }
--- A name belongs to one character of a world, so a record under the asking
--- character's own name is not an alt (it is a character that is gone, or
--- this one under an older id), and of several records under one name only
--- the one seen last is. Entries that are not records have no standing.
+-- A name belongs to one character of a world: the record seen last under it
+-- (of two seen at the same moment, the one whose id sorts first). That is
+-- settled first, within the world, and only then is that one record asked
+-- whether it is of the same faction and can send - so when the character of
+-- a name cannot send or went over to the other faction, an older record of
+-- its name never counts in its place. A record under the asking character's
+-- own name is not an alt either (a character that is gone, or this one under
+-- an older id). Entries that are not records have no standing.
 local function Standing(characters, identity)
     local standing = {}
     if type(identity) ~= "table" then return standing end
     local known = identity.guid and identity.world and identity.faction
-    local latest = {}   -- [name] = { guid, seen } of the record seen last
+    local newest = {}   -- [name] = { guid, seen }: the record of the world seen last under that name
+    local inWorld = {}  -- [guid] = record, the other records of the asking character's world
     for guid, record in pairs(characters) do
         if type(record) == "table" then
-            local name = Text(record.name)
             if guid == identity.guid then
                 standing[guid] = "self"
             elseif not known then
                 standing[guid] = "unknown"
             elseif record.world ~= identity.world then
                 standing[guid] = "world"
-            elseif record.faction ~= identity.faction then
-                standing[guid] = "faction"
-            elseif record.noSend == true then
-                standing[guid] = "nosend"
-            elseif not name then
-                standing[guid] = "noname"
-            elseif name == identity.name then
-                standing[guid] = "name"
             else
-                local seen = Time(record.seen) or 0
-                local other = latest[name]
-                if not other or seen > other.seen or (seen == other.seen and tostring(guid) < tostring(other.guid)) then
-                    if other then standing[other.guid] = "name" end
-                    latest[name] = { guid = guid, seen = seen }
-                    standing[guid] = "alt"
-                else
-                    standing[guid] = "name"
+                inWorld[guid] = record
+                local name = Text(record.name)
+                if name then
+                    local seen = Time(record.seen) or 0
+                    local other = newest[name]
+                    if not other or seen > other.seen or (seen == other.seen and tostring(guid) < tostring(other.guid)) then
+                        newest[name] = { guid = guid, seen = seen }
+                    end
                 end
             end
+        end
+    end
+    for guid, record in pairs(inWorld) do
+        local name = Text(record.name)
+        if name and newest[name].guid ~= guid then
+            standing[guid] = "name"
+        elseif record.faction ~= identity.faction then
+            standing[guid] = "faction"
+        elseif record.noSend == true then
+            standing[guid] = "nosend"
+        elseif not name then
+            standing[guid] = "noname"
+        elseif name == identity.name then
+            standing[guid] = "name"
+        else
+            standing[guid] = "alt"
         end
     end
     return standing

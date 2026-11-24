@@ -169,6 +169,46 @@ T.section("one name, one character", function()
     T.eq("the one seen last", alts[1].guid, "Player-1-NEW")
     T.eq("with its own stock", alts[1].bags[2589], 4)
 
+    -- The record seen last is the character of that name, whatever it is: when
+    -- it cannot send, or has gone over to the other faction, the older record
+    -- under its name does not count in its place.
+    local function named(newer)
+        fresh()
+        Memory:SaveBags(MAIN, { [2589] = 9 }, {}, NOW)
+        Memory:SaveBags(who("Player-1-GONE", "Bank Alt"), { [2589] = 30 }, {}, NOW - 20 * DAY)
+        newer()
+        return Memory:Alts(MAIN), Memory:Standing(MAIN)
+    end
+    local list, standing = named(function()
+        Memory:SaveBags(who("Player-1-NEW", "Bank Alt"), { [2589] = 4 }, {}, NOW - DAY, false)
+    end)
+    T.eq("the newest record of a name cannot send: nobody of that name counts", #list, 0)
+    T.check("the newest stands as unable to send, the older as an older record of the name",
+        standing["Player-1-NEW"] == "nosend" and standing["Player-1-GONE"] == "name",
+        tostring(standing["Player-1-NEW"]) .. "/" .. tostring(standing["Player-1-GONE"]))
+    list, standing = named(function()
+        Memory:SaveBags(who("Player-1-NEW", "Bank Alt", "eu-pvp", "Horde"), { [2589] = 4 }, {}, NOW - DAY)
+    end)
+    T.eq("the newest record of a name is of the other faction: nobody of that name counts", #list, 0)
+    T.check("the newest stands as the other faction, the older as an older record of the name",
+        standing["Player-1-NEW"] == "faction" and standing["Player-1-GONE"] == "name",
+        tostring(standing["Player-1-NEW"]) .. "/" .. tostring(standing["Player-1-GONE"]))
+    -- A record of the same name in another world is another character.
+    list, standing = named(function()
+        Memory:SaveBags(who("Player-1-NEW", "Bank Alt", "eu-normal"), { [2589] = 4 }, {}, NOW - DAY, false)
+    end)
+    T.check("a newer record of the name in another world leaves this world's one an alt",
+        #list == 1 and list[1].guid == "Player-1-GONE" and standing["Player-1-NEW"] == "world", #list)
+    -- Seen at the same moment: one of the two, and always the same one.
+    list = named(function()
+        Memory:SaveBags(who("Player-1-AAA", "Bank Alt"), { [2589] = 4 }, {}, NOW - 20 * DAY, false)
+    end)
+    T.eq("two records of a name seen at the same time: the first by id decides", #list, 0)
+    fresh()
+    Memory:SaveBags(MAIN, { [2589] = 9 }, {}, NOW)
+    Memory:SaveBags(who("Player-1-GONE", "Bank Alt"), { [2589] = 30 }, {}, NOW - 20 * DAY)
+    Memory:SaveBags(who("Player-1-NEW", "Bank Alt"), { [2589] = 4 }, {}, NOW - DAY)
+
     -- A record whose name could not be read cannot be shown, so it is not counted.
     Memory:SaveBags({ guid = "Player-1-NONAME", world = "eu-pvp", faction = "Alliance" }, { [2589] = 77 }, {}, NOW)
     T.eq("a record without a name is not an alt", #Memory:Alts(MAIN), 1)
