@@ -26,7 +26,9 @@
 -- really in it (MarkBankDoubt / MarkAccountBankDoubt; absent otherwise). The
 -- bank stays remembered, but it is handed out with that mark, and an alt's
 -- bank that carries it is not handed out at all. The next save of the bank
--- replaces its table and with it the mark.
+-- replaces its table and with it the mark. Read back, any value but nothing
+-- and false is the mark: a saved table that was damaged must lean towards
+-- not counting a bank, never towards counting one that was in doubt.
 --
 -- `bagsAtBank` is a note left by a session that ended at the bank (with its
 -- window open or shortly after it closed): what the carried bags held at
@@ -132,6 +134,12 @@ local function Part(record, key)
     return part
 end
 
+-- Does a saved bank carry the doubt mark? Any value but nil and false does
+-- (see `doubt` at the top of this file).
+local function InDoubt(bank)
+    return bank.doubt ~= nil and bank.doubt ~= false
+end
+
 local function Snapshot(items, bound, now)
     local snapshot = { items = Counts(items), at = now }
     local boundCounts = Counts(bound)
@@ -232,7 +240,7 @@ function StockMemory:OwnBank(guid)
     local characters = Store()
     local bank = characters and guid ~= nil and Part(characters[guid], "bank")
     if not bank then return nil end
-    return Counts(bank.items), Time(bank.at), bank.doubt == true
+    return Counts(bank.items), Time(bank.at), InDoubt(bank)
 end
 
 -- The account-wide bank of a world as last seen: a copy of its items, the
@@ -241,7 +249,7 @@ function StockMemory:AccountBank(world)
     local _, account = Store()
     local bank = account and world ~= nil and account[world]
     if type(bank) ~= "table" or type(bank.items) ~= "table" then return nil end
-    return Counts(bank.items), Time(bank.at), bank.doubt == true
+    return Counts(bank.items), Time(bank.at), InDoubt(bank)
 end
 
 -- Mark a character's remembered bank as in doubt: it is behind what is
@@ -251,7 +259,7 @@ end
 function StockMemory:MarkBankDoubt(guid)
     local characters = Store()
     local bank = characters and guid ~= nil and Part(characters[guid], "bank")
-    if not bank or bank.doubt == true then return false end
+    if not bank or InDoubt(bank) then return false end
     bank.doubt = true
     return true
 end
@@ -260,7 +268,7 @@ end
 function StockMemory:MarkAccountBankDoubt(world)
     local _, account = Store()
     local bank = account and world ~= nil and account[world]
-    if type(bank) ~= "table" or type(bank.items) ~= "table" or bank.doubt == true then return false end
+    if type(bank) ~= "table" or type(bank.items) ~= "table" or InDoubt(bank) then return false end
     bank.doubt = true
     return true
 end
@@ -405,7 +413,7 @@ function StockMemory:Alts(identity)
             if bags then
                 alt.bags, alt.bagsAt = Sendable(bags), Time(bags.at)
             end
-            if bank and bank.doubt == true then
+            if bank and InDoubt(bank) then
                 alt.bankDoubt = true
             elseif bank then
                 alt.bank, alt.bankAt = Sendable(bank), Time(bank.at)
@@ -493,7 +501,7 @@ function StockMemory:Summary()
                 seen = Time(record.seen), canSend = record.noSend ~= true,
                 bagItems = bags and Size(Counts(bags.items)) or nil, bagsAt = bags and Time(bags.at) or nil,
                 bankItems = bank and Size(Counts(bank.items)) or nil, bankAt = bank and Time(bank.at) or nil,
-                bankDoubt = (bank and bank.doubt == true) or false,
+                bankDoubt = (bank and InDoubt(bank)) or false,
             }
         else
             summary.unreadable = summary.unreadable + 1
@@ -509,7 +517,7 @@ function StockMemory:Summary()
     for world, bank in pairs(account) do
         if type(bank) == "table" and type(bank.items) == "table" then
             summary.account[#summary.account + 1] = { world = world, items = Size(Counts(bank.items)), at = Time(bank.at),
-                                                      doubt = bank.doubt == true }
+                                                      doubt = InDoubt(bank) }
         else
             summary.unreadable = summary.unreadable + 1
         end
@@ -522,10 +530,14 @@ end
 -- elapsed time: "less than an hour ago", "1 hour ago" / "N hours ago" up to
 -- 23, then "1 day ago" / "N days ago" in whole 24-hour periods. Never
 -- calendar days: twenty minutes that span a midnight are not "1 day". A time
--- ahead of the clock reads as less than an hour ago. nil without both times.
+-- ahead of the clock reads as less than an hour ago. nil without both times,
+-- and nil when the time between them is no time at all: a saved time that is
+-- a number but cannot be compared (not-a-number) or has no end would
+-- otherwise read "nan days ago" or "inf days ago".
 function StockMemory.AgeText(now, at)
     if type(now) ~= "number" or type(at) ~= "number" then return nil end
     local elapsed = now - at
+    if elapsed ~= elapsed or elapsed == math.huge or elapsed == -math.huge then return nil end
     if elapsed < HOUR then
         return "less than an hour ago"
     end

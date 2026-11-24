@@ -959,7 +959,27 @@ function Inventory:SaveBags(trustEmpty)
     return LazyProf.StockMemory:SaveBags(Client:CharacterIdentity(), items, bound, Client:Now(), not IsSelfFound())
 end
 
+-- The save a request asked for, BAG_SAVE_DELAY later.
+local function TimedBagSave()
+    if not bagSavePending then return end   -- written at logout meanwhile
+    bagSavePending = false
+    local trustEmpty = bagUpdateSeen
+    bagUpdateSeen = false
+    -- Rule 5c: by the first save of a session the bags are compared
+    -- with the last session's note, with whatever can be told by now.
+    Protected("bag save", CompareWaiting, trustEmpty)
+    Protected("bag save", Inventory.SaveBags, Inventory, trustEmpty)
+end
+
+local function ArmBagSave()
+    C_Timer.After(BAG_SAVE_DELAY, TimedBagSave)
+end
+
 -- fromUpdate: asked for by a bag update (see SaveBags).
+-- Setting the timer runs protected: a client without timers, or a timer call
+-- that fails, must not raise into whoever asked (the start of the addon
+-- among them). The waiting flag does not stay set then - no timer would ever
+-- clear it, and it would turn every later request away.
 function Inventory:RequestBagSave(fromUpdate)
     if self:UsesSyndicator() then return end
     if fromUpdate then
@@ -967,16 +987,9 @@ function Inventory:RequestBagSave(fromUpdate)
     end
     if bagSavePending then return end
     bagSavePending = true
-    C_Timer.After(BAG_SAVE_DELAY, function()
-        if not bagSavePending then return end   -- written at logout meanwhile
+    if not Protected("bag save", ArmBagSave) then
         bagSavePending = false
-        local trustEmpty = bagUpdateSeen
-        bagUpdateSeen = false
-        -- Rule 5c: by the first save of a session the bags are compared
-        -- with the last session's note, with whatever can be told by now.
-        Protected("bag save", CompareWaiting, trustEmpty)
-        Protected("bag save", Inventory.SaveBags, Inventory, trustEmpty)
-    end)
+    end
 end
 
 -- The bank -------------------------------------------------------------------
@@ -1651,6 +1664,9 @@ end
 -- The character being played is remembered again by itself: its bags with
 -- the next save, and its bank at once when the bank window is open.
 function Inventory:ForgetRemembered()
+    -- With Syndicator installed the memory is neither read nor written, by
+    -- this path either (the options hide the button then).
+    if self:UsesSyndicator() then return end
     LazyProf.StockMemory:Forget()
     self:InvalidateCache()
     self:ForgetAltsPart()

@@ -353,6 +353,14 @@ T.section("no inventory addon: a bank in doubt is not counted", function()
     combined, breakdown, meta = scan()
     T.eq("saved again: both count", combined[2589], 5 + 41 + 11 + 20)
     T.check("and nothing is in doubt", meta.bankInDoubt == nil and meta.accountInDoubt == nil and meta.bankSeenAt == NOW)
+
+    -- A mark that is not what the memory writes (a damaged saved table) is
+    -- taken for a mark: such a bank is not counted either.
+    LazyProf.db.global.stock.characters[MAIN.guid].bank.doubt = "yes"
+    LazyProf.db.global.stock.account["eu-pvp"].doubt = 1
+    combined, breakdown, meta = scan()
+    T.eq("a damaged doubt mark: neither bank is counted", combined[2589], 5 + 20)
+    T.check("and the scan says that both are in doubt", meta.bankInDoubt == true and meta.accountInDoubt == true)
 end)
 
 -- ===========================================================================
@@ -546,6 +554,18 @@ T.section("Syndicator present: as before, the memory is not used", function()
     Inventory:Initialize()
     T.check("start with Syndicator: nothing is dropped from the memory",
         LazyProf.db.global.stock.characters["Player-1-OLD"] ~= nil and Memory:AccountBank("us-normal") ~= nil)
+    -- Forgetting is the memory's too: with Syndicator installed it forgets
+    -- nothing, reads no bank and asks for no save.
+    client.bankOpen = true
+    client.bank.character = { items = { [2589] = 1 } }
+    client.reads.character, client.reads.account = 0, 0
+    timers = {}
+    Inventory:ForgetRemembered()
+    T.check("Forget with Syndicator: what is remembered stays", (Memory:OwnBank(MAIN.guid))[2589] == 7777
+        and Memory:AccountBank("eu-pvp") ~= nil and LazyProf.db.global.stock.characters[ALT.guid] ~= nil)
+    T.check("Forget with Syndicator: the open bank is not read and no save is asked for",
+        client.reads.character == 0 and client.reads.account == 0 and #timers == 0, client.reads.character)
+    client.bankOpen = false
     _G.Syndicator = nil
     T.eq("what was remembered before is untouched", (Memory:OwnBank(MAIN.guid))[2589], 7777)
     Inventory:Initialize()
@@ -2642,6 +2662,54 @@ T.section("no entry point lets a failure out", function()
     Inventory:RunDiagnostic(lines)
     T.check("and nothing is left waiting", table.concat(lines, "\n"):find("waiting: bagSave=false bankRead=false", 1, true) ~= nil,
         table.concat(lines, "\n"))
+end)
+
+-- ===========================================================================
+-- The timed bag save needs the client's timer. A client without one, or a
+-- timer call that fails, must not stop the addon from starting - and must not
+-- leave a save "waiting" that no timer will ever run: every later request
+-- would be turned away by it.
+T.section("a bag save whose timer cannot be set", function()
+    local function dump()
+        local out = {}
+        Inventory:RunDiagnostic(out)
+        return table.concat(out, "\n")
+    end
+    local function waiting() return (dump():match("waiting: bagSave=(%a+)")) end
+    local function failures() return tonumber((dump():match("; (%d+) this session"))) or 0 end
+    local realTimer = _G.C_Timer
+    for _, case in ipairs({
+        { "a timer call that fails", { After = function() error("no timers today") end } },
+        { "a client without timers", false },
+    }) do
+        local label = case[1]
+        fresh()
+        local before = failures()
+        _G.C_Timer = case[2] or nil
+        local ok, err = pcall(Inventory.Initialize, Inventory)
+        T.check(label .. ": the start does not raise", ok, err)
+        T.check(label .. ": the adapter's events are started all the same", type(client.started) == "table")
+        T.eq(label .. ": no save is left waiting", waiting(), "false")
+        T.check(label .. ": the failure is counted", failures() > before, failures() - before)
+        ok, err = pcall(Inventory.OnBagUpdate, Inventory, 0)
+        T.check(label .. ": a bag update does not raise", ok, err)
+        T.eq(label .. ": and leaves no save waiting either", waiting(), "false")
+        ok, err = pcall(Inventory.ForgetRemembered, Inventory)
+        T.check(label .. ": forgetting does not raise", ok, err)
+        T.eq(label .. ": and leaves none waiting", waiting(), "false")
+        -- Once the timer can be set, the next request is not turned away.
+        _G.C_Timer = realTimer
+        timers = {}
+        client.bags = { [2589] = 9, [765] = 2 }
+        Inventory:OnBagUpdate(0)
+        T.eq(label .. ": with a working timer the next bag update asks for a save", #timers, 1)
+        T.eq(label .. ": which is waiting", waiting(), "true")
+        advance(2.1)
+        local summary = Memory:Summary()
+        T.check(label .. ": and is written", #summary.characters == 1 and summary.characters[1].bagItems == 2
+            and waiting() == "false", #summary.characters)
+    end
+    _G.C_Timer = realTimer
 end)
 
 -- ===========================================================================

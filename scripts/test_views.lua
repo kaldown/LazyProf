@@ -1505,6 +1505,15 @@ T.section("collect first: how old remembered stock is", function()
     meta.alts["Zed Alt"].bags = nil
     t = tips(view(meta, NOW))
     T.check("an alt's part without a time gets no age", has(t["From alts Silk"], "  Zed Alt: 10"), joined(t["From alts Silk"]))
+    -- Nor does a time that is a number but no time (a damaged saved table):
+    -- no line, rather than "nan days ago".
+    meta.alts["Zed Alt"].bags = 0 / 0
+    meta.bankSeenAt = 0 / 0
+    t = tips(view(meta, NOW))
+    T.check("an alt's part with a time that cannot be compared gets no age", has(t["From alts Silk"], "  Zed Alt: 10"),
+        joined(t["From alts Silk"]))
+    T.eq("nor does a bank with such a time", joined(t["From bank Silk"]), "In bank: 12 | Grab: 12 / Shift-click to link")
+    meta.bankSeenAt = NOW - 60
     meta.alts["Zed Alt"].bags = NOW - 5 * 3600
 
     -- The account-wide bank is bank stock too and has an age of its own.

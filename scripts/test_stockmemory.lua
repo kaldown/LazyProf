@@ -384,11 +384,34 @@ T.section("a bank in doubt", function()
     items, at, doubt = Memory:AccountBank("eu-pvp")
     T.check("its next save takes the mark away", items[2770] == 51 and doubt == false and Memory:Summary().account[1].doubt == false)
 
-    -- Only the mark this file writes is one.
-    LazyProf.db.global.stock.characters[MAIN.guid].bank.doubt = "yes"
-    LazyProf.db.global.stock.account["eu-pvp"].doubt = 1
-    T.check("a value that is not the mark is none", select(3, Memory:OwnBank(MAIN.guid)) == false
-        and select(3, Memory:AccountBank("eu-pvp")) == false)
+    -- A mark that is not what this file writes (a saved table that was
+    -- damaged) is a mark all the same: any value but nothing and false. In
+    -- doubt about the doubt, the bank is not counted.
+    local records = LazyProf.db.global.stock
+    for _, value in ipairs({ "yes", 1, 0, {} }) do
+        local what = "a mark that is " .. (type(value) == "table" and "a table" or tostring(value))
+        records.characters[MAIN.guid].bank.doubt = value
+        records.characters[zed.guid].bank.doubt = value
+        records.account["eu-pvp"].doubt = value
+        T.check(what .. ": the own bank and the account bank are in doubt", select(3, Memory:OwnBank(MAIN.guid)) == true
+            and select(3, Memory:AccountBank("eu-pvp")) == true)
+        local list = Memory:Alts(MAIN)
+        T.check(what .. ": an alt's bank is not handed out", #list == 1 and list[1].bank == nil and list[1].bankDoubt == true
+            and list[1].bags[2589] == 20)
+        local sum = Memory:Summary()
+        T.check(what .. ": the summary names all three", sum.characters[1].bankDoubt == true and sum.characters[2].bankDoubt == true
+            and sum.account[1].doubt == true)
+        T.check(what .. ": marking again is not new", Memory:MarkBankDoubt(MAIN.guid) == false
+            and Memory:MarkAccountBankDoubt("eu-pvp") == false)
+    end
+    records.characters[MAIN.guid].bank.doubt = false
+    records.characters[zed.guid].bank.doubt = false
+    records.account["eu-pvp"].doubt = false
+    T.check("false is no mark", select(3, Memory:OwnBank(MAIN.guid)) == false and select(3, Memory:AccountBank("eu-pvp")) == false
+        and Memory:Alts(MAIN)[1].bank ~= nil and Memory:Summary().characters[1].bankDoubt == false)
+    records.characters[MAIN.guid].bank.doubt = "yes"
+    Memory:SaveBank(MAIN, { [2589] = 41 }, {}, NOW)
+    T.check("the next save takes a damaged mark away too", select(3, Memory:OwnBank(MAIN.guid)) == false)
     T.check("nothing to mark without a character or a world", Memory:MarkBankDoubt(nil) == false
         and Memory:MarkAccountBankDoubt(nil) == false)
     LazyProf.db.global.stock.characters["Player-1-JUNK"] = true
@@ -749,6 +772,14 @@ T.section("age text", function()
     T.eq("a time ahead of the clock (a clock that went back)", Memory.AgeText(NOW, NOW + 3 * DAY), "less than an hour ago")
     T.check("nothing to say without a time", Memory.AgeText(NOW, nil) == nil and Memory.AgeText(nil, NOW) == nil
         and Memory.AgeText(NOW, "yesterday") == nil)
+    -- A time that is a number but no time (a damaged saved table): no age,
+    -- rather than "nan days ago".
+    local nan = 0 / 0
+    T.check("a time that cannot be compared has no age", Memory.AgeText(NOW, nan) == nil and Memory.AgeText(nan, NOW) == nil
+        and Memory.AgeText(nan, nan) == nil, tostring(Memory.AgeText(NOW, nan)))
+    T.check("nor has a time without end", Memory.AgeText(NOW, -math.huge) == nil and Memory.AgeText(NOW, math.huge) == nil
+        and Memory.AgeText(math.huge, NOW) == nil and Memory.AgeText(math.huge, math.huge) == nil,
+        tostring(Memory.AgeText(NOW, -math.huge)))
     for _, at in ipairs({ NOW, NOW - 5 * HOUR, NOW - 5 * DAY }) do
         T.check("plain ASCII: " .. Memory.AgeText(NOW, at), not Memory.AgeText(NOW, at):find("[\128-\255]"))
     end
