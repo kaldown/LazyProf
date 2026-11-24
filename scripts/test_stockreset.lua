@@ -170,7 +170,8 @@ T.section("Reset All Settings keeps the remembered stock", function()
     local button = option(addon.options, "resetDB")
     T.check("the button exists and asks first", button ~= nil and button.type == "execute" and button.confirm == true)
     T.check("it says that remembered characters are kept and where they are forgotten",
-        tostring(button.desc):find("Forget remembered characters", 1, true) ~= nil, button.desc)
+        tostring(button.desc):find("LazyProf remembers for your characters are kept", 1, true) ~= nil
+        and tostring(button.desc):find("Forget remembered characters", 1, true) ~= nil, button.desc)
     addon.recalcs = {}
     button.func()
     T.eq("the setting is back at its default", addon.db.profile.marginPercent, addon.defaults.profile.marginPercent)

@@ -907,6 +907,14 @@ T.section("which read of the bank is kept", function()
     local doubt
     items, doubt = bankOf(addon)
     T.check("items that arrive late replace the early empty read", items[LINEN] == 95 and doubt == false, items[LINEN])
+    -- That early empty read is settled by then: it is no second opinion for
+    -- an empty read that comes later in the visit.
+    World.containers[6] = { slots = 28 }
+    World.containers[0][2] = slot(LINEN, 100)
+    World.bagUpdate(addon, 6, 0)
+    T.eq("emptied later in that visit: one empty read is not believed", (bankOf(addon))[LINEN], 95)
+    World.advance(0.25)
+    T.check("the second look is", next((bankOf(addon))) == nil)
 
     -- A long visit; the bank is emptied. One read without items is not
     -- believed, the second look 0.2 s later is.
@@ -1107,6 +1115,18 @@ T.section("the close", function()
     linenLeft, inDoubt, barsLeft, accountDoubt = letGoThen("BANKFRAME_CLOSED", 15)
     T.check("the same told by an account bank container's update", linenLeft == 100 and barsLeft == 50
         and inDoubt == false and accountDoubt == false, tostring(linenLeft) .. "/" .. tostring(barsLeft))
+    -- Several updates and the batch notice in that frame: the bank is read
+    -- twice in it, and two reads of one frame are not a second look.
+    addon = bankVisit(30)
+    World.containers[6] = { slots = 28 }
+    World.containers[15] = { slots = 98 }
+    World.bagUpdate(addon, 6, 15, 6)
+    World.bagUpdateDelayed(addon)
+    T.check("read twice in the frame the client let go: nothing is believed", (bankOf(addon))[LINEN] == 100
+        and (addon.StockMemory:AccountBank("eu-pvp"))[BAR] == 50, (bankOf(addon))[LINEN])
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(5)
+    T.check("nor after the close", (bankOf(addon))[LINEN] == 100 and select(2, bankOf(addon)) == false)
     linenLeft, inDoubt, barsLeft, accountDoubt = letGoThen("PLAYER_LOGOUT")
     T.check("the same at logout with the bank open: unchanged", linenLeft == 100 and barsLeft == 50,
         tostring(linenLeft) .. "/" .. tostring(barsLeft))

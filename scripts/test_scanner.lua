@@ -481,7 +481,8 @@ T.section("frame cache", function()
     T.eq("the next frame reads again", client.reads.bags, 2)
 
     -- A stock setting changed inside the frame is not answered from the
-    -- frame's earlier scan, whoever changed it.
+    -- frame's earlier scan, whoever changed it. Each of the four settings on
+    -- its own, with nothing but the setting changed between the two scans.
     Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW)
     Inventory:ForgetAltsPart()
     nextFrame()
@@ -489,16 +490,31 @@ T.section("frame cache", function()
     LazyProf.db.profile.includeAltCharacters = false
     T.eq("alts turned off in the same frame", (Inventory:ScanAll())[2589], 45)
     LazyProf.db.profile.includeAltCharacters = true
+    T.eq("and on again", (Inventory:ScanAll())[2589], 65)
     LazyProf.db.profile.includeBankItems = false
-    T.eq("bank turned off in the same frame", (Inventory:ScanAll())[2589], 25)
+    T.eq("bank items turned off in the same frame, nothing else", (Inventory:ScanAll())[2589], 25)
     LazyProf.db.profile.includeBankItems = true
+    T.eq("and on again", (Inventory:ScanAll())[2589], 65)
     LazyProf.db.char.selfFoundMode = true
-    T.eq("Self-Found turned on in the same frame", (Inventory:ScanAll())[2589], 45)
+    T.eq("Self-Found turned on in the same frame, nothing else", (Inventory:ScanAll())[2589], 45)
     LazyProf.db.char.selfFoundMode = false
     client.reads.bags = 0
     T.eq("everything back on", (Inventory:ScanAll())[2589], 65)
     Inventory:ScanAll()
     T.eq("unchanged settings: the frame's scan answers", client.reads.bags, 1)
+    -- The guild bank setting only does something with Syndicator.
+    installSyndicator()
+    nextFrame()
+    T.check("guild bank off", (select(2, Inventory:ScanAll()))[2589].guildBank == nil)
+    LazyProf.db.profile.includeGuildBank = true
+    T.eq("guild bank turned on in the same frame, nothing else", (select(2, Inventory:ScanAll()))[2589].guildBank, 500)
+    LazyProf.db.profile.includeGuildBank = false
+    T.check("and off again", (select(2, Inventory:ScanAll()))[2589].guildBank == nil)
+    client.reads.bags = 0
+    Inventory:ScanAll()
+    T.eq("unchanged settings with Syndicator: the frame's scan answers", client.reads.bags, 0)
+    _G.Syndicator = nil
+    nextFrame()
     LazyProf.db.global.stock.characters[ALT.guid] = nil
     Inventory:ForgetAltsPart()
     nextFrame()
@@ -658,6 +674,12 @@ T.section("the alts' part is kept between scans", function()
     client.identity = MAIN
     nextFrame()
     T.eq("and back", (Inventory:ScanAll())[2589], 25)
+    -- Another character of the same world and faction has other alts.
+    Memory:SaveBags(MAIN, { [2589] = 3 }, {}, NOW)
+    client.identity = ALT
+    nextFrame()
+    T.eq("asked as another character: its own alts, not the part kept for the first", (Inventory:ScanAll())[2589], 5 + 3)
+    client.identity = MAIN
 
     -- While who the character is cannot be read, nothing is kept.
     fresh()
@@ -1085,6 +1107,16 @@ T.section("the close", function()
     T.eq("a second logout notice does not read again", client.reads.character, 2)
     close()
     T.eq("nor does a close notice that still follows", client.reads.character, 2)
+    -- Also when the read at the first notice could not settle anything.
+    visit()
+    client.bank.character = { items = {}, slots = 28 }
+    Inventory:OnBagUpdate(6)           -- read at once: empty, not believed
+    client.started.onLogout()
+    T.eq("logout with an unresolved empty read: the bank is read once more", client.reads.character, 2)
+    client.started.onLogout()
+    close()
+    T.eq("and only once, whatever notices follow", client.reads.character, 2)
+    T.check("the remembered bank is unchanged and not in doubt", (bankOf())[2589] == 100 and inDoubt() == false)
 
     -- After the close nothing is read, and a bank-container update that still
     -- arrives is counted for the dump (the count runs for the whole session).
@@ -1170,9 +1202,12 @@ T.section("after the close", function()
     nextFrame()
     T.eq("once marked, nothing is compared any more", client.reads.bags, 1 + 1)   -- the scan above read the bags once
 
-    -- A scan that comes before the next frame makes the comparison itself.
+    -- A scan that comes before the next frame makes the comparison itself,
+    -- also when the frame has scanned before the update came.
     closedVisit()
     advance(0.08)
+    T.eq("this frame's scan, before the answer arrives", (Inventory:ScanAll())[2589], 105)
+    client.reads.bags = 0
     client.bags = { [2589] = 65 }
     Inventory:OnBagUpdate(0)
     combined, breakdown, meta = Inventory:ScanAll()     -- no InvalidateCache: the update dropped the frame's scan
@@ -1181,6 +1216,20 @@ T.section("after the close", function()
     T.eq("with the bags it read anyway: one read", client.reads.bags, 1)
     nextFrame()
     T.eq("and the timer has nothing left to compare", client.reads.bags, 1)
+
+    -- An item the bags did not hold at the close is a change too.
+    closedVisit()
+    advance(0.08)
+    client.bags = { [2589] = 5, [4306] = 9 }
+    Inventory:OnBagUpdate(0)
+    nextFrame()
+    T.check("an item that was not carried before arrives: marked", inDoubt() == true)
+    closedVisit()
+    advance(0.08)
+    client.bags = {}
+    Inventory:OnBagUpdate(0)
+    nextFrame()
+    T.check("an item that was carried is gone: marked", inDoubt() == true)
 
     -- Nothing changed in the bags: no doubt, whatever container the update names.
     closedVisit()
@@ -1436,9 +1485,9 @@ T.section("a scan never reads the bank", function()
     advance(3)
     T.eq("fixture: the visit's reads are remembered", (scan())[2589], 5 + 90)
     nextFrame()
-    Inventory:ScanAll()                                    -- this frame's scan, kept for the frame
     client.bags = { [2589] = 65 }
     Inventory:OnBagUpdate(0)                               -- read at once: the bank has not changed yet
+    Inventory:ScanAll()                                    -- this frame's scan, kept for the frame
     client.bank.character = { items = { [2589] = 30 } }
     Inventory:OnBagUpdate(6)                               -- owed
     client.reads.character = 0
@@ -1466,6 +1515,134 @@ T.section("a scan never reads the bank", function()
     Inventory:OnBagUpdate(6)
     combined, breakdown, meta = scan()
     T.check("bank items off: nothing of the bank, and nothing said of it", combined[2589] == 65 and meta.bankPending == nil)
+end)
+
+-- ===========================================================================
+-- Nothing that touches the memory may raise into the game: not from an
+-- event, not from a timer, not from the options. Each entry point is tried
+-- with the client call it depends on failing. Every failure is counted.
+T.section("no entry point lets a failure out", function()
+    local function failures()
+        local lines = {}
+        Inventory:RunDiagnostic(lines)
+        local n = table.concat(lines, "\n"):match("; (%d+) this session")
+        return tonumber(n) or 0
+    end
+    local function openBank()
+        fresh()
+        Inventory:Initialize()
+        advance(2.1)
+        client.bankOpen = true
+        client.bank.character = { items = { [2589] = 100 }, slots = 28 }
+        client.bank.account = { items = { [4306] = 9 }, slots = 98 }
+        client.started.onBankOpened()
+        advance(3)
+    end
+    local real = {}
+    for name, fn in pairs(LazyProf.Client) do real[name] = fn end
+    local function breakCall(name)
+        LazyProf.Client[name] = function() error(name .. " failed") end
+    end
+    local function restore()
+        for name, fn in pairs(real) do LazyProf.Client[name] = fn end
+    end
+    -- Run `action` with the adapter's `call` failing; it must not raise, and
+    -- the failure must be counted (so it really was reached).
+    local function survives(label, call, action)
+        local before = failures()
+        breakCall(call)
+        local ok, err = pcall(action)
+        restore()
+        T.check(label .. ": does not raise", ok, err)
+        T.check(label .. ": and the failure is counted", failures() > before, failures() - before)
+    end
+
+    openBank()
+    survives("a bag update with the bank open", "BankContents", function() Inventory:OnBagUpdate(0) end)
+    openBank()
+    survives("a bag update when the container cannot be told", "BankKindOfBag", function() Inventory:OnBagUpdate(0) end)
+    openBank()
+    Inventory:OnBagUpdate(6)
+    nextFrame()
+    Inventory:OnBagUpdate(6)                                -- owed: the trailing read is waiting
+    survives("the trailing read", "BankContents", function() advance(1) end)
+    openBank()
+    survives("a change of the bank's tabs", "BankContents", function() client.started.onBankChanged("character") end)
+    openBank()
+    Inventory:OnBagUpdate(0)                                -- read at once
+    Inventory:OnBagUpdate(6)                                -- owed, in the same frame
+    survives("the batch notice", "BankContents", function() Inventory:OnBagUpdateDelayed() end)
+    fresh()
+    Inventory:Initialize()
+    advance(2.1)
+    client.bankOpen = true
+    survives("the read at the opening and the looks after it", "BankContents", function()
+        client.started.onBankOpened()
+        advance(3)
+    end)
+    openBank()
+    Inventory:OnBagUpdate(6)
+    nextFrame()
+    Inventory:OnBagUpdate(6)
+    survives("the closing notice", "BankContents", function()
+        client.started.onBankClosing()
+        client.bankOpen = false
+        client.started.onBankClosed()
+    end)
+    openBank()
+    Inventory:OnBagUpdate(6)
+    nextFrame()
+    Inventory:OnBagUpdate(6)
+    survives("a logout with the bank open", "BankContents", function() client.started.onLogout() end)
+    openBank()
+    client.started.onBankClosing()
+    client.bankOpen = false
+    client.started.onBankClosed()
+    Inventory:OnBagUpdate(0)
+    survives("the comparison after the close", "BagContents", function() nextFrame() end)
+    fresh()
+    Inventory:Initialize()
+    advance(2.1)
+    Inventory:OnBagUpdate(0)                                -- a bag save is waiting
+    survives("the save at logout", "BagContents", function() client.started.onLogout() end)
+    fresh()
+    Inventory:Initialize()
+    advance(2.1)
+    Inventory:OnBagUpdate(0)
+    survives("the timed bag save", "BagContents", function() advance(3) end)
+    openBank()
+    survives("the look at the open bank after Forget", "BankContents", function() Inventory:ForgetRemembered() end)
+    fresh()
+    Inventory:Initialize()
+    advance(2.1)
+    survives("the note that the Self-Found setting changed", "CharacterIdentity", function() Inventory:OnSendingChanged() end)
+    fresh()
+    survives("starting the adapter's events", "StartStock", function() Inventory:Initialize() end)
+    fresh()
+    survives("dropping old characters at the start", "Now", function() Inventory:Initialize() end)
+    fresh()
+    survives("a scan", "CharacterIdentity", function() T.eq("which then counts the bags", (scan())[2589], 5) end)
+
+    -- No pending flag is left set by a failure: everything works afterwards.
+    openBank()
+    Inventory:OnBagUpdate(6)
+    nextFrame()
+    Inventory:OnBagUpdate(6)
+    breakCall("BankContents")
+    advance(1)                                              -- the trailing read fails
+    restore()
+    client.bank.character = { items = { [2589] = 77 }, slots = 28 }
+    Inventory:OnBagUpdate(6)                                -- read at once
+    nextFrame()
+    client.bank.character = { items = { [2589] = 78 }, slots = 28 }
+    Inventory:OnBagUpdate(6)                                -- owed again
+    advance(1)
+    T.eq("after a failed trailing read the next one is taken", (Memory:OwnBank(MAIN.guid))[2589], 78)
+    advance(10)
+    local lines = {}
+    Inventory:RunDiagnostic(lines)
+    T.check("and nothing is left waiting", table.concat(lines, "\n"):find("waiting: bagSave=false bankRead=false", 1, true) ~= nil,
+        table.concat(lines, "\n"))
 end)
 
 -- ===========================================================================
@@ -1637,6 +1814,56 @@ T.section("diagnostic lines", function()
     T.check("and no trial of the memory is made", not text:find("scan now:", 1, true), text)
     _G.Syndicator = nil
 
+    -- "waiting" names every read of the bank that is still to come: a look
+    -- after the opening, a trailing read, a read that is owed.
+    do
+        local function waiting()
+            local out = {}
+            Inventory:RunDiagnostic(out)
+            return (table.concat(out, "\n"):match("waiting: [^\n]*"))
+        end
+        fresh()
+        Inventory:Initialize()
+        advance(2.1)
+        T.eq("nothing waiting", waiting(), "waiting: bagSave=false bankRead=false bankOpen=false")
+        client.bankOpen = true
+        client.bank.character = { items = { [2589] = 1 } }
+        client.bank.account = { items = { [4306] = 1 } }
+        client.started.onBankOpened()
+        T.eq("after the opening the half-second look is waiting", waiting(), "waiting: bagSave=false bankRead=true bankOpen=true")
+        advance(0.6)
+        T.eq("after it nothing is", waiting(), "waiting: bagSave=false bankRead=false bankOpen=true")
+        client.bank.account = nil
+        client.started.onBankClosing(); client.bankOpen = false; client.started.onBankClosed()
+        client.bankOpen = true
+        client.started.onBankOpened()                       -- one bank refused: the two-second look will be wanted
+        advance(0.6)
+        T.eq("a look at the two-second mark is waiting", waiting(), "waiting: bagSave=false bankRead=true bankOpen=true")
+        advance(1.5)
+        T.eq("after it nothing is", waiting(), "waiting: bagSave=false bankRead=false bankOpen=true")
+        Inventory:OnBagUpdate(6)
+        nextFrame()
+        Inventory:OnBagUpdate(6)
+        T.eq("an owed read and its trailing read are waiting", waiting(), "waiting: bagSave=false bankRead=true bankOpen=true")
+        advance(0.3)
+        T.eq("after it nothing is", waiting(), "waiting: bagSave=false bankRead=false bankOpen=true")
+        Inventory:OnBagUpdate(0)
+        T.eq("a bag save is named too", waiting(), "waiting: bagSave=true bankRead=false bankOpen=true")
+        -- The visit lines say what was read and kept.
+        local out = {}
+        Inventory:RunDiagnostic(out)
+        local visitText = table.concat(out, "\n")
+        T.check("the visit: how long it is open, how often it was read",
+            visitText:find("bank visit: open for 2.4 s; reads=5 owed=false carriedBagsUpdated=true", 1, true) ~= nil, visitText)
+        T.check("the visit: what was kept of the character bank",
+            visitText:find("bank visit character: kept=5 lastRead=items slots=28 unresolvedEmpty=false bagsChangedSinceKept=true", 1, true) ~= nil,
+            visitText)
+        T.check("the visit: a bank that was refused all along",
+            visitText:find("bank visit account: kept=0 lastRead=refused slots=nil unresolvedEmpty=false bagsChangedSinceKept=true", 1, true) ~= nil,
+            visitText)
+        advance(3)
+    end
+
     -- Entries that are not what LazyProf writes are counted, not listed.
     LazyProf.db.global.stock.characters["Player-1-JUNK"] = true
     LazyProf.db.global.stock.account["eu-normal"] = "x"
@@ -1774,6 +2001,29 @@ T.section("init wiring", function()
         display.includeBankItems.set(nil, false)
         T.eq("bank items turned off in the same frame", planned[2589], 85)
         display.includeBankItems.set(nil, true)
+        T.eq("and on again", planned[2589], 95)
+        installSyndicator()
+        nextFrame()
+        local _, sources = Inventory:ScanAll()
+        T.check("with Syndicator: this frame's scan has no guild bank", sources[2589].guildBank == nil)
+        local plannedSources
+        LazyProf.Pathfinder.Calculate = function()
+            planned, plannedSources = Inventory:ScanAll()
+            return nil
+        end
+        display.includeGuildBank.set(nil, true)
+        T.eq("guild bank turned on in the same frame: the planning scans again", plannedSources[2589].guildBank, 500)
+        display.includeGuildBank.set(nil, false)
+        T.check("and off again", plannedSources[2589].guildBank == nil)
+        _G.Syndicator = nil
+        nextFrame()
+        -- A recalculation never plans from the frame's earlier scan, whatever
+        -- made it stale: here the bags, with no setting touched.
+        T.eq("this frame's scan", (Inventory:ScanAll())[2589], 95)
+        client.bags = { [2589] = 6 }
+        LazyProf:Recalculate("test")
+        T.eq("a recalculation scans afresh", planned[2589], 96)
+        client.bags = { [2589] = 5 }
         LazyProf.Pathfinder = nil
         Memory:Forget()
         Inventory:InvalidateCache()

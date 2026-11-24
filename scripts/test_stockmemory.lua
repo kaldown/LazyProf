@@ -212,6 +212,20 @@ T.section("one name, one character", function()
     -- A record whose name could not be read cannot be shown, so it is not counted.
     Memory:SaveBags({ guid = "Player-1-NONAME", world = "eu-pvp", faction = "Alliance" }, { [2589] = 77 }, {}, NOW)
     T.eq("a record without a name is not an alt", #Memory:Alts(MAIN), 1)
+    -- A save brings the name up to date: a character can be renamed.
+    Memory:SaveBags(who("Player-1-NEW", "Renamed Alt"), { [2589] = 5 }, {}, NOW - DAY + 60)
+    alts = Memory:Alts(MAIN)
+    T.check("a save under a new name renames the record", #alts == 2 and alts[2].guid == "Player-1-NEW"
+        and alts[2].name == "Renamed Alt" and alts[2].bags[2589] == 5, alts[1] and alts[1].name)
+    T.check("the older record of the old name is the character of that name again",
+        alts[1].guid == "Player-1-GONE" and alts[1].name == "Bank Alt")
+    Memory:SaveBags(who("Player-1-NEW", "Bank Alt"), { [2589] = 4 }, {}, NOW - DAY + 120)
+    -- The same for the world and the faction it is filed under.
+    Memory:SaveBags(who("Player-1-MOVED", "Moved Alt", "eu-normal", "Horde"), { [2589] = 2 }, {}, NOW)
+    T.eq("fixture: another world and faction is no alt", #Memory:Alts(MAIN), 1)
+    Memory:SaveBags(who("Player-1-MOVED", "Moved Alt"), { [2589] = 2 }, {}, NOW)
+    T.eq("a save under another world and faction refiles the record", #Memory:Alts(MAIN), 2)
+    LazyProf.db.global.stock.characters["Player-1-MOVED"] = nil
     -- A later save that cannot read the name keeps the one it had.
     Memory:SaveBags({ guid = "Player-1-NEW", world = "eu-pvp", faction = "Alliance" }, { [2589] = 6 }, {}, NOW)
     alts = Memory:Alts(MAIN)
