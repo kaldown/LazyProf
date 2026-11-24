@@ -1755,6 +1755,8 @@ T.section("the close", function()
     refreshes = 0
     advance(0.9)
     T.check("0.9 s after the close it is still left out", (scan())[2589] == 5 and select(3, scan()).bankPending == true)
+    advance(0.098)
+    T.check("and 0.998 s after it", (scan())[2589] == 5 and select(3, scan()).bankPending == true)
     advance(0.2)
     combined, _, meta = scan()
     T.check("no update of the bank within the second: it counts again, unmarked", combined[2589] == 105 and meta.bankPending == nil
@@ -2342,9 +2344,11 @@ T.section("after the close", function()
     T.eq("the update itself reads nothing", client.reads.bags, 0)
     T.check("nothing is marked before something compared", inDoubt() == false)
     Inventory:OnBagUpdate(0)
+    refreshes = 0
     nextFrame()
     T.eq("one comparison a frame later, however many updates there were", client.reads.bags, 1)
     T.check("a carried count rose for an item the bank holds: that bank is in doubt", inDoubt() == true)
+    T.check("and a shown list is asked to redraw", refreshes >= 1, refreshes)
     T.check("the account bank holds none of it: not marked", accountDoubt() == false)
     T.eq("the dump says which item", afterLine(),
         "after the close: bankUpdates=0 bagUpdates=2 (last 0.1 s after the close) compared=1 marked=character (carried count rose: 2589)")
