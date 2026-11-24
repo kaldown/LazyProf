@@ -327,7 +327,7 @@ local SettleAfterClose  -- the comparison due after a bag update that followed a
 local scanCache = { time = 0, combined = nil, breakdown = nil, meta = nil }
 
 -- Stock from Syndicator: the character's bank, mail and auctions, the alts,
--- the guild bank.
+-- the guild bank (the last two not for a Self-Found character).
 local function AddSyndicatorStock(self, combined, breakdown, countAlts)
     local charName = Syndicator.API.GetCurrentCharacter()
     local charData = charName and Syndicator.API.GetByCharacterFullName(charName)
@@ -383,8 +383,9 @@ local function AddSyndicatorStock(self, combined, breakdown, countAlts)
         LazyProf:Debug("pathfinder", "Inventory scan: alts not counted")
     end
 
-    -- Guild bank (if enabled)
-    if LazyProf.db.profile.includeGuildBank then
+    -- Guild bank (if enabled). It is other characters' stock as well: a
+    -- Self-Found character, which cannot be handed anything, does not count it.
+    if LazyProf.db.profile.includeGuildBank and not IsSelfFound() then
         local guildItems = self:ScanGuildBank()
         mergeSource(guildItems, "guildBank", nil, combined, breakdown)
 
@@ -1297,6 +1298,7 @@ function Inventory:RunDiagnostic(lines)
         unknown = "not counted (this character's world or faction is unknown)",
     }
     local standing = Memory:Standing(identity)
+    local usesSyndicator = self:UsesSyndicator()
     local function part(label, items, at, doubt)
         if items == nil then return label .. "=never seen" end
         return label .. "=" .. tostring(items) .. " items (" .. tostring(Memory.AgeText(now, at) or "no time")
@@ -1304,11 +1306,16 @@ function Inventory:RunDiagnostic(lines)
     end
     for _, c in ipairs(summary.characters) do
         local label = STANDING[standing[c.guid]]
-        if standing[c.guid] == "alt" then
+        if usesSyndicator then
+            -- Left over from a time without it: listed, but nothing of it counts.
+            label = "remembered, not used (Syndicator is installed)"
+        elseif standing[c.guid] == "alt" then
             if IsSelfFound() then
                 label = "not counted (this character is Self-Found)"
             elseif not profile.includeAltCharacters then
                 label = "alt, not counted (alts off)"
+            elseif not profile.includeBankItems then
+                label = "alt, counted (bags only: bank items are off)"
             else
                 label = "alt, counted"
             end

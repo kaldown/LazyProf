@@ -435,7 +435,15 @@ T.section("Syndicator present: as before, the memory is not used", function()
         T.eq("Self-Found: bags, own bank and own mail", combined[2589], 5 + 30 + 4)
         T.check("Self-Found: no alt stock from Syndicator", breakdown[2589].alts == nil and combined[2592] == nil)
         T.eq("Self-Found: own auctions still count", breakdown[765].auctions, 6)
+        -- Nor from the guild bank, which is other characters' stock as well.
+        LazyProf.db.profile.includeGuildBank = true
+        combined, breakdown = scan()
+        T.check("Self-Found: the guild bank is not counted although it is turned on",
+            combined[2589] == 5 + 30 + 4 and breakdown[2589].guildBank == nil, combined[2589])
         LazyProf.db.char.selfFoundMode = false
+        combined, breakdown = Inventory:ScanAll()      -- same frame: the scan made as Self-Found must not answer
+        T.eq("(with the mode off the guild bank counts)", breakdown[2589].guildBank, 500)
+        LazyProf.db.profile.includeGuildBank = false
     end)
     for name, fn in pairs(saved) do Memory[name] = fn end
     LazyProf.Client.BankContents = savedContents
@@ -1570,6 +1578,28 @@ T.section("diagnostic lines", function()
     T.check("label: an alt while this character is Self-Found",
         soloDump:find("character: Bank Alt [not counted (this character is Self-Found)]", 1, true) ~= nil, soloDump)
     LazyProf.db.char.selfFoundMode = false
+    -- With "Include bank items" off an alt supplies its bags only: the label says so.
+    Memory:SaveBank(ALT, { [2589] = 100 }, {}, NOW - DAY)
+    LazyProf.db.profile.includeBankItems = false
+    local _, bankOffDump = labels()
+    T.check("label: an alt while bank items are off",
+        bankOffDump:find("character: Bank Alt [alt, counted (bags only: bank items are off)]", 1, true) ~= nil, bankOffDump)
+    LazyProf.db.profile.includeBankItems = true
+    local _, bankOnDump = labels()
+    T.check("label: with bank items on it is counted whole", bankOnDump:find("character: Bank Alt [alt, counted]", 1, true) ~= nil, bankOnDump)
+    -- An alt whose bank is in doubt: its bank part says so.
+    Memory:MarkBankDoubt(ALT.guid)
+    local _, doubtDump = labels()
+    T.check("label: an alt whose bank is in doubt", doubtDump:find(
+        "character: Bank Alt [alt, counted] world=eu-pvp faction=Alliance bags=1 items (1 day ago) bank=1 items (1 day ago, in doubt: not counted)",
+        1, true) ~= nil, doubtDump)
+    LazyProf.db.global.stock.characters[ALT.guid].bank = nil
+    -- An account bank in doubt.
+    Memory:MarkAccountBankDoubt("eu-pvp")
+    local _, accountDump = labels()
+    T.check("the account bank in doubt", accountDump:find("account bank: world=eu-pvp items=1 (5 days ago, in doubt: not counted)", 1, true) ~= nil,
+        accountDump)
+    Memory:SaveAccountBank("eu-pvp", { [2589] = 10 }, NOW - 5 * DAY)
 
     -- A character whose world or faction cannot be read counts nobody, and the dump says so in words.
     client.identity = { guid = MAIN.guid, name = "Main Character", faction = "Alliance" }
@@ -1597,6 +1627,14 @@ T.section("diagnostic lines", function()
     text = table.concat(lines, "\n")
     T.check("with Syndicator it says the memory is not used", text:find("source: Syndicator", 1, true) ~= nil
         and text:find("not used", 1, true) ~= nil, text)
+    -- What is still remembered from before is listed, but nobody of it counts.
+    T.check("with Syndicator no remembered character is labelled as counted",
+        not text:find("alt, counted", 1, true) and not text:find("[this character]", 1, true), text)
+    T.check("each says that the memory is not used",
+        text:find("character: Bank Alt [remembered, not used (Syndicator is installed)]", 1, true) ~= nil
+        and text:find("character: Main Character [remembered, not used (Syndicator is installed)]", 1, true) ~= nil
+        and text:find("character: Other Side [remembered, not used (Syndicator is installed)]", 1, true) ~= nil, text)
+    T.check("and no trial of the memory is made", not text:find("scan now:", 1, true), text)
     _G.Syndicator = nil
 
     -- Entries that are not what LazyProf writes are counted, not listed.
@@ -1652,6 +1690,17 @@ T.section("options", function()
     -- off has the character saved again (its alts read the stored value).
     local selfFound = LazyProf.options.args.general.args.selfFoundMode
     LazyProf.Recalculate = function() end
+    -- Its tooltip says what LazyProf does: other characters' stock is never
+    -- counted for a Self-Found character; whether its own stock counts for
+    -- the others is LazyProf's to decide only where it remembers the stock.
+    local selfFoundText = text(selfFound.desc)
+    T.check("Self-Found: says that no stock of other characters is counted for it",
+        selfFoundText:find("stock of your other characters", 1, true) ~= nil and selfFoundText:find("guild bank", 1, true) ~= nil,
+        selfFoundText)
+    T.check("Self-Found: does not claim to keep its stock from the others whatever supplies the stock",
+        not selfFoundText:find("and its own stock is not counted for them.", 1, true)
+        and selfFoundText:find("remembers the stock itself", 1, true) ~= nil, selfFoundText)
+    T.check("Self-Found: plain ASCII", not selfFoundText:find("[\128-\255]"))
     Inventory:SaveBags(true)
     T.check("before: the character is remembered as able to send", Memory:Summary().characters[1].canSend == true)
     selfFound.set(nil, true)

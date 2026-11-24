@@ -241,9 +241,11 @@ LazyProf.options = {
                            "not an Alchemist. Allowed: items you own, vendor-sold reagents, " ..
                            "gathered materials, and anything you can craft with a profession " ..
                            "you have.\n\n" ..
-                           "Such a character cannot be sent anything and cannot send " ..
-                           "anything: stock of your other characters is not counted for " ..
-                           "it, and its own stock is not counted for them.\n\n" ..
+                           "Such a character cannot be sent anything: stock of your other " ..
+                           "characters and of the guild bank is not counted for it. It " ..
+                           "cannot send anything either: where LazyProf remembers the stock " ..
+                           "itself (no inventory addon installed), its own stock is not " ..
+                           "counted for your other characters.\n\n" ..
                            "This setting is per character.",
                     type = "toggle",
                     order = 6,
@@ -388,6 +390,8 @@ LazyProf.options = {
                            "Requires: Syndicator addon installed.\n\n" ..
                            "Guild bank data is cached from your last visit. Only " ..
                            "tabs you have permission to view are included.\n\n" ..
+                           "A character in Self-Found mode cannot be handed anything, " ..
+                           "so the guild bank is not counted for it.\n\n" ..
                            "Example: Your guild bank has 50 Thorium Bars. The " ..
                            "shopping list shows 50 fewer to buy from the AH.\n\n" ..
                            "Note: This is a shared resource - other guild members " ..
