@@ -1077,7 +1077,9 @@ local function BagUpdate(container)
     Guard("BAG_UPDATE", World.bagUpdate, S.addon, container)
     if not KindOf(container) then
         S.lastBagUpdateMs = S.now
-        S.bagsCompared = true
+        -- The comparison with the last session's note (or the last save of
+        -- the bags) is made on the next frame, by a timer (see RunTimers).
+        S.compareFrame = S.compareFrame or S.frameNo
     end
     S.updatesSince = S.updatesSince + 1
     Touched()
@@ -1216,6 +1218,11 @@ local function SetClock()
 end
 
 local function RunTimers()
+    -- A carried bag's update of an earlier frame: its comparison runs with
+    -- this frame's timers.
+    if S.compareFrame and S.frameNo > S.compareFrame then
+        S.bagsCompared, S.compareFrame = true, nil
+    end
     local timers = World.timers
     if #timers == 0 then return end
     local pass, rest
@@ -1446,7 +1453,7 @@ local function Login(who, a)
     -- visit that ended that session: it is judged with it.
     S.visit, S.lastVisit, S.closeMs = nil, me.pendingVisit, nil
     me.pendingVisit = nil
-    S.bagsCompared = false
+    S.bagsCompared, S.compareFrame = false, nil
     S.lastArrival = nil
     S.loginMs = S.now
     S.updatesSince = 0
