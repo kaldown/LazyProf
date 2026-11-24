@@ -139,6 +139,29 @@ T.section("damaged saved stock", function()
 end)
 
 -- ===========================================================================
+-- Dropping old characters at login must not take a good account bank with it
+-- because the characters beside it could not be read.
+-- ===========================================================================
+T.section("damaged characters beside a good account bank", function()
+    local function login(characters)
+        World.reset()
+        World.containers = { [0] = { slots = 16, slot(LINEN, 5) } }
+        local saved = { stock = { schema = 1, characters = characters,
+            account = { ["eu-pvp"] = { items = { [BAR] = 50 }, at = World.serverTime - 100 } } } }
+        local addon = World.login(saved)
+        return addon, saved
+    end
+    local addon, saved = login("cut off")
+    T.check("right after login the account bank is still there", type(saved.stock.account["eu-pvp"]) == "table")
+    World.advance(3)
+    T.eq("and it counts once the character is remembered again", (World.scan(addon))[BAR], 50)
+    addon, saved = login({ [MAIN_GUID] = { name = "Main Goldtooth", faction = "Horde", seen = World.serverTime - 100 } })
+    T.check("a record without a world: the account bank is kept", type(saved.stock.account["eu-pvp"]) == "table")
+    World.advance(3)
+    T.eq("and counts", (World.scan(addon))[BAR], 50)
+end)
+
+-- ===========================================================================
 -- A client call that fails while the memory starts or is read must not stop
 -- the addon either: the scan then counts the live bags, and the dump says why.
 -- ===========================================================================

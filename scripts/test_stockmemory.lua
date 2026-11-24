@@ -353,6 +353,26 @@ T.section("prune", function()
     T.check("its bank is still remembered", (Memory:OwnBank(MAIN.guid))[2589] == 8)
     T.check("and its world's account bank", Memory:AccountBank("eu-pvp") ~= nil)
     T.check("prune without a time does nothing", Memory:Prune(nil) == 0 and Memory:OwnBank(MAIN.guid) ~= nil)
+
+    -- An account bank is dropped only when it is known that no character
+    -- lives in its world. Characters that cannot be read prove nothing.
+    local function accountAfter(characters)
+        fresh()
+        LazyProf.db.global.stock = { schema = 1, characters = characters,
+            account = { ["eu-pvp"] = { items = { [2770] = 50 }, at = NOW - DAY } } }
+        Memory:Prune(NOW, MAIN.guid)
+        return Memory:AccountBank("eu-pvp")
+    end
+    T.check("the characters are not a table: the account bank stays", accountAfter("cut off") ~= nil)
+    T.check("the characters are missing: the account bank stays", accountAfter(nil) ~= nil)
+    T.check("the played character's record has no world: the account bank stays",
+        accountAfter({ [MAIN.guid] = { name = "Main Character", faction = "Alliance", seen = NOW - DAY } }) ~= nil)
+    T.check("the played character's record is not a record: the account bank stays", accountAfter({ [MAIN.guid] = 7 }) ~= nil)
+    T.check("a record with a world that is not text: the account bank stays",
+        accountAfter({ ["Player-1-ODD"] = { name = "Odd", world = 12, faction = "Alliance", seen = NOW - DAY } }) ~= nil)
+    T.check("(every character read, none of them in that world: it goes)",
+        accountAfter({ [MAIN.guid] = { name = "Main Character", world = "eu-normal", faction = "Alliance", seen = NOW - DAY } }) == nil)
+    T.check("(no character at all, and the table is one: it goes)", accountAfter({}) == nil)
 end)
 
 T.section("forget", function()

@@ -55,22 +55,25 @@ StockMemory.KEEP_DAYS = 180
 -- repair: a save is coming, so whatever is not a table is replaced now;
 -- without it a reader gets empty tables in their place and nothing is
 -- written.
+-- The fourth return says whether the characters were found as a table: an
+-- empty table handed out in their place is not "no characters".
 local function Store(repair)
     local global = LazyProf.db and LazyProf.db.global
-    if type(global) ~= "table" then return nil, nil, nil end
+    if type(global) ~= "table" then return nil, nil, nil, false end
     local stock = global.stock
     if type(stock) ~= "table" then
-        if not repair then return {}, {}, SCHEMA end
+        if not repair then return {}, {}, SCHEMA, false end
         stock = {}
         global.stock = stock
     end
     if stock.schema == nil then
         if repair then stock.schema = SCHEMA end
     elseif stock.schema ~= SCHEMA then
-        return nil, nil, stock.schema
+        return nil, nil, stock.schema, false
     end
     local characters, account = stock.characters, stock.account
-    if type(characters) ~= "table" then
+    local charactersFound = type(characters) == "table"
+    if not charactersFound then
         characters = {}
         if repair then stock.characters = characters end
     end
@@ -78,7 +81,7 @@ local function Store(repair)
         account = {}
         if repair then stock.account = account end
     end
-    return characters, account, SCHEMA
+    return characters, account, SCHEMA, charactersFound
 end
 
 local function IsCount(value)
@@ -337,8 +340,11 @@ end
 -- without being one, and the account banks of worlds no remembered character
 -- is left in. keepGuid: the character being played, whose entry is never
 -- dropped. Returns how many entries were dropped.
+-- An account bank goes only when it is known that nobody lives in its world:
+-- when the characters could not be read (they are not a table, or what is
+-- left of them holds an entry without a readable world) none is dropped.
 function StockMemory:Prune(now, keepGuid)
-    local characters, account = Store()
+    local characters, account, _, charactersFound = Store()
     if not characters or type(now) ~= "number" then return 0 end
     local dropped = 0
     local limit = self.KEEP_DAYS * DAY
@@ -349,11 +355,12 @@ function StockMemory:Prune(now, keepGuid)
             dropped = dropped + 1
         end
     end
+    if not charactersFound then return dropped end
     local worlds = {}
     for _, record in pairs(characters) do
-        if type(record) == "table" and Text(record.world) then
-            worlds[record.world] = true
-        end
+        local world = type(record) == "table" and Text(record.world) or nil
+        if not world then return dropped end
+        worlds[world] = true
     end
     for world in pairs(account) do
         if not worlds[world] then
