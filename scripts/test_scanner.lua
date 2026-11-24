@@ -1897,7 +1897,8 @@ T.section("the close", function()
         (bankOf())[2589] == 100 and inDoubt() == true)
 
     -- After the close nothing is read, and a bank-container update that still
-    -- arrives is counted for the dump (the count runs for the whole session).
+    -- arrives is counted for the dump (the count runs for the whole session),
+    -- with how many of them marked a bank.
     local function closedUpdates()
         local out = {}
         Inventory:RunDiagnostic(out)
@@ -1919,6 +1920,7 @@ T.section("the close", function()
     T.eq("closed: the remembered bank is unchanged", (bankOf())[2589], 100)
     T.eq("the dump counts the bank updates that came while it was closed", counted, before + 2)
     T.check("and says how long after the close the last one came", line:find(", last 0.2 s after closing", 1, true) ~= nil, line)
+    T.check("and how many marked a bank", line:find("(in the first 10 s of the session, only counted: 0; marked a bank in doubt: 2)", 1, true) ~= nil, line)
 
     -- Open again: the count of an earlier visit stays for the paste, and reads work again.
     client.bankOpen = true
@@ -1935,6 +1937,43 @@ T.section("the close", function()
     nextFrame()
     Inventory:OnBagUpdate(6)
     T.eq("an update while the bank is open is not counted", (closedUpdates()), before)
+
+    -- A session without a visit: the client may load the bank's containers
+    -- in the first moments, so an update then is only counted; later it
+    -- marks that bank (a craft that took reagents from it, say).
+    fresh()
+    Memory:SaveBank(MAIN, { [2589] = 100 }, {}, NOW - DAY)
+    Memory:SaveBags(MAIN, { [2589] = 5 }, {}, NOW - DAY)
+    Memory:SaveAccountBank(MAIN, { [4306] = 9 }, NOW - DAY)
+    Inventory:Initialize()
+    advance(9.9)
+    Inventory:OnBagUpdate(6)
+    Inventory:OnBagUpdate(15)
+    T.check("9.9 s into a session: only counted", inDoubt() == false and select(3, Memory:AccountBank("eu")) == false)
+    advance(0.2)
+    refreshes = 0
+    Inventory:OnBagUpdate(6)
+    T.check("10.1 s into it: the character's bank is marked", inDoubt() == true and select(3, Memory:AccountBank("eu")) == false)
+    T.check("a shown list is asked to redraw", refreshes >= 1, refreshes)
+    Inventory:OnBagUpdate(15)
+    T.check("and an account bank container marks the account bank", select(3, Memory:AccountBank("eu")) == true)
+    T.eq("still remembered", (bankOf())[2589], 100)
+    local _, sessionLine = closedUpdates()
+    T.eq("the dump says what came when", sessionLine,
+        "bank updates while closed: 4, before the bank was opened this session (in the first 10 s of the session, only counted: 2; marked a bank in doubt: 2)")
+    -- A visit early in the session: the client has the bank's containers
+    -- by then, so the quiet start is over.
+    fresh()
+    Memory:SaveBags(MAIN, { [2589] = 5 }, {}, NOW - DAY)
+    Inventory:Initialize()
+    client.bankOpen = true
+    client.bank.character = { items = { [2589] = 100 }, slots = 28 }
+    client.started.onBankOpened()
+    advance(1)
+    client.started.onBankClosing(); client.bankOpen = false; client.started.onBankClosed()
+    advance(1)
+    Inventory:OnBagUpdate(6)
+    T.check("after a visit, also in the first ten seconds: marked", inDoubt() == true)
 end)
 
 -- ===========================================================================
@@ -2037,10 +2076,10 @@ end)
 
 -- ===========================================================================
 -- After the close the bank cannot be read any more. The answer of a last move
--- may still arrive: an update of a bank container in the ten seconds after
--- the close marks that bank at once; a carried count that has risen within a
--- second, against what the bags held at the closing notice, marks a bank
--- that is remembered to hold that item.
+-- may still arrive, and a craft may take reagents from the closed bank: an
+-- update of a bank container marks that bank at once, whenever it comes; a
+-- carried count that has risen within a second, against what the bags held
+-- at the closing notice, marks a bank that is remembered to hold that item.
 T.section("after the close", function()
     local function bankOf() return Memory:OwnBank(MAIN.guid) end
     local function inDoubt() return (select(3, Memory:OwnBank(MAIN.guid))) end
@@ -2088,7 +2127,8 @@ T.section("after the close", function()
     advance(0.08)
     Inventory:OnBagUpdate(15)
     T.check("an update of an account bank container marks the account bank alone", accountDoubt() == true and inDoubt() == false)
-    -- Up to ten seconds after the close; later ones are only counted.
+    -- Whenever it comes: the watch counts those of the ten seconds after
+    -- the close, every one marks.
     closedVisit()
     advance(9.9)
     Inventory:OnBagUpdate(6)
@@ -2096,9 +2136,14 @@ T.section("after the close", function()
     closedVisit()
     advance(10.1)
     Inventory:OnBagUpdate(6)
-    T.check("10.1 s after the close: not marked", inDoubt() == false)
-    T.eq("and not counted by the watch", afterLine(), "after the close: bankUpdates=0 bagUpdates=0 compared=0 marked=none")
-    -- A bank that was never usable in the visit is not marked by it.
+    T.check("10.1 s after the close: marked too", inDoubt() == true)
+    T.eq("(the watch counts only the first ten seconds)", afterLine(), "after the close: bankUpdates=0 bagUpdates=0 compared=0 marked=none")
+    closedVisit()
+    advance(600)
+    Inventory:OnBagUpdate(15)
+    T.check("ten minutes after the close: the account bank, alone", accountDoubt() == true and inDoubt() == false)
+    -- A bank that was never usable in the visit is marked by its own
+    -- update too: the update is that bank's own sign that it changed.
     fresh()
     Inventory:Initialize()
     advance(2.1)
@@ -2114,9 +2159,9 @@ T.section("after the close", function()
     advance(0.08)
     Inventory:OnBagUpdate(15)
     Inventory:OnBagUpdate(6)
-    T.check("an update for a bank that was never usable in the visit does not mark it", accountDoubt() == false and inDoubt() == true)
-    T.eq("the dump counts both updates and names the one bank", afterLine(),
-        "after the close: bankUpdates=2 (last 0.1 s after the close) bagUpdates=0 compared=0 marked=character (bank container updated)")
+    T.check("an update of a bank that was never usable in the visit marks it", accountDoubt() == true and inDoubt() == true)
+    T.eq("the dump counts both updates and names both banks", afterLine(),
+        "after the close: bankUpdates=2 (last 0.1 s after the close) bagUpdates=0 compared=0 marked=character (bank container updated), account (bank container updated)")
 
     -- A client that reports the late answer for the carried bag alone: the
     -- count of an item has risen and the remembered bank holds that item.

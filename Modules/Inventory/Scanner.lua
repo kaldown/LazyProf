@@ -138,14 +138,18 @@
 --    bank counts again, unmarked. When the session ends inside that second
 --    the bank is marked: its update could never be heard.
 -- 5. After the close the bank cannot be read. What may still arrive is the
---    answer of a last move.
---    (a) An update of a bank container that arrives within CLOSE_WATCH_BANK
---        (10 s) after the close marks that bank in doubt at once, in the
---        handler of the update. Later ones, and those of a session without
---        a visit, are only counted for /lp diag stock. (On a client that
---        empties the bank's containers after the close and reports it,
---        every visit ends in doubt by this rule; the dump shows whether a
---        client does.)
+--    answer of a last move, and a craft may take reagents from the closed
+--    bank.
+--    (a) An update of a bank container while the bank is closed marks that
+--        bank in doubt at once, in the handler of the update, whenever it
+--        comes: the character's own bank, or the account bank of its region
+--        (whoever's read that copy is). Only in the first LOGIN_QUIET (10 s)
+--        of a session that has had no visit yet is it merely counted: the
+--        client may be loading the bank's containers then. Every one is
+--        counted for /lp diag stock. (On a client that empties the bank's
+--        containers after the close and reports it, or sends updates that
+--        change nothing, every visit ends in doubt by this rule; the dump
+--        shows whether a client does.)
 --    (b) The carried bags' contents (item -> count) are noted at the closing
 --        notice. When, within CLOSE_WATCH (1 s) after the close, the carried
 --        count of an item has RISEN against that note and a remembered bank
@@ -172,8 +176,9 @@
 --        has ended (a logout or a reload) cannot be seen by that session;
 --        the next one can tell, because nothing else changes the carried
 --        bags in between. So when a session ends with the bank open, or
---        within CLOSE_WATCH_BANK after a close, what the carried bags hold
---        is saved with the character's record as "the bags at the bank":
+--        within CLOSE_WATCH_BANK (10 s) after a close, what the carried
+--        bags hold is saved with the character's record as "the bags at the
+--        bank":
 --        read at that moment when they can be read and hold something
 --        (completely empty bags are not trusted at logout), otherwise the
 --        note of the close; when there is neither, the fact that it is not
@@ -190,15 +195,16 @@
 --        accountPending). Any difference, a note that is not known and
 --        bags that cannot be compared mark those banks in doubt; in every
 --        case the note is removed.
---    Which banks can be marked (rules 4 and 5), or left out by rule 3: only
---    a bank that was USABLE at some moment of the visit - the adapter says
---    so (window open, the bank may be viewed, is not locked, has a tab),
---    and it is asked at every read of the visit, the closing one included.
---    A bank that never was (one this character may not view, say) cannot
---    have been changed through the visit: it is neither left out nor
---    marked, whatever is moved in the other one, and the note of rule 5c
---    does not name it. And a mark is only ever set on a bank of which
---    something is remembered.
+--    Which banks a visit can mark (rules 4, 5b and 5c), or leave out by
+--    rule 3: only a bank that was USABLE at some moment of the visit - the
+--    adapter says so (window open, the bank may be viewed, is not locked,
+--    has a tab), and it is asked at every read of the visit, the closing
+--    one included. A bank that never was (one this character may not view,
+--    say) cannot have been changed through the visit: it is neither left
+--    out nor marked, whatever is moved in the other one, and the note of
+--    rule 5c does not name it. Rule 5a is the bank's own sign and marks the
+--    bank whose container reported. A mark is only ever set on a bank of
+--    which something is remembered.
 -- 6. In doubt is a mark saved with the remembered bank (StockMemory.lua). A
 --    bank that carries it is not counted by any scan - not for its own
 --    character, not as an alt's bank (the alt's bags still count), not as
@@ -827,7 +833,8 @@ local BANK_SETTLE = 0.5         -- the second look, this long after the opening
 local BANK_EMPTY_TRUST = 2      -- an empty bank is not believed earlier after the opening
 local BANK_READ_SPACING = 0.2   -- least time between two reads that changes ask for
 local CLOSE_WATCH = 1           -- how long after the close a carried count that rose is taken for a late answer
-local CLOSE_WATCH_BANK = 10     -- how long after the close an update of a bank container marks that bank
+local CLOSE_WATCH_BANK = 10     -- how long after the close a session that ends leaves its note (rule 5c)
+local LOGIN_QUIET = 10          -- how long after the start of a session a bank-container update is only counted
 local CLOCK_SLACK = 0.001       -- a timer may run a hair before its mark
 local BANK_KINDS = { "character", "account" }
 
@@ -858,8 +865,13 @@ local bagUpdateSeen = false     -- a bag update asked for the waiting save
 --     last       what the last read gave, in words
 local visit = nil
 local bankClosedAt = nil        -- GetTime() of the last close
--- Bank containers' updates that arrived while the bank was closed.
-local closedBankUpdates = { count = 0, lastAfter = nil }
+-- The start of the session (Initialize), and whether it has had a visit.
+local sessionStartedAt = GetTime()
+local visitedThisSession = false
+-- Bank containers' updates that arrived while the bank was closed: how
+-- many, how long after the last close the last one came, how many came in
+-- the quiet start of the session and how many marked a bank (rule 5a).
+local closedBankUpdates = { count = 0, lastAfter = nil, quiet = 0, marked = 0 }
 -- The watch after a close (rule 5):
 --   at, guid, region  when the window closed, and whose banks the visit read
 --   usable[kind]      the bank was usable in the visit: it can be marked
@@ -871,8 +883,8 @@ local closedBankUpdates = { count = 0, lastAfter = nil }
 --   floor             the same for the scans that come before a comparison:
 --                     lowered by each of them, and set back to the note by
 --                     the comparison
---   bankUpdates, bankLast   updates of bank containers inside CLOSE_WATCH_BANK,
---                     and how long after the close the last one came
+--   bankUpdates, bankLast   updates of bank containers inside the ten seconds
+--                     after the close, and how long after it the last one came
 --   bagUpdates, bagLast     the same for carried bags inside CLOSE_WATCH
 --   owed, pending     a comparison is due; its timer is waiting
 --   scanLeftOut       a scan left a bank out for the comparison that is due
@@ -1265,6 +1277,7 @@ function Inventory:OnBankOpened()
     -- later would fall on a bank this visit has just read.
     Protected("bank read", CompareWaiting, bagUpdateSeen)
     visit = NewVisit()
+    visitedThisSession = true
     Protected("bank read", LookAtBank, self)
     ScheduleLook(visit, BANK_SETTLE)
     ScheduleLook(visit, BANK_EMPTY_TRUST)
@@ -1520,16 +1533,40 @@ RisenAfterClose = function(bagItems)
     return leaveOut
 end
 
--- Rule 5a: an update of a bank container while the bank is closed. Inside
--- CLOSE_WATCH_BANK after a close it marks that bank at once.
-local function WatchBankUpdate(kind)
+-- Rule 5a: an update of a bank container while the bank is closed marks
+-- that bank at once (the character's own, or the account bank of its
+-- region), whenever it comes - unless it comes in the first LOGIN_QUIET
+-- seconds of a session that has had no visit yet: the client may be loading
+-- the bank's containers then, and such an update is only counted.
+local function ClosedBankUpdate(kind)
+    local now = GetTime()
+    local counts = closedBankUpdates
+    counts.count = counts.count + 1
+    counts.lastAfter = bankClosedAt and (now - bankClosedAt) or nil
     local w = watch
-    if not w then return end
-    local after = GetTime() - w.at
-    if after > CLOSE_WATCH_BANK + CLOCK_SLACK then return end
-    w.bankUpdates = w.bankUpdates + 1
-    w.bankLast = after
-    WatchMark(w, kind, "bank container updated")
+    local inWatch = w ~= nil and now - w.at <= CLOSE_WATCH_BANK + CLOCK_SLACK
+    if inWatch then
+        w.bankUpdates = w.bankUpdates + 1
+        w.bankLast = now - w.at
+    end
+    if not visitedThisSession and now - sessionStartedAt < LOGIN_QUIET then
+        counts.quiet = counts.quiet + 1
+        return
+    end
+    local identity = LazyProf.Client:CharacterIdentity() or {}
+    local new, marked = MarkDoubt(kind, identity.guid, identity.region)
+    if w and marked then
+        w.done[kind] = true
+    end
+    if not new then return end
+    counts.marked = counts.marked + 1
+    if inWatch then
+        w.marked[kind] = "bank container updated"
+    end
+    InvalidateFrame()
+    if LazyProf.ScheduleShoppingListRefresh then
+        LazyProf:ScheduleShoppingListRefresh()
+    end
 end
 
 -- Rule 5b: an update of a carried bag while the bank is closed. Inside
@@ -1569,11 +1606,9 @@ local function BagUpdated(self, bagId)
         self:OnBankChange(bankKind)
     else
         if bankKind then
-            -- It cannot be read now. Counted, so that one dump shows whether
-            -- the client reports bank changes after the window closed.
-            closedBankUpdates.count = closedBankUpdates.count + 1
-            closedBankUpdates.lastAfter = bankClosedAt and (GetTime() - bankClosedAt) or nil
-            WatchBankUpdate(bankKind)
+            -- It cannot be read now (rule 5a). Counted too, so that one dump
+            -- shows whether the client reports bank changes while closed.
+            ClosedBankUpdate(bankKind)
         else
             WatchBagUpdate()
         end
@@ -1671,6 +1706,10 @@ end
 -- character is remembered shortly after login even if its bags never change.
 -- Nothing in here can stop the addon from starting.
 function Inventory:Initialize()
+    sessionStartedAt = GetTime()
+    visitedThisSession = false
+    bankClosedAt = nil
+    closedBankUpdates = { count = 0, lastAfter = nil, quiet = 0, marked = 0 }
     Protected("start", function()
         LazyProf.Client:StartStock({
             onBankOpened = function() Inventory:OnBankOpened() end,
@@ -1901,8 +1940,8 @@ function Inventory:RunDiagnostic(lines)
         }
         add("bags at the bank (from the last session): " .. said[lastSession.state])
     end
-    -- Whether the client reports bank changes after the window closed (they
-    -- cannot be read then, so the remembered bank misses them).
+    -- Whether the client reports bank changes while the window is closed
+    -- (they cannot be read then), when, and what they did (rule 5a).
     local closedLine = "bank updates while closed: " .. tostring(closedBankUpdates.count)
     if closedBankUpdates.count > 0 then
         if closedBankUpdates.lastAfter then
@@ -1910,6 +1949,8 @@ function Inventory:RunDiagnostic(lines)
         else
             closedLine = closedLine .. ", before the bank was opened this session"
         end
+        closedLine = closedLine .. " (in the first " .. tostring(LOGIN_QUIET) .. " s of the session, only counted: "
+            .. tostring(closedBankUpdates.quiet) .. "; marked a bank in doubt: " .. tostring(closedBankUpdates.marked) .. ")"
     end
     add(closedLine)
 

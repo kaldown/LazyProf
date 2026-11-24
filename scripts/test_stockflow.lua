@@ -1701,7 +1701,8 @@ T.section("the answer of a last move arrives after the close", function()
     World.bagUpdate(addon, 6)
     T.check("an update of the bank's container after the close marks the bank at once", select(2, bankOf(addon)) == true)
     World.bagUpdate(addon, 0)
-    T.eq("it is still counted for the dump", closedUpdates(addon), "bank updates while closed: 1, last 0.1 s after closing")
+    T.eq("it is still counted for the dump", closedUpdates(addon),
+        "bank updates while closed: 1, last 0.1 s after closing (in the first 10 s of the session, only counted: 0; marked a bank in doubt: 1)")
     T.eq("which names the bank and the reason", afterLine(addon), "after the close: bankUpdates=1 (last 0.1 s after the close)"
         .. " bagUpdates=1 (last 0.1 s after the close) compared=0 marked=character (bank container updated)")
 
@@ -1834,17 +1835,20 @@ T.section("the answer of a last move arrives after the close", function()
     T.check("bank containers' updates alone after the close: both banks in doubt, still remembered", total == 5 and bank == nil
         and meta.bankInDoubt == true and meta.accountInDoubt == true and (bankOf(addon))[LINEN] == 100, total)
     T.eq("the Shopping tab says so", firstShoppingRow(addon), NOT_COUNTED)
-    T.eq("they are counted for the dump", closedUpdates(addon), "bank updates while closed: 2, last 0.1 s after closing")
-    -- Ten seconds after the close such an update is only counted.
+    T.eq("they are counted for the dump", closedUpdates(addon),
+        "bank updates while closed: 2, last 0.1 s after closing (in the first 10 s of the session, only counted: 0; marked a bank in doubt: 2)")
+    -- Whenever it comes: a craft may take reagents from the closed bank.
     addon = bankVisit()
     World.event(addon, "BANKFRAME_CLOSED")
-    World.advance(10.5)
-    World.bagUpdate(addon, 6, 15)
+    World.advance(60)
+    World.containers[6][1] = slot(LINEN, 97)                   -- three used by a craft
+    World.bagUpdate(addon, 6)
     World.advance(5)
     total, bags, bank, meta = linen(addon)
-    T.check("a bank container's update later than ten seconds after the close: counted for the dump, nothing marked",
-        total == 105 and meta.bankInDoubt == nil and meta.accountInDoubt == nil, total)
-    T.eq("the dump has it", closedUpdates(addon), "bank updates while closed: 2, last 10.5 s after closing")
+    T.check("a bank container's update a minute after the close: that bank in doubt, the other still counts",
+        total == 5 and meta.bankInDoubt == true and meta.accountInDoubt == nil, total)
+    T.eq("the dump has it", closedUpdates(addon),
+        "bank updates while closed: 1, last 60.0 s after closing (in the first 10 s of the session, only counted: 0; marked a bank in doubt: 1)")
 
     -- A carried bag's update that changes no count (a stack moved to another slot).
     addon = bankVisit()
@@ -1935,7 +1939,29 @@ T.section("the answer of a last move arrives after the close", function()
     World.bagUpdate(addon, 7)
     World.bagUpdate(addon, 0)
     T.eq("one before the bank was ever opened is named as such", closedUpdates(addon),
-        "bank updates while closed: 1, before the bank was opened this session")
+        "bank updates while closed: 1, before the bank was opened this session (in the first 10 s of the session, only counted: 1; marked a bank in doubt: 0)")
+    -- In a session without a visit the client may load the bank's containers
+    -- in the first moments: such an update is only counted then. Later one
+    -- marks its bank.
+    local saved = {}
+    addon = bankVisit(3, saved)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(1)
+    World.event(addon, "PLAYER_LOGOUT")
+    World.containers = { [0] = World.containers[0], [6] = World.containers[6], [15] = World.containers[15] }
+    addon = World.login(saved)
+    World.bagUpdate(addon, 0)
+    World.advance(1)
+    World.bagUpdate(addon, 6, 15)
+    World.advance(3)
+    total, bags, bank, meta = linen(addon)
+    T.check("the next session: updates in its first seconds are only counted", total == 105 and meta.bankInDoubt == nil
+        and meta.accountInDoubt == nil, total)
+    World.advance(10)
+    World.containers[6][1] = slot(LINEN, 97)
+    World.bagUpdate(addon, 6)
+    total, bags, bank, meta = linen(addon)
+    T.check("one fourteen seconds into it marks that bank", total == 5 and meta.bankInDoubt == true and meta.accountInDoubt == nil, total)
 end)
 
 -- ===========================================================================
@@ -2358,15 +2384,15 @@ T.section("two characters", function()
         combined[LINEN])
 
     -- After the close the bank's containers may read as empty. Nothing may
-    -- ask the adapter for the bank any more, whatever arrives. (Later than
-    -- ten seconds after the close an update of a bank container is no
-    -- reason to doubt what is remembered either.)
+    -- ask the adapter for the bank any more, whatever arrives. (An update of
+    -- a bank container would mark that bank: "the answer of a last move
+    -- arrives after the close".)
     World.advance(11)
     World.containers[6] = { slots = 28 }
     World.containers[8] = { slots = 12 }
     World.containers[15] = { slots = 98 }
     bankReads = 0
-    World.bagUpdate(banker, 6, 0)
+    World.bagUpdate(banker, 0)
     World.advance(5)
     combined, breakdown, meta = World.scan(banker)
     T.eq("after the close the bank is not asked for again", bankReads, 0)
