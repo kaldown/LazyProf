@@ -1309,6 +1309,30 @@ T.section("the close", function()
     T.check("and the dump says that a move was on its way", table.concat(lines, "\n"):find("moveInFlight=true", 1, true) ~= nil,
         table.concat(lines, "\n"))
 
+    -- The carried part of a withdrawal is answered while the bank is open,
+    -- and the read taken for it (kept) sees the bank's slot still locked.
+    -- At the closing notice the bank cannot be shown, and its update never
+    -- comes. The lock that read saw is a move on its way at the close.
+    addon = bankVisit()
+    World.containers[6][1] = slot(LINEN, 100, false, true)     -- the click: the bank's slot locks
+    World.advance(0.1)
+    World.containers[0][3] = slot(LINEN, 100)                  -- the carried part
+    World.bagUpdate(addon, 0)
+    World.bagUpdateDelayed(addon)
+    World.advance(0.2)
+    World.bank[0].canView = false                              -- not shown at the closing notice
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.bank[0].canView = true
+    World.containers[6] = { slots = 28 }                       -- the bank's part, after the close: not reported
+    World.advance(20)
+    total, bags, bank, meta = linen(addon)
+    T.check("a lock a kept read saw, the bank not shown at the close: in doubt, nothing counts twice",
+        total == 105 and bags == 105 and bank == nil and meta.bankInDoubt == true, tostring(total) .. "/" .. tostring(bank))
+    lines = {}
+    addon.Inventory:RunDiagnostic(lines)
+    T.check("and the dump says that a move was on its way", table.concat(lines, "\n"):find("moveInFlight=true", 1, true) ~= nil,
+        table.concat(lines, "\n"))
+
     -- The banker is clicked again while the bank is open, and the client
     -- sends a second opening notice. The visit goes on with what it knows:
     -- here, that the bank is unsettled - its own update came while it was

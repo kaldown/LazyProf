@@ -844,6 +844,14 @@ section("stock", function()
     check(p .. "open: soulbound counts are split off", bound and bound[2770] == 9 and bound[2589] == nil)
     check(p .. "open: the slots of its tabs together are the third return", select(3, Client:BankContents("character")) == 40,
         select(3, Client:BankContents("character")))
+    local locked = select(4, Client:BankContents("character"))
+    check(p .. "open: nothing locked, the fourth return is an empty table", type(locked) == "table" and next(locked) == nil)
+    containers[6][1].isLocked = true
+    locked = select(4, Client:BankContents("character"))
+    check(p .. "open: the part in slots that read as locked is the fourth return (a move of them on its way)",
+        locked[2589] == 100 and locked[2770] == nil and locked[4306] == nil, locked[2589])
+    containers[6][1].isLocked = false
+    check(p .. "a slot that reads unlocked is not in it", next(select(4, Client:BankContents("character"))) == nil)
     fetched = {}
     items, bound = Client:BankContents("account")
     check(p .. "open: the account bank's slots", select(3, Client:BankContents("account")) == 98)

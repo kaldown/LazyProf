@@ -112,7 +112,7 @@ LazyProf.Client = {
         client.reads[kind] = client.reads[kind] + 1
         local contents = client.bankOpen and client.bank[kind] or nil
         if not contents then return nil end
-        return contents.items, contents.bound or {}, contents.slots or 28
+        return contents.items, contents.bound or {}, contents.slots or 28, contents.locked or {}
     end,
     -- A bank that hands out contents is usable; client.usable[kind] says
     -- otherwise (true: usable although it cannot be read just now).
@@ -2240,6 +2240,123 @@ T.section("a move still on its way at the close", function()
     close()
     T.check("marked, not held", closeLine():find("markedInDoubt=character,account held=none", 1, true) ~= nil, closeLine())
     client.inFlight = false
+end)
+
+-- ===========================================================================
+-- A read of the open bank also sees which of its slots read as locked. A
+-- lock that a kept read saw, and that no update of that bank's own
+-- containers has answered since, is a move still on its way at the close -
+-- also when the bank cannot be looked at then: the bank's part of a
+-- withdrawal whose carried part was answered before the close may never be
+-- reported on a client that sends no bank update once the window is closed.
+T.section("a lock a kept read saw", function()
+    local function bankDoubt() return (select(3, Memory:OwnBank(MAIN.guid))) end
+    local function accountDoubt() return (select(3, Memory:AccountBank("eu"))) end
+    local function visit()
+        fresh()
+        Inventory:Initialize()
+        advance(2.1)
+        client.bankOpen = true
+        client.bank.character = { items = { [2589] = 100 }, slots = 28 }
+        client.bank.account = { items = { [4306] = 9 }, slots = 98 }
+        client.started.onBankOpened()
+        advance(3)
+    end
+    local function close()
+        client.started.onBankClosing()
+        client.bankOpen = false
+        client.started.onBankClosed()
+    end
+    local function closeLine()
+        local lines = {}
+        Inventory:RunDiagnostic(lines)
+        return (("\n" .. table.concat(lines, "\n") .. "\n"):match("\n(bank visit close: [^\n]*)\n"))
+    end
+    -- A withdrawal of the 100: the carried part is answered, the bank's slot
+    -- still reads as locked when the read for the carried bag's update is
+    -- taken (and kept).
+    local function carriedHalf()
+        client.bank.character = { items = { [2589] = 100 }, slots = 28, locked = { [2589] = 100 } }
+        client.bags = { [2589] = 105 }
+        Inventory:OnBagUpdate(0)                      -- read at once, kept
+        advance(0.3)
+    end
+
+    visit()
+    carriedHalf()
+    client.bank.character = nil                       -- at the closing notice the bank cannot be read
+    close()
+    T.check("the lock a kept read saw is a move on its way at the close: both banks of the visit in doubt",
+        bankDoubt() == true and accountDoubt() == true)
+    T.eq("and the dump says so as for a lock seen at the close", closeLine(),
+        "bank visit close: owed=false unsettled=none readAgain=false kept=none markedInDoubt=character,account held=none"
+        .. " moveInFlight=true unreadable=character")
+    local combined = scan()
+    T.eq("nothing counts twice", combined[2589], 105)
+
+    -- The same at a logout with the bank open.
+    visit()
+    carriedHalf()
+    client.bank.character = nil
+    client.started.onLogout()
+    T.check("a logout with the bank open: the same", bankDoubt() == true and accountDoubt() == true)
+
+    -- The bank's own update answers it: the read after it, kept and without
+    -- a lock, leaves nothing on its way.
+    visit()
+    carriedHalf()
+    client.bank.character = { items = { [765] = 1 }, slots = 28 }
+    Inventory:OnBagUpdate(6)                          -- read at once, kept, no lock
+    client.bank.character = nil
+    close()
+    T.check("answered by the bank's own update and read back: no mark", bankDoubt() == false and accountDoubt() == false)
+    T.check("and the dump says nothing was on its way", closeLine():find(" moveInFlight=false", 1, true) ~= nil, closeLine())
+
+    -- The bank's own update clears it also when no read of it can be kept
+    -- after it: the bank is then unsettled, and marked for that alone.
+    visit()
+    carriedHalf()
+    client.bank.character = nil
+    Inventory:OnBagUpdate(6)                          -- its read is refused
+    close()
+    T.check("its own update and no read after it: that bank is in doubt for being unsettled, the other is not",
+        bankDoubt() == true and accountDoubt() == false)
+    T.check("nothing was on its way", closeLine():find("unsettled=character", 1, true) ~= nil
+        and closeLine():find(" moveInFlight=false", 1, true) ~= nil, closeLine())
+
+    -- A later kept read that shows no lock clears it.
+    visit()
+    carriedHalf()
+    client.bank.character = { items = { [2589] = 40 }, slots = 28 }
+    Inventory:OnBagUpdate(0)                          -- read at once (0.3 s later), kept, no lock
+    client.bank.character = nil
+    close()
+    T.check("a later kept read without a lock: no mark", bankDoubt() == false and accountDoubt() == false)
+
+    -- A lock seen by a read that was not kept says nothing (the read of an
+    -- empty bank that is not believed sees no slot at all; a refused read
+    -- sees nothing).
+    visit()
+    client.bank.character = { items = {}, slots = 28 }
+    Inventory:OnBagUpdate(0)
+    advance(0.05)
+    client.bank.character = nil
+    close()
+    T.check("no kept read saw a lock: nothing on its way", closeLine():find(" moveInFlight=false", 1, true) ~= nil, closeLine())
+
+    -- The next visit starts without it.
+    visit()
+    carriedHalf()
+    client.bank.character = { items = { [2589] = 100 }, slots = 28 }
+    close()
+    advance(5)
+    client.bankOpen = true
+    client.bank.character = { items = { [2589] = 100 }, slots = 28 }
+    client.started.onBankOpened()
+    advance(3)
+    client.bank.character = nil
+    close()
+    T.check("a later visit whose reads saw no lock: no mark", bankDoubt() == false and accountDoubt() == false)
 end)
 
 -- ===========================================================================

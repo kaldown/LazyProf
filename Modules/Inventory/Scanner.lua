@@ -150,7 +150,14 @@
 --      carried bags or of a bank that can be read reads as locked (the
 --      adapter's MoveInFlight; locks that cannot be read count as a lock),
 --      the answer may come after the close - for the carried bag alone on
---      a client that does not report the bank's containers then.
+--      a client that does not report the bank's containers then. So does a
+--      lock that a kept read of this visit saw in a bank (every read of the
+--      bank reports its locked slots too) when no update of that bank's
+--      own containers has come since and no later kept read of it showed
+--      none: the bank may not be readable at the closing notice, and its
+--      part of a withdrawal whose carried part was answered before the
+--      close may never be reported. Either way every bank of the visit is
+--      marked, and the dump says moveInFlight=true.
 --    Nothing else marks at the close: not a read that was owed for an
 --    update of a carried bag, not such an update itself.
 --    A bank that is not unsettled and not marked, for which a read was
@@ -283,11 +290,14 @@
 --      did not see, or shown late by the client).
 --    - On a client that does not report the bank's part of a move once the
 --      window is closed: a move on its way at the close none of whose locks
---      can be seen - its carried bag's part answered before the close, and
---      its bank's part going into an empty slot, or into a bank that cannot
---      be read at the closing notice; or one into an empty carried slot
---      from such a bank, answered after the watch of rule 5b. Nothing shows
---      it on its way, and its bank's update never comes.
+--      can be seen then, nor was seen by a kept read of the visit (rule 4) -
+--      its carried bag's part answered before the close, and its bank's part
+--      going into an empty slot (an empty slot shows no lock: such a deposit
+--      is remembered short, never twice), or out of a slot of a bank that
+--      cannot be read at the closing notice when no kept read came between
+--      the click and the close; or one into an empty carried slot from such
+--      a bank, answered after the watch of rule 5b. Nothing shows it on its
+--      way, and its bank's update never comes.
 --    - A craft that takes reagents from the closed bank in the first ten
 --      seconds of a session that has not opened the bank: its bank
 --      container's update is only counted (rule 5a), and the remembered bank
@@ -925,6 +935,7 @@ local bagUpdateSeen = false     -- a bag update asked for the waiting save
 --   confirm              an empty read waits for its second look
 --   trailingPending      the trailing read's timer is waiting
 --   lookPending[mark]    the look `mark` seconds after the opening is waiting
+--   reopened             how many opening notices came again during the visit
 --   closing              what the closing notice did (see CloseVisit)
 --   character, account   per bank:
 --     slots      slot count of the last read kept
@@ -933,7 +944,10 @@ local bagUpdateSeen = false     -- a bag update asked for the waiting save
 --                since the bank's last own update
 --     usable     the adapter called the bank usable at some read of this visit
 --     unsettled  an update of one of its containers (or a change of its
---                tabs) arrived that no kept read of it has come after
+--                tabs, or an opening notice that came again) arrived that no
+--                kept read of it has come after
+--     lockSeen   the last kept read saw a slot of it locked, and no update
+--                of its own containers has come since (rule 4)
 --     kept       how many reads were kept
 --     last       what the last read gave, in words
 local visit = nil
@@ -1283,7 +1297,7 @@ local function ReadBank(v, closing, keptNow)
         if Client:BankUsable(kind) then
             state.usable = true
         end
-        local items, bound, slots = Client:BankContents(kind)
+        local items, bound, slots, locked = Client:BankContents(kind)
         local keep = false
         state.refused = not items
         if not items then
@@ -1322,6 +1336,10 @@ local function ReadBank(v, closing, keptNow)
                 state.slots = slots
                 state.emptyAt = nil
                 state.unsettled = false
+                -- Whether this read saw a slot that reads as locked: a move
+                -- of it on its way, until an update of this bank's own
+                -- containers or a later kept read without one (rule 4).
+                state.lockSeen = type(locked) == "table" and next(locked) ~= nil or nil
                 state.kept = state.kept + 1
                 if next(items) ~= nil then
                     state.keptItems = true
@@ -1542,7 +1560,14 @@ local function CloseVisit(self)
         local locked, looked = Client:MoveInFlight()
         return { locked = locked, looked = looked }
     end)
-    done.moveInFlight = asked and (answer.locked == true) or (not asked and "unknown")
+    -- So is a lock a kept read of this visit saw and that no update of that
+    -- bank's own containers answered since: the bank may not be readable
+    -- now, and its part of the move may never be reported after the close.
+    local lockSeen = false
+    for _, kind in ipairs(BANK_KINDS) do
+        if v[kind].lockSeen then lockSeen = true end
+    end
+    done.moveInFlight = asked and (answer.locked == true or lockSeen) or (not asked and "unknown")
     local inFlight = done.moveInFlight ~= false
     local looked = asked and type(answer.looked) == "table" and answer.looked or {}
     local identity = Client:CharacterIdentity() or {}
@@ -1885,7 +1910,14 @@ end
 local function BagUpdated(self, bagId)
     local Client = LazyProf.Client
     local bankKind = Client:BankKindOfBag(bagId)
-    if OpenVisit() then
+    local v = OpenVisit()
+    if v then
+        -- An update of a bank's own container answers the moves of it a
+        -- kept read saw on their way (rule 4); the bank is unsettled from
+        -- here until a read of it is kept.
+        if bankKind and v[bankKind] then
+            v[bankKind].lockSeen = nil
+        end
         self:OnBankChange(bankKind)
     else
         if bankKind then

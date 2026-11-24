@@ -711,12 +711,13 @@ function Client:IsBankOpen()
     return bankOpen
 end
 
--- What a bank holds right now: items, the soulbound part of them, and how
--- many slots its tabs have together (a caller can tell by it whether two
--- reads saw the same bank). kind is "character" or "account". nil when it
--- cannot be read now - the window is closed, the bank may not be viewed, it
--- is locked, it has no tabs or none of them reports a slot - so that "could
--- not read" is never taken for "empty".
+-- What a bank holds right now: items, the soulbound part of them, how many
+-- slots its tabs have together (a caller can tell by it whether two reads
+-- saw the same bank), and the part of the items in slots that read as
+-- locked (a move of them on its way, see MoveInFlight). kind is "character"
+-- or "account". nil when it cannot be read now - the window is closed, the
+-- bank may not be viewed, it is locked, it has no tabs or none of them
+-- reports a slot - so that "could not read" is never taken for "empty".
 -- The gates and the reading are the bank window's own: C_Bank.CanViewBank
 -- (Blizzard_UIPanels_Game/Mainline/BankFrameTemplates.lua:70), a non-nil
 -- C_Bank.FetchBankLockedReason is locked (same file :872-874),
@@ -732,13 +733,13 @@ function Client:BankContents(kind)
     if C_Bank.FetchBankLockedReason(bankType) ~= nil then return nil end
     local tabs = C_Bank.FetchPurchasedBankTabData(bankType)
     if not tabs or #tabs == 0 then return nil end
-    local items, bound = {}, {}
+    local items, bound, locked = {}, {}, {}
     local slots = 0
     for _, tab in ipairs(tabs) do
-        slots = slots + ReadContainer(tab.ID, items, bound)
+        slots = slots + ReadContainer(tab.ID, items, bound, locked)
     end
     if slots == 0 then return nil end
-    return items, bound, slots
+    return items, bound, slots, locked
 end
 
 -- Whether a bank can be used right now: its window is open, the bank may be

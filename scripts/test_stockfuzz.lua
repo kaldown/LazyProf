@@ -312,14 +312,19 @@ local HABITS = { logoutMidMove = true, closeMidMove = true, afterCloseChange = t
 --                      move once the window is closed (drop): close the
 --                      window, or log out with it open, while a move is on
 --                      its way none of whose locks can be seen at that
---                      moment - its carried bag's part was answered before
---                      the close and its bank's part goes into an empty
---                      slot (an empty slot shows no lock) or into a bank
---                      that cannot be read at the closing notice (refused,
---                      empty, no slots, let go, or locked just then); or it
---                      is a move between bank containers of such a bank; or
---                      what is left of it on the carried side goes into an
---                      empty slot and is answered later than rule 5b
+--                      moment, and no read of the visit that the scanner
+--                      kept saw a bank's slot locked that no update of that
+--                      bank's containers answered since (such a lock marks
+--                      every bank of the visit, rule 4) - its carried bag's
+--                      part was answered before the close and its bank's
+--                      part goes into an empty slot (an empty slot shows no
+--                      lock: the deposit is remembered short) or out of a
+--                      bank that cannot be read at the closing notice
+--                      (refused, empty, no slots, let go, or locked just
+--                      then) before any kept read came after the click; or
+--                      it is a move between bank containers of such a bank;
+--                      or what is left of it on the carried side goes into
+--                      an empty slot and is answered later than rule 5b
 --                      watches. The bank's update never comes: the move
 --                      cannot be seen, and what is remembered of that bank
 --                      is wrong until it is read again.
@@ -1039,6 +1044,9 @@ end
 
 local function BagUpdate(container)
     Emit("upd(" .. container .. ")")
+    -- An update of a bank's own container answers the moves of it that a
+    -- kept read saw on their way (the read it brings sets it again).
+    if KindOf(container) and S.bankOpen then S.lockSeen[KindOf(container)] = false end
     Guard("BAG_UPDATE", World.bagUpdate, S.addon, container)
     if not KindOf(container) then
         S.lastBagUpdateMs = S.now
@@ -1319,6 +1327,20 @@ local function Login(who, a)
                 .. " (and so cannot have changed it, and cannot read it to take the mark away)", { cause = Cause() })
         end
         return new
+    end
+    -- Whether a read of the open bank that the scanner keeps saw a slot of
+    -- it locked (rule 4). A read with items is kept while the window is
+    -- open; an empty read may not be, and clears it here: the model never
+    -- takes a lock for seen that the scanner does not.
+    S.lockSeen = {}
+    local client = S.addon.Client
+    local bankContents = client.BankContents
+    client.BankContents = function(self, kind)
+        local items, bound, slots, locked = bankContents(self, kind)
+        if items then
+            S.lockSeen[kind] = next(items) ~= nil and type(locked) == "table" and next(locked) ~= nil
+        end
+        return items, bound, slots, locked
     end
     -- A mark the comparison with the last session's note sets belongs to the
     -- visit that ended that session: it is judged with it.
@@ -1802,6 +1824,7 @@ function OPS.open(a)
     -- comparison its close left due): that visit is judged with it, the new
     -- one begins after.
     S.visit = nil
+    S.lockSeen = {}
     Fire("BANKFRAME_OPENED")
     JudgeVisit(S.lastVisit)
     S.visit = { who = S.cur, openMs = S.now, moves = 0, marks = { character = 0, account = 0 }, cause = "visit" }
@@ -1886,6 +1909,10 @@ end
 -- or into a bank that cannot be read now.
 local function BetweenHalves()
     if not cfg.drop then return false end
+    -- A lock a kept read of this visit saw in a bank, not answered since by
+    -- an update of that bank's containers, is a move on its way at the
+    -- close (rule 4): every bank of the visit is marked, nothing is missed.
+    if S.lockSeen.character or S.lockSeen.account then return false end
     local bankReadable = cfg.closeRead == "readable" and not S.locked and not cfg.letgo
     local seen = {}
     local function look(d)
