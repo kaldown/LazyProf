@@ -11,8 +11,9 @@
 --     bags and banks of the other characters of the same world and faction.
 --     This file keeps that memory up to date.
 -- A Self-Found character cannot be sent anything, so nothing that belongs to
--- other characters is counted for it, from either place; and it cannot send
--- anything, so the memory does not offer what it holds to the others.
+-- other characters is counted for it, from either place (alts, the account
+-- bank, the guild bank); and it cannot send anything, so the memory does not
+-- offer what it holds to the others.
 --
 -- The memory can never stop the addon: everything that touches it runs
 -- protected (see Protected), and a scan that cannot read it counts the bags.
@@ -73,18 +74,25 @@
 --    read" of a bank when a bag update of a container that is no bank
 --    container arrived in the frame of that read or later - so the order of
 --    a move's two updates inside one frame does not matter, and only a read
---    kept on a later frame clears it. A bank is BEHIND while a read is owed
+--    kept on a later frame clears it. An update is "unanswered" for a bank
+--    until a read has seen that bank again: a read that is still owed has
+--    not, and neither has one the adapter refused. A bank that this visit
+--    has read at least once is BEHIND while an update is unanswered for it
 --    or its empty read is unresolved, and the carried bags changed since its
 --    last kept read. While the window is open a scan leaves a bank that is
---    behind out (it says so in its third return); the next read brings it
---    back.
+--    behind out (it says so in its third return); the next read that sees
+--    the bank brings it back. A bank the visit never got to read (one this
+--    character may not view, say) cannot have been changed through it and
+--    is not behind.
 -- 4. The close: the adapter's closing notice, which comes while the bank
 --    still counts as open, and likewise a logout with the bank open. When a
---    read is owed or an empty read is unresolved the bank is read once more,
---    and a bank is kept from that read only when the read is not refused,
---    holds at least one item and has the slot count of the last read kept in
---    this visit. A bank that is still behind after that, and of which
---    something is remembered, is marked in doubt.
+--    read is owed, an update is unanswered or an empty read is unresolved,
+--    the bank is read once more, and a bank is kept from that read only when
+--    the read is not refused, holds at least one item and has the slot count
+--    of the last read kept in this visit. A bank that is still behind after
+--    that - or that was not kept although a read was owed and the carried
+--    bags changed - and of which something is remembered, is marked in
+--    doubt.
 -- 5. After the close. The carried bags' contents (item -> count) are noted
 --    at the closing notice. A bag update in the CLOSE_WATCH (1 s) after it,
 --    whatever container it names, has them compared with the note - on the
@@ -641,6 +649,8 @@ local bagUpdateSeen = false     -- a bag update asked for the waiting save
 --     keptItems  a read with items was kept
 --     keptAt     frame of the last read kept
 --     emptyAt    frame of the first empty read not believed yet (unresolved)
+--     seen       a read of this visit saw the bank (kept it, or found it empty)
+--     unread     an update arrived that no read has seen the bank after
 --     kept       how many reads were kept
 --     last       what the last read gave, in words
 local visit = nil
@@ -695,7 +705,7 @@ end
 local function NewVisit()
     local v = { openedAt = GetTime(), reads = 0, owed = false, confirm = false, trailingPending = false, lookPending = {} }
     for _, kind in ipairs(BANK_KINDS) do
-        v[kind] = { kept = 0, keptItems = false }
+        v[kind] = { kept = 0, keptItems = false, seen = false, unread = false }
     end
     return v
 end
@@ -718,15 +728,15 @@ end
 
 -- That bank is behind: what is remembered of it may not be what is in it,
 -- while the bags that are counted live have changed.
-local function Behind(v, state, owed)
-    return (owed or state.emptyAt ~= nil) and BagsChangedSince(v, state)
+local function Behind(v, state)
+    return ((state.seen and state.unread) or state.emptyAt ~= nil) and BagsChangedSince(v, state)
 end
 
 -- For a scan: is the open bank of that kind behind right now?
 BankBehind = function(kind)
     local v = visit
     if not v or v.closedAt or v.closing then return false end
-    return Behind(v, v[kind], v.owed)
+    return Behind(v, v[kind])
 end
 
 -- Does the memory hold items for that bank?
@@ -762,8 +772,11 @@ end
 -- kept noted in keptNow). Returns whether what is remembered changed, and
 -- whether a kind was refused or found empty without being believed before
 -- the two-second mark (the look at that mark is then wanted).
+-- Whether a bank is behind may be different after any read, so the frame's
+-- scan is dropped first.
 local function ReadBank(v, closing, keptNow)
     local Client = LazyProf.Client
+    InvalidateFrame()
     local identity = Client:CharacterIdentity() or {}
     local now, frame = Client:Now(), GetTime()
     local late = frame - v.openedAt >= BANK_EMPTY_TRUST - CLOCK_SLACK
@@ -797,8 +810,11 @@ local function ReadBank(v, closing, keptNow)
             if keep then
                 state.last = "empty, believed"
             else
+                -- Seen, if not believed: the update it follows is answered,
+                -- and the bank is unresolved from here on.
                 state.last = "empty, not believed"
                 state.emptyAt = state.emptyAt or frame
+                state.seen, state.unread = true, false
                 lookWanted = lookWanted or not late
                 -- Only the second look is missing: it comes with the trailing read.
                 if remembered and (late or sameBank) then
@@ -811,6 +827,7 @@ local function ReadBank(v, closing, keptNow)
                 state.slots = slots
                 state.keptAt = frame
                 state.emptyAt = nil
+                state.seen, state.unread = true, false
                 state.kept = state.kept + 1
                 if next(items) ~= nil then
                     state.keptItems = true
@@ -819,7 +836,6 @@ local function ReadBank(v, closing, keptNow)
                     keptNow[kind] = true
                 end
                 changed = true
-                InvalidateFrame()
             else
                 state.last = state.last .. ", not saved"
             end
@@ -893,6 +909,10 @@ function Inventory:OnBankChange()
     if self:UsesSyndicator() then return end
     local v = OpenVisit()
     if not v then return end
+    -- Unanswered for both banks until a read has seen them again; whether a
+    -- bank is behind may change with that, so the frame's scan is dropped.
+    v.character.unread, v.account.unread = true, true
+    InvalidateFrame()
     if v.lastReadAt == nil or GetTime() - v.lastReadAt >= BANK_READ_SPACING - CLOCK_SLACK then
         LookAtBank(self)
     else
@@ -925,7 +945,7 @@ end
 
 -- Rule 4, at the adapter's closing notice and at a logout with the bank
 -- open; once per visit. visit.closing says afterwards what was done:
---   owed, unresolved   what the visit still had open
+--   owed, unanswered, unresolved   what the visit still had open
 --   read               the bank was read once more
 --   kept[kind]         that read was kept for the kind
 --   doubt[kind]        the kind was still behind: marked in doubt
@@ -934,21 +954,26 @@ local function CloseVisit(self)
     local v = OpenVisit()
     if not v or v.closing then return end
     local Client = LazyProf.Client
-    local done = { owed = v.owed, unresolved = false, read = false, kept = {}, doubt = {} }
+    local done = { owed = v.owed, unanswered = false, unresolved = false, read = false, kept = {}, doubt = {} }
     v.closing = done
     for _, kind in ipairs(BANK_KINDS) do
-        if v[kind].emptyAt ~= nil then
+        local state = v[kind]
+        if state.emptyAt ~= nil then
             done.unresolved = true
+        end
+        if state.seen and state.unread then
+            done.unanswered = true
         end
     end
     local changed = false
-    if done.owed or done.unresolved then
+    if done.owed or done.unanswered or done.unresolved then
         done.read = true
         changed = ReadBank(v, true, done.kept)
     end
     local identity = Client:CharacterIdentity() or {}
     for _, kind in ipairs(BANK_KINDS) do
-        if not done.kept[kind] and Behind(v, v[kind], done.owed) then
+        local state = v[kind]
+        if not done.kept[kind] and (Behind(v, state) or (done.owed and BagsChangedSince(v, state))) then
             done.doubt[kind] = true
             if MarkDoubt(kind, identity.guid, identity.world) then
                 changed = true
@@ -1056,8 +1081,6 @@ local function BagUpdated(self, bagId)
         if not bankKind then
             v.bagsUpdateAt = GetTime()
         end
-        -- Whether a bank is behind may have changed with this update.
-        InvalidateFrame()
         self:OnBankChange()
     else
         if bankKind then
@@ -1241,6 +1264,7 @@ function Inventory:RunDiagnostic(lines)
             local state = v[kind]
             add("bank visit " .. kind .. ": kept=" .. tostring(state.kept) .. " lastRead=" .. tostring(state.last or "none")
                 .. " slots=" .. tostring(state.slots) .. " unresolvedEmpty=" .. tostring(state.emptyAt ~= nil)
+                .. " unansweredUpdate=" .. tostring(state.seen and state.unread)
                 .. " bagsChangedSinceKept=" .. tostring(BagsChangedSince(v, state)))
         end
         local done = v.closing
@@ -1252,7 +1276,8 @@ function Inventory:RunDiagnostic(lines)
                 end
                 return #list > 0 and table.concat(list, ",") or "none"
             end
-            add("bank visit close: owed=" .. tostring(done.owed) .. " unresolvedEmpty=" .. tostring(done.unresolved)
+            add("bank visit close: owed=" .. tostring(done.owed) .. " unansweredUpdate=" .. tostring(done.unanswered)
+                .. " unresolvedEmpty=" .. tostring(done.unresolved)
                 .. " readAgain=" .. tostring(done.read) .. " kept=" .. names(done.kept)
                 .. " markedInDoubt=" .. names(done.doubt))
         end

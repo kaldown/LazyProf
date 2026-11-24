@@ -1050,6 +1050,71 @@ T.section("the close", function()
     T.check("one bank refused at the close: that one is in doubt, the other is read and counts",
         meta.bankInDoubt == true and meta.accountInDoubt == nil and combined[BAR] == 50 and combined[LINEN] == 65, combined[LINEN])
 
+    -- A read that was owed is taken, but the bank is refused by then: the
+    -- update it was owed for is still unanswered. The bank stays out of the
+    -- counts, and the close settles it one way or the other.
+    for _, readableAtClose in ipairs({ false, true }) do
+        addon = bankVisit()
+        WITHDRAWALS[3][2](addon)                 -- the bank still read as 100; one more read is owed
+        refuseBank()
+        World.advance(0.3)                       -- the trailing read: refused
+        local label = "the trailing read is refused" .. (readableAtClose and ", the bank readable again at the close" or ", and so is the close")
+        local total, _, _, meta = linen(addon)
+        T.check(label .. ": while open the bank is not counted beside the bags that changed",
+            total == 65 and meta.bankPending == true, total)
+        if readableAtClose then
+            World.bank[0].canView, World.bank[2].canView = nil, nil
+        end
+        World.event(addon, "BANKFRAME_CLOSED")
+        World.advance(5)
+        total, bags, bank, meta = linen(addon)
+        notOver(label, addon)
+        if readableAtClose then
+            T.check(label .. ": the read at the close is kept", total == 105 and bank == 40 and meta.bankInDoubt == nil, total)
+        else
+            T.check(label .. ": in doubt", total == 65 and bank == nil and meta.bankInDoubt == true, total)
+        end
+    end
+    -- The same without any carried-bag update: nothing can be counted twice,
+    -- and nothing is put in doubt.
+    addon = bankVisit()
+    World.containers[6][1] = slot(LINEN, 100)
+    World.bagUpdate(addon, 6)
+    World.nextFrame()
+    World.bagUpdate(addon, 6)
+    refuseBank()
+    World.advance(0.3)
+    World.event(addon, "BANKFRAME_CLOSED")
+    T.check("refused reads without a change of the bags: no doubt", select(2, bankOf(addon)) == false and (linen(addon)) == 105)
+
+    -- A bank this character cannot view at all (here the account bank, known
+    -- from another character) is not put in doubt by what it moves in its own.
+    do
+        local saved = { stock = { schema = 1,
+            characters = { OTHER = { name = "Other Goldtooth", world = "eu-pvp", faction = "Horde", seen = World.serverTime - 100,
+                bags = { items = { [SILK] = 1 }, at = World.serverTime - 100 } } },
+            account = { ["eu-pvp"] = { items = { [BAR] = 50 }, at = World.serverTime - 100 } } } }
+        World.reset()
+        World.containers = { [0] = { slots = 16, slot(HEARTHSTONE, 1, true), slot(LINEN, 5) }, [6] = { slots = 28, slot(LINEN, 100) } }
+        World.bank = { [0] = { tabs = { { ID = 6 } } }, [2] = { tabs = { { ID = 15 } }, canView = false } }
+        addon = World.login(saved)
+        World.advance(3)
+        World.event(addon, "BANKFRAME_OPENED")
+        World.advance(3)
+        WITHDRAWALS[3][2](addon)
+        local combined, _, meta = World.scan(addon)
+        T.check("a bank never readable in this visit stays counted while a read is owed", combined[BAR] == 50
+            and meta.accountPending == nil and meta.bankPending == true, combined[BAR])
+        World.advance(0.3)
+        World.bagUpdate(addon, 0)
+        World.advance(3)
+        World.event(addon, "BANKFRAME_CLOSED")
+        World.advance(5)
+        combined, _, meta = World.scan(addon)
+        T.check("and is not in doubt after the visit", combined[BAR] == 50 and meta.accountInDoubt == nil
+            and combined[LINEN] == 105, combined[LINEN])
+    end
+
     -- The bank is emptied one second after the opening and the window closed
     -- half a second later: the two reads in between settle it.
     for _, order in ipairs({ { 6, 0 }, { 0, 6 } }) do

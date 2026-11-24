@@ -1056,6 +1056,50 @@ T.section("the close", function()
     kept, doubt = owed(nil, true)
     T.check("only bank containers were updated: a refused closing read changes nothing", kept == 70 and doubt == false, kept)
 
+    -- A read that was owed is taken and refused: the update is still
+    -- unanswered. The close reads once more and settles it.
+    local function refusedTrailing(atClose)
+        visit()
+        client.bank.character = { items = { [2589] = 70 }, slots = 28 }
+        Inventory:OnBagUpdate(0)           -- read at once: 70
+        Inventory:OnBagUpdate(6)           -- owed
+        client.bank.character = nil
+        advance(0.3)                       -- the trailing read: refused
+        local combined, _, meta = scan()
+        T.check("a refused trailing read: a scan still leaves the bank out", combined[2589] == 5 and meta.bankPending == true,
+            combined[2589])
+        client.reads.character = 0
+        client.bank.character = atClose
+        close()
+        T.eq("the close reads the bank once more", client.reads.character, 1)
+        return (bankOf())[2589], inDoubt()
+    end
+    kept, doubt = refusedTrailing(nil)
+    T.check("refused again at the close: in doubt", kept == 70 and doubt == true, kept)
+    kept, doubt = refusedTrailing({ items = { [2589] = 40 }, slots = 28 })
+    T.check("readable at the close: kept, nothing in doubt", kept == 40 and doubt == false, kept)
+    -- A bank the visit never got to read is not behind, whatever is moved.
+    fresh()
+    Inventory:Initialize()
+    advance(2.1)
+    Memory:SaveAccountBank("eu-pvp", { [4306] = 9 }, NOW - DAY)
+    Memory:SaveBags(ALT, { [1] = 1 }, {}, NOW)
+    client.bankOpen = true
+    client.bank.character = { items = { [2589] = 100 }, slots = 28 }
+    client.bank.account = nil                              -- not viewable by this character
+    client.started.onBankOpened()
+    advance(3)
+    Inventory:OnBagUpdate(0)
+    Inventory:OnBagUpdate(6)
+    local combined, _, meta = scan()
+    T.check("a bank never read in the visit stays counted while a read is owed", combined[4306] == 9 and meta.accountPending == nil
+        and meta.bankPending == true, combined[4306])
+    advance(1)
+    Inventory:OnBagUpdate(0)
+    advance(1)
+    close()
+    T.check("and is not in doubt after it", select(3, Memory:AccountBank("eu-pvp")) == false)
+
     -- No read of this visit was kept for that bank: nothing to compare with, nothing kept.
     fresh()
     Inventory:Initialize()
@@ -1089,7 +1133,7 @@ T.section("the close", function()
     Inventory:RunDiagnostic(lines)
     local text = table.concat(lines, "\n")
     T.check("the dump: what the close did",
-        text:find("bank visit close: owed=true unresolvedEmpty=false readAgain=true kept=account markedInDoubt=character", 1, true) ~= nil, text)
+        text:find("bank visit close: owed=true unansweredUpdate=true unresolvedEmpty=false readAgain=true kept=account markedInDoubt=character", 1, true) ~= nil, text)
     T.check("the dump: the bank marked in doubt",
         text:find("bank=1 items (less than an hour ago, in doubt: not counted)", 1, true) ~= nil, text)
 
@@ -1856,10 +1900,10 @@ T.section("diagnostic lines", function()
         T.check("the visit: how long it is open, how often it was read",
             visitText:find("bank visit: open for 2.4 s; reads=5 owed=false carriedBagsUpdated=true", 1, true) ~= nil, visitText)
         T.check("the visit: what was kept of the character bank",
-            visitText:find("bank visit character: kept=5 lastRead=items slots=28 unresolvedEmpty=false bagsChangedSinceKept=true", 1, true) ~= nil,
+            visitText:find("bank visit character: kept=5 lastRead=items slots=28 unresolvedEmpty=false unansweredUpdate=false bagsChangedSinceKept=true", 1, true) ~= nil,
             visitText)
         T.check("the visit: a bank that was refused all along",
-            visitText:find("bank visit account: kept=0 lastRead=refused slots=nil unresolvedEmpty=false bagsChangedSinceKept=true", 1, true) ~= nil,
+            visitText:find("bank visit account: kept=0 lastRead=refused slots=nil unresolvedEmpty=false unansweredUpdate=false bagsChangedSinceKept=true", 1, true) ~= nil,
             visitText)
         advance(3)
     end
