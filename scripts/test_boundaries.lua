@@ -18,7 +18,7 @@ local FORBIDDEN = {
     "C_Container", "GetContainerItemInfo", "GetContainerNumSlots", "C_Bank", "BANKFRAME", "BANK_TABS_CHANGED",
     -- The world a character belongs to and the server clock (the adapter's
     -- CharacterIdentity / Now): a realm name is no stable key on every client
-    "C_GameRules", "GetCurrentRegionName", "GetRealmName", "GetServerTime",
+    "C_GameRules", "GetCurrentRegion", "GetRealmName", "GetServerTime",
 }
 
 local EXEMPT_DIRS = { "Core/Client/", "Modules/UI/Widgets/" }

@@ -798,6 +798,12 @@ function Inventory:RunDiagnostic(lines)
     local now = Client:Now()
     add("identity: guid=" .. tostring(identity.guid) .. " name=" .. tostring(identity.name)
         .. " world=" .. tostring(identity.world) .. " faction=" .. tostring(identity.faction))
+    if not identity.world then
+        add("world: unknown - alts and the account bank are not counted")
+    end
+    if not identity.faction then
+        add("faction: unknown - alts are not counted")
+    end
     add("waiting: bagSave=" .. tostring(bagSavePending) .. " bankRead=" .. tostring(bankReadOwed or next(bankLookPending) ~= nil)
         .. " bankOpen=" .. tostring(Client:IsBankOpen()))
     -- Whether the client reports bank changes after the window closed (they
@@ -825,26 +831,39 @@ function Inventory:RunDiagnostic(lines)
             .. " (saved entries that are not what LazyProf writes; they are skipped, and Forget remembered characters removes them)")
     end
 
-    local isAlt = {}
-    for _, alt in ipairs(Memory:Alts(identity)) do isAlt[alt.guid] = true end
+    -- What happens to each character's stock, and why.
+    local STANDING = {
+        self = "this character",
+        world = "other world",
+        faction = "other faction",
+        nosend = "not counted (Self-Found)",
+        noname = "not counted (no name)",
+        name = "not counted (an older record of this name)",
+        unknown = "not counted (this character's world or faction is unknown)",
+    }
+    local standing = Memory:Standing(identity)
     local function part(label, items, at)
         if items == nil then return label .. "=never seen" end
-        return label .. "=" .. tostring(items) .. " items (" .. tostring(Memory.AgeText(now, at)) .. ")"
+        return label .. "=" .. tostring(items) .. " items (" .. tostring(Memory.AgeText(now, at) or "no time") .. ")"
     end
     for _, c in ipairs(summary.characters) do
-        local role = "not counted"
-        if c.guid == identity.guid then
-            role = "this character"
-        elseif isAlt[c.guid] then
-            role = "alt"
+        local label = STANDING[standing[c.guid]]
+        if standing[c.guid] == "alt" then
+            if IsSelfFound() then
+                label = "not counted (this character is Self-Found)"
+            elseif not profile.includeAltCharacters then
+                label = "alt, not counted (alts off)"
+            else
+                label = "alt, counted"
+            end
         end
-        add("character: " .. tostring(c.name) .. " [" .. role .. "] world=" .. tostring(c.world)
+        add("character: " .. tostring(c.name) .. " [" .. tostring(label) .. "] world=" .. tostring(c.world)
             .. " faction=" .. tostring(c.faction) .. " " .. part("bags", c.bagItems, c.bagsAt)
             .. " " .. part("bank", c.bankItems, c.bankAt) .. " guid=" .. tostring(c.guid))
     end
     for _, bank in ipairs(summary.account) do
         add("account bank: world=" .. tostring(bank.world) .. " items=" .. tostring(bank.items)
-            .. " (" .. tostring(Memory.AgeText(now, bank.at)) .. ")")
+            .. " (" .. tostring(Memory.AgeText(now, bank.at) or "no time") .. ")")
     end
 end
 

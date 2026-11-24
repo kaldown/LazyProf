@@ -225,43 +225,85 @@ function StockMemory:AccountBank(world)
     return Counts(bank.items), Time(bank.at)
 end
 
--- The other remembered characters of this character's world and faction, by
--- name: { { guid, name, bags, bagsAt, bank, bankAt }, ... }. bags / bank are
--- what could be sent over (soulbound counts taken off); a part never seen is
--- nil, and so is the time of a part that has none.
+-- Where each remembered character stands for the asking one:
+--   { [guid] = "self"     the asking character itself
+--            | "alt"      counted as an alt
+--            | "world"    another world
+--            | "faction"  another faction
+--            | "nosend"   it cannot send anything (Self-Found)
+--            | "noname"   its name was never readable: it could not be shown
+--            | "name"     an older record under a name in use
+--            | "unknown"  the asking character's world or faction is not known }
 -- A name belongs to one character of a world, so a record under the asking
 -- character's own name is not an alt (it is a character that is gone, or
 -- this one under an older id), and of several records under one name only
--- the one seen last counts. A record whose name was never readable is left
--- out: it could not be shown. So is a character that cannot send anything.
-function StockMemory:Alts(identity)
-    local list = {}
-    local characters = Store()
-    if not (characters and type(identity) == "table" and identity.guid and identity.world and identity.faction) then
-        return list
-    end
-    local byName = {}
+-- the one seen last is. Entries that are not records have no standing.
+local function Standing(characters, identity)
+    local standing = {}
+    if type(identity) ~= "table" then return standing end
+    local known = identity.guid and identity.world and identity.faction
+    local latest = {}   -- [name] = { guid, seen } of the record seen last
     for guid, record in pairs(characters) do
-        local name = type(record) == "table" and Text(record.name) or nil
-        if name and guid ~= identity.guid and name ~= identity.name and record.noSend ~= true
-                and record.world == identity.world and record.faction == identity.faction then
-            local seen = Time(record.seen) or 0
-            local other = byName[name]
-            if not other or seen > other.seen or (seen == other.seen and tostring(guid) < tostring(other.guid)) then
-                byName[name] = { guid = guid, seen = seen, record = record }
+        if type(record) == "table" then
+            local name = Text(record.name)
+            if guid == identity.guid then
+                standing[guid] = "self"
+            elseif not known then
+                standing[guid] = "unknown"
+            elseif record.world ~= identity.world then
+                standing[guid] = "world"
+            elseif record.faction ~= identity.faction then
+                standing[guid] = "faction"
+            elseif record.noSend == true then
+                standing[guid] = "nosend"
+            elseif not name then
+                standing[guid] = "noname"
+            elseif name == identity.name then
+                standing[guid] = "name"
+            else
+                local seen = Time(record.seen) or 0
+                local other = latest[name]
+                if not other or seen > other.seen or (seen == other.seen and tostring(guid) < tostring(other.guid)) then
+                    if other then standing[other.guid] = "name" end
+                    latest[name] = { guid = guid, seen = seen }
+                    standing[guid] = "alt"
+                else
+                    standing[guid] = "name"
+                end
             end
         end
     end
-    for name, entry in pairs(byName) do
-        local alt = { guid = entry.guid, name = name }
-        local bags, bank = Part(entry.record, "bags"), Part(entry.record, "bank")
-        if bags then
-            alt.bags, alt.bagsAt = Sendable(bags), Time(bags.at)
+    return standing
+end
+
+function StockMemory:Standing(identity)
+    local characters = Store()
+    if not characters then return {} end
+    return Standing(characters, identity)
+end
+
+-- The other remembered characters of this character's world and faction, by
+-- name: { { guid, name, bags, bagsAt, bank, bankAt }, ... } - those standing
+-- as "alt" above. bags / bank are what could be sent over (soulbound counts
+-- taken off); a part never seen is nil, and so is the time of a part that
+-- has none.
+function StockMemory:Alts(identity)
+    local list = {}
+    local characters = Store()
+    if not characters then return list end
+    for guid, standing in pairs(Standing(characters, identity)) do
+        if standing == "alt" then
+            local record = characters[guid]
+            local alt = { guid = guid, name = record.name }
+            local bags, bank = Part(record, "bags"), Part(record, "bank")
+            if bags then
+                alt.bags, alt.bagsAt = Sendable(bags), Time(bags.at)
+            end
+            if bank then
+                alt.bank, alt.bankAt = Sendable(bank), Time(bank.at)
+            end
+            list[#list + 1] = alt
         end
-        if bank then
-            alt.bank, alt.bankAt = Sendable(bank), Time(bank.at)
-        end
-        list[#list + 1] = alt
     end
     table.sort(list, function(a, b) return a.name < b.name end)
     return list

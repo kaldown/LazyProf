@@ -61,7 +61,7 @@ _G.Enum = { TradeskillRelativeDifficulty = { Optimal = 0, Medium = 1, Easy = 2, 
                          CharacterBankTab_1 = 6, CharacterBankTab_9 = 14,
                          AccountBankTab_1 = 15, AccountBankTab_9 = 23 },
             BankType = { Character = 0, Guild = 1, Account = 2 },
-            GameRule = { HardcoreRuleset = 10, PvPRuleset = 213, RPRuleset = 214 } }
+            GameRule = { HardcoreRuleset = 10, CraftFromBankRestricted = 211, PvPRuleset = 213, RPRuleset = 214 } }
 _G.BaseScrollBoxEvents = { OnScroll = "OnScroll" }
 _G.ScrollBoxListMixin = { Event = { OnDataRangeChanged = "OnDataRangeChanged" } }
 
@@ -900,7 +900,10 @@ section("stock", function()
     local rules = { [213] = true }   -- PvP
     local region = "EU"
     local guidCalls = 0
-    local SECRET = {}
+    -- The stand-in for a secret value is text, like a real GUID: only the
+    -- secret check can keep it out (a type check would let it through).
+    local SECRET = "Player-4444-SECRET00"
+    local regionNumber = 3
     local guid = "Player-4444-0A1B2C3D"
     _G.issecretvalue = function(value) return value == SECRET end
     _G.UnitGUID = function(unit)
@@ -911,6 +914,7 @@ section("stock", function()
     _G.NameUtil = { GetUnmodifiedUnitFullName = function(unit) return unit == "player" and "Thrag Ironhide" or nil end }
     _G.C_GameRules = { IsGameRuleActive = function(rule) return rules[rule] == true end }
     _G.GetCurrentRegionName = function() return region end
+    _G.GetCurrentRegion = function() return regionNumber end
     -- The realm name is a shard name here: it must never be part of a key.
     _G.GetRealmName = function() error("GetRealmName called on Forever") end
 
@@ -938,24 +942,37 @@ section("stock", function()
     rules = { [10] = true }
     check(p .. "world: hardcore", identityOf().world == "us-hc-normal", identityOf().world)
     rules = { [213] = true }
+    -- A region without a name (test realms): its number stands in for it.
     region = ""
     id = identityOf()
-    check(p .. "world: no region name -> no world, the rest still read", id.world == nil and id.guid ~= nil)
+    check(p .. "world: no region name -> the region's number", id.world == "region3-pvp" and id.guid ~= nil, id.world)
     region = nil
-    check(p .. "world: nil region -> no world, no error", identityOf().world == nil)
+    check(p .. "world: nil region name -> the region's number too", identityOf().world == "region3-pvp", identityOf().world)
+    regionNumber = 1
+    rules = {}
+    check(p .. "world: another number, another ruleset", identityOf().world == "region1-normal", identityOf().world)
+    rules = { [213] = true }
+    -- Neither a name nor a number: no world (nothing is then taken for the same world).
+    regionNumber = nil
+    id = identityOf()
+    check(p .. "world: no name and no number -> no world, the rest still read", id.world == nil and id.guid ~= nil, id.world)
+    regionNumber = "3"
+    check(p .. "world: a number that is not one -> no world", identityOf().world == nil)
+    regionNumber = 3
     region = "EU"
+    check(p .. "world: with a name the number is not used", identityOf().world == "eu-pvp")
 
     -- A value the client keeps secret is not read out.
     guid = SECRET
     id = identityOf()
-    check(p .. "identity: a secret GUID is not returned", id.guid == nil and id.name == "Thrag Ironhide")
+    check(p .. "identity: a secret GUID is not returned", id.guid == nil and id.name == "Thrag Ironhide", id.guid)
     guid = "Player-4444-0A1B2C3D"
 
     -- Nothing of it changes during a session: read once, when all of it is there.
     local client
-    region = ""
+    region, regionNumber = "", nil
     id, client = identityOf()
-    region = "EU"
+    region, regionNumber = "EU", 3
     check(p .. "identity: an incomplete read is tried again", client:CharacterIdentity().world == "eu-pvp")
     guidCalls = 0
     guid = "Player-4444-CHANGED"
@@ -982,7 +999,24 @@ section("stock", function()
     check(p .. "diag: raw facts of the account bank",
         text:find("bank account: canView=true lockedReason=nil tabs=1 [15:98/2]", 1, true) ~= nil, text)
     check(p .. "diag: what the adapter reads", text:find("adapter bank character: items=3 soulbound=1", 1, true) ~= nil, text)
-    check(p .. "diag: the world's parts", text:find("region=EU", 1, true) ~= nil and text:find("pvp=true", 1, true) ~= nil, text)
+    check(p .. "diag: the world's parts", text:find("region=EU", 1, true) ~= nil and text:find("regionNumber=3", 1, true) ~= nil
+        and text:find("pvp=true", 1, true) ~= nil, text)
+    -- Whether crafts may take reagents from the bank (they would change it while it is closed).
+    check(p .. "diag: crafting from the bank", text:find("crafting from the bank: restricted=false", 1, true) ~= nil, text)
+    rules[211] = true
+    lines = {}
+    Client:RunStockDiagnostic(lines)
+    check(p .. "diag: crafting from the bank, restricted",
+        table.concat(lines, "\n"):find("crafting from the bank: restricted=true", 1, true) ~= nil, table.concat(lines, "\n"))
+    rules[211] = nil
+    local savedRule = _G.Enum.GameRule.CraftFromBankRestricted
+    _G.Enum.GameRule.CraftFromBankRestricted = nil
+    lines = {}
+    Client:RunStockDiagnostic(lines)
+    check(p .. "diag: a client without that rule says so and prints the rest",
+        table.concat(lines, "\n"):find("crafting from the bank: this client has no such rule", 1, true) ~= nil
+        and table.concat(lines, "\n"):find("region=EU", 1, true) ~= nil, table.concat(lines, "\n"))
+    _G.Enum.GameRule.CraftFromBankRestricted = savedRule
     check(p .. "diag: plain ASCII", not text:find("[\128-\255]"))
     bank[2].canView = false
     lines = {}
@@ -997,7 +1031,7 @@ section("stock", function()
         ok and table.concat(lines, "\n"):find("SECTION ERROR", 1, true) ~= nil
         and table.concat(lines, "\n"):find("region=EU", 1, true) ~= nil)
     _G.issecretvalue = nil
-    _G.GetContainerNumSlots, _G.GetContainerItemInfo, _G.GetRealmName = nil, nil, nil
+    _G.GetContainerNumSlots, _G.GetContainerItemInfo, _G.GetRealmName, _G.GetCurrentRegion = nil, nil, nil, nil
 end)
 
 -- ===========================================================================

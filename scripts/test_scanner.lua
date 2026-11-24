@@ -1152,8 +1152,64 @@ T.section("diagnostic lines", function()
     T.check("this character, with ages",
         text:find("character: Main Character [this character] world=eu-pvp faction=Alliance bags=2 items (less than an hour ago) bank=1 items (2 days ago)", 1, true) ~= nil, text)
     T.check("an alt that counts",
-        text:find("character: Bank Alt [alt] world=eu-pvp faction=Alliance bags=1 items (1 day ago) bank=never seen", 1, true) ~= nil, text)
-    T.check("a character that does not count", text:find("character: Other Side [not counted] world=eu-pvp faction=Horde", 1, true) ~= nil, text)
+        text:find("character: Bank Alt [alt, counted] world=eu-pvp faction=Alliance bags=1 items (1 day ago) bank=never seen", 1, true) ~= nil, text)
+    T.check("a character of the other faction", text:find("character: Other Side [other faction] world=eu-pvp faction=Horde", 1, true) ~= nil, text)
+    T.check("the world is known: no warning about it", not text:find("world: unknown", 1, true) and not text:find("faction: unknown", 1, true))
+
+    -- The label says what happens to a character's stock, and why.
+    local function labels(setup)
+        if setup then setup() end
+        local out = {}
+        Inventory:RunDiagnostic(out)
+        local found = {}
+        for _, line in ipairs(out) do
+            local name, label = line:match("^character: (.-) %[(.-)%]")
+            if name then found[name] = label end
+        end
+        return found, table.concat(out, "\n")
+    end
+    Memory:SaveBags({ guid = "Player-1-NORMAL", name = "Elsewhere", world = "eu-normal", faction = "Alliance" }, { [1] = 1 }, {}, NOW)
+    Memory:SaveBags({ guid = "Player-1-SOLO", name = "Solo", world = "eu-pvp", faction = "Alliance" }, { [1] = 1 }, {}, NOW, false)
+    Memory:SaveBags({ guid = "Player-1-OLDME", name = "Main Character", world = "eu-pvp", faction = "Alliance" }, { [1] = 1 }, {}, NOW - 9 * DAY)
+    Memory:SaveBags({ guid = "Player-1-OLDALT", name = "Bank Alt", world = "eu-pvp", faction = "Alliance" }, { [1] = 1 }, {}, NOW - 9 * DAY)
+    Memory:SaveBags({ guid = "Player-1-NAMELESS", world = "eu-pvp", faction = "Alliance" }, { [1] = 1 }, {}, NOW)
+    local found, dump = labels()
+    T.check("label: this character", dump:find("character: Main Character [this character] world=eu-pvp", 1, true) ~= nil, dump)
+    T.check("label: an older record under this character's name",
+        dump:find("character: Main Character [not counted (an older record of this name)]", 1, true) ~= nil, dump)
+    T.check("label: an alt that is counted, and an older record under its name",
+        dump:find("character: Bank Alt [alt, counted]", 1, true) ~= nil
+        and dump:find("character: Bank Alt [not counted (an older record of this name)]", 1, true) ~= nil, dump)
+    T.eq("label: another world", found["Elsewhere"], "other world")
+    T.eq("label: another faction", found["Other Side"], "other faction")
+    T.eq("label: a character that cannot send", found["Solo"], "not counted (Self-Found)")
+    T.check("label: a record without a name", dump:find("character: nil [not counted (no name)]", 1, true) ~= nil, dump)
+
+    LazyProf.db.profile.includeAltCharacters = false
+    local _, offDump = labels()
+    T.check("label: an alt while alts are off", offDump:find("character: Bank Alt [alt, not counted (alts off)]", 1, true) ~= nil, offDump)
+    T.check("label: the other reasons stay as they are", offDump:find("character: Other Side [other faction]", 1, true) ~= nil
+        and offDump:find("character: Solo [not counted (Self-Found)]", 1, true) ~= nil)
+    LazyProf.db.profile.includeAltCharacters = true
+    LazyProf.db.char.selfFoundMode = true
+    local _, soloDump = labels()
+    T.check("label: an alt while this character is Self-Found",
+        soloDump:find("character: Bank Alt [not counted (this character is Self-Found)]", 1, true) ~= nil, soloDump)
+    LazyProf.db.char.selfFoundMode = false
+
+    -- A character whose world or faction cannot be read counts nobody, and the dump says so in words.
+    client.identity = { guid = MAIN.guid, name = "Main Character", faction = "Alliance" }
+    local _, noWorld = labels()
+    T.check("no world: said in words", noWorld:find("world: unknown - alts and the account bank are not counted", 1, true) ~= nil, noWorld)
+    T.check("no world: the others are labelled for it",
+        noWorld:find("character: Bank Alt [not counted (this character's world or faction is unknown)]", 1, true) ~= nil, noWorld)
+    client.identity = { guid = MAIN.guid, name = "Main Character", world = "eu-pvp" }
+    local _, noFaction = labels()
+    T.check("no faction: said in words", noFaction:find("faction: unknown - alts are not counted", 1, true) ~= nil, noFaction)
+    client.identity = MAIN
+    for _, guid in ipairs({ "Player-1-NORMAL", "Player-1-SOLO", "Player-1-OLDME", "Player-1-OLDALT", "Player-1-NAMELESS" }) do
+        LazyProf.db.global.stock.characters[guid] = nil
+    end
     T.check("the account bank", text:find("account bank: world=eu-pvp items=1 (5 days ago)", 1, true) ~= nil, text)
     T.check("plain ASCII", not text:find("[\128-\255]"))
     -- Read-only: an open bank is not saved by the dump.

@@ -750,16 +750,24 @@ end
 -- (GameRulesDocumentation.lua:225-238) with Enum.GameRule.RPRuleset,
 -- PvPRuleset and HardcoreRuleset (dump, LuaEnum.lua:3441, 3587-3588);
 -- GetCurrentRegionName() is the region's short name (compared with "US" at
--- Blizzard_GroupFinder/Mainline/LFGList.lua:2422). nil while the region has
--- no name: then nothing is taken for a character of the same world.
+-- Blizzard_GroupFinder/Mainline/LFGList.lua:2422). Where the region has no
+-- name its number stands in, "region3-pvp": GetCurrentRegion() returns a
+-- number (LocaleDocumentation.lua:39-47; dump, GlobalAPI.lua:5382). nil when
+-- there is neither: then nothing is taken for a character of the same world.
 local function WorldKey()
     local region = GetCurrentRegionName()
-    if type(region) ~= "string" or region == "" then return nil end
+    if type(region) == "string" and region ~= "" then
+        region = region:lower()
+    else
+        local number = GetCurrentRegion()
+        if type(number) ~= "number" then return nil end
+        region = "region" .. tostring(number)
+    end
     local on, rule = C_GameRules.IsGameRuleActive, Enum.GameRule
     local ruleset = (on(rule.RPRuleset) and "rp" or "") .. (on(rule.PvPRuleset) and "pvp" or "")
     if ruleset == "" then ruleset = "normal" end
     if on(rule.HardcoreRuleset) then ruleset = "hc-" .. ruleset end
-    return region:lower() .. "-" .. ruleset
+    return region .. "-" .. ruleset
 end
 
 -- Who the character is: { guid, name, world, faction }. A part that cannot
@@ -898,9 +906,23 @@ function Client:RunStockDiagnostic(lines)
         local on, rule = C_GameRules.IsGameRuleActive, Enum.GameRule
         local guid = UnitGUID("player")
         local secret = issecretvalue ~= nil and guid ~= nil and issecretvalue(guid) or false
-        add("world: region=" .. tostring(GetCurrentRegionName()) .. " rp=" .. tostring(on(rule.RPRuleset))
+        add("world: region=" .. tostring(GetCurrentRegionName()) .. " regionNumber=" .. tostring(GetCurrentRegion())
+            .. " rp=" .. tostring(on(rule.RPRuleset))
             .. " pvp=" .. tostring(on(rule.PvPRuleset)) .. " hardcore=" .. tostring(on(rule.HardcoreRuleset))
             .. " guidSecret=" .. tostring(secret) .. " serverTime=" .. tostring(GetServerTime()))
+    end)
+    -- Whether crafts may take reagents out of the bank. If they may, a craft
+    -- changes the bank while its window is closed and the remembered bank is
+    -- then behind until the next visit. Enum.GameRule.CraftFromBankRestricted
+    -- is in the client's enum table (dump, LuaEnum.lua:3586); what the rule
+    -- does in play is not documented, so it is only reported here.
+    section("rules", function()
+        local rule = Enum.GameRule.CraftFromBankRestricted
+        if rule == nil then
+            add("crafting from the bank: this client has no such rule")
+        else
+            add("crafting from the bank: restricted=" .. tostring(C_GameRules.IsGameRuleActive(rule)))
+        end
     end)
 end
 
