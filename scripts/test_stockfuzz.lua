@@ -3,9 +3,12 @@
 -- A seeded random walk through bank visits, checked against a model of what
 -- the character really owns. The client is scripts/lib/stockworld.lua driving
 -- the real WoW Forever adapter, the scanner and the stock memory; this file
--- adds a true world (carried bags, character bank, account bank, a second
--- character), a simulated client whose unknown behaviours are switches, a
--- random player, and the checks:
+-- adds a true world (carried bags, character bank, account banks, up to four
+-- characters - of one world and faction, of the other faction, of another
+-- world), a simulated client whose unknown behaviours are switches (when the
+-- bank can be read, how and when the answer of a move is reported and what
+-- it locks meanwhile, whether bank containers report while the window is
+-- closed, how the account bank is shared), a random player, and the checks:
 --   I1  a scan never counts more of an item than is owned
 --   I2  two seconds after the last event no bank is left out or short without
 --       the scan's third return - and the Shopping tab - saying so
@@ -21,8 +24,9 @@
 -- on every machine and every time.
 --
 -- Run from the addon root:  lua5.1 scripts/test_stockfuzz.lua
--- By default it runs three fixed samples of client configurations and
--- players (a few seconds; see the end of this file) and checks everything.
+-- By default it runs three samples of client configurations and players,
+-- drawn from a fixed seed (about seven seconds; see the end of this file),
+-- and checks everything.
 -- Environment:
 --   STOCKFUZZ_MODE    suite (default): every check on the samples
 --                     campaign: many walks, results as tables (kinds,
@@ -41,6 +45,10 @@
 --   shrink: STOCKFUZZ_COMBOS (a key), STOCKFUZZ_SEED, STOCKFUZZ_KIND, and
 --     optionally STOCKFUZZ_CAUSE (part of the cause; all of it with
 --     STOCKFUZZ_CAUSE_EXACT=1), STOCKFUZZ_MS (least duration), STOCKFUZZ_NAME
+--   STOCKFUZZ_LIST    suite: 1 prints every failure on a line of its own
+--   STOCKFUZZ_PICK    suite: the seed the samples are drawn with (another seed,
+--                     other configurations), and STOCKFUZZ_SAMPLE_WB / _ANY /
+--                     _CAREFUL / _HASTY: how many walks each sample has
 --   STOCKFUZZ_MUTANT  a file to load in place of Modules/Inventory/Scanner.lua:
 --                     shows whether the checks notice a scanner with a rule
 --                     taken out (any mode)
@@ -68,8 +76,11 @@
 --                        remembered bank holds
 --   I5.error|handler     a Lua error, or a message to the game's error handler
 --   careful.*, hasty.*   any of these kinds in the samples of a careful player
--- What the bank's rules accept on purpose is named further down (ALSO, and
--- the list above it): the default run shows no failure of any kind above.
+--   slowOpen:*           what a client that shows its bank late leads to (decided:
+--                        SLOW_OPEN, after WellBehaved); counted, no check
+-- What the bank's rules accept on purpose is named further down (WellBehaved,
+-- SLOW_OPEN, ALSO and the list above it): the default run shows no failure
+-- of any kind above.
 
 package.path = "./?.lua;" .. package.path
 local T = require("scripts.lib.check").new()
@@ -101,6 +112,7 @@ World.install()
 World.FRAME = 0.001
 
 local floor, ceil, max, min = math.floor, math.ceil, math.max, math.min
+local cfg        -- the client configuration of the walk in progress
 
 -- ===========================================================================
 -- Switches: what is not known about the client. Every combination is a
@@ -116,17 +128,33 @@ local SWITCHES = {
     --    apart, each container changed with its own update ("apart") or both
     --    with the first, the second update merely late ("late")
     { "spread", { "same", "split", "apart", "late" } },
-    --    how long after the click: the same or the next frame / up to 0.3 s / up to 1 s
-    { "latency", { "none", "short", "long" } },
+    --    how long after the click: the same or the next frame / up to 0.3 s / up to 1 s /
+    --    up to 2.5 s (a lag spike)
+    { "latency", { "none", "short", "long", "lag" } },
     -- 3. the client empties the bank's containers and says so before the close notice
     { "letgo", { false, true } },
-    -- 4. at the opening the items are all there / come later / partly there;
-    --    "Silent": no bag update when they arrive
-    { "open", { "all", "late", "lateSilent", "partial", "partialSilent" } },
+    -- 4. at the opening the items are all there / come later (within 1.5 s) / partly
+    --    there; "Silent": no bag update when they arrive. "slow": they come 2.1 to 4 s
+    --    after the opening (decided: see SLOW_OPEN below)
+    { "open", { "all", "late", "lateSilent", "partial", "partialSilent", "slow", "slowSilent" } },
     -- 5. BAG_UPDATE_DELAYED comes in the frame of its updates / a frame later / never
     { "delayed", { "same", "next", "never" } },
     -- 6. bag updates of carried bags that change nothing, at any time
     { "idle", { false, true } },
+    -- 7. once the window is closed the client sends no update of a bank container
+    --    for the answer of a move (the carried bag's update still comes)
+    { "drop", { false, true } },
+    -- 8. while the window is open the bank is locked now and then, for 0.1 to 2 s:
+    --    every read of it is refused meanwhile, and nothing says when it ends
+    { "lock", { false, true } },
+    -- 9. updates of bank containers that change nothing, at any time: while the bank
+    --    is open, while it is closed, and in the first seconds of a session (decided:
+    --    such a client is not well-behaved, see WellBehaved)
+    { "bankIdle", { false, true } },
+    -- 10. what the game's account bank is: one for the whole account, one per world,
+    --     or one per world and faction (the addon remembers one per region and counts
+    --     it only for the world and faction whose read it is)
+    { "acctScope", { "account", "world", "faction" } },
 }
 
 local function ComboCount()
@@ -156,18 +184,73 @@ local function Key(cfg)
     return table.concat(parts, "/")
 end
 
-local function ComboByKey(key)
-    for index = 0, ComboCount() - 1 do
-        local cfg = Combo(index)
-        if Key(cfg) == key then return cfg end
+-- A combination's number, for its seeds (the inverse of Combo).
+local function IndexOf(config)
+    local index, mult = 0, 1
+    for _, switch in ipairs(SWITCHES) do
+        local values = switch[2]
+        for i, value in ipairs(values) do
+            if value == config[switch[1]] then index = index + (i - 1) * mult end
+        end
+        mult = mult * #values
     end
-    return nil
+    return index
 end
 
--- Readable at the close, nothing late, the items there at the opening.
+local function ComboByKey(key)
+    local parts = {}
+    for part in key:gmatch("[^/]+") do parts[#parts + 1] = part end
+    if #parts ~= #SWITCHES then return nil end
+    local config = {}
+    for i, switch in ipairs(SWITCHES) do
+        local found = false
+        for _, value in ipairs(switch[2]) do
+            local text = value == true and switch[1] or (value == false and ("no" .. switch[1]) or tostring(value))
+            if text == parts[i] then config[switch[1]] = value; found = true end
+        end
+        if not found then return nil end
+    end
+    config.index = IndexOf(config)
+    return config
+end
+
+-- A combination drawn at random: each switch one of `allowed[name]` (any
+-- of its values where nothing is given).
+local function RandomCombo(rng, allowed)
+    local config = {}
+    for _, switch in ipairs(SWITCHES) do
+        local values = (allowed and allowed[switch[1]]) or switch[2]
+        config[switch[1]] = values[rng.int(1, #values)]
+    end
+    config.index = IndexOf(config)
+    return config
+end
+
+-- Readable at the close, nothing late, the items there at the opening, the
+-- bank not locked now and then. Decided: a client that sends updates of bank
+-- containers that change nothing (bankIdle) is not well-behaved - while the
+-- bank is closed such an update marks its bank in doubt (the player is told,
+-- and the next visit heals it), so the no-nuisance checks do not apply to it.
 local function WellBehaved(cfg)
-    return cfg.closeRead == "readable" and not cfg.letgo and cfg.open == "all" and cfg.latency ~= "long"
-        and (cfg.spread == "same" or cfg.spread == "split")
+    return cfg.closeRead == "readable" and not cfg.letgo and cfg.open == "all"
+        and (cfg.latency == "none" or cfg.latency == "short")
+        and (cfg.spread == "same" or cfg.spread == "split") and not cfg.lock and not cfg.bankIdle
+end
+
+-- Decided: a client whose bank items arrive later than two seconds after the
+-- opening ("slow", "slowSilent"). An empty read may then be believed, and the
+-- remembered bank replaced by nothing - a short bank, without a line - until
+-- a read sees the items (with "slow" when they arrive, with "slowSilent" at
+-- the next visit). The kinds that follow from it are filed under this name
+-- for such a client: counted and printed, no check.
+local SLOW_OPEN = { "I2.stale.", "I2.uncounted.", "I3x.count." }
+local function DecidedName(kind, cfg)
+    if cfg.open == "slow" or cfg.open == "slowSilent" then
+        for _, prefix in ipairs(SLOW_OPEN) do
+            if kind:sub(1, #prefix) == prefix then return "slowOpen:" .. kind end
+        end
+    end
+    return nil
 end
 
 -- Player habits a campaign can switch off, to look past a failure that is
@@ -181,8 +264,11 @@ end
 --   afterCloseChange  loot, craft or shuffle the bags in the second after a close
 --   logoutAfterClose  log out or reload in the second after a close
 --   quickVisit        do something within two seconds of opening the bank
+--   craftFromBank     craft with reagents taken from the closed bank: the
+--                     bank's count of an item falls, and its container
+--                     reports the change
 local HABITS = { logoutMidMove = true, closeMidMove = true, afterCloseChange = true, quickVisit = true,
-                 bankToBank = true, emptyBags = true, logoutAfterClose = true }
+                 bankToBank = true, emptyBags = true, logoutAfterClose = true, craftFromBank = true }
 
 -- Decided behaviour: what the bank's rules accept on purpose. The test is
 -- told each by name - a habit the default player does not have, a kind of
@@ -208,19 +294,44 @@ local HABITS = { logoutMidMove = true, closeMidMove = true, afterCloseChange = t
 --                      empty bags are not trusted at logout (nothing says
 --                      the client still holds the bags then), so the
 --                      character's record keeps the bags as last saved.
---   leaveEarly         on a client that shows a bank only partly when its
---                      window opens: end the visit before the look two
---                      seconds after the opening has read the whole bank. A
---                      visit that ends earlier keeps the partial read (the
+--   leaveEarly         on a client that shows a bank only partly or late
+--                      when its window opens: end the visit before a read
+--                      has seen the whole bank - before the look two seconds
+--                      after the opening, or while the bank is locked (or
+--                      within a read's time after the lock ended). A visit
+--                      that ends earlier keeps the partial read (the
 --                      client's own bank window could not draw such a bank).
+--   closeBetweenHalves on a client that does not report the bank's part of a
+--                      move once the window is closed (drop): close the
+--                      window, or log out with it open, while a move is on
+--                      its way none of whose locks can be seen at that
+--                      moment - its carried bag's part was answered before
+--                      the close and its bank's part goes into an empty
+--                      slot (an empty slot shows no lock) or into a bank
+--                      that cannot be read at the closing notice (refused,
+--                      empty, no slots, let go, or locked just then); or it
+--                      is a move between bank containers of such a bank; or
+--                      what is left of it on the carried side goes into an
+--                      empty slot and is answered later than rule 5b
+--                      watches. The bank's update never comes: the move
+--                      cannot be seen, and what is remembered of that bank
+--                      is wrong until it is read again.
+--   craftFromBankAtLogin  craft with reagents from the closed bank in the
+--                      first ten seconds of a session that has not opened
+--                      the bank: the bank container's update is then only
+--                      counted (the client may be loading the bank's
+--                      containers at login), so the remembered bank stays
+--                      as it was until the next visit.
 -- Kinds and classes:
 --   "+rise" visits     in the second after a close a carried count rises for
 --                      an item a bank of the visit is remembered to hold:
 --                      that bank is marked, also when it was loot or a craft
---                      (see NoteChange). The check "a change of the bags in
---                      the second after the close leaves no mark" is for
---                      counts that fall and for items no remembered bank
---                      holds.
+--                      (see NoteChange). The same in the next session of a
+--                      character whose last one ended at the bank, before
+--                      its bags are compared with the note it left (rule
+--                      5c). The check "a change of the bags in the second
+--                      after the close leaves no mark" is for counts that
+--                      fall and for items no remembered bank holds.
 --   I1h.*              while the client itself shows an item in two
 --                      containers (a move half reported), a scan counts it
 --                      twice.
@@ -241,10 +352,22 @@ local HABITS = { logoutMidMove = true, closeMidMove = true, afterCloseChange = t
 --                      one the client let go of. The "no doubt mark after an
 --                      unhurried visit" checks are for well-behaved clients
 --                      (WellBehaved above), which do not do that.
--- Not modelled at all: a clock that runs backwards; a client that reports
--- the answer of a move for the carried bag alone once the bank is closed and
--- takes longer for it than the rules watch (a second for a carried bag).
-local ALSO = { logoutMidBankMove = false, emptyBagsLogout = false, leaveEarly = false }
+--   in and out         a stack put into a bank remembered as empty and taken
+--   again              out again in a visit of under two seconds: no
+--                      exception any more. A bank whose last read found it
+--                      empty, with no update of its own after that read, is
+--                      not marked at the close while it is remembered as
+--                      empty or not at all (what is remembered agrees with
+--                      what was read); it is checked as any other visit.
+--   "+bankcraft"       a visit after whose close a craft took reagents from
+--      visits          the closed bank: the mark that follows is needed, and
+--                      the no-nuisance checks do not judge it.
+--   slowOpen:*         see SLOW_OPEN above.
+-- Not modelled at all: a clock that runs backwards; a client that crafts
+-- from the closed bank without reporting its container (nothing could see
+-- that); a client without slot locks.
+local ALSO = { logoutMidBankMove = false, emptyBagsLogout = false, leaveEarly = false, closeBetweenHalves = false,
+               craftFromBankAtLogin = false }
 local DEFAULT_HABITS = {}
 for name, value in pairs(HABITS) do DEFAULT_HABITS[name] = value end
 for name, value in pairs(ALSO) do DEFAULT_HABITS[name] = value end
@@ -276,10 +399,20 @@ local ITEMS = { LINEN, SILK, ORE }        -- STONE is always soulbound
 local ALL_ITEMS = { LINEN, SILK, ORE, STONE }
 local MAX_STACK = 20
 local BACKPACK, BAG, TAB1, TAB2, ACCOUNT_TAB = 0, 1, 6, 7, 15
-local GUID = { A = "Player-4444-000000AA", B = "Player-4444-000000BB" }
-local NAME = { A = "Main Goldtooth", B = "Alt Goldtooth" }
-local WORLD_KEY, REGION = "eu-pvp", "eu"
+local WHO = { "A", "B", "C", "D" }
+local GUID = { A = "Player-4444-000000AA", B = "Player-4444-000000BB", C = "Player-4444-000000CC", D = "Player-4444-000000DD" }
+local NAME = { A = "Main Goldtooth", B = "Alt Goldtooth", C = "Third Goldtooth", D = "Fourth Goldtooth" }
+-- The worlds of the region "eu", by the game rules that make them.
+local RULES = { ["eu-pvp"] = { [213] = true }, ["eu-normal"] = {} }
+local REGION = "eu"
 local SETTLE = 2000                       -- ms without an event: settled
+-- The account bank a character uses, under the scope the client has (switch 10).
+local ACCOUNT_KEYS = { "all", "eu-pvp", "eu-normal", "eu-pvp Horde", "eu-pvp Alliance", "eu-normal Horde", "eu-normal Alliance" }
+local function ScopeKey(char)
+    if cfg.acctScope == "account" then return "all" end
+    if cfg.acctScope == "world" then return char.world end
+    return char.world .. " " .. char.faction
+end
 
 local function KindOf(container)
     if container >= 6 and container <= 14 then return "character" end
@@ -300,12 +433,12 @@ end
 local function CopyInit(init)
     local copy = { chars = {}, account = {} }
     for who, char in pairs(init.chars) do
-        local c = { bags = {}, bank = {}, view = char.view }
+        local c = { bags = {}, bank = {}, view = char.view, world = char.world, faction = char.faction }
         for id, container in pairs(char.bags) do c.bags[id] = CopyContainer(container) end
         for id, container in pairs(char.bank) do c.bank[id] = CopyContainer(container) end
         copy.chars[who] = c
     end
-    for id, container in pairs(init.account) do copy.account[id] = CopyContainer(container) end
+    for key, container in pairs(init.account) do copy.account[key] = CopyContainer(container) end
     return copy
 end
 
@@ -318,8 +451,11 @@ local function AddCounts(into, container, sendableOnly)
     end
 end
 
--- A random world: two characters (the second one mostly), few slots, few
--- items, banks that are often empty.
+-- A random world: two characters of one world and faction (the second one
+-- mostly), sometimes a third and a fourth - of the same world and faction,
+-- of the other faction, or of another world of the region -, few slots, few
+-- items, banks that are often empty. An account bank for each key the three
+-- scopes can ask for (ACCOUNT_KEYS); a walk uses those of its scope.
 local function RandomInit(rng)
     local function fill(container, stacks, allowBound)
         for _ = 1, stacks do
@@ -335,18 +471,28 @@ local function RandomInit(rng)
         return container
     end
     local init = { chars = {}, account = {} }
-    local function char()
-        local c = { bags = {}, bank = {}, view = not rng.chance(0.12) }
+    local function char(world, faction)
+        local c = { bags = {}, bank = {}, view = not rng.chance(0.12), world = world, faction = faction }
         c.bags[BACKPACK] = fill({ slots = 6 }, rng.int(0, 4), true)
         c.bags[BAG] = fill({ slots = 4 }, rng.int(0, 2), false)
         c.bank[TAB1] = fill({ slots = 6 }, rng.chance(0.25) and 0 or rng.int(1, 4), true)
         if rng.chance(0.2) then c.bank[TAB2] = fill({ slots = 4 }, rng.int(0, 2), false) end
         return c
     end
-    init.chars.A = char()
-    if rng.chance(0.75) then init.chars.B = char() end
-    if rng.chance(0.85) then
-        init.account[ACCOUNT_TAB] = fill({ slots = 5 }, rng.chance(0.5) and 0 or rng.int(1, 3), false)
+    local function another()
+        local kind = rng.pick({ "same", "faction", "world" })
+        if kind == "faction" then return char("eu-pvp", "Alliance") end
+        if kind == "world" then return char("eu-normal", rng.chance(0.5) and "Horde" or "Alliance") end
+        return char("eu-pvp", "Horde")
+    end
+    init.chars.A = char("eu-pvp", "Horde")
+    if rng.chance(0.75) then init.chars.B = char("eu-pvp", "Horde") end
+    if rng.chance(0.45) then init.chars.C = another() end
+    if rng.chance(0.2) then init.chars.D = another() end
+    for _, key in ipairs(ACCOUNT_KEYS) do
+        if rng.chance(0.85) then
+            init.account[key] = fill({ slots = 5 }, rng.chance(0.5) and 0 or rng.int(1, 3), false)
+        end
     end
     return init
 end
@@ -355,7 +501,6 @@ end
 -- One walk: the simulated client, the player's actions, the checks.
 -- ===========================================================================
 local S          -- the walk in progress
-local cfg        -- its client configuration
 
 local function Emit(line)
     if S.trace then S.trace[#S.trace + 1] = line end
@@ -374,12 +519,32 @@ local function Violate(kind, detail, extra)
 end
 
 local function Me() return S.chars[S.cur] end
-local function OtherName() return S.cur == "A" and "B" or "A" end
+-- The account bank a character uses (nil when there is none).
+local function AccountOf(who)
+    return S.account[ScopeKey(S.chars[who or S.cur])]
+end
+-- The other characters of the world, in order; and those of them that are
+-- alts of the one being played (same world and faction).
+local function Others()
+    local list = {}
+    for _, who in ipairs(WHO) do
+        if who ~= S.cur and S.chars[who] then list[#list + 1] = who end
+    end
+    return list
+end
+local function AltsOf(who)
+    local me, list = S.chars[who or S.cur], {}
+    for _, other in ipairs(WHO) do
+        local c = S.chars[other]
+        if other ~= (who or S.cur) and c and c.world == me.world and c.faction == me.faction then list[#list + 1] = other end
+    end
+    return list
+end
 
 local function TruthOf(container)
     if container <= 5 then return Me().bags[container] end
     if container <= 14 then return Me().bank[container] end
-    return S.account[container]
+    return AccountOf()
 end
 
 -- What the client's calls return for a container: what it holds of it
@@ -399,7 +564,7 @@ local function PushView(container)
                 for index = 1, src.slots do
                     local item = src[index]
                     if item and (not arrived or arrived[index]) then
-                        view[index] = World.slot(item.id, item.n, item.bound)
+                        view[index] = World.slot(item.id, item.n, item.bound, (S.locks[container * 100 + index] or 0) > 0)
                     end
                 end
             end
@@ -415,7 +580,8 @@ local function PushView(container)
                 local item = view[index]
                 if item then
                     parts[#parts + 1] = "[" .. index .. "] = slot(" .. item.itemID .. ", " .. item.stackCount
-                        .. (item.isBound and ", true)" or ")")
+                        .. ((item.isBound or item.isLocked) and (", " .. tostring(item.isBound)) or "")
+                        .. (item.isLocked and ", true)" or ")")
                 end
             end
             Emit("World.containers[" .. container .. "] = { " .. table.concat(parts, ", ") .. " }")
@@ -428,17 +594,19 @@ local function PushBank()
     local tabs0 = { { ID = TAB1 } }
     if me.bank[TAB2] then tabs0[2] = { ID = TAB2 } end
     local tabs2 = {}
-    if S.account[ACCOUNT_TAB] then tabs2[1] = { ID = ACCOUNT_TAB } end
+    if AccountOf() then tabs2[1] = { ID = ACCOUNT_TAB } end
     local view0, view2 = not S.refused, (me.view and not S.refused) and true or false
-    World.bank = { [0] = { tabs = tabs0, canView = view0 }, [2] = { tabs = tabs2, canView = view2 } }
+    local locked = S.locked and 1 or nil
+    World.bank = { [0] = { tabs = tabs0, canView = view0, locked = locked }, [2] = { tabs = tabs2, canView = view2, locked = locked } }
     if S.trace then
         local function ids(tabs)
             local out = {}
             for _, tab in ipairs(tabs) do out[#out + 1] = "{ ID = " .. tab.ID .. " }" end
             return "{ " .. table.concat(out, ", ") .. " }"
         end
-        Emit("World.bank = { [0] = { tabs = " .. ids(tabs0) .. ", canView = " .. tostring(view0) .. " }, [2] = { tabs = "
-            .. ids(tabs2) .. ", canView = " .. tostring(view2) .. " } }")
+        local lk = locked and ", locked = 1" or ""
+        Emit("World.bank = { [0] = { tabs = " .. ids(tabs0) .. ", canView = " .. tostring(view0) .. lk .. " }, [2] = { tabs = "
+            .. ids(tabs2) .. ", canView = " .. tostring(view2) .. lk .. " } }")
     end
 end
 
@@ -446,7 +614,7 @@ local function BankContainers(kind)
     if kind == "character" then
         return Me().bank[TAB2] and { TAB1, TAB2 } or { TAB1 }
     end
-    return S.account[ACCOUNT_TAB] and { ACCOUNT_TAB } or {}
+    return AccountOf() and { ACCOUNT_TAB } or {}
 end
 
 local function PushBankViews()
@@ -457,13 +625,17 @@ end
 
 -- Checks ---------------------------------------------------------------------
 
+-- What is owned: the character's own (bags, bank, its account bank), what
+-- its alts could send it (their bags and banks without soulbound items),
+-- and what the client shows of the character's containers.
 local function Truths()
-    local me, other = Me(), S.chars[OtherName()]
+    local me = Me()
     local own, alt, shown = {}, {}, {}
     for _, container in pairs(me.bags) do AddCounts(own, container) end
     for _, container in pairs(me.bank) do AddCounts(own, container) end
-    for _, container in pairs(S.account) do AddCounts(own, container) end
-    if other then
+    if AccountOf() then AddCounts(own, AccountOf()) end
+    for _, who in ipairs(AltsOf()) do
+        local other = S.chars[who]
         for _, container in pairs(other.bags) do AddCounts(alt, container, true) end
         for _, container in pairs(other.bank) do AddCounts(alt, container, true) end
     end
@@ -517,21 +689,31 @@ local function BankTruth(kind, who)
     local truth = {}
     if kind == "character" then
         for _, container in pairs(S.chars[who or S.cur].bank) do AddCounts(truth, container) end
-    else
-        for _, container in pairs(S.account) do AddCounts(truth, container) end
+    elseif AccountOf(who) then
+        AddCounts(truth, AccountOf(who))
     end
     return truth
 end
 
--- What is remembered of a bank as it counts for the character being played:
--- the account bank only when the copy of the region is of this character's
--- world and faction (a copy read elsewhere is not counted here).
+-- What is remembered of a bank as it counts for that character (the one
+-- being played when none is named): the account bank only when the copy of
+-- the region is of the character's world and faction (a copy read elsewhere
+-- is not counted for it).
 local function Remembered(kind, who)
     local memory = S.addon.StockMemory
     if kind == "character" then return memory:OwnBank(GUID[who or S.cur]) end
+    local char = S.chars[who or S.cur]
     local items, at, doubt, world, faction = memory:AccountBank(REGION)
-    if world ~= WORLD_KEY or faction ~= "Horde" then return nil end
+    if world ~= char.world or faction ~= char.faction then return nil end
     return items, at, doubt
+end
+
+-- What is remembered of a bank whoever's read it is: the character's own, or
+-- the account bank's copy of the region (what a mark falls on).
+local function RegionCopy(kind, who)
+    local memory = S.addon.StockMemory
+    if kind == "character" then return memory:OwnBank(GUID[who or S.cur]) end
+    return memory:AccountBank(REGION)
 end
 
 -- For a shrunk script: what the two banks really hold now, as literals.
@@ -541,7 +723,7 @@ end
 
 local function Viewable(kind)
     if kind == "character" then return true end
-    return Me().view and S.account[ACCOUNT_TAB] ~= nil
+    return Me().view and AccountOf() ~= nil
 end
 
 local function InFlight()
@@ -566,13 +748,14 @@ local function JudgeVisit(v)
     if not v or v.judged then return end
     v.judged = true
     local _, _, charDoubt = Remembered("character", v.who)
-    local _, _, accountDoubt = Remembered("account")
+    local _, _, accountDoubt = Remembered("account", v.who)
     local ended = (v.marks.character > 0 and charDoubt == true) or (v.marks.account > 0 and accountDoubt == true)
     local class
     if v.moves == 0 then class = "glance"
     elseif v.hurried then class = "hurried"
     else class = "unhurried" end
-    if v.afterRise then class = class .. "+rise" elseif v.after then class = class .. "+after" end
+    if v.bankCraft then class = class .. "+bankcraft"
+    elseif v.afterRise then class = class .. "+rise" elseif v.after then class = class .. "+after" end
     local stat = S.stats.visits[class] or { n = 0, doubt = 0 }
     S.stats.visits[class] = stat
     stat.n = stat.n + 1
@@ -581,7 +764,7 @@ local function JudgeVisit(v)
         -- Was the mark needed? Not when what is remembered is what is there.
         local needed = false
         if v.marks.character > 0 and charDoubt and Compare(Remembered("character", v.who), BankTruth("character", v.who)) ~= "eq" then needed = true end
-        if v.marks.account > 0 and accountDoubt and Compare(Remembered("account"), BankTruth("account")) ~= "eq" then needed = true end
+        if v.marks.account > 0 and accountDoubt and Compare(Remembered("account", v.who), BankTruth("account", v.who)) ~= "eq" then needed = true end
         if needed then S.stats.doubtNeeded = S.stats.doubtNeeded + 1 else S.stats.doubtIdle = S.stats.doubtIdle + 1 end
         if WellBehaved(cfg) then
             local detail = string.format("visit of %d ms, %d changes, closed %s ms after the last one; marks: character=%s account=%s",
@@ -704,26 +887,30 @@ local function SettledChecks(meta)
         end
     end
     -- An alt's bank that is in doubt is left out too: the scan's third
-    -- return names the alt, and the Shopping tab has a line for it.
-    local other = S.chars[OtherName()]
-    if other then
-        local items, _, doubt = Remembered("character", OtherName())
-        if items and doubt then
-            local name, named = NAME[OtherName()], false
-            for _, listed in ipairs(meta.altBanksInDoubt or {}) do
-                if listed == name then named = true end
+    -- return names exactly those alts, by name, and the Shopping tab has a
+    -- line that names them.
+    local expected = {}
+    for _, who in ipairs(AltsOf()) do
+        local items, _, doubt = Remembered("character", who)
+        if items and doubt then expected[#expected + 1] = NAME[who] end
+    end
+    table.sort(expected)
+    local listed = meta.altBanksInDoubt or {}
+    local same = #listed == #expected
+    for i = 1, #expected do
+        if listed[i] ~= expected[i] then same = false end
+    end
+    if not same then
+        Violate("I2.alt", "alts whose bank is in doubt: {" .. table.concat(expected, ",") .. "}, the scan names {"
+            .. table.concat(listed, ",") .. "}", { cause = Cause() })
+    elseif #expected > 0 then
+        local line = ShoppingLine(meta)
+        for _, name in ipairs(expected) do
+            if not line:find(name, 1, true) then
+                Violate("I2.alt", "the bank of " .. name .. " is in doubt and left out; the Shopping tab starts with: " .. line,
+                    { cause = Cause() })
             end
-            if not named then
-                Violate("I2.alt", "the other character's bank is in doubt and left out; the scan's third return does not name it", { cause = Cause() })
-            elseif not ShoppingLine(meta):find("The bank of " .. name .. " is not counted", 1, true) then
-                Violate("I2.alt", "the other character's bank is in doubt and left out; the Shopping tab starts with: "
-                    .. ShoppingLine(meta), { cause = Cause() })
-            end
-        elseif meta.altBanksInDoubt ~= nil then
-            Violate("I2.alt", "the scan names an alt whose bank is not in doubt", { cause = Cause() })
         end
-    elseif meta.altBanksInDoubt ~= nil then
-        Violate("I2.alt", "the scan names an alt, and there is no other character", { cause = Cause() })
     end
     -- The model itself: with nothing on its way the client shows the truth.
     if InFlight() == 0 then
@@ -826,7 +1013,10 @@ end
 local function BagUpdate(container)
     Emit("upd(" .. container .. ")")
     Guard("BAG_UPDATE", World.bagUpdate, S.addon, container)
-    if not KindOf(container) then S.lastBagUpdateMs = S.now end
+    if not KindOf(container) then
+        S.lastBagUpdateMs = S.now
+        S.bagsCompared = true
+    end
     S.updatesSince = S.updatesSince + 1
     Touched()
     Observe("mid")
@@ -888,11 +1078,25 @@ Process = function(d)
                 Dirty(set.c, set.s, -1)
             end
         end
-        for container in pairs(touched) do PushView(container) end
+        -- The slots of this container that the move locked are unlocked
+        -- with its update (an opening has unlocked a bank's already).
+        for _, key in ipairs(d.unlock or {}) do
+            if (S.locks[key] or 0) > 0 and not (KindOf(floor(key / 100)) and d.epoch ~= S.epoch) then
+                S.locks[key] = S.locks[key] - 1
+                touched[floor(key / 100)] = true
+            end
+        end
+        for container in pairs(touched) do
+            if S.shown[container] then PushView(container) end
+        end
         -- The client shows the move now: a visit is judged by how long
         -- after this it ended (see CloseNotice).
         if S.visit and d.epoch == S.epoch then S.visit.lastMoveMs = S.now end
-        for _ = 1, d.rep or 1 do BagUpdate(d.c) end
+        if cfg.drop and KindOf(d.c) and not S.bankOpen then
+            Emit("-- (the update of bank container " .. d.c .. " is not sent: the window is closed)")
+        else
+            for _ = 1, d.rep or 1 do BagUpdate(d.c) end
+        end
         if d.chain then
             d.chain.at = S.now + d.chainGap
             local chain = d.chain
@@ -905,6 +1109,14 @@ Process = function(d)
         S.updatesSince = 0
     elseif d.kind == "idle" then
         BagUpdate(d.c)
+    elseif d.kind == "unlock" then
+        -- The bank can be read again (switch 8); nothing says so.
+        if d.epoch == S.epoch and S.locked then
+            S.locked = false
+            S.unlockMs = S.now
+            PushBank()
+            Touched()
+        end
     elseif d.kind == "arrive" then
         -- The bank's items are all there now (switch 4).
         if d.epoch == S.epoch and S.bankOpen and S.mask[d.bank] ~= "full" then
@@ -1034,17 +1246,21 @@ end
 local function Login(who, a)
     S.cur = who
     local me = Me()
-    World.guid, World.name, World.faction = GUID[who], NAME[who], "Horde"
-    Emit("World.guid, World.name = \"" .. GUID[who] .. "\", \"" .. NAME[who] .. "\"")
-    S.shown, S.dirty, S.queue, S.arrived = {}, {}, {}, {}
+    World.guid, World.name, World.faction = GUID[who], NAME[who], me.faction
+    World.rules = {}
+    for rule, on in pairs(RULES[me.world]) do World.rules[rule] = on end
+    Emit("World.guid, World.name, World.faction = \"" .. GUID[who] .. "\", \"" .. NAME[who] .. "\", \"" .. me.faction .. "\"")
+    Emit("World.rules = { " .. (me.world == "eu-pvp" and "[213] = true" or "") .. " }")
+    S.shown, S.dirty, S.queue, S.arrived, S.locks = {}, {}, {}, {}, {}
     S.mask = { character = "empty", account = "empty" }
-    S.bankOpen, S.refused, S.epoch = false, false, S.epoch + 1
+    S.bankOpen, S.refused, S.locked, S.epoch = false, false, false, S.epoch + 1
+    S.visitedThisSession = false
     S.bagsHidden = (a.bagsLate or 0) > 0
     World.containers = {}
     Emit("World.containers = {}")
     for container, truth in pairs(me.bags) do S.shown[container] = CopyContainer(truth) end
     for container, truth in pairs(me.bank) do S.shown[container] = CopyContainer(truth) end
-    for container, truth in pairs(S.account) do S.shown[container] = CopyContainer(truth) end
+    if AccountOf() then S.shown[ACCOUNT_TAB] = CopyContainer(AccountOf()) end
     for _, container in ipairs({ BACKPACK, BAG, TAB1, TAB2, ACCOUNT_TAB }) do
         if S.shown[container] then PushView(container) end
     end
@@ -1077,7 +1293,11 @@ local function Login(who, a)
         end
         return new
     end
-    S.visit, S.lastVisit, S.closeMs = nil, nil, nil
+    -- A mark the comparison with the last session's note sets belongs to the
+    -- visit that ended that session: it is judged with it.
+    S.visit, S.lastVisit, S.closeMs = nil, me.pendingVisit, nil
+    me.pendingVisit = nil
+    S.bagsCompared = false
     S.lastArrival = nil
     S.loginMs = S.now
     S.updatesSince = 0
@@ -1087,6 +1307,11 @@ local function Login(who, a)
         Enqueue({ at = S.now + a.bagsLate, kind = "bags", ev = true })
     elseif a.loginUpd then
         for _, container in ipairs({ BACKPACK, BAG }) do BagUpdate(container) end
+    end
+    -- A client that sends bank-container updates that change nothing does
+    -- so at login too, while it loads them (switch 9).
+    if cfg.bankIdle and a.idleAtLogin then
+        for _, ms in ipairs(a.idleAtLogin) do Enqueue({ at = S.now + ms, kind = "idle", c = TAB1 }) end
     end
 end
 
@@ -1098,7 +1323,7 @@ local function Usable(container, index)
     if (S.dirty[container * 100 + index] or 0) ~= 0 then return false end
     local kind = KindOf(container)
     if kind then
-        if not S.bankOpen then return false end
+        if not S.bankOpen or S.locked then return false end
         if kind == "account" and not Me().view then return false end
         local mask = S.mask[kind]
         if mask == "full" then return true end
@@ -1130,43 +1355,78 @@ end
 -- close: what was used up first does not hide what arrives after it.
 -- Such a visit is filed as "+rise" and is no failure; any other change of
 -- the bags in that second ("+after": a count that fell, an item no
--- remembered bank holds) must leave no mark.
+-- remembered bank holds) must leave no mark. The second is the scanner's:
+-- up to and with 1001 ms after the close (its watch has a millisecond of
+-- slack for timers).
 local function NoteChange(counts)
     local v = S.visit
     if v then
         v.moves = v.moves + 1
         v.lastMoveMs = S.now
-    elseif counts and S.lastVisit and S.closeMs and S.now - S.closeMs <= 1000 then
+    elseif counts and S.lastVisit and S.lastVisit.atEnd and not S.bagsCompared and S.now - S.loginMs <= 2000 then
+        -- The same in a new session before its bags are compared with the
+        -- note the last one left at the bank (rule 5c): a rise of an item
+        -- a bank of that visit holds marks it, whatever brought it.
         local last = S.lastVisit
-        local least = last.bagsAtClose or {}
-        local now, rose = ShownBags(), false
+        local now = ShownBags()
         for _, kind in ipairs({ "character", "account" }) do
             local held = Remembered(kind, last.who)
             for _, id in ipairs(ALL_ITEMS) do
-                if (now[id] or 0) > (least[id] or 0) and held and (held[id] or 0) > 0 then rose = true end
+                if (now[id] or 0) > (last.atEnd[id] or 0) and held and (held[id] or 0) > 0 then last.afterRise = true end
+            end
+        end
+    elseif counts and S.lastVisit and S.closeMs and S.now - S.closeMs <= 3034 then
+        -- The watch is the scanner's: a second, and three for a bank that
+        -- could not be looked at for a move on its way at the close. A
+        -- comparison asked for by a carried bag's update inside it is made
+        -- on the next frame and sees what changed until then.
+        local last = S.lastVisit
+        local least = last.bagsAtClose or {}
+        local now, rose, watched = ShownBags(), false, false
+        for _, kind in ipairs({ "character", "account" }) do
+            local window = (last.blind and last.blind[kind]) and 3001 or 1001
+            local due = S.lastBagUpdateMs ~= nil and S.lastBagUpdateMs >= S.closeMs and S.lastBagUpdateMs - S.closeMs <= window
+                and S.now - S.lastBagUpdateMs <= 33
+            if S.now - S.closeMs <= window or due then
+                watched = true
+                local held = RegionCopy(kind, last.who)
+                for _, id in ipairs(ALL_ITEMS) do
+                    if (now[id] or 0) > (least[id] or 0) and held and (held[id] or 0) > 0 then rose = true end
+                end
             end
         end
         for _, id in ipairs(ALL_ITEMS) do
             if (now[id] or 0) < (least[id] or 0) then least[id] = now[id] or 0 end
         end
-        if rose then last.afterRise = true else last.after = true end
+        if rose then last.afterRise = true elseif watched then last.after = true end
     end
 end
 
 -- When the answer of a move asked for now arrives: `lat` ms from now, never
 -- before the answer of an earlier move (the server answers in order), and -
 -- with its second update `gap` ms behind the first - never more than a
--- second from now. An answer is handled in the first frame at or after its
--- time, so the latest time is a frame (33 ms at most here) short of the
--- second: whatever closes after the click, the answer is heard within a
--- second of it. Returns the first update's time and the gap in force.
-local LATEST = 1000 - 40
+-- second from now (2.5 s on a client with lag spikes). An answer is handled
+-- in the first frame at or after its time, so the latest time is a frame
+-- (33 ms at most here) short of that. Returns the first update's time and
+-- the gap in force.
+local function Latest()
+    return (cfg.latency == "lag" and 2500 or 1000) - 40
+end
 local function Arrival(lat, gap)
+    local latest = Latest()
     local at = max(S.now + lat, S.lastArrival or 0)
-    if at > S.now + LATEST then at = S.now + LATEST end
-    gap = min(gap or 0, S.now + LATEST - at)
+    if at > S.now + latest then at = S.now + latest end
+    gap = min(gap or 0, S.now + latest - at)
     S.lastArrival = at + gap
     return at, gap
+end
+
+-- A move locks the slots it involves from the click until the update of
+-- their own container arrives (the client greys them meanwhile).
+local function Lock(container, index)
+    local key = container * 100 + index
+    S.locks[key] = (S.locks[key] or 0) + 1
+    return key
 end
 
 local OPS = {}
@@ -1214,16 +1474,23 @@ function OPS.move(a)
     local dstSet = { c = a.dc, s = a.ds, item = CopyItem(to[a.ds]) }
     Dirty(a.sc, a.ss, 1)
     Dirty(a.dc, a.ds, 1)
+    local srcLock, dstLock = Lock(a.sc, a.ss), Lock(a.dc, a.ds)
+    PushView(a.sc)
+    if a.dc ~= a.sc then PushView(a.dc) end
     local at, gap = Arrival(a.lat, a.gap)
     local bankMove = KindOf(a.sc) ~= nil or KindOf(a.dc) ~= nil
+    S.moves = S.moves + 1
     if a.sc == a.dc then
-        Enqueue({ at = at, kind = "upd", c = a.sc, sets = { srcSet, dstSet }, bank = bankMove })
+        Enqueue({ at = at, kind = "upd", c = a.sc, sets = { srcSet, dstSet }, bank = bankMove, unlock = { srcLock, dstLock },
+                  move = S.moves })
         return
     end
     local firstSet, secondSet = srcSet, dstSet
     if a.first == "dst" then firstSet, secondSet = dstSet, srcSet end
-    local d1 = { at = at, kind = "upd", c = firstSet.c, sets = { firstSet }, bank = bankMove }
-    local d2 = { at = at, kind = "upd", c = secondSet.c, sets = { secondSet }, bank = bankMove }
+    local d1 = { at = at, kind = "upd", c = firstSet.c, sets = { firstSet }, bank = bankMove,
+                 unlock = { firstSet == srcSet and srcLock or dstLock }, move = S.moves }
+    local d2 = { at = at, kind = "upd", c = secondSet.c, sets = { secondSet }, bank = bankMove,
+                 unlock = { secondSet == srcSet and srcLock or dstLock }, move = S.moves }
     if a.atomic then
         d1.sets, d2.sets = { firstSet, secondSet }, {}
     end
@@ -1264,18 +1531,22 @@ function OPS.sort(a)
         if x.id ~= y.id then return x.id < y.id end
         return x.n > y.n
     end)
-    local sets = {}
+    local sets, locks = {}, {}
     for index = 1, truth.slots do
         local before, after = truth[index], stacks[index]
         if (before and before.id) ~= (after and after.id) or (before and before.n) ~= (after and after.n) then
             truth[index] = CopyItem(after)
             sets[#sets + 1] = { c = a.c, s = index, item = CopyItem(after) }
             Dirty(a.c, index, 1)
+            locks[#locks + 1] = Lock(a.c, index)
         end
     end
     if #sets == 0 then return end
+    PushView(a.c)
     NoteChange()
-    Enqueue({ at = (Arrival(a.lat, 0)), kind = "upd", c = a.c, sets = sets, rep = a.rep, bank = KindOf(a.c) ~= nil })
+    S.moves = S.moves + 1
+    Enqueue({ at = (Arrival(a.lat, 0)), kind = "upd", c = a.c, sets = sets, rep = a.rep, bank = KindOf(a.c) ~= nil, unlock = locks,
+              move = S.moves })
 end
 
 -- Put n of an item into the carried bags, at once (the client's answer and
@@ -1361,6 +1632,57 @@ function OPS.zone()
     BagUpdate(BAG)
 end
 
+-- The bank is locked for a moment (switch 8): its reads are refused until
+-- it ends, and nothing says when that is.
+function OPS.lock(a)
+    if not cfg.lock or not S.bankOpen or S.locked then return end
+    S.locked = true
+    PushBank()
+    Touched()
+    Enqueue({ at = S.now + a.ms, kind = "unlock" })
+end
+
+-- The bank containers the client reports to this character: its own bank's,
+-- and the account bank's when it may view it.
+local function SeenBankContainers()
+    local list = {}
+    for _, container in ipairs(BankContainers("character")) do list[#list + 1] = container end
+    if Me().view then
+        for _, container in ipairs(BankContainers("account")) do list[#list + 1] = container end
+    end
+    return list
+end
+
+-- An update of a bank container that changes nothing (switch 9).
+function OPS.bankidle(a)
+    if not cfg.bankIdle then return end
+    local list = SeenBankContainers()
+    BagUpdate(list[(a.k or 1) % #list + 1])
+end
+
+-- A craft takes reagents from the closed bank (habit craftFromBank): the
+-- bank's count of an item falls, and its container reports it.
+function OPS.craftbank(a)
+    if S.bankOpen or S.bagsHidden or not S.habits.craftFromBank then return end
+    if not S.habits.craftFromBankAtLogin and not S.visitedThisSession and S.now - S.loginMs < 10500 then return end
+    local list = SeenBankContainers()
+    local container = list[(a.k or 1) % #list + 1]
+    local truth = TruthOf(container)
+    for index = 1, truth.slots do
+        local item = truth[index]
+        if item and not item.bound and (S.dirty[container * 100 + index] or 0) == 0 then
+            local n = min(a.n, item.n)
+            item.n = item.n - n
+            if item.n == 0 then truth[index] = nil end
+            if S.shown[container] then S.shown[container][index] = CopyItem(truth[index]) end
+            PushView(container)
+            if S.lastVisit and S.lastVisit.who == S.cur then S.lastVisit.bankCraft = true end
+            BagUpdate(container)
+            return
+        end
+    end
+end
+
 -- A tab is bought at the banker: the character bank's second, or the account
 -- bank's first. That changes the bank (its slot count), so for judging the
 -- visit it counts like a move: a visit closed right after it was hurried.
@@ -1377,10 +1699,10 @@ function OPS.buytab(a)
         PushView(TAB2)
         Fire("BANK_TABS_CHANGED", 0)
     else
-        if S.account[ACCOUNT_TAB] or not me.view then return end
+        if AccountOf() or not me.view then return end
         NoteChange()
         S.visit.tabBought = true
-        S.account[ACCOUNT_TAB] = { slots = 5 }
+        S.account[ScopeKey(me)] = { slots = 5 }
         S.shown[ACCOUNT_TAB] = { slots = 5 }
         PushBank()
         PushView(ACCOUNT_TAB)
@@ -1398,16 +1720,21 @@ function OPS.open(a)
     -- cannot come after the bank's contents of this opening.
     while S.queue[1] do Process(table.remove(S.queue, 1)) end
     BatchEnd()
+    S.lastArrival = nil
     local me = Me()
-    S.bankOpen, S.openMs, S.refused = true, S.now, false
+    S.bankOpen, S.openMs, S.refused, S.locked = true, S.now, false, false
     S.epoch = S.epoch + 1
     me.visited = true
+    S.visitedThisSession = true
     -- The opening shows the bank as it is; a bank's part of an answer still
-    -- on its way is void.
+    -- on its way is void, and so are its locks.
     for _, kind in ipairs({ "character", "account" }) do
         for _, container in ipairs(BankContainers(kind)) do
             S.shown[container] = CopyContainer(TruthOf(container))
-            for index = 1, S.shown[container].slots do S.dirty[container * 100 + index] = nil end
+            for index = 1, S.shown[container].slots do
+                S.dirty[container * 100 + index] = nil
+                S.locks[container * 100 + index] = nil
+            end
         end
     end
     local mode = cfg.open
@@ -1426,8 +1753,10 @@ function OPS.open(a)
                     S.arrived[container] = arrived
                 end
             end
-            Enqueue({ at = S.now + (kind == "character" and a.arrive1 or a.arrive2), kind = "arrive", bank = kind,
-                      ev = (mode == "late" or mode == "partial") })
+            local slow = mode == "slow" or mode == "slowSilent"
+            local after = kind == "character" and a.arrive1 or a.arrive2
+            if slow then after = kind == "character" and a.slow1 or a.slow2 end
+            Enqueue({ at = S.now + after, kind = "arrive", bank = kind, ev = (mode == "late" or mode == "partial" or mode == "slow") })
         end
     end
     PushBank()
@@ -1478,6 +1807,26 @@ local function CloseNotice(a, event)
         S.mask.character, S.mask.account = "noslots", "noslots"
         PushBankViews()
     end
+    -- Which banks the closing notice cannot look at for a move on its way
+    -- (as the adapter sees them: not readable now, or showing no item while
+    -- items of them are remembered).
+    v.blind = {}
+    for _, kind in ipairs({ "character", "account" }) do
+        local info = World.bank[kind == "character" and 0 or 2]
+        if Viewable(kind) and info then
+            local slots, occupied = 0, 0
+            for _, tab in ipairs(info.tabs or {}) do
+                local container = World.containers[tab.ID]
+                slots = slots + (container and container.slots or 0)
+                for index = 1, container and container.slots or 0 do
+                    if container[index] then occupied = occupied + 1 end
+                end
+            end
+            local remembered = RegionCopy(kind)
+            local readable = info.canView ~= false and not info.locked and slots > 0
+            v.blind[kind] = not readable or (occupied == 0 and remembered ~= nil and next(remembered) ~= nil)
+        end
+    end
     if event then
         Fire(event)
         if a.twice then Fire(event) end
@@ -1486,24 +1835,58 @@ local function CloseNotice(a, event)
     S.lastVisit, S.visit = v, nil
     S.mask.character, S.mask.account = "empty", "empty"
     S.arrived = {}
+    S.locked = false
     if not event then return end
     S.refused = false
     PushBank()
     PushBankViews()
 end
 
--- leaveEarly (see ALSO): the visit would end before the whole of a partly
--- shown bank has been read.
+-- closeBetweenHalves (see ALSO): the client will not report a bank
+-- container's part of a move once the window is closed, and a move is on
+-- its way none of whose locks can be seen at this moment: what is left of
+-- its answer goes into slots that were empty (an empty slot shows no lock),
+-- or into a bank that cannot be read now.
+local function BetweenHalves()
+    if not cfg.drop then return false end
+    local bankReadable = cfg.closeRead == "readable" and not S.locked and not cfg.letgo
+    local seen = {}
+    local function look(d)
+        if d.kind ~= "upd" or not d.move then return end
+        if seen[d.move] == nil then seen[d.move] = false end
+        for _, key in ipairs(d.unlock or {}) do
+            local container, index = floor(key / 100), key % 100
+            if (not KindOf(container) or bankReadable) and S.shown[container] and S.shown[container][index] then
+                seen[d.move] = true
+            end
+        end
+        if d.chain then look(d.chain) end
+    end
+    for _, d in ipairs(S.queue) do look(d) end
+    for _, visible in pairs(seen) do
+        if not visible then return true end
+    end
+    return false
+end
+
+-- leaveEarly (see ALSO): the visit would end before the whole of a bank
+-- shown late or in part has been read - before the look two seconds after
+-- the opening, or while the bank is locked, or before a read can have come
+-- after the lock ended.
 local function LeavesEarly(a)
-    if S.habits.leaveEarly or a.tail or not S.bankOpen then return false end
-    if cfg.open ~= "partial" and cfg.open ~= "partialSilent" then return false end
-    return S.now - S.openMs < 2100 or S.mask.character == "partial" or S.mask.account == "partial"
+    if S.habits.leaveEarly or a.tail or not S.bankOpen or cfg.open == "all" then return false end
+    if (cfg.open == "partial" or cfg.open == "partialSilent")
+            and (S.now - S.openMs < 2100 or S.mask.character == "partial" or S.mask.account == "partial") then
+        return true
+    end
+    return S.locked or (S.unlockMs ~= nil and S.unlockMs >= S.openMs and S.now - S.unlockMs < 600)
 end
 
 function OPS.close(a)
     if not S.bankOpen then return end
     if not S.habits.closeMidMove and InFlight() > 0 and not a.tail then return end
     if LeavesEarly(a) then return end
+    if not S.habits.closeBetweenHalves and BetweenHalves() and not a.tail then return end
     if cfg.idle and a.idleBefore then BagUpdate(BACKPACK) end
     CloseNotice(a, "BANKFRAME_CLOSED")
     if cfg.idle and a.idleAfter then
@@ -1523,6 +1906,10 @@ function OPS.logout(a)
         return
     end
     if not S.habits.logoutAfterClose and not S.bankOpen and S.closeMs and S.now - S.closeMs <= 1100 and not a.tail then return end
+    if S.bankOpen and not S.habits.closeBetweenHalves and BetweenHalves() and not a.tail then return end
+    -- A session that ends at the bank leaves a note; the comparison with it
+    -- in the character's next session may mark the banks of this visit.
+    local atBank = S.bankOpen or (S.closeMs ~= nil and S.now - S.closeMs <= 10001)
     if S.bankOpen then
         CloseNotice(a, a.closeFirst and "BANKFRAME_CLOSED" or nil)
     end
@@ -1539,14 +1926,22 @@ function OPS.logout(a)
             Fire("PLAYER_LOGOUT")
         end
     end
-    JudgeVisit(S.lastVisit)
+    if atBank and S.lastVisit and not S.lastVisit.judged then
+        Me().pendingVisit = S.lastVisit
+        S.lastVisit.atEnd = ShownBags()
+    else
+        JudgeVisit(S.lastVisit)
+    end
     for key, e in pairs(S.episodes) do
         FinishEpisode(e, "the logout")
         S.episodes[key] = nil
     end
     S.followUp, S.follows = false, 0
     local who = S.cur
-    if a.next == "other" and S.chars[OtherName()] then who = OtherName() end
+    if a.next == "other" and #Others() > 0 then
+        local list = Others()
+        who = list[((a.pick or 1) - 1) % #list + 1]
+    end
     NewFrame(S.now + max(16, a.away or 3000))
     S.flushed = true
     Login(who, a)
@@ -1578,15 +1973,17 @@ local function Timing(a, rng)
         a.lat = rng.chance(0.6) and 0 or rng.pick({ 8, 16, 33 })
     elseif cfg.latency == "short" then
         a.lat = rng.int(20, 300)
-    else
+    elseif cfg.latency == "long" then
         a.lat = rng.chance(0.25) and rng.int(20, 300) or rng.int(300, 1000)
+    else
+        a.lat = rng.chance(0.5) and rng.int(20, 300) or rng.int(300, 2500)
     end
     if cfg.spread == "apart" or cfg.spread == "late" then
         a.gap = rng.chance(0.7) and rng.pick({ 1, 16, 33, 50 }) or rng.int(60, 200)
     else
         a.gap = 0
     end
-    if a.lat + a.gap > LATEST then a.lat = LATEST - a.gap end
+    if a.lat + a.gap > Latest() then a.lat = Latest() - a.gap end
     a.atomic = cfg.spread == "same" or cfg.spread == "late"
 end
 
@@ -1651,10 +2048,10 @@ end
 
 local function GenLogout(rng)
     local other = rng.chance(0.5)
-    return { op = "logout", next = other and "other" or "same", closeFirst = rng.chance(0.5), twice = rng.chance(0.3),
+    return { op = "logout", next = other and "other" or "same", pick = rng.int(1, 3), closeFirst = rng.chance(0.5), twice = rng.chance(0.3),
              idle = rng.chance(0.5), away = other and rng.pick({ 5000, 60000, 3600000, 10800000 }) or rng.int(2000, 6000),
              loginUpd = rng.chance(0.7), bagsLate = rng.chance(0.15) and rng.int(100, 1500) or 0,
-             letgoBatch = rng.chance(0.5) }
+             letgoBatch = rng.chance(0.5), idleAtLogin = rng.chance(0.6) and { rng.int(1, 3000), rng.int(1, 3000) } or nil }
 end
 
 local function GenAction(rng, habits)
@@ -1690,6 +2087,8 @@ local function GenAction(rng, habits)
             end
         elseif roll <= 790 then
             a = GenWait(rng)
+            if cfg.lock and rng.chance(0.25) then a = { op = "lock", ms = rng.int(100, 2000) } end
+            if cfg.bankIdle and rng.chance(0.2) then a = { op = "bankidle", k = rng.int(1, 4) } end
         elseif roll <= 830 then
             a = { op = "loot", id = rng.pick(ITEMS), n = rng.int(1, 5) }
         elseif roll <= 880 then
@@ -1708,7 +2107,8 @@ local function GenAction(rng, habits)
         local watch = S.closeMs and S.now - S.closeMs <= 1100
         local canChange = habits.afterCloseChange or not watch
         if roll <= 330 then
-            a = { op = "open", arrive1 = rng.int(100, 1500), arrive2 = rng.int(100, 1500), pseed = rng.int(1, 100000) }
+            a = { op = "open", arrive1 = rng.int(100, 1500), arrive2 = rng.int(100, 1500), pseed = rng.int(1, 100000),
+                  slow1 = rng.int(2100, 4000), slow2 = rng.int(100, 4000) }
         elseif roll <= 430 then
             if canChange then a = { op = "loot", id = rng.pick(ITEMS), n = rng.int(1, 5) } end
         elseif roll <= 510 then
@@ -1717,8 +2117,11 @@ local function GenAction(rng, habits)
             end
         elseif roll <= 570 then
             if canChange then a = GenMove(rng, "bags", "bags", habits) end
+        elseif roll <= 620 then
+            if habits.craftFromBank then a = { op = "craftbank", k = rng.int(1, 4), n = rng.int(1, 3) } end
         elseif roll <= 800 then
             a = GenWait(rng)
+            if cfg.bankIdle and rng.chance(0.2) then a = { op = "bankidle", k = rng.int(1, 4) } end
         elseif roll <= 850 then
             if canLogout then a = GenLogout(rng) end
         elseif roll <= 920 then
@@ -1786,6 +2189,12 @@ local function Describe(a)
         text = "the client sends an idle update of " .. CONTAINER_NAME[a.c]
     elseif a.op == "zone" then
         text = "zone change: idle updates of the carried bags"
+    elseif a.op == "lock" then
+        text = "the bank is locked for " .. a.ms .. " ms"
+    elseif a.op == "bankidle" then
+        text = "the client sends an update of a bank container that changes nothing"
+    elseif a.op == "craftbank" then
+        text = "craft: " .. a.n .. " taken from a closed bank's container"
     else
         text = a.op
     end
@@ -1834,7 +2243,7 @@ local function NewWalk(config, init, opts)
     S = {
         chars = nil, account = nil, cur = "A",
         now = 1000, frameNo = 0, flushed = true, serverBase = 20000 * 86400 + 3600,
-        queue = {}, seq = 0, epoch = 0, dirty = {}, shown = {}, arrived = {}, mask = {},
+        queue = {}, seq = 0, epoch = 0, dirty = {}, shown = {}, arrived = {}, mask = {}, locks = {}, moves = 0,
         saved = {}, violations = {}, episodes = {}, step = 0, sessions = 0,
         lastEvent = 1000, settleChecked = false, activity = false, followUp = false, follows = 0,
         updatesSince = 0, errorsSeen = 0, loginMs = 1000,
@@ -1859,6 +2268,10 @@ local function EndWalk()
     end
     EndFrame(true)
     JudgeVisit(S.lastVisit)
+    for _, who in ipairs(WHO) do
+        local char = S.chars[who]
+        if char and char.pendingVisit then JudgeVisit(char.pendingVisit) end
+    end
     for key, e in pairs(S.episodes) do
         FinishEpisode(e, "the end of the walk")
         S.episodes[key] = nil
@@ -2467,9 +2880,10 @@ if MODE == "shrink" then
 end
 
 -- ===========================================================================
--- The suite: three fixed samples of client configurations, seeds and players.
+-- The suite: three samples of client configurations, seeds and players.
 -- ===========================================================================
 local steps = tonumber(os.getenv("STOCKFUZZ_STEPS") or "120")
+local LIST = os.getenv("STOCKFUZZ_LIST") == "1"   -- print every failure, a line each
 local found, examples = {}, {}
 local walks, totalSteps, scans = 0, 0, 0
 
@@ -2487,9 +2901,13 @@ local function run(config, seed, habits, keep)
     totalSteps = totalSteps + walk.stats.steps
     scans = scans + walk.stats.scans
     for _, v in ipairs(walk.violations) do
-        local kept = not keep or keep(v.kind, config)
+        -- What a decided client behaviour leads to is filed under its name.
+        local kept = DecidedName(v.kind, config) or (not keep or keep(v.kind, config))
         if kept then
             local kind = type(kept) == "string" and kept or v.kind
+            if LIST and not kind:find("^I1h") and not kind:find(":") then
+                print(string.format("FAILURE\t%s\t%s\t%d\t%s\t%s\t%s", kind, Key(config), seed, v.step, tostring(v.cause), tostring(v.detail)))
+            end
             found[kind] = (found[kind] or 0) + 1
             examples[kind] = examples[kind]
                 or (Key(config) .. " seed " .. seed .. " step " .. v.step .. ": " .. tostring(v.detail) .. " [" .. tostring(v.cause) .. "]")
@@ -2525,7 +2943,8 @@ end
 -- that asked for it, whoever asked (an event or another timer), and runs in
 -- the first frame at or after its mark.
 do
-    NewWalk(Combo(0), { chars = { A = { bags = { [BACKPACK] = { slots = 6 }, [BAG] = { slots = 4 } }, bank = { [TAB1] = { slots = 6 } }, view = true } },
+    NewWalk(Combo(0), { chars = { A = { bags = { [BACKPACK] = { slots = 6 }, [BAG] = { slots = 4 } }, bank = { [TAB1] = { slots = 6 } }, view = true,
+                                        world = "eu-pvp", faction = "Horde" } },
                         account = {} }, { density = "step" })
     World.timers = {}
     local ran = {}
@@ -2555,16 +2974,27 @@ do
         table.concat(ran, ","))
 end
 
--- Sample 1, any player: every well-behaved client twice, every 41st and every
--- 61st of the others once.
-for index = 0, ComboCount() - 1 do
-    local config = Combo(index)
-    if WellBehaved(config) then
-        run(config, 1)
-        run(config, 2)
-    elseif index % 41 == 0 or index % 61 == 0 then
-        run(config, 1)
-    end
+-- The samples are drawn by the file's own generator from a fixed seed: the
+-- same configurations on every run. A client switch that is free in a
+-- sample takes each of its values about equally often.
+local pick = Rng(tonumber(os.getenv("STOCKFUZZ_PICK") or "20261124"))
+local WELL_BEHAVED = { closeRead = { "readable" }, letgo = { false }, open = { "all" }, latency = { "none", "short" },
+                       spread = { "same", "split" }, lock = { false }, bankIdle = { false } }
+local SAMPLE_WB = tonumber(os.getenv("STOCKFUZZ_SAMPLE_WB") or "200")
+local SAMPLE_ANY = tonumber(os.getenv("STOCKFUZZ_SAMPLE_ANY") or "250")
+local SAMPLE_CAREFUL = tonumber(os.getenv("STOCKFUZZ_SAMPLE_CAREFUL") or "90")
+local SAMPLE_HASTY = tonumber(os.getenv("STOCKFUZZ_SAMPLE_HASTY") or "60")
+
+-- Sample 1, any player (STOCKFUZZ_HABITS / STOCKFUZZ_ALSO change it): well-
+-- behaved clients, and clients of any kind.
+local anyPlayer = Habits()
+for i = 1, SAMPLE_WB do
+    run(RandomCombo(pick, WELL_BEHAVED), i, anyPlayer)
+end
+for i = 1, SAMPLE_ANY do
+    local config
+    repeat config = RandomCombo(pick) until not WellBehaved(config)
+    run(config, i, anyPlayer)
 end
 
 -- Sample 2, a careful player: one who does not log out or close while an
@@ -2575,17 +3005,9 @@ local careful = {}
 for name, value in pairs(DEFAULT_HABITS) do careful[name] = value end
 careful.logoutMidMove, careful.closeMidMove, careful.bankToBank, careful.emptyBags = false, false, false, false
 local CHECKED = { "sanity.", "I1.settled.", "I1.latent.", "I1.multi.", "I1.frame.", "I1.mid.", "I2.", "I3.", "I3x.", "I4.", "I5." }
-do
-    local n = 0
-    for index = 0, ComboCount() - 1 do
-        local config = Combo(index)
-        if config.spread == "same" or config.spread == "late" then
-            n = n + 1
-            if n % 23 == 0 then
-                run(config, 2, careful, function(kind) return startsWith(kind, unpack(CHECKED)) and ("careful." .. kind) end)
-            end
-        end
-    end
+for i = 1, SAMPLE_CAREFUL do
+    run(RandomCombo(pick, { spread = { "same", "late" } }), 1000 + i, careful,
+        function(kind) return startsWith(kind, unpack(CHECKED)) and ("careful." .. kind) end)
 end
 
 -- Sample 3, the same player, but one who closes the bank while an answer is
@@ -2595,17 +3017,9 @@ end
 local hasty = {}
 for name, value in pairs(careful) do hasty[name] = value end
 hasty.closeMidMove, hasty.afterCloseChange, hasty.logoutAfterClose = true, false, false
-do
-    local n = 0
-    for index = 0, ComboCount() - 1 do
-        local config = Combo(index)
-        if config.spread == "same" then
-            n = n + 1
-            if n % 19 == 0 then
-                run(config, 3, hasty, function(kind) return startsWith(kind, unpack(CHECKED)) and ("hasty." .. kind) end)
-            end
-        end
-    end
+for i = 1, SAMPLE_HASTY do
+    run(RandomCombo(pick, { spread = { "same" } }), 2000 + i, hasty,
+        function(kind) return startsWith(kind, unpack(CHECKED)) and ("hasty." .. kind) end)
 end
 
 print(string.format("%d walks, %d actions, %d scans", walks, totalSteps, scans))
