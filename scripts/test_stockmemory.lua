@@ -709,14 +709,14 @@ T.section("saved data that is not what the addon wrote", function()
         { "bags is a number", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags = 5; return r end)() }, account = {} }, 0 },
         { "bags without items", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags = { at = 1 }; return r end)() }, account = {} }, 0 },
         { "bags.items is a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.items = "x"; return r end)() }, account = {} }, 0 },
-        { "bound is a number", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.bound = 3; return r end)() }, account = {} }, 20 },
+        { "bound is a number", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.bound = 3; return r end)() }, account = {} }, 0 },
         { "a count that is a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.items[2589] = "abc"; return r end)() }, account = {} }, 0 },
         { "a count that is negative", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.items[2589] = -50; return r end)() }, account = {} }, 0 },
         { "a count that is true", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.items[2589] = true; return r end)() }, account = {} }, 0 },
         { "a count that is not whole", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.items[2589] = 2.5; return r end)() }, account = {} }, 0 },
         { "an item id that is a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.items = { ["2589"] = 20 }; return r end)() }, account = {} }, 0 },
         { "a bound count larger than the count", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.bound = { [2589] = 50 }; return r end)() }, account = {} }, 0 },
-        { "a bound count that is negative", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.bound = { [2589] = -5 }; return r end)() }, account = {} }, 20 },
+        { "a bound count that is negative", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.bound = { [2589] = -5 }; return r end)() }, account = {} }, 0 },
         { "own bank with a negative count", { schema = 1, characters = { [MAIN.guid] = own({ [2589] = -30 }) }, account = {} }, 0 },
         { "own bank with a string count", { schema = 1, characters = { [MAIN.guid] = own({ [2589] = "x", [4306] = 2 }) }, account = {} }, 0 },
         { "own bank is true", { schema = 1, characters = { [MAIN.guid] = { seen = 1, bank = true } }, account = {} }, 0 },
@@ -725,7 +725,7 @@ T.section("saved data that is not what the addon wrote", function()
         { "an account bank with a negative count", { schema = 1, characters = {}, account = { ["eu-pvp"] = { items = { [2589] = -4, [4306] = 1 }, at = 5 } } }, 0 },
         { "a name that is a number", { schema = 1, characters = { X = (function() local r = goodAlt(); r.name = 12; return r end)(), [ALT.guid] = goodAlt() }, account = {} }, 20 },
         { "a world that is a table", { schema = 1, characters = { X = (function() local r = goodAlt(); r.world = {}; return r end)() }, account = {} }, 0 },
-        { "seen is a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.seen = "yesterday"; return r end)() }, account = {} }, 20 },
+        { "seen is a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.seen = "yesterday"; return r end)() }, account = {} }, 0 },
         { "two records of one name, one with seen as a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.seen = "x"; r.bags.items[2589] = 99; return r end)(), [ALT.guid] = goodAlt() }, account = {} }, 20 },
         { "a part without a time", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.at = nil; return r end)() }, account = {} }, 20 },
         { "a part whose time is a string", { schema = 1, characters = { X = (function() local r = goodAlt(); r.bags.at = "noon"; return r end)() }, account = {} }, 20 },
@@ -810,6 +810,81 @@ T.section("saved data that is not what the addon wrote", function()
     -- A format number that is not this version's (even the text "1") is another format.
     out = read({ schema = "1", characters = { [ALT.guid] = goodAlt() } })
     T.check("a format number that is text is not this format", out.ok and linen(out) == 0 and out.summary.usable == false)
+end)
+
+-- A damaged value of the fields that say whether something may be counted
+-- reads the way that counts less: "cannot send" and a note's banks are set
+-- by anything but nothing and false, a soulbound part that cannot be read
+-- keeps its whole part back, and a record without a usable time is no
+-- record seen at all.
+T.section("damaged values lean towards not counting", function()
+    local ALT = who("Player-1-ALT", "Alt Character")
+    local function alt(change)
+        local record = { name = "Alt Character", world = "eu-pvp", faction = "Alliance", seen = NOW - 100,
+                         bags = { items = { [2589] = 20 }, at = NOW - 100 }, bank = { items = { [2589] = 7 }, at = NOW - 100 } }
+        change(record)
+        LazyProf.db.global = { characters = {}, stock = { schema = 1, account = {}, characters = { [ALT.guid] = record } } }
+        return record
+    end
+    local function counted()
+        local n = 0
+        for _, a in ipairs(Memory:Alts(MAIN)) do n = n + ((a.bags or {})[2589] or 0) + ((a.bank or {})[2589] or 0) end
+        return n
+    end
+
+    for _, value in ipairs({ "yes", 1, 0, {}, "false" }) do
+        alt(function(r) r.noSend = value end)
+        T.eq("cannot send = " .. type(value) .. " " .. tostring(value) .. ": not an alt", counted(), 0)
+        T.eq("and so it stands", Memory:Standing(MAIN)[ALT.guid], "nosend")
+        T.check("and the summary says it cannot send", Memory:Summary().characters[1].canSend == false)
+    end
+    alt(function(r) r.noSend = false end)
+    T.eq("cannot send = false: an alt", counted(), 27)
+    T.check("(and the summary says it can send)", Memory:Summary().characters[1].canSend == true)
+
+    for _, value in ipairs({ "yes", 1, {} }) do
+        local record = alt(function(r) r.bagsAtBank = { items = { [2589] = 5 }, banks = { character = value, account = value }, at = NOW } end)
+        local note = Memory:BagsAtBank(ALT.guid)
+        T.check("a note whose banks read " .. type(value) .. ": both banks are named", note.character == true and note.account == true)
+        record.bagsAtBank.banks = { character = false }
+        note = Memory:BagsAtBank(ALT.guid)
+        T.check("(false and nothing name no bank)", note.character == false and note.account == false)
+    end
+
+    for label, bound in pairs({ ["a number"] = 3, ["text"] = "x", ["true"] = true,
+                                ["a table with an id that is text"] = { ["2589"] = 3 },
+                                ["a table with a negative count"] = { [2589] = -2 } }) do
+        alt(function(r) r.bags.bound = bound end)
+        local alts = Memory:Alts(MAIN)
+        T.check("a soulbound part that is " .. label .. ": those bags are not offered, the bank still is",
+            #alts == 1 and alts[1].bags == nil and alts[1].bagsAt == nil and alts[1].bank[2589] == 7, counted())
+    end
+    alt(function(r) r.bank.bound = "x" end)
+    local alts = Memory:Alts(MAIN)
+    T.check("the same for a bank: its soulbound part cannot be read, it is not offered",
+        alts[1].bank == nil and alts[1].bankAt == nil and alts[1].bags[2589] == 20)
+    alt(function(r) r.bags.bound = { [2589] = 5 } end)
+    T.eq("(a soulbound part that can be read is taken off as before)", counted(), 15 + 7)
+
+    for _, seen in ipairs({ 0 / 0, math.huge, -math.huge, "noon" }) do
+        alt(function(r) r.seen = seen end)
+        T.eq("seen = " .. tostring(seen) .. ": no alt", counted(), 0)
+        T.eq("seen = " .. tostring(seen) .. ": it stands as never seen", Memory:Standing(MAIN)[ALT.guid], "unseen")
+        local record = LazyProf.db.global.stock.characters[ALT.guid]
+        T.check("seen = " .. tostring(seen) .. ": nor does it take a name from a record that was seen", (function()
+            LazyProf.db.global.stock.characters["Player-1-ALT2"] = { name = "Alt Character", world = "eu-pvp", faction = "Alliance",
+                seen = NOW - 5000, bags = { items = { [2589] = 3 }, at = NOW - 5000 } }
+            local n = counted()
+            LazyProf.db.global.stock.characters["Player-1-ALT2"] = nil
+            return n == 3
+        end)())
+        T.eq("seen = " .. tostring(seen) .. ": dropped at the start", Memory:Prune(NOW, MAIN.guid), 1)
+        T.check("seen = " .. tostring(seen) .. ": gone", LazyProf.db.global.stock.characters[ALT.guid] == nil and record ~= nil)
+        alt(function(r) r.seen = seen end)
+        Memory:SaveBags(ALT, { [2589] = 20 }, {}, NOW)
+        T.eq("seen = " .. tostring(seen) .. ": the character's own next save repairs it",
+            LazyProf.db.global.stock.characters[ALT.guid].seen, NOW)
+    end
 end)
 
 T.section("age text", function()

@@ -2676,8 +2676,19 @@ T.section("no entry point lets a failure out", function()
         LazyProf.db.char.selfFoundMode = false
         Inventory:SaveBags(true)
     end)
-    T.check("a save made while the flag cannot be read is saved as the setting says",
-        LazyProf.db.global.stock.characters[MAIN.guid] ~= nil and LazyProf.db.global.stock.characters[MAIN.guid].noSend == nil)
+    -- What is saved is offered to the other characters: a record saved while
+    -- the flag cannot be read says that it cannot send.
+    T.check("a save made while the flag cannot be read is saved as unable to send",
+        LazyProf.db.global.stock.characters[MAIN.guid] ~= nil and LazyProf.db.global.stock.characters[MAIN.guid].noSend == true)
+    fresh()
+    Memory:SaveBags(MAIN, { [2589] = 5 }, {}, NOW)
+    survives("telling the record that the setting changed while the flag cannot be read", "IsSelfFoundCharacter", function()
+        Inventory:OnSendingChanged()
+    end)
+    T.check("so is the record told then", LazyProf.db.global.stock.characters[MAIN.guid].noSend == true)
+    fresh()
+    Inventory:SaveBags(true)
+    T.check("(with the flag readable and off, it can send)", LazyProf.db.global.stock.characters[MAIN.guid].noSend == nil)
 
     -- A read at the close that fails is a read that was not kept: the bank
     -- it was owed for must not go on counting as it was remembered.
@@ -2885,6 +2896,11 @@ T.section("diagnostic lines", function()
     T.eq("label: another faction", found["Other Side"], "other faction")
     T.eq("label: a character that cannot send", found["Solo"], "not counted (Self-Found)")
     T.check("label: a record without a name", dump:find("character: nil [not counted (no name)]", 1, true) ~= nil, dump)
+    LazyProf.db.global.stock.characters["Player-1-UNSEEN"] = { name = "Timeless", world = "eu-pvp", faction = "Alliance", seen = 0 / 0,
+        bags = { items = { [1] = 1 }, at = NOW } }
+    found = labels()
+    T.eq("label: a record without a usable time of its last save", found["Timeless"], "not counted (no time it was last seen)")
+    LazyProf.db.global.stock.characters["Player-1-UNSEEN"] = nil
 
     LazyProf.db.profile.includeAltCharacters = false
     local _, offDump = labels()

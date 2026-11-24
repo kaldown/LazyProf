@@ -457,6 +457,16 @@ local function IsSelfFound()
     return asked and marked == true
 end
 
+-- What a save says of the character: whether it can send. What is saved is
+-- offered to the other characters, so a flag that cannot be read says that
+-- it cannot (the failure is counted like every other).
+local function CanSend()
+    if SelfFoundSetting() then return false end
+    local Client = LazyProf.Client
+    local asked, marked = Protected("game flag", Client.IsSelfFoundCharacter, Client)
+    return asked and marked ~= true
+end
+
 -- Defined with the bank's rules further down ("Keeping the memory").
 local BankPending       -- is the open bank of that kind left out of a scan right now (rule 3)?
 local RisenAfterClose   -- which banks a scan leaves out for a carried count that rose after a close (rule 5b)
@@ -967,7 +977,7 @@ function Inventory:SaveBags(trustEmpty)
     if not trustEmpty and next(items) == nil then
         return false   -- slots but no items, and nothing says they are loaded
     end
-    return LazyProf.StockMemory:SaveBags(Client:CharacterIdentity(), items, bound, Client:Now(), not IsSelfFound())
+    return LazyProf.StockMemory:SaveBags(Client:CharacterIdentity(), items, bound, Client:Now(), CanSend())
 end
 
 -- The save a request asked for, BAG_SAVE_DELAY later.
@@ -1048,7 +1058,7 @@ end
 
 local function SaveBank(kind, identity, items, bound, now)
     if kind == "character" then
-        return LazyProf.StockMemory:SaveBank(identity, items, bound, now, not IsSelfFound())
+        return LazyProf.StockMemory:SaveBank(identity, items, bound, now, CanSend())
     end
     return LazyProf.StockMemory:SaveAccountBank(identity.world, items, now)
 end
@@ -1658,7 +1668,7 @@ function Inventory:OnSendingChanged()
     if self:UsesSyndicator() then return end
     Protected("setting", function()
         local identity = LazyProf.Client:CharacterIdentity() or {}
-        LazyProf.StockMemory:SetCanSend(identity.guid, not IsSelfFound())
+        LazyProf.StockMemory:SetCanSend(identity.guid, CanSend())
     end)
 end
 
@@ -1897,6 +1907,7 @@ function Inventory:RunDiagnostic(lines)
         nosend = "not counted (Self-Found)",
         noname = "not counted (no name)",
         name = "not counted (an older record of this name)",
+        unseen = "not counted (no time it was last seen)",
         unknown = "not counted (this character's world or faction is unknown)",
     }
     local standing = Memory:Standing(identity)

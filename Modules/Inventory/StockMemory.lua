@@ -47,11 +47,16 @@
 --
 -- The saved table is read defensively: it may have been edited by hand, cut
 -- off by a crash or written by a build with a defect. A record that is not a
--- table is skipped, as is a bags / bank / bound part that is not one, an
--- item id that is not a number, a count that is not a positive whole number
--- and a name that is not text. Nothing negative is ever handed out, and what
--- is handed out is a copy. Reading changes nothing; the next save replaces
--- what was not a table.
+-- table is skipped, as is a bags / bank part that is not one, an item id
+-- that is not a number, a count that is not a positive whole number and a
+-- name that is not text. Nothing negative is ever handed out, and what is
+-- handed out is a copy. Reading changes nothing; the next save replaces what
+-- was not a table. A damaged value leans towards counting less, never more:
+-- `noSend`, `doubt` and a note's banks are set by any value but nothing and
+-- false; a part whose `bound` is there but cannot be read (not a table, or
+-- an entry that is no count of an item) is not offered to the other
+-- characters at all; and a time that is not a finite number is no time - a
+-- record without a usable `seen` is no alt of anyone and is dropped by Prune.
 --
 -- This file is pure: who the character is, what it holds and what time it is
 -- are passed in (the client adapter supplies them).
@@ -122,8 +127,18 @@ local function Text(value)
     return type(value) == "string" and value or nil
 end
 
+-- A time: a number that has an end and can be compared. Not-a-number and
+-- the infinite ones are no time (a record seen "infinitely late" would never
+-- be dropped).
 local function Time(value)
-    return type(value) == "number" and value or nil
+    if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then return nil end
+    return value
+end
+
+-- A saved yes / no that must lean towards not counting when damaged: any
+-- value but nothing and false is yes.
+local function Set(value)
+    return value ~= nil and value ~= false
 end
 
 -- A saved part of a record (its bags or its bank) when it can be read: a
@@ -137,7 +152,7 @@ end
 -- Does a saved bank carry the doubt mark? Any value but nil and false does
 -- (see `doubt` at the top of this file).
 local function InDoubt(bank)
-    return bank.doubt ~= nil and bank.doubt ~= false
+    return Set(bank.doubt)
 end
 
 local function Snapshot(items, bound, now)
@@ -150,8 +165,17 @@ local function Snapshot(items, bound, now)
 end
 
 -- What of a saved part can be sent to another character: counts less their
--- soulbound part.
+-- soulbound part. nil when the soulbound part cannot be read - it is there
+-- and not a table, or holds an entry that is not a count of an item: how
+-- much of the part is soulbound is then not known, so none of it is offered.
 local function Sendable(part)
+    local bound = part.bound
+    if bound ~= nil then
+        if type(bound) ~= "table" then return nil end
+        for itemId, count in pairs(bound) do
+            if type(itemId) ~= "number" or not IsCount(count) then return nil end
+        end
+    end
     local items = Counts(part.items)
     for itemId, boundCount in pairs(Counts(part.bound)) do
         local count = items[itemId]
@@ -180,7 +204,7 @@ local function Record(characters, identity, now)
     record.name = Text(identity.name) or Text(record.name)
     record.world = Text(identity.world) or Text(record.world)
     record.faction = Text(identity.faction) or Text(record.faction)
-    if type(record.seen) ~= "number" or now > record.seen then
+    if not Time(record.seen) or now > record.seen then
         record.seen = now
     end
     return record
@@ -312,8 +336,8 @@ function StockMemory:BagsAtBank(guid)
     return {
         known = note.items ~= nil,
         items = note.items ~= nil and Counts(note.items) or nil,
-        character = note.banks.character == true,
-        account = note.banks.account == true,
+        character = Set(note.banks.character),
+        account = Set(note.banks.account),
     }
 end
 
@@ -334,6 +358,7 @@ end
 --            | "nosend"   it cannot send anything (Self-Found)
 --            | "noname"   its name was never readable: it could not be shown
 --            | "name"     an older record under a name in use
+--            | "unseen"   it has no usable time of its last save
 --            | "unknown"  the asking character's world or faction is not known }
 -- A name belongs to one character of a world: the record seen last under it
 -- (of two seen at the same moment, the one whose id sorts first). That is
@@ -342,7 +367,9 @@ end
 -- a name cannot send or went over to the other faction, an older record of
 -- its name never counts in its place. A record under the asking character's
 -- own name is not an alt either (a character that is gone, or this one under
--- an older id). Entries that are not records have no standing.
+-- an older id). A record without a usable time of its last save takes part in
+-- none of that: how old it is cannot be told, and Prune drops it. Entries that
+-- are not records have no standing.
 local function Standing(characters, identity)
     local standing = {}
     if type(identity) ~= "table" then return standing end
@@ -355,13 +382,15 @@ local function Standing(characters, identity)
                 standing[guid] = "self"
             elseif not known then
                 standing[guid] = "unknown"
+            elseif not Time(record.seen) then
+                standing[guid] = "unseen"
             elseif record.world ~= identity.world then
                 standing[guid] = "world"
             else
                 inWorld[guid] = record
                 local name = Text(record.name)
                 if name then
-                    local seen = Time(record.seen) or 0
+                    local seen = Time(record.seen)
                     local other = newest[name]
                     if not other or seen > other.seen or (seen == other.seen and tostring(guid) < tostring(other.guid)) then
                         newest[name] = { guid = guid, seen = seen }
@@ -376,7 +405,7 @@ local function Standing(characters, identity)
             standing[guid] = "name"
         elseif record.faction ~= identity.faction then
             standing[guid] = "faction"
-        elseif record.noSend == true then
+        elseif Set(record.noSend) then
             standing[guid] = "nosend"
         elseif not name then
             standing[guid] = "noname"
@@ -399,8 +428,10 @@ end
 -- name: { { guid, name, bags, bagsAt, bank, bankAt, bankDoubt }, ... } -
 -- those standing as "alt" above. bags / bank are what could be sent over
 -- (soulbound counts taken off); a part never seen is nil, and so is the time
--- of a part that has none. A bank in doubt is not handed out: bankDoubt is
--- then true and bank / bankAt are nil, while the bags still count.
+-- of a part that has none, and a part whose soulbound share cannot be read
+-- (see Sendable) is nil with its time. A bank in doubt is not handed out:
+-- bankDoubt is then true and bank / bankAt are nil, while the bags still
+-- count.
 function StockMemory:Alts(identity)
     local list = {}
     local characters = Store()
@@ -410,13 +441,17 @@ function StockMemory:Alts(identity)
             local record = characters[guid]
             local alt = { guid = guid, name = record.name }
             local bags, bank = Part(record, "bags"), Part(record, "bank")
-            if bags then
-                alt.bags, alt.bagsAt = Sendable(bags), Time(bags.at)
+            local sendable = bags and Sendable(bags)
+            if sendable then
+                alt.bags, alt.bagsAt = sendable, Time(bags.at)
             end
             if bank and InDoubt(bank) then
                 alt.bankDoubt = true
             elseif bank then
-                alt.bank, alt.bankAt = Sendable(bank), Time(bank.at)
+                sendable = Sendable(bank)
+                if sendable then
+                    alt.bank, alt.bankAt = sendable, Time(bank.at)
+                end
             end
             list[#list + 1] = alt
         end
@@ -498,7 +533,7 @@ function StockMemory:Summary()
             local bags, bank = Part(record, "bags"), Part(record, "bank")
             summary.characters[#summary.characters + 1] = {
                 guid = guid, name = Text(record.name), world = Text(record.world), faction = Text(record.faction),
-                seen = Time(record.seen), canSend = record.noSend ~= true,
+                seen = Time(record.seen), canSend = not Set(record.noSend),
                 bagItems = bags and Size(Counts(bags.items)) or nil, bagsAt = bags and Time(bags.at) or nil,
                 bankItems = bank and Size(Counts(bank.items)) or nil, bankAt = bank and Time(bank.at) or nil,
                 bankDoubt = (bank and InDoubt(bank)) or false,
