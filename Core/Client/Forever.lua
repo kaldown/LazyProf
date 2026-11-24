@@ -728,6 +728,21 @@ function Client:BankContents(kind)
     return items, bound, slots
 end
 
+-- Whether a bank can be used right now: its window is open, the bank may be
+-- viewed, it is not locked and it has at least one purchased tab. These are
+-- the first gates of BankContents above (the same calls, at the same lines of
+-- the bank window's source); no slot is read. A bank that is not usable at
+-- any moment of a visit cannot have been changed through that visit, which
+-- is what the scanner asks this for. kind is "character" or "account".
+function Client:BankUsable(kind)
+    local bankType = BankType(kind)
+    if not bankOpen or bankType == nil then return false end
+    if not C_Bank.CanViewBank(bankType) then return false end
+    if C_Bank.FetchBankLockedReason(bankType) ~= nil then return false end
+    local tabs = C_Bank.FetchPurchasedBankTabData(bankType)
+    return (tabs ~= nil and #tabs > 0) and true or false
+end
+
 -- Which bank a container id belongs to ("character" | "account"), nil for
 -- the carried bags and anything else. A BAG_UPDATE carries the container id
 -- (ContainerDocumentation.lua:659-667); the bank window reads it the same

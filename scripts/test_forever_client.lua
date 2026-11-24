@@ -206,7 +206,7 @@ local SURFACE = { "IsOpen", "AnchorFrame", "PanelOffsetX", "GetLine", "NoDataPro
                   "StartMerchant", "IsMerchantOpen", "MerchantAnchorFrame", "MerchantItems", "BuyFromMerchant",
                   "FreeBagSlots", "Money", "RunMerchantDiagnostic",
                   "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic",
-                  "BagContents", "IsBankOpen", "BankContents", "BankKindOfBag", "CharacterIdentity", "Now",
+                  "BagContents", "IsBankOpen", "BankContents", "BankUsable", "BankKindOfBag", "CharacterIdentity", "Now",
                   "StartStock", "RunStockDiagnostic" }
 
 -- Names of the functions an adapter installs.
@@ -819,6 +819,7 @@ section("stock", function()
     check(p .. "closed: no character bank", Client:BankContents("character") == nil)
     check(p .. "closed: no account bank", Client:BankContents("account") == nil)
     check(p .. "closed: the bank is not even asked", #fetched == 0, #fetched)
+    check(p .. "closed: no bank is usable", Client:BankUsable("character") == false and Client:BankUsable("account") == false)
     addon.events.BANK_TABS_CHANGED("BANK_TABS_CHANGED", 0)
     check(p .. "closed: a tab change is not passed on", #seen == 0, table.concat(seen, ","))
 
@@ -842,6 +843,11 @@ section("stock", function()
     check(p .. "open: the account bank is asked by its bank type", fetched[1] == 2, fetched[1])
     check(p .. "open: the account bank's tab", items and items[2589] == 60 and items[774] == 2 and bound[774] == 2)
     check(p .. "open: an unknown kind is nothing", Client:BankContents("guild") == nil and Client:BankContents(nil) == nil)
+    -- Usable: the gates of a read, without reading a slot.
+    slotCalls = {}
+    check(p .. "open: both banks are usable", Client:BankUsable("character") == true and Client:BankUsable("account") == true)
+    check(p .. "usable: no container is asked for its slots", #slotCalls == 0, table.concat(slotCalls, ","))
+    check(p .. "usable: an unknown kind is not", Client:BankUsable("guild") == false and Client:BankUsable(nil) == false)
 
     -- A bank bag slot without a bag reports no slots: the rest still counts.
     bank[0].tabs = { { ID = 6 }, { ID = 9 }, { ID = 8 } }
@@ -852,22 +858,28 @@ section("stock", function()
     -- Not readable now: nil, never an empty bank.
     bank[0].canView = false
     check(p .. "open but not viewable -> nil", Client:BankContents("character") == nil)
+    check(p .. "open but not viewable: not usable", Client:BankUsable("character") == false)
     bank[0].canView = true
     bank[0].locked = 2
     check(p .. "open but locked -> nil", Client:BankContents("character") == nil)
+    check(p .. "open but locked: not usable", Client:BankUsable("character") == false)
     bank[0].locked = 0   -- any reason counts as locked, as in the bank window itself
     check(p .. "open, locked with reason 0 -> nil", Client:BankContents("character") == nil)
+    check(p .. "open, locked with reason 0: not usable", Client:BankUsable("character") == false)
     bank[0].locked = nil
     bank[0].tabs = {}
     check(p .. "open with no tabs -> nil", Client:BankContents("character") == nil)
+    check(p .. "open with no tabs: not usable", Client:BankUsable("character") == false)
     bank[0].tabs = { { ID = 6 }, { ID = 8 } }
     local savedSix, savedEight = containers[6], containers[8]
     containers[6], containers[8] = nil, nil
     check(p .. "open, tabs that report no slots at all -> nil", Client:BankContents("character") == nil)
+    check(p .. "but usable: the bank can be viewed, is not locked and has its tabs", Client:BankUsable("character") == true)
     containers[6], containers[8] = savedSix, savedEight
     bank[2].canView = false
     check(p .. "an account bank that cannot be viewed -> nil, the character bank still reads",
         Client:BankContents("account") == nil and Client:BankContents("character") ~= nil)
+    check(p .. "and only the character bank is usable", Client:BankUsable("account") == false and Client:BankUsable("character") == true)
     bank[2].canView = true
     containers[6] = { slots = 28 }
     containers[8] = { slots = 12 }
@@ -892,6 +904,7 @@ section("stock", function()
     -- ... and never after it.
     check(p .. "the bank counts as closed inside onBankClosed", openDuringClose == false)
     check(p .. "closed again: nothing is read", Client:IsBankOpen() == false and Client:BankContents("character") == nil)
+    check(p .. "closed again: no bank is usable", Client:BankUsable("character") == false and Client:BankUsable("account") == false)
 
     addon.events.PLAYER_LOGOUT("PLAYER_LOGOUT")
     check(p .. "PLAYER_LOGOUT -> onLogout", seen[6] == "logout", table.concat(seen, ","))

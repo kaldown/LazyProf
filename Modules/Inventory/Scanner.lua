@@ -76,14 +76,13 @@
 --    a move's two updates inside one frame does not matter, and only a read
 --    kept on a later frame clears it. An update is "unanswered" for a bank
 --    until a read has seen that bank again: a read that is still owed has
---    not, and neither has one the adapter refused. A bank that this visit
---    has read at least once is BEHIND while an update is unanswered for it
---    or its empty read is unresolved, and the carried bags changed since its
---    last kept read. While the window is open a scan leaves a bank that is
---    behind out (it says so in its third return); the next read that sees
---    the bank brings it back. A bank the visit never got to read (one this
---    character may not view, say) cannot have been changed through it and
---    is not behind.
+--    not, and neither has one the adapter refused. A bank that was usable
+--    at some read of this visit (see "Which banks a visit can mark" below)
+--    is BEHIND while an update is unanswered for it or its empty read is
+--    unresolved, and the carried bags changed since its last kept read.
+--    While the window is open a scan leaves a bank that is behind out (it
+--    says so in its third return); the next read that sees the bank brings
+--    it back.
 -- 4. The close: the adapter's closing notice, which comes while the bank
 --    still counts as open, and likewise a logout with the bank open. When a
 --    read is owed, an update is unanswered or an empty read is unresolved,
@@ -91,18 +90,25 @@
 --    the read is not refused, holds at least one item and has the slot count
 --    of the last read kept in this visit. A bank that is still behind after
 --    that - or that was not kept although a read was owed and the carried
---    bags changed - and of which something is remembered, is marked in
---    doubt.
+--    bags changed - is marked in doubt.
 -- 5. After the close. The carried bags' contents (item -> count) are noted
 --    at the closing notice. A bag update in the CLOSE_WATCH (1 s) after it,
 --    whatever container it names, has them compared with the note - on the
 --    next frame, or by a scan that comes first. When a count differs, the
---    answer of a last move arrived late: both remembered banks of the visit
---    are marked in doubt. An update that changes no count marks nothing (the
+--    answer of a last move arrived late: the banks of the visit are marked
+--    in doubt. An update that changes no count marks nothing (the
 --    client may only be letting go of the bank), nor does anything later
 --    than the second, or a session without a close. Updates of bank
 --    containers that arrive while the bank is closed are counted for
 --    /lp diag stock.
+-- Which banks a visit can mark (rules 4 and 5): only a bank that was USABLE
+--    at some moment of it - the adapter says so (window open, the bank may
+--    be viewed, is not locked, has a tab), and it is asked at every read of
+--    the visit, the closing one included. A bank that never was (one this
+--    character may not view, say) cannot have been changed through the
+--    visit: it is neither behind nor marked, whatever is moved in the other
+--    one. And a mark is only ever set on a bank of which something is
+--    remembered.
 -- 6. In doubt is a mark saved with the remembered bank (StockMemory.lua). A
 --    bank that carries it is not counted by any scan - not for its own
 --    character, not as an alt's bank (the alt's bags still count), not as
@@ -649,7 +655,7 @@ local bagUpdateSeen = false     -- a bag update asked for the waiting save
 --     keptItems  a read with items was kept
 --     keptAt     frame of the last read kept
 --     emptyAt    frame of the first empty read not believed yet (unresolved)
---     seen       a read of this visit saw the bank (kept it, or found it empty)
+--     usable     the adapter called the bank usable at some read of this visit
 --     unread     an update arrived that no read has seen the bank after
 --     kept       how many reads were kept
 --     last       what the last read gave, in words
@@ -659,6 +665,7 @@ local bankClosedAt = nil        -- GetTime() of the last close
 local closedBankUpdates = { count = 0, lastAfter = nil }
 -- The watch after a close (rule 5):
 --   at, guid, world   when the window closed, and whose banks the visit read
+--   usable[kind]      the bank was usable in the visit: it can be marked
 --   note              the carried bags' contents at the closing notice
 --   updates           bag updates that arrived inside the watch
 --   carried           one of them named a carried bag
@@ -705,7 +712,7 @@ end
 local function NewVisit()
     local v = { openedAt = GetTime(), reads = 0, owed = false, confirm = false, trailingPending = false, lookPending = {} }
     for _, kind in ipairs(BANK_KINDS) do
-        v[kind] = { kept = 0, keptItems = false, seen = false, unread = false }
+        v[kind] = { kept = 0, keptItems = false, usable = false, unread = false }
     end
     return v
 end
@@ -729,7 +736,7 @@ end
 -- That bank is behind: what is remembered of it may not be what is in it,
 -- while the bags that are counted live have changed.
 local function Behind(v, state)
-    return ((state.seen and state.unread) or state.emptyAt ~= nil) and BagsChangedSince(v, state)
+    return state.usable and (state.unread or state.emptyAt ~= nil) and BagsChangedSince(v, state)
 end
 
 -- For a scan: is the open bank of that kind behind right now?
@@ -787,6 +794,10 @@ local function ReadBank(v, closing, keptNow)
     local changed, lookWanted = false, false
     for _, kind in ipairs(BANK_KINDS) do
         local state = v[kind]
+        -- Asked at every read: usable once is enough for the visit.
+        if Client:BankUsable(kind) then
+            state.usable = true
+        end
         local items, bound, slots = Client:BankContents(kind)
         local keep = false
         if not items then
@@ -814,7 +825,7 @@ local function ReadBank(v, closing, keptNow)
                 -- and the bank is unresolved from here on.
                 state.last = "empty, not believed"
                 state.emptyAt = state.emptyAt or frame
-                state.seen, state.unread = true, false
+                state.unread = false
                 lookWanted = lookWanted or not late
                 -- Only the second look is missing: it comes with the trailing read.
                 if remembered and (late or sameBank) then
@@ -827,7 +838,7 @@ local function ReadBank(v, closing, keptNow)
                 state.slots = slots
                 state.keptAt = frame
                 state.emptyAt = nil
-                state.seen, state.unread = true, false
+                state.unread = false
                 state.kept = state.kept + 1
                 if next(items) ~= nil then
                     state.keptItems = true
@@ -961,7 +972,7 @@ local function CloseVisit(self)
         if state.emptyAt ~= nil then
             done.unresolved = true
         end
-        if state.seen and state.unread then
+        if state.usable and state.unread then
             done.unanswered = true
         end
     end
@@ -976,7 +987,7 @@ local function CloseVisit(self)
     local identity = Client:CharacterIdentity() or {}
     for _, kind in ipairs(BANK_KINDS) do
         local state = v[kind]
-        if not done.kept[kind] and (Behind(v, state) or (done.owed and BagsChangedSince(v, state))) then
+        if not done.kept[kind] and state.usable and (Behind(v, state) or (done.owed and BagsChangedSince(v, state))) then
             done.doubt[kind] = true
             if MarkDoubt(kind, identity.guid, identity.world) then
                 changed = true
@@ -986,6 +997,7 @@ local function CloseVisit(self)
     local items, _, backpackSlots = Client:BagContents()
     watch = {
         at = GetTime(), guid = identity.guid, world = identity.world,
+        usable = { character = v.character.usable, account = v.account.usable },
         note = (backpackSlots and backpackSlots > 0) and items or nil,
         updates = 0, compared = 0, owed = false, pending = false,
     }
@@ -1040,7 +1052,7 @@ SettleAfterClose = function(bagItems)
     w.changed = true
     local marked = false
     for _, kind in ipairs(BANK_KINDS) do
-        if MarkDoubt(kind, w.guid, w.world) then
+        if w.usable[kind] and MarkDoubt(kind, w.guid, w.world) then
             marked = true
         end
     end
@@ -1265,9 +1277,10 @@ function Inventory:RunDiagnostic(lines)
             .. " carriedBagsUpdated=" .. tostring(v.bagsUpdateAt ~= nil))
         for _, kind in ipairs(BANK_KINDS) do
             local state = v[kind]
-            add("bank visit " .. kind .. ": kept=" .. tostring(state.kept) .. " lastRead=" .. tostring(state.last or "none")
+            add("bank visit " .. kind .. ": usable=" .. tostring(state.usable) .. " kept=" .. tostring(state.kept)
+                .. " lastRead=" .. tostring(state.last or "none")
                 .. " slots=" .. tostring(state.slots) .. " unresolvedEmpty=" .. tostring(state.emptyAt ~= nil)
-                .. " unansweredUpdate=" .. tostring(state.seen and state.unread)
+                .. " unansweredUpdate=" .. tostring(state.usable and state.unread)
                 .. " bagsChangedSinceKept=" .. tostring(BagsChangedSince(v, state)))
         end
         local done = v.closing

@@ -194,7 +194,7 @@ section("selection", function()
                          "StartMerchant", "IsMerchantOpen", "MerchantAnchorFrame", "MerchantItems", "BuyFromMerchant",
                          "FreeBagSlots", "Money", "RunMerchantDiagnostic",
                          "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic",
-                         "BagContents", "IsBankOpen", "BankContents", "BankKindOfBag", "CharacterIdentity", "Now",
+                         "BagContents", "IsBankOpen", "BankContents", "BankUsable", "BankKindOfBag", "CharacterIdentity", "Now",
                          "StartStock", "RunStockDiagnostic" }) do
         check(p .. "Client:" .. m .. " exists", type(classic.Client[m]) == "function")
     end
@@ -499,6 +499,7 @@ section("stock", function()
     _G.C_Bank = { FetchPurchasedBankTabData = function() error("bank read on a Classic client") end }
     check(p .. "the bank never counts as open", Client:IsBankOpen() == false)
     check(p .. "no bank contents", Client:BankContents("character") == nil and Client:BankContents("account") == nil)
+    check(p .. "no bank is usable", Client:BankUsable("character") == false and Client:BankUsable("account") == false)
     check(p .. "no container is a bank container", Client:BankKindOfBag(6) == nil and Client:BankKindOfBag(-1) == nil)
     _G.C_Bank = nil
 

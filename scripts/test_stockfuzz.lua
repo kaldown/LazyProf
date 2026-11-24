@@ -209,9 +209,7 @@ local KNOWN = {
     { "I2.alt", "The bank of another character that is in doubt is left out of the counts without a word in the scan's third"
         .. " return or on the Shopping tab." },
     { "I3.stuck.account", "The account bank is in doubt for a character that may not view it, so no visit of its own takes"
-        .. " the mark away." },
-    { "I4.blindmark.account", "A visit marks the account bank in doubt although the character may not view it and so cannot"
-        .. " have changed it." },
+        .. " the mark away. The mark is another character's, set after a visit of its own that left the bank uncertain." },
     { "I4.nuisance", "A visit that ended half a second or more after its last move leaves a doubt mark: an empty bank that"
         .. " is remembered as empty is marked whenever the carried bags changed in a visit shorter than two seconds." },
     { "I4.glance", "A visit in which nothing was moved leaves a doubt mark on an empty bank when the client sends a bag"

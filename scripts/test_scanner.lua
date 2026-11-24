@@ -88,6 +88,8 @@ local function resetClient()
         identity = MAIN, now = NOW, bankOpen = false,
         bags = { [2589] = 5 }, bagsBound = {}, backpackSlots = 16,
         bank = { character = nil, account = nil },   -- [kind] = { items, bound }; nil = cannot be read now
+        usable = {},                                 -- [kind] = true / false: says so whatever the bank reads
+        asked = { character = 0, account = 0 },      -- how often BankUsable was asked
         reads = { bags = 0, character = 0, account = 0 },
         started = nil,
     }
@@ -104,6 +106,14 @@ LazyProf.Client = {
         local contents = client.bankOpen and client.bank[kind] or nil
         if not contents then return nil end
         return contents.items, contents.bound or {}, contents.slots or 28
+    end,
+    -- A bank that hands out contents is usable; client.usable[kind] says
+    -- otherwise (true: usable although it cannot be read just now).
+    BankUsable = function(_, kind)
+        client.asked[kind] = client.asked[kind] + 1
+        if not client.bankOpen then return false end
+        if client.usable[kind] ~= nil then return client.usable[kind] end
+        return client.bank[kind] ~= nil
     end,
     BankKindOfBag = function(_, bagId)
         if type(bagId) ~= "number" then return nil end
@@ -1108,6 +1118,48 @@ T.section("the close", function()
     close()
     T.check("and is not in doubt after it", select(3, Memory:AccountBank("eu-pvp")) == false)
 
+    -- Which banks a visit can mark: only one that was usable at some read of
+    -- it. The account bank is remembered from another character and this
+    -- one may not view it. A move in its own bank, Escape while the read is
+    -- still owed and the bank refused by then.
+    local function blindVisit()
+        fresh()
+        Inventory:Initialize()
+        advance(2.1)
+        Memory:SaveAccountBank("eu-pvp", { [4306] = 9 }, NOW - DAY)
+        client.bankOpen = true
+        client.bank.character = { items = { [2589] = 100 }, slots = 28 }
+        client.bank.account = nil                          -- may not be viewed
+        client.started.onBankOpened()
+        advance(3)
+    end
+    blindVisit()
+    client.bags = { [2589] = 65 }
+    Inventory:OnBagUpdate(0)                               -- read at once: the bank as it was
+    Inventory:OnBagUpdate(6)                               -- owed
+    client.bank.character = nil
+    close()
+    T.check("a hurried close: the bank that was used is in doubt", inDoubt() == true)
+    T.check("the bank that was never usable in the visit is not", select(3, Memory:AccountBank("eu-pvp")) == false)
+    T.check("it was asked at every read of the visit, the closing one included",
+        client.asked.account == client.reads.account and client.reads.account >= 4, client.asked.account)
+    local blindLines = {}
+    Inventory:RunDiagnostic(blindLines)
+    T.check("the dump: which bank was usable", table.concat(blindLines, "\n"):find("bank visit character: usable=true", 1, true) ~= nil
+        and table.concat(blindLines, "\n"):find("bank visit account: usable=false", 1, true) ~= nil, table.concat(blindLines, "\n"))
+    -- Usable at one read is enough: a bank that is refused later can still
+    -- have been changed before.
+    blindVisit()
+    client.usable.account = true                           -- can be viewed, has its tab; no slot reads
+    Inventory:OnBagUpdate(15)
+    advance(1)
+    client.usable.account = false
+    client.bags = { [2589] = 65 }
+    Inventory:OnBagUpdate(0)
+    Inventory:OnBagUpdate(15)
+    close()
+    T.check("usable at one read of the visit: it can be marked", select(3, Memory:AccountBank("eu-pvp")) == true)
+
     -- No read of this visit was kept for that bank: nothing to compare with, nothing kept.
     fresh()
     Inventory:Initialize()
@@ -1268,6 +1320,30 @@ T.section("after the close", function()
     T.eq("with the bags it read anyway: one read", client.reads.bags, 1)
     nextFrame()
     T.eq("and the timer has nothing left to compare", client.reads.bags, 1)
+
+    -- Only the banks that were usable in the visit are marked: here the
+    -- account bank is remembered from another character and this one may
+    -- not view it.
+    fresh()
+    Inventory:Initialize()
+    advance(2.1)
+    Memory:SaveAccountBank("eu-pvp", { [4306] = 9 }, NOW - DAY)
+    client.bankOpen = true
+    client.bank.character = { items = { [2589] = 100 }, slots = 28 }
+    client.bank.account = nil
+    client.started.onBankOpened()
+    advance(3)
+    client.started.onBankClosing()
+    client.bankOpen = false
+    client.started.onBankClosed()
+    advance(0.08)
+    client.bags = { [2589] = 65 }
+    Inventory:OnBagUpdate(0)
+    nextFrame()
+    T.check("a late answer marks the bank that was usable", inDoubt() == true)
+    T.check("and not the one that never was", select(3, Memory:AccountBank("eu-pvp")) == false)
+    combined, breakdown, meta = scan()
+    T.check("which goes on counting", combined[4306] == 9 and meta.accountInDoubt == nil, combined[4306])
 
     -- An item the bags did not hold at the close is a change too.
     closedVisit()
@@ -1932,10 +2008,10 @@ T.section("diagnostic lines", function()
         T.check("the visit: how long it is open, how often it was read",
             visitText:find("bank visit: open for 2.4 s; reads=5 owed=false carriedBagsUpdated=true", 1, true) ~= nil, visitText)
         T.check("the visit: what was kept of the character bank",
-            visitText:find("bank visit character: kept=5 lastRead=items slots=28 unresolvedEmpty=false unansweredUpdate=false bagsChangedSinceKept=true", 1, true) ~= nil,
+            visitText:find("bank visit character: usable=true kept=5 lastRead=items slots=28 unresolvedEmpty=false unansweredUpdate=false bagsChangedSinceKept=true", 1, true) ~= nil,
             visitText)
         T.check("the visit: a bank that was refused all along",
-            visitText:find("bank visit account: kept=0 lastRead=refused slots=nil unresolvedEmpty=false unansweredUpdate=false bagsChangedSinceKept=true", 1, true) ~= nil,
+            visitText:find("bank visit account: usable=false kept=0 lastRead=refused slots=nil unresolvedEmpty=false unansweredUpdate=false bagsChangedSinceKept=true", 1, true) ~= nil,
             visitText)
         advance(3)
     end

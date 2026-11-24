@@ -1113,6 +1113,40 @@ T.section("the close", function()
         combined, _, meta = World.scan(addon)
         T.check("and is not in doubt after the visit", combined[BAR] == 50 and meta.accountInDoubt == nil
             and combined[LINEN] == 105, combined[LINEN])
+
+        -- Nor by a hurried end of that visit. The 5 carried linen go into
+        -- the character bank and Escape follows in the same frame, the bank
+        -- refused inside the close notice: the character bank is in doubt,
+        -- the account bank - never usable in this visit - is not.
+        World.event(addon, "BANKFRAME_OPENED")
+        World.advance(3)
+        World.containers[0][3] = slot(SILK, 1)
+        World.bagUpdate(addon, 0)                    -- read at once
+        World.containers[6][2] = slot(LINEN, 5)
+        World.containers[0][2] = nil
+        World.bagUpdate(addon, 0, 6)                 -- owed
+        World.bank[0].canView = false
+        World.event(addon, "BANKFRAME_CLOSED")
+        World.bank[0].canView = nil
+        combined, _, meta = World.scan(addon)
+        T.check("a deposit and Escape in one frame, the bank refused at the close: the bank that was used is in doubt",
+            meta.bankInDoubt == true, tostring(meta.bankInDoubt))
+        T.check("the bank this character may not view is not, and still counts", meta.accountInDoubt == nil and combined[BAR] == 50,
+            tostring(meta.accountInDoubt))
+        T.eq("the Shopping tab names the character's bank alone", firstShoppingRow(addon),
+            "Your bank is not counted: it changed after LazyProf last read it. Open the bank to count it again.")
+
+        -- Nor by a change of the carried bags in the second after a close.
+        World.event(addon, "BANKFRAME_OPENED")
+        World.advance(3)
+        World.event(addon, "BANKFRAME_CLOSED")
+        World.advance(0.5)
+        World.containers[0][4] = slot(LINEN, 3)
+        World.bagUpdate(addon, 0)
+        World.advance(3)
+        combined, _, meta = World.scan(addon)
+        T.check("a change of the bags after the close does not mark it either", meta.accountInDoubt == nil and combined[BAR] == 50,
+            tostring(meta.accountInDoubt))
     end
 
     -- The bank is emptied one second after the opening and the window closed

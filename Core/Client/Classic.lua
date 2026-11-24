@@ -446,14 +446,18 @@ end
 -- The bank is not read on these clients: its calls and events could not be
 -- checked against client source here, and a bank read on a guess could
 -- remember a wrong or an empty bank. So the bank never counts as open,
--- nothing is returned for it and no container is a bank container; bank
--- stock on these clients comes from an inventory addon only.
+-- nothing is returned for it, no bank is usable and no container is a bank
+-- container; bank stock on these clients comes from an inventory addon only.
 function Client:IsBankOpen()
     return false
 end
 
 function Client:BankContents(kind)
     return nil
+end
+
+function Client:BankUsable(kind)
+    return false
 end
 
 function Client:BankKindOfBag(bagId)
