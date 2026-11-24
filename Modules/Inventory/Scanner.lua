@@ -307,6 +307,11 @@
 --      the account bank itself. Telling would mean distrusting an alt's
 --      remembered bags after every logout at the bank, which would cost the
 --      ordinary bank alt its stock.
+--    - A logout while the answer of a move is on its way whose lock is seen
+--      (rule 4 marks the banks of the visit): another character that plays
+--      before this one returns counts its bags as they were last saved - a
+--      move clicked after that save shows as not made yet, so a stack put
+--      into a bank just before the logout is still counted in those bags.
 --    - A mark another character set on a bank this one may not view. The
 --      account bank's mark is the account's: a character that could use
 --      that bank set it for a reason, and one that may not view the bank
@@ -352,6 +357,35 @@
 --      character after that note is not marked by it). The marks it set are
 --      lost with it. And another character that plays before it returns
 --      counts its bags and banks as the session before left them.
+--
+-- How these rules are tested: the whole suite (scripts/run_tests.sh) is the
+-- acceptance test for them - scripts/test_scanner.lua (each rule on a
+-- stand-in adapter), scripts/test_stockflow.lua (whole sessions on the real
+-- adapter) and scripts/test_stockfuzz.lua (a seeded random walk against a
+-- model of what is owned) together. The random walk alone does not notice
+-- when one of these is taken out; only the other two guard them:
+--    rule 1: the read when a batch of bag updates is complete;
+--    rule 2: an empty read of a bank remembered as empty, while the bank is
+--      unsettled, kept only on a second look;
+--    rule 3: an opening notice that comes again unsettling both banks;
+--    rule 4: the closing read taken for an unsettled bank, and kept only with
+--      the visit's slot count; the held second, its end when its timer runs,
+--      and the mark when the session ends inside it; a lock a kept read saw,
+--      and its end with an update of the bank's own containers;
+--    rule 5a: the quiet first ten seconds of a session;
+--    rule 5b: the longer watch for a bank whose locks could not be seen;
+--      without a note, the mark of a carried update within each bank's own
+--      watch; the mark of a comparison given up; the note lowered to the
+--      counts that fell;
+--    rule 5c: the note itself, also within ten seconds after a close; the
+--      comparison at the opening and at a logout; the exception for an
+--      account bank read after the note, and none for the own bank; a note
+--      with a damaged time;
+--    rule 5d: only the account bank this character counts and has read;
+--    rule 6 and the scan: every mark and every end of a leaving-out seen by
+--      a later scan of the same frame; marks and leaving-outs after the close
+--      only for a bank usable in the visit; a bank with a damaged time not
+--      counted.
 local ADDON_NAME, LazyProf = ...
 
 LazyProf.Inventory = {}
