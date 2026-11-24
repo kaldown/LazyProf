@@ -40,6 +40,7 @@ World.name = "Main Goldtooth"
 World.faction = "Horde"
 World.gameSelfFound = false   -- C_PlayerInfo.IsSelfFoundActive()
 World.countsBank = true       -- C_Item.GetItemCount counts the banks' containers when asked to
+World.reagentsFromBank = false   -- ReagentsFromBankAllowed(): crafts may take reagents from the bank
 World.calls = { slots = 0, tabs = 0 }
 World.errors = {}
 
@@ -66,6 +67,7 @@ function World.reset()
     World.faction = "Horde"
     World.gameSelfFound = false
     World.countsBank = true
+    World.reagentsFromBank = false
     World.calls = { slots = 0, tabs = 0 }
     World.errors = {}
 end
@@ -148,6 +150,7 @@ function World.install()
         if includeAccountBank and World.countsBank then count = count + held(15, 23) end
         return count
     end }
+    _G.ReagentsFromBankAllowed = function() return World.reagentsFromBank end
     _G.issecretvalue = nil
     _G.geterrorhandler = function()
         return function(message) World.errors[#World.errors + 1] = tostring(message) end

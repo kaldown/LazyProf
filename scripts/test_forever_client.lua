@@ -206,7 +206,7 @@ local SURFACE = { "IsOpen", "AnchorFrame", "PanelOffsetX", "GetLine", "NoDataPro
                   "StartMerchant", "IsMerchantOpen", "MerchantAnchorFrame", "MerchantItems", "BuyFromMerchant",
                   "FreeBagSlots", "Money", "RunMerchantDiagnostic",
                   "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic",
-                  "BagContents", "IsBankOpen", "BankContents", "BankUsable", "BankKindOfBag", "CharacterIdentity", "Now",
+                  "BagContents", "ReadsBank", "IsBankOpen", "BankContents", "BankUsable", "BankKindOfBag", "CharacterIdentity", "Now",
                   "IsSelfFoundCharacter", "ShowError", "ClientItemCounts", "MoveInFlight",
                   "StartStock", "RunStockDiagnostic" }
 
@@ -820,6 +820,7 @@ section("stock", function()
         sortedKeys(added) == "BANKFRAME_CLOSED,BANKFRAME_OPENED,BANK_TABS_CHANGED,PLAYER_LOGOUT", sortedKeys(added))
 
     -- Closed: nothing is read, whatever the containers hold.
+    check(p .. "the adapter says that it reads the bank (while its window is open)", Client:ReadsBank() == true)
     check(p .. "bank closed at first", Client:IsBankOpen() == false)
     fetched = {}
     check(p .. "closed: no character bank", Client:BankContents("character") == nil)
@@ -984,6 +985,9 @@ section("stock", function()
     _G.UnitFactionGroup = function() return "Horde", "Die Horde" end
     _G.NameUtil = { GetUnmodifiedUnitFullName = function(unit) return unit == "player" and "Thrag Ironhide" or nil end }
     _G.C_GameRules = { IsGameRuleActive = function(rule) return rules[rule] == true end }
+    -- What the profession window asks before it counts reagents in the bank.
+    local reagentsFromBank = false
+    _G.ReagentsFromBankAllowed = function() return reagentsFromBank end
     _G.GetCurrentRegionName = function() return region end
     _G.GetCurrentRegion = function() return regionNumber end
     -- The realm name is a shard name here: it must never be part of a key.
@@ -1191,21 +1195,29 @@ section("stock", function()
     check(p .. "diag: what the adapter reads", text:find("adapter bank character: items=3 soulbound=1", 1, true) ~= nil, text)
     check(p .. "diag: the world's parts", text:find("region=EU", 1, true) ~= nil and text:find("regionNumber=3", 1, true) ~= nil
         and text:find("pvp=true", 1, true) ~= nil, text)
-    -- Whether crafts may take reagents from the bank (they would change it while it is closed).
-    check(p .. "diag: crafting from the bank", text:find("crafting from the bank: restricted=false", 1, true) ~= nil, text)
+    -- Whether crafts may take reagents from the bank (they would change it
+    -- while it is closed): what the profession window asks, and the game rule.
+    local function craftingLine()
+        local out = {}
+        Client:RunStockDiagnostic(out)
+        return (("\n" .. table.concat(out, "\n") .. "\n"):match("\n(crafting from the bank: [^\n]*)\n")), table.concat(out, "\n")
+    end
+    check(p .. "diag: crafting from the bank, in one line",
+        craftingLine() == "crafting from the bank: reagentsFromBankAllowed=false restrictedRule=false", text)
+    reagentsFromBank = true
     rules[211] = true
-    lines = {}
-    Client:RunStockDiagnostic(lines)
-    check(p .. "diag: crafting from the bank, restricted",
-        table.concat(lines, "\n"):find("crafting from the bank: restricted=true", 1, true) ~= nil, table.concat(lines, "\n"))
+    check(p .. "diag: crafting from the bank allowed, the rule on",
+        craftingLine() == "crafting from the bank: reagentsFromBankAllowed=true restrictedRule=true", select(2, craftingLine()))
     rules[211] = nil
+    check(p .. "diag: crafting from the bank allowed, the rule off",
+        craftingLine() == "crafting from the bank: reagentsFromBankAllowed=true restrictedRule=false", select(2, craftingLine()))
+    reagentsFromBank = false
     local savedRule = _G.Enum.GameRule.CraftFromBankRestricted
     _G.Enum.GameRule.CraftFromBankRestricted = nil
-    lines = {}
-    Client:RunStockDiagnostic(lines)
+    local line, whole = craftingLine()
     check(p .. "diag: a client without that rule says so and prints the rest",
-        table.concat(lines, "\n"):find("crafting from the bank: this client has no such rule", 1, true) ~= nil
-        and table.concat(lines, "\n"):find("region=EU", 1, true) ~= nil, table.concat(lines, "\n"))
+        line == "crafting from the bank: reagentsFromBankAllowed=false restrictedRule=none (this client has no such rule)"
+        and whole:find("region=EU", 1, true) ~= nil, whole)
     _G.Enum.GameRule.CraftFromBankRestricted = savedRule
     check(p .. "diag: plain ASCII", not text:find("[\128-\255]"))
     bank[2].canView = false

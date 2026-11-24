@@ -2046,66 +2046,11 @@ local function AddClientCounts(add, identity)
     end
 end
 
--- /lp diag stock: where stock outside the bags comes from, who the character
--- is, what the current or the last bank visit did, what the client itself
--- counts of the remembered bank and what is remembered.
--- Read-only (an open bank is neither read nor saved by it).
-function Inventory:RunDiagnostic(lines)
-    local function add(text) lines[#lines + 1] = text end
-    local Memory, Client = LazyProf.StockMemory, LazyProf.Client
-    local profile = LazyProf.db.profile
-
-    if self:UsesSyndicator() then
-        add("source: Syndicator (LazyProf's own memory is not used and not updated)")
-    else
-        add("source: LazyProf's own memory (Syndicator is not installed)")
-    end
-    -- The Self-Found setting and the game's own flag, apart: either makes
-    -- the character Self-Found for stock. The flag is asked here without
-    -- counting a failure (the dump reports, it does not add to the count).
-    local flagRead, gameFlag = pcall(Client.IsSelfFoundCharacter, Client)
-    local selfFound = SelfFoundSetting() or (flagRead and gameFlag == true)
-    add("settings: bank=" .. tostring(profile.includeBankItems) .. " alts=" .. tostring(profile.includeAltCharacters)
-        .. " guildBank=" .. tostring(profile.includeGuildBank) .. " selfFound=" .. tostring(SelfFoundSetting())
-        .. " gameSelfFound=" .. (flagRead and tostring(gameFlag == true) or ("not readable: " .. tostring(gameFlag))))
-
-    if memoryErrors.count > 0 then
-        add("last error: " .. tostring(memoryErrors.last) .. " (in: " .. tostring(memoryErrors.where) .. "; "
-            .. tostring(memoryErrors.count) .. " this session; the first was handed to the game's error display)")
-    end
-    -- What a scan does right now: tried here, on tables that are thrown
-    -- away, so that a failure long over does not read as stock left out.
-    -- The line says only what was tried - that the memory reads. Which of
-    -- its stock counts is said by the settings line and by each character's
-    -- label (with bank items and alts off, or on a client without a bank,
-    -- nothing of it may count at all).
-    if not self:UsesSyndicator() then
-        local whole, err = pcall(AddRememberedStock, self, {}, {}, profile.includeAltCharacters and not selfFound, selfFound)
-        if whole then
-            add("scan now: the memory reads without error")
-        else
-            add("scan now: bags only - the memory cannot be read: " .. tostring(err))
-        end
-    end
-
-    -- Who the character is may be the very call that fails: the rest of the
-    -- dump is still worth having.
-    local identityRead, identity = pcall(Client.CharacterIdentity, Client)
-    if not identityRead then
-        add("identity: could not be read: " .. tostring(identity))
-        identity = {}
-    end
-    identity = identity or {}
-    local now = Client:Now()
-    add("identity: guid=" .. tostring(identity.guid) .. " name=" .. tostring(identity.name)
-        .. " world=" .. tostring(identity.world) .. " faction=" .. tostring(identity.faction)
-        .. " region=" .. tostring(identity.region))
-    if not identity.world then
-        add("world: unknown - alts and the account bank are not counted")
-    end
-    if not identity.faction then
-        add("faction: unknown - alts are not counted")
-    end
+-- The dump's lines of the bank visit in progress or the last one, of the
+-- watch after its close, of the last session's note and of the bank updates
+-- that came while the bank was closed (see RunDiagnostic below).
+local function AddBankVisitLines(add)
+    local Client = LazyProf.Client
     local v = visit
     local bankReadWaiting = v ~= nil and not v.closedAt
         and (v.owed or v.confirm or v.trailingPending or v.repeatPending or next(v.lookPending) ~= nil) or false
@@ -2206,11 +2151,87 @@ function Inventory:RunDiagnostic(lines)
             .. tostring(closedBankUpdates.quiet) .. "; marked a bank in doubt: " .. tostring(closedBankUpdates.marked) .. ")"
     end
     add(closedLine)
+end
+
+-- /lp diag stock: where stock outside the bags comes from, who the character
+-- is, what the current or the last bank visit did, what the client itself
+-- counts of the remembered bank and what is remembered.
+-- Read-only (an open bank is neither read nor saved by it).
+function Inventory:RunDiagnostic(lines)
+    local function add(text) lines[#lines + 1] = text end
+    local Memory, Client = LazyProf.StockMemory, LazyProf.Client
+    local profile = LazyProf.db.profile
+    local usesSyndicator = self:UsesSyndicator()
+
+    if usesSyndicator then
+        add("source: Syndicator (LazyProf's own memory is not used and not updated)")
+    else
+        add("source: LazyProf's own memory (Syndicator is not installed)")
+    end
+    -- The Self-Found setting and the game's own flag, apart: either makes
+    -- the character Self-Found for stock. The flag is asked here without
+    -- counting a failure (the dump reports, it does not add to the count).
+    local flagRead, gameFlag = pcall(Client.IsSelfFoundCharacter, Client)
+    local selfFound = SelfFoundSetting() or (flagRead and gameFlag == true)
+    add("settings: bank=" .. tostring(profile.includeBankItems) .. " alts=" .. tostring(profile.includeAltCharacters)
+        .. " guildBank=" .. tostring(profile.includeGuildBank) .. " selfFound=" .. tostring(SelfFoundSetting())
+        .. " gameSelfFound=" .. (flagRead and tostring(gameFlag == true) or ("not readable: " .. tostring(gameFlag))))
+
+    if memoryErrors.count > 0 then
+        add("last error: " .. tostring(memoryErrors.last) .. " (in: " .. tostring(memoryErrors.where) .. "; "
+            .. tostring(memoryErrors.count) .. " this session; the first was handed to the game's error display)")
+    end
+    -- What a scan does right now: tried here, on tables that are thrown
+    -- away, so that a failure long over does not read as stock left out.
+    -- The line says only what was tried - that the memory reads. Which of
+    -- its stock counts is said by the settings line and by each character's
+    -- label (with bank items and alts off, or on a client without a bank,
+    -- nothing of it may count at all).
+    if not usesSyndicator then
+        local whole, err = pcall(AddRememberedStock, self, {}, {}, profile.includeAltCharacters and not selfFound, selfFound)
+        if whole then
+            add("scan now: the memory reads without error")
+        else
+            add("scan now: bags only - the memory cannot be read: " .. tostring(err))
+        end
+    end
+
+    -- Who the character is may be the very call that fails: the rest of the
+    -- dump is still worth having.
+    local identityRead, identity = pcall(Client.CharacterIdentity, Client)
+    if not identityRead then
+        add("identity: could not be read: " .. tostring(identity))
+        identity = {}
+    end
+    identity = identity or {}
+    local now = Client:Now()
+    add("identity: guid=" .. tostring(identity.guid) .. " name=" .. tostring(identity.name)
+        .. " world=" .. tostring(identity.world) .. " faction=" .. tostring(identity.faction)
+        .. " region=" .. tostring(identity.region))
+    -- What the world and the faction decide is which remembered stock
+    -- counts: nothing of the memory counts with Syndicator installed.
+    if not usesSyndicator and not identity.world then
+        add("world: unknown - alts and the account bank are not counted")
+    end
+    if not usesSyndicator and not identity.faction then
+        add("faction: unknown - alts are not counted")
+    end
+    -- The bank visits are followed only without Syndicator, and only where
+    -- the adapter reads the bank at all; elsewhere one line says so in place
+    -- of the visit's lines.
+    if usesSyndicator then
+        add("bank: not followed (Syndicator is installed)")
+    elseif not Client:ReadsBank() then
+        add("waiting: bagSave=" .. tostring(bagSavePending))
+        add("bank: not followed on this client")
+    else
+        AddBankVisitLines(add)
+    end
 
     -- What the client itself counts of the remembered bank (not with
     -- Syndicator: the memory is not in use then). A section of its own: a
     -- count call that fails is said here, and the rest of the dump stays.
-    if not self:UsesSyndicator() then
+    if not usesSyndicator then
         local counted, countError = pcall(AddClientCounts, add, identity)
         if not counted then
             add("SECTION ERROR: client count: " .. tostring(countError))
@@ -2226,7 +2247,7 @@ function Inventory:RunDiagnostic(lines)
     -- memory. With Syndicator installed none is, so the line leaves that out.
     add("memory: format=" .. tostring(summary.schema) .. " characters=" .. tostring(#summary.characters)
         .. " accountBanks=" .. tostring(#summary.account)
-        .. (self:UsesSyndicator() and "" or (" (characters not seen for " .. tostring(Memory.KEEP_DAYS) .. " days are dropped)")))
+        .. (usesSyndicator and "" or (" (characters not seen for " .. tostring(Memory.KEEP_DAYS) .. " days are dropped)")))
     if summary.unreadable > 0 then
         add("memory: unreadable=" .. tostring(summary.unreadable)
             .. " (saved entries that are not what LazyProf writes; they are skipped, and Forget remembered characters removes them)")
@@ -2244,7 +2265,6 @@ function Inventory:RunDiagnostic(lines)
         unknown = "not counted (this character's world or faction is unknown)",
     }
     local standing = Memory:Standing(identity)
-    local usesSyndicator = self:UsesSyndicator()
     local function part(label, items, at, doubt)
         if items == nil then return label .. "=never seen" end
         return label .. "=" .. tostring(items) .. " items (" .. tostring(Memory.AgeText(now, at) or "no time")
@@ -2271,15 +2291,22 @@ function Inventory:RunDiagnostic(lines)
             .. " " .. part("bank", c.bankItems, c.bankAt, c.bankDoubt) .. " guid=" .. tostring(c.guid))
     end
     -- The account bank of each region: whose read it is, and whether it
-    -- counts for this character (only for the world and faction of that read).
+    -- counts for this character (only for the world and faction of that
+    -- read, only while bank items count, and not for a Self-Found character).
     for _, bank in ipairs(summary.account) do
         local here = bank.region == identity.region and identity.world ~= nil and bank.world == identity.world
             and bank.faction == identity.faction
         local counts
-        if bank.region ~= identity.region then
+        if usesSyndicator then
+            counts = "remembered, not used (Syndicator is installed)"
+        elseif bank.region ~= identity.region then
             counts = "not counted (another region)"
         elseif not here then
             counts = "not counted (read in another world or by the other faction)"
+        elseif not profile.includeBankItems then
+            counts = "not counted (bank items are off)"
+        elseif selfFound then
+            counts = "not counted (this character is Self-Found)"
         elseif bank.doubt then
             counts = "not counted (in doubt)"
         else

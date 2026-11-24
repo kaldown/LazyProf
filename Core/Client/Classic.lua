@@ -478,6 +478,11 @@ end
 -- remember a wrong or an empty bank. So the bank never counts as open,
 -- nothing is returned for it, no bank is usable and no container is a bank
 -- container; bank stock on these clients comes from an inventory addon only.
+-- ReadsBank says so to the scanner, which then follows no bank visit.
+function Client:ReadsBank()
+    return false
+end
+
 function Client:IsBankOpen()
     return false
 end

@@ -87,6 +87,7 @@ local client
 local function resetClient()
     client = {
         identity = MAIN, now = NOW, bankOpen = false,
+        readsBank = true,                            -- the adapter reads the bank at all (false: a Classic client)
         gameSelfFound = false,                       -- what the game's own Self-Found flag reads
         inFlight = false,                            -- a slot reads as locked: a move is on its way (true / false / "fail")
         clientCounts = nil,                          -- function(itemId): the client's own three counts; nil = this client has none
@@ -105,6 +106,7 @@ LazyProf.Client = {
         client.reads.bags = client.reads.bags + 1
         return client.bags, client.bagsBound, client.backpackSlots, client.bagsLocked
     end,
+    ReadsBank = function() return client.readsBank end,
     IsBankOpen = function() return client.bankOpen end,
     BankContents = function(_, kind)
         client.reads[kind] = client.reads[kind] + 1
@@ -601,14 +603,18 @@ T.section("Syndicator present: as before, the memory is not used", function()
     end
     client.bankOpen = true
     -- What the dump says of the bank visit and of what is waiting: none of
-    -- it may change either.
+    -- it may change either. With Syndicator installed the dump says only that
+    -- the bank is not followed, so it is asked here as without it.
     local function visitState()
         local out, kept = {}, {}
         -- The dump goes on to list what is remembered, which the stand-ins
         -- above refuse: the lines wanted here come before that, and what the
         -- dump itself asked of the memory is not held against the scanner.
         local usedBefore = #used
+        local syndicator = _G.Syndicator
+        _G.Syndicator = nil
         pcall(Inventory.RunDiagnostic, Inventory, out)
+        _G.Syndicator = syndicator
         for i = #used, usedBefore + 1, -1 do used[i] = nil end
         for _, line in ipairs(out) do
             if line:find("^bank visit") or line:find("^after the close") or line:find("^waiting:") then
@@ -3390,6 +3396,25 @@ T.section("diagnostic lines", function()
         "account bank: region=eu read by world=eu-pvp faction=Alliance items=1 (5 days ago, in doubt: not counted) - not counted (in doubt)",
         1, true) ~= nil, accountDump)
     Memory:SaveAccountBank(MAIN, { [2589] = 10 }, NOW - 5 * DAY)
+    -- Read here, but not counted while bank items are off, nor for a
+    -- character that is Self-Found (by the setting or by the game's flag):
+    -- the line says so rather than "counted".
+    local ACCOUNT_LINE = "account bank: region=eu read by world=eu-pvp faction=Alliance items=1 (5 days ago) - "
+    LazyProf.db.profile.includeBankItems = false
+    local _, accountOffDump = labels()
+    T.check("the account bank while bank items are off", hasLine(accountOffDump, ACCOUNT_LINE .. "not counted (bank items are off)"),
+        accountOffDump)
+    LazyProf.db.profile.includeBankItems = true
+    LazyProf.db.char.selfFoundMode = true
+    local _, accountSoloDump = labels()
+    T.check("the account bank of a Self-Found character",
+        hasLine(accountSoloDump, ACCOUNT_LINE .. "not counted (this character is Self-Found)"), accountSoloDump)
+    LazyProf.db.char.selfFoundMode = false
+    client.gameSelfFound = true
+    local _, accountFlagDump = labels()
+    T.check("the account bank of a character the game marks Self-Found",
+        hasLine(accountFlagDump, ACCOUNT_LINE .. "not counted (this character is Self-Found)"), accountFlagDump)
+    client.gameSelfFound = false
 
     -- A character whose world or faction cannot be read counts nobody, and the dump says so in words.
     client.identity = { guid = MAIN.guid, name = "Main Character", faction = "Alliance" }
@@ -3400,6 +3425,18 @@ T.section("diagnostic lines", function()
     client.identity = { guid = MAIN.guid, name = "Main Character", world = "eu-pvp" }
     local _, noFaction = labels()
     T.check("no faction: said in words", noFaction:find("faction: unknown - alts are not counted", 1, true) ~= nil, noFaction)
+    -- With Syndicator installed the memory is not used: what the world and
+    -- the faction are does not decide what counts, and no line says it does.
+    installSyndicator()
+    client.identity = { guid = MAIN.guid, name = "Main Character" }
+    local _, syndicatorUnknown = labels()
+    T.check("with Syndicator, world and faction unknown: no line says that alts or the account bank are not counted",
+        not syndicatorUnknown:find("world: unknown", 1, true) and not syndicatorUnknown:find("faction: unknown", 1, true)
+        and not syndicatorUnknown:find("are not counted", 1, true), syndicatorUnknown)
+    T.check("(and who the character is is still printed)",
+        syndicatorUnknown:find("identity: guid=Player-1-MAIN name=Main Character world=nil faction=nil", 1, true) ~= nil,
+        syndicatorUnknown)
+    _G.Syndicator = nil
     client.identity = MAIN
     for _, guid in ipairs({ "Player-1-NORMAL", "Player-1-SOLO", "Player-1-OLDME", "Player-1-OLDALT", "Player-1-NAMELESS" }) do
         LazyProf.db.global.stock.characters[guid] = nil
@@ -3436,7 +3473,34 @@ T.section("diagnostic lines", function()
         hasLine(text, "memory: format=1 characters=3 accountBanks=1") and not text:find("are dropped", 1, true), text)
     T.check("with Syndicator the source line names it",
         lines[1] == "source: Syndicator (LazyProf's own memory is not used and not updated)", lines[1])
+    -- Nor is the bank followed then (the bank window is open here): one line
+    -- in place of what a visit did, what is waiting and what came while the
+    -- bank was closed.
+    T.check("with Syndicator the bank is said not to be followed, in one line, after who the character is",
+        text:find("\nidentity: [^\n]*\nbank: not followed %(Syndicator is installed%)\nmemory: format=1 ") ~= nil, text)
+    T.check("and no line of a visit, of what is waiting or of the updates while the bank was closed",
+        not text:find("waiting:", 1, true) and not text:find("bank visit", 1, true) and not text:find("after the close", 1, true)
+        and not text:find("bags at the bank", 1, true) and not text:find("bank updates while closed", 1, true)
+        and not text:find("bankOpen=", 1, true), text)
+    -- An account bank remembered from before is not used either.
+    T.check("with Syndicator the remembered account bank is listed as not used, not as counted",
+        hasLine(text, "account bank: region=eu read by world=eu-pvp faction=Alliance items=1 (5 days ago)"
+            .. " - remembered, not used (Syndicator is installed)"), text)
     _G.Syndicator = nil
+    -- A client whose adapter does not read the bank at all (the Classic
+    -- ones): the bank is said not to be followed there; what can be waiting
+    -- is a save of the bags.
+    client.readsBank = false
+    lines = {}
+    Inventory:RunDiagnostic(lines)
+    text = table.concat(lines, "\n")
+    T.check("a client that does not read the bank: the bag save that is waiting, then one line for the bank",
+        text:find("\nidentity: [^\n]*\nwaiting: bagSave=false\nbank: not followed on this client\nmemory: format=1 ") ~= nil, text)
+    T.check("and no line of a visit, of an open bank or of updates while it was closed",
+        not text:find("bank visit", 1, true) and not text:find("after the close", 1, true)
+        and not text:find("bags at the bank", 1, true) and not text:find("bank updates while closed", 1, true)
+        and not text:find("bankOpen=", 1, true) and not text:find("bankRead=", 1, true), text)
+    client.readsBank = true
     -- A memory that cannot be read: what a scan counts then, and why.
     do
         local realOwnBank = Memory.OwnBank

@@ -700,6 +700,13 @@ local function BankType(kind)
     return nil
 end
 
+-- Whether this adapter reads the bank at all: on this client it does, while
+-- its window is open (see above). The scanner follows bank visits only where
+-- it does.
+function Client:ReadsBank()
+    return true
+end
+
 function Client:IsBankOpen()
     return bankOpen
 end
@@ -1056,16 +1063,22 @@ function Client:RunStockDiagnostic(lines)
     end)
     -- Whether crafts may take reagents out of the bank. If they may, a craft
     -- changes the bank while its window is closed and the remembered bank is
-    -- then behind until the next visit. Enum.GameRule.CraftFromBankRestricted
-    -- is in the client's enum table (dump, LuaEnum.lua:3586); what the rule
-    -- does in play is not documented, so it is only reported here.
+    -- then behind until the next visit. The profession window decides it with
+    -- ReagentsFromBankAllowed(), which returns a boolean
+    -- (PlayerScriptDocumentation.lua:1601-1608; in the client's function
+    -- list, dump, GlobalAPI.lua:6338): only when it is true does it count
+    -- reagents in the bank (Blizzard_FrameXMLUtil/ItemUtil.lua:314-320).
+    -- Enum.GameRule.CraftFromBankRestricted is in the client's enum table
+    -- (dump, LuaEnum.lua:3586), but no Blizzard UI code reads it and what it
+    -- does in play is not documented. Both are only reported here.
     section("rules", function()
         local rule = Enum.GameRule.CraftFromBankRestricted
-        if rule == nil then
-            add("crafting from the bank: this client has no such rule")
-        else
-            add("crafting from the bank: restricted=" .. tostring(C_GameRules.IsGameRuleActive(rule)))
+        local restricted = "none (this client has no such rule)"
+        if rule ~= nil then
+            restricted = tostring(C_GameRules.IsGameRuleActive(rule))
         end
+        add("crafting from the bank: reagentsFromBankAllowed=" .. tostring(ReagentsFromBankAllowed())
+            .. " restrictedRule=" .. restricted)
     end)
 end
 

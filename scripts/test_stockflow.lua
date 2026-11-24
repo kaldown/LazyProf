@@ -545,6 +545,60 @@ T.section("the stock dump: what the client itself counts", function()
         and text:find("\ncharacter: Main Goldtooth [this character] ", 1, true) ~= nil
         and text:find("\naccount bank: region=eu read by world=eu-pvp faction=Horde items=1 ", 1, true) ~= nil, shown)
     T.eq("the dump's own failure is no failure of the memory: nothing is handed to the game's error handler", #World.errors, 0)
+    -- The adapter's part: whether crafts may take reagents from the bank,
+    -- as the profession window asks it, and the game rule beside it.
+    text = dump()
+    T.check("the adapter's part: crafting from the bank, in one line",
+        text:find("\ncrafting from the bank: reagentsFromBankAllowed=false restrictedRule=false\n", 1, true) ~= nil, shown)
+    World.reagentsFromBank = true
+    T.check("a client that lets crafts take reagents from the bank says so",
+        dump():find("\ncrafting from the bank: reagentsFromBankAllowed=true restrictedRule=false\n", 1, true) ~= nil, shown)
+    World.reagentsFromBank = false
+    T.check("and no section of the dump fails", not text:find("SECTION ERROR", 1, true), text)
+end)
+
+-- ===========================================================================
+-- With Syndicator installed LazyProf does not follow the bank: the dump says
+-- so in one line, at an open bank and after it, and nothing of a visit.
+-- ===========================================================================
+T.section("the stock dump with Syndicator installed", function()
+    World.reset()
+    World.containers = { [0] = { slots = 16, slot(LINEN, 1) }, [6] = { slots = 28, slot(LINEN, 10) } }
+    World.bank = { [0] = { tabs = { { ID = 6 } } } }
+    _G.Syndicator = { API = { GetCurrentCharacter = function() return "Main-Shard" end,
+        GetByCharacterFullName = function() return { bags = {}, bank = {} } end,
+        GetAllCharacters = function() return {} end, GetCurrentGuild = function() return nil end } }
+    local addon = World.login({}, { init = true })
+    addon:OnEnable()
+    local shown
+    addon.ShowDiagnosticOutput = function(_, text) shown = text end
+    local function dump()
+        shown = nil
+        addon:RunStockDiagnostic()
+        return "\n" .. tostring(shown) .. "\n"
+    end
+    World.advance(3)
+    World.event(addon, "BANKFRAME_OPENED")
+    World.advance(1)
+    World.bagUpdate(addon, 6, 0)
+    World.advance(1)
+    local function followed(text)
+        return text:find("waiting:", 1, true) or text:find("bankOpen=", 1, true) or text:find("bank visit", 1, true)
+            or text:find("after the close", 1, true) or text:find("bank updates while closed", 1, true)
+            or text:find("bags at the bank", 1, true)
+    end
+    local text = dump()
+    T.check("at an open bank: one line says the bank is not followed",
+        text:find("\nbank: not followed (Syndicator is installed)\n", 1, true) ~= nil, shown)
+    T.check("at an open bank: nothing of a visit, of an open bank or of what is waiting", not followed(text), shown)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(1)
+    World.bagUpdate(addon, 6)
+    World.advance(1)
+    text = dump()
+    T.check("after the close and an update of the bank's container: the same one line",
+        text:find("\nbank: not followed (Syndicator is installed)\n", 1, true) ~= nil and not followed(text), shown)
+    _G.Syndicator = nil
 end)
 
 -- ===========================================================================
