@@ -606,13 +606,17 @@ LazyProf.options = {
                 },
                 resetDB = {
                     name = "Reset All Settings",
-                    desc = "Reset all settings to defaults",
+                    desc = "Reset all settings to defaults.\n\n" ..
+                           "The bags and banks LazyProf remembers for your characters " ..
+                           "are kept: \"Forget remembered characters\" (Display, " ..
+                           "\"Your stock\") is the button for those.\n\n" ..
+                           "Same as /lp reset",
                     type = "execute",
                     order = 91,
                     confirm = true,
                     confirmText = "Are you sure you want to reset all LazyProf settings?",
                     func = function()
-                        LazyProf.db:ResetDB()
+                        LazyProf:ResetSettings()
                         LazyProf:Print("Settings reset to defaults.")
                     end,
                 },

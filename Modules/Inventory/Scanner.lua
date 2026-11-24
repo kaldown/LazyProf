@@ -790,6 +790,15 @@ function Inventory:OnSendingChanged()
     end)
 end
 
+-- Every setting went back to its default (the options' reset; what is
+-- remembered was kept through it, see LazyProf:ResetSettings): nothing a scan
+-- kept may answer any more, and the character's record says again whether it
+-- can send, as the setting stands now.
+function Inventory:OnSettingsReset()
+    self:ForgetAltsPart()
+    self:OnSendingChanged()
+end
+
 -- Forget every remembered character and account bank (the options button).
 -- The character being played is remembered again by itself.
 function Inventory:ForgetRemembered()

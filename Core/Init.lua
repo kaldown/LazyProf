@@ -145,7 +145,7 @@ function LazyProf:SlashCommand(input)
     elseif cmd == "scan" then
         self:Print("AH scanning not yet implemented.")
     elseif cmd == "reset" then
-        self.db:ResetDB()
+        self:ResetSettings()
         self:Print("Database reset.")
     elseif cmd == "resetpanels" then
         if self.PanelShell then
@@ -183,6 +183,26 @@ function LazyProf:SlashCommand(input)
     else
         self:Print("Commands: /lp | /lp browse | /lp reset | /lp resetpanels | /lp log | /lp diag")
     end
+end
+
+-- /lp reset and "Reset All Settings": every setting goes back to its default,
+-- and with the settings the rest of what the database holds. What LazyProf
+-- remembers of the characters' bags and banks is not a setting - it cannot be
+-- had again without playing every character and opening every bank - and has
+-- a button of its own ("Forget remembered characters"). So it is taken out
+-- before the reset and put back after it; a saved value that is not a table
+-- is not put back. Then nothing a scan kept may answer any more, and what is
+-- shown is planned and drawn again.
+function LazyProf:ResetSettings()
+    local stock = self.db.global.stock
+    self.db:ResetDB()
+    if type(stock) == "table" then
+        self.db.global.stock = stock
+    end
+    if self.Inventory then
+        self.Inventory:OnSettingsReset()
+    end
+    self:Recalculate("settings reset")
 end
 
 -- Profession window opened (the client adapter also hooks list scrolling).
