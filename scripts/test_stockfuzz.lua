@@ -274,8 +274,13 @@ end
 --   craftFromBank     craft with reagents taken from the closed bank: the
 --                     bank's count of an item falls, and its container
 --                     reports the change
+--   crash             a session ends without its saved data written (the
+--                     client is killed or crashes): no logout notice, and the
+--                     next session starts from what the last ordinary logout
+--                     wrote. What follows from it that the bank's rules
+--                     cannot see is filed under "crash:" (see below)
 local HABITS = { logoutMidMove = true, closeMidMove = true, afterCloseChange = true, quickVisit = true,
-                 bankToBank = true, emptyBags = true, logoutAfterClose = true, craftFromBank = true }
+                 bankToBank = true, emptyBags = true, logoutAfterClose = true, craftFromBank = true, crash = true }
 
 -- Decided behaviour: what the bank's rules accept on purpose. The test is
 -- told each by name - a habit the default player does not have, a kind of
@@ -375,11 +380,31 @@ local HABITS = { logoutMidMove = true, closeMidMove = true, afterCloseChange = t
 --      visits          the closed bank: the mark that follows is needed, and
 --                      the no-nuisance checks do not judge it.
 --   slowOpen:*         see SLOW_OPEN above.
+--   crash:*            after a crash (habit crash), what the rules cannot
+--                      see: (1) every I1 and I2.stale failure in the sessions
+--                      of other characters until the crashed one plays
+--                      again (they count its bags and banks, and the account
+--                      bank, as the last ordinary logout wrote them); (2) of
+--                      a bank the lost session changed, I1 and I2.stale
+--                      failures that involve it until it is read again -
+--                      unless the crashed character's next session must
+--                      mark it, which is when a carried count has risen
+--                      against its record of the bags for an item the bank
+--                      is remembered to hold (rule 5d). In the first 2.1 s
+--                      of that next session the player leaves the bags
+--                      alone, so that what is compared is what the model
+--                      expects.
 -- Not modelled at all: a clock that runs backwards; a client that crafts
 -- from the closed bank without reporting its container (nothing could see
 -- that); a client without slot locks.
+--   crashAfterNote     a crash (habit crash) of a session that began with a
+--                      note its last session left at the bank: the lost
+--                      session compared the note and took it away, and the
+--                      next one compares it again - an account bank read by
+--                      another character after that note is not marked by
+--                      it, though the lost session may have changed it.
 local ALSO = { logoutMidBankMove = false, emptyBagsLogout = false, leaveEarly = false, closeBetweenHalves = false,
-               craftFromBankAtLogin = false }
+               craftFromBankAtLogin = false, crashAfterNote = false }
 local DEFAULT_HABITS = {}
 for name, value in pairs(HABITS) do DEFAULT_HABITS[name] = value end
 for name, value in pairs(ALSO) do DEFAULT_HABITS[name] = value end
@@ -518,7 +543,9 @@ local function Emit(line)
     if S.trace then S.trace[#S.trace + 1] = line end
 end
 
+local CrashExcused          -- defined with the sessions: a failure that follows from a crash
 local function Violate(kind, detail, extra)
+    if CrashExcused(kind) then kind = "crash:" .. kind end
     local v = { kind = kind, step = S.step, at = S.now, detail = detail, cause = (extra and extra.cause) or S.cause or "?" }
     if extra then for k, value in pairs(extra) do if v[k] == nil then v[k] = value end end end
     S.violations[#S.violations + 1] = v
@@ -1278,6 +1305,46 @@ end
 
 -- Sessions -------------------------------------------------------------------
 
+local function DeepCopy(t)
+    if type(t) ~= "table" then return t end
+    local copy = {}
+    for k, v in pairs(t) do copy[k] = DeepCopy(v) end
+    return copy
+end
+
+-- What every bank of the world holds, at the moment the saved data is written.
+local function TruthAtWrite()
+    local truth = { char = {}, account = {} }
+    for _, who in ipairs(WHO) do
+        if S.chars[who] then truth.char[who] = BankTruth("character", who) end
+    end
+    for key, container in pairs(S.account) do
+        local counts = {}
+        AddCounts(counts, container)
+        truth.account[key] = counts
+    end
+    return truth
+end
+
+-- A failure that follows from a crash in a way the rules cannot see (see
+-- crash:* at the top).
+CrashExcused = function(kind)
+    if not S or not S.crashPending then return false end
+    if not (kind:sub(1, 2) == "I1" or kind:sub(1, 9) == "I2.stale.") then return false end
+    for who in pairs(S.crashPending) do
+        if who ~= S.cur then return true end
+    end
+    local part = kind:match("%.(%a+)$")
+    if S.crashStale.char[S.cur] and (part == "own" or part == "character") then return true end
+    if S.chars[S.cur] and S.crashStale.account[ScopeKey(Me())] and (part == "own" or part == "account") then return true end
+    if part == "alt" then
+        for _, who in ipairs(AltsOf()) do
+            if S.crashStale.char[who] then return true end
+        end
+    end
+    return false
+end
+
 local function Login(who, a)
     S.cur = who
     local me = Me()
@@ -1339,8 +1406,41 @@ local function Login(who, a)
         local items, bound, slots, locked = bankContents(self, kind)
         if items then
             S.lockSeen[kind] = next(items) ~= nil and type(locked) == "table" and next(locked) ~= nil
+            -- A read of a bank the client shows whole heals what a crash
+            -- left of it.
+            if S.mask[kind] == "full" then
+                if kind == "character" then S.crashStale.char[S.cur] = nil else S.crashStale.account[ScopeKey(Me())] = nil end
+            end
         end
         return items, bound, slots, locked
+    end
+    -- The first session of a character after its crash: the banks the lost
+    -- session changed are filed under "crash:" until read again, unless
+    -- rule 5d must mark them now (see crash:* above).
+    local lost = S.crashPending[who]
+    S.crashPending[who] = nil
+    S.crashQuietUntil = nil
+    if lost then
+        local memory = S.addon.StockMemory
+        local record = memory:OwnBags(GUID[who])
+        local note = memory:BagsAtBank(GUID[who])
+        local bags = {}
+        for container in pairs(me.bags) do AddCounts(bags, S.shown[container]) end
+        local function marked(held)
+            if note or not record or not held then return false end
+            for id, n in pairs(bags) do
+                if n > (record[id] or 0) and (held[id] or 0) > 0 then return true end
+            end
+            return false
+        end
+        if lost.char and not marked((memory:OwnBank(GUID[who]))) then S.crashStale.char[who] = true end
+        if lost.account then
+            local held, _, _, world, faction = memory:AccountBank(REGION)
+            if not marked((world == me.world and faction == me.faction) and held or nil) then
+                S.crashStale.account[lost.account] = true
+            end
+        end
+        S.crashQuietUntil = S.now + 2100
     end
     -- A mark the comparison with the last session's note sets belongs to the
     -- visit that ended that session: it is judged with it.
@@ -1493,6 +1593,7 @@ end
 -- of the same item, or - a whole stack onto another item - swapped. The true
 -- world changes at the click; the client hears of it later (switch 2).
 function OPS.move(a)
+    if S.crashQuietUntil and S.now < S.crashQuietUntil then return end   -- see crash:* at the top
     if not Usable(a.sc, a.ss) or not Usable(a.dc, a.ds) then return end
     if a.sc == a.dc and a.ss == a.ds then return end
     if not S.habits.bankToBank and KindOf(a.sc) and KindOf(a.dc) and KindOf(a.sc) ~= KindOf(a.dc) then return end
@@ -1555,6 +1656,7 @@ end
 -- Sort a container: its stacks merged and put in order, told in one frame by
 -- several bag updates.
 function OPS.sort(a)
+    if S.crashQuietUntil and S.now < S.crashQuietUntil then return end   -- see crash:* at the top
     local truth = TruthOf(a.c)
     if not truth then return end
     if not S.habits.emptyBags and a.c == BACKPACK then return end
@@ -1627,6 +1729,7 @@ local function IntoBags(id, n)
 end
 
 function OPS.loot(a)
+    if S.crashQuietUntil and S.now < S.crashQuietUntil then return end   -- see crash:* at the top
     if S.bagsHidden then return end
     if not S.habits.afterCloseChange and not S.bankOpen and S.closeMs and S.now - S.closeMs <= 1100 then return end
     local container = IntoBags(a.id, a.n)
@@ -1638,6 +1741,7 @@ end
 
 -- Craft: n of an item leave the carried bags, and one of another may come.
 function OPS.craft(a)
+    if S.crashQuietUntil and S.now < S.crashQuietUntil then return end   -- see crash:* at the top
     if S.bagsHidden then return end
     if not S.habits.afterCloseChange and not S.bankOpen and S.closeMs and S.now - S.closeMs <= 1100 then return end
     local me = Me()
@@ -1712,6 +1816,7 @@ end
 -- A craft takes reagents from the closed bank (habit craftFromBank): the
 -- bank's count of an item falls, and its container reports it.
 function OPS.craftbank(a)
+    if S.crashQuietUntil and S.now < S.crashQuietUntil then return end   -- see crash:* at the top
     if S.bankOpen or S.bagsHidden or not S.habits.craftFromBank then return end
     if not S.habits.craftFromBankAtLogin and not S.visitedThisSession and S.now - S.loginMs < 10500 then return end
     local list = SeenBankContainers()
@@ -1971,6 +2076,45 @@ function OPS.logout(a)
     end
     if not S.habits.logoutAfterClose and not S.bankOpen and S.closeMs and S.now - S.closeMs <= 1100 and not a.tail then return end
     if S.bankOpen and not S.habits.closeBetweenHalves and BetweenHalves() and not a.tail then return end
+    -- A crash (habit crash): no notice at all, nothing written. Not of a
+    -- session that began with a note of its last one (crashAfterNote).
+    local crash = a.crash and S.habits.crash and not a.tail
+    if crash and not S.habits.crashAfterNote then
+        local record = S.disk.stock and type(S.disk.stock.characters) == "table" and S.disk.stock.characters[GUID[S.cur]]
+        if type(record) == "table" and record.bagsAtBank ~= nil then crash = false end
+    end
+    if crash then
+        if S.bankOpen then CloseNotice(a, nil) end
+        local key = ScopeKey(Me())
+        local function same(a1, b1)
+            for _, id in ipairs(ALL_ITEMS) do
+                if (a1[id] or 0) ~= (b1[id] or 0) then return false end
+            end
+            return true
+        end
+        S.crashPending[S.cur] = {
+            char = not same(BankTruth("character"), S.diskTruth.char[S.cur] or {}),
+            account = (not same(AccountOf() and BankTruth("account") or {}, S.diskTruth.account[key] or {})) and key or nil,
+        }
+        Emit("-- (the client is killed: nothing of this session is written)")
+        Emit("saved = deepcopy(disk)")
+        S.saved = DeepCopy(S.disk)
+        JudgeVisit(S.lastVisit)
+        for k, e in pairs(S.episodes) do
+            FinishEpisode(e, "the crash")
+            S.episodes[k] = nil
+        end
+        S.followUp, S.follows = false, 0
+        local who = S.cur
+        if a.next == "other" and #Others() > 0 then
+            local list = Others()
+            who = list[((a.pick or 1) - 1) % #list + 1]
+        end
+        NewFrame(S.now + max(16, a.away or 3000))
+        S.flushed = true
+        Login(who, a)
+        return
+    end
     -- A session that ends at the bank leaves a note; the comparison with it
     -- in the character's next session may mark the banks of this visit.
     local atBank = S.bankOpen or (S.closeMs ~= nil and S.now - S.closeMs <= 10001)
@@ -1990,6 +2134,10 @@ function OPS.logout(a)
             Fire("PLAYER_LOGOUT")
         end
     end
+    -- What the logout writes, and what the world held then.
+    S.disk = DeepCopy(S.saved)
+    S.diskTruth = TruthAtWrite()
+    Emit("disk = deepcopy(saved)")
     if atBank and S.lastVisit and not S.lastVisit.judged then
         Me().pendingVisit = S.lastVisit
         S.lastVisit.atEnd = ShownBags()
@@ -2115,7 +2263,8 @@ local function GenLogout(rng)
     return { op = "logout", next = other and "other" or "same", pick = rng.int(1, 3), closeFirst = rng.chance(0.5), twice = rng.chance(0.3),
              idle = rng.chance(0.5), away = other and rng.pick({ 5000, 60000, 3600000, 10800000 }) or rng.int(2000, 6000),
              loginUpd = rng.chance(0.7), bagsLate = rng.chance(0.15) and rng.int(100, 1500) or 0,
-             letgoBatch = rng.chance(0.5), idleAtLogin = rng.chance(0.6) and { rng.int(1, 3000), rng.int(1, 3000) } or nil }
+             letgoBatch = rng.chance(0.5), idleAtLogin = rng.chance(0.6) and { rng.int(1, 3000), rng.int(1, 3000) } or nil,
+             crash = rng.chance(0.06) }
 end
 
 local function GenAction(rng, habits)
@@ -2246,7 +2395,8 @@ local function Describe(a)
     elseif a.op == "close" then
         text = "close the bank" .. (a.twice and " (the notice comes twice)" or "")
     elseif a.op == "logout" then
-        text = "log out" .. (a.closeFirst and "" or " (no close notice)") .. ", log in as " .. (a.next == "other" and "the other character" or "the same character")
+        text = (a.crash and "the client is killed (nothing written)" or ("log out" .. (a.closeFirst and "" or " (no close notice)")))
+            .. ", log in as " .. (a.next == "other" and "the other character" or "the same character")
             .. " " .. tostring(a.away) .. " ms later"
     elseif a.op == "buytab" then
         text = "buy a tab: " .. a.kind
@@ -2318,9 +2468,11 @@ local function NewWalk(config, init, opts)
         trace = opts.trace and {} or nil, wanted = opts.wanted,
         stats = { scans = 0, frames = 0, visits = {}, episodes = {}, longest = {}, doubtNeeded = 0, doubtIdle = 0,
                   doubtSettled = 0, elsewhere = 0, healChecks = 0, settled = 0 },
+        disk = {}, crashPending = {}, crashStale = { char = {}, account = {} },
     }
     local world = CopyInit(init)
     S.chars, S.account = world.chars, world.account
+    S.diskTruth = TruthAtWrite()
     S.bankTruths = BankTruthLiterals
     SetClock()
     Emit("at(1000)")
@@ -2431,7 +2583,7 @@ local function ShrinkOnce(config, init, actions, opts, wanted)
         away = { 3000 }, bagsLate = { 0 }, rep = { 1 }, fm = { 16 },
     }
     local FLAGS = { twice = false, idleBefore = false, idle = false, atomic = true, tf = true, letgoBatch = false, closeFirst = true,
-                    loginUpd = true }
+                    loginUpd = true, crash = false }
     local changed = true
     while changed do
         changed = false
@@ -2554,6 +2706,13 @@ World.FRAME = 0.001          -- a timer is due a millisecond after the ask at th
 World.reset()
 local slot = World.slot
 local saved, addon = {}, nil
+local function deepcopy(t)
+    if type(t) ~= "table" then return t end
+    local c = {}
+    for k, v in pairs(t) do c[k] = deepcopy(v) end
+    return c
+end
+local disk = {}                -- what the last ordinary logout wrote (a crash goes back to it)
 local over, failures = 0, {}
 
 -- A frame at `ms` (whole milliseconds since the client started).

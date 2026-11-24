@@ -248,6 +248,25 @@
 --        anything the note is about. The character's own bank has no such
 --        exception: nothing but damage can make it look saved after its own
 --        last session's note. In every case the note is removed.
+--    (d) A session that ends without its saved data written (the client is
+--        killed or crashes) leaves nothing: the next one starts from what
+--        the session before it saved, and a withdrawal made in the lost
+--        session is in the bags and still in the remembered bank. So a
+--        session whose last one left no note compares its bags in the same
+--        way - at the same moments, with the same safeguards, and leaving
+--        the banks out until then - with the character's own bags as its
+--        last save of them left them (taken at the start, before this
+--        session's first save replaces them). A carried count that has
+--        risen against that record for an item that the character's own
+--        remembered bank, or the account bank as it counts for this
+--        character (of its world and faction; not for a Self-Found
+--        character), holds marks that bank in doubt; bags that cannot be
+--        compared, and a record whose time is damaged, mark each of those
+--        banks that holds something. A count that fell, no record or a
+--        record that cannot be read: no mark. There is no exception for a
+--        bank saved after the record: after a lost session nothing tells
+--        when its changes were made. The record stays (the next save
+--        replaces it).
 --    Which banks a visit can mark (rules 4, 5b and 5c), or leave out by
 --    rule 3: only a bank that was USABLE at some moment of the visit - the
 --    adapter says so (window open, the bank may be viewed, is not locked,
@@ -311,8 +330,21 @@
 --      bank in that time (a bank interaction kept across a reload, say).
 --    - A loot or a craft that raises a carried count of an item a bank
 --      holds in the watch after a close, or in the next session before its
---      bags are compared with the note: it cannot be told from the answer
---      of a withdrawal, and marks that bank (rules 5b, 5c).
+--      bags are compared with the note or the record: it cannot be told
+--      from the answer of a withdrawal, and marks that bank (rules 5b, 5c,
+--      5d). So does a stack that was on its way between two carried bags
+--      at a logout away from the bank (a save leaves locked slots out of
+--      the record, so it shows as risen against it).
+--    - A session that ended without its saved data written (rule 5d): what
+--      it did that the carried bags do not show is not seen by the next
+--      one - a deposit (the bank is remembered short of it), a move between
+--      the two banks, a craft from the closed bank, a withdrawal whose
+--      stack left the bags again before the end - nor what it did after it
+--      had compared a note of the session before (the next session
+--      compares that note again, and an account bank read by another
+--      character after that note is not marked by it). The marks it set are
+--      lost with it. And another character that plays before it returns
+--      counts its bags and banks as the session before left them.
 local ADDON_NAME, LazyProf = ...
 
 LazyProf.Inventory = {}
@@ -998,12 +1030,18 @@ local closedBankUpdates = { count = 0, lastAfter = nil, quiet = 0, marked = 0 }
 --   marked[kind]      why this watch marked it
 local watch = nil
 -- The bags at the bank, as the character's last session left them noted
--- (rule 5c):
+-- (rule 5c), or - when it left no note - as the character's last save of
+-- them left them (rule 5d):
 --   looked    the memory was asked for the note (once the character is known)
 --   state     nil: there was none | "waiting": not compared yet | "equal" |
 --             "different" | "unknown"
 --   guid      whose note it is
---   note      the note (StockMemory:BagsAtBank)
+--   note      the note (StockMemory:BagsAtBank); for the record of the bags
+--             one of the same shape, which names both banks
+--   started        the session was started (Initialize): only then is the
+--                  record of the bags the one its last session left
+--   fromRecord     the note is the record of the bags (rule 5d)
+--   damaged        the note's (or the record's) time is damaged
 --   marked[kind]   the comparison left that bank's record with the doubt mark
 local lastSession = { looked = false, marked = {} }
 
@@ -1024,15 +1062,26 @@ local function MarkDoubt(kind, guid, region)
 end
 
 -- Rule 5c: the note the character's last session left, looked up once.
+-- Rule 5d: without a note, the bags as the character's last save left them
+-- (taken before this session's first save replaces them); compared like a
+-- note that names both banks - which of them can be marked is decided when
+-- they are compared.
 local function LastSession(identity)
     local ls = lastSession
     if ls.looked then return ls end
     identity = identity or LazyProf.Client:CharacterIdentity() or {}
     if not identity.guid then return ls end
     ls.looked = true
-    local note = LazyProf.StockMemory:BagsAtBank(identity.guid)
+    local Memory = LazyProf.StockMemory
+    local note = Memory:BagsAtBank(identity.guid)
     if note then
         ls.state, ls.guid, ls.note = "waiting", identity.guid, note
+    elseif ls.started then
+        local items, at = Memory:OwnBags(identity.guid)
+        if items then
+            ls.state, ls.guid, ls.fromRecord = "waiting", identity.guid, true
+            ls.note = { known = true, items = items, character = true, account = true, at = at }
+        end
     end
     return ls
 end
@@ -1106,8 +1155,19 @@ local function CompareLastSession(items)
                 -- landed after the session (a deposit's answer is seen on
                 -- its way at the close: its carried slot is locked), so
                 -- the difference is the new session's own (a craft, a sale).
-                local held = kind == "character" and Memory:OwnBank(ls.guid) or Memory:AccountBank(identity.region)
-                if kind == "account" and not damaged and Memory.SoundTime(savedAt, now) and savedAt > note.at then
+                local held
+                if kind == "character" then
+                    held = Memory:OwnBank(ls.guid)
+                elseif not ls.fromRecord then
+                    held = Memory:AccountBank(identity.region)
+                elseif not IsSelfFound() then
+                    -- Rule 5d: only the account bank this character counts.
+                    held = AccountBankOf(identity)
+                end
+                if ls.fromRecord and not (held and next(held) ~= nil) then
+                    -- Rule 5d: nothing of it counts here, or nothing is in it.
+                elseif not ls.fromRecord and kind == "account" and not damaged and Memory.SoundTime(savedAt, now)
+                        and savedAt > note.at then
                     ls.newer = ls.newer or {}
                     ls.newer[kind] = true
                 elseif ls.state == "unknown" or (held and RisenItem(note.items, items, held)) then
@@ -1168,6 +1228,8 @@ end
 -- to the other characters. Returns whether it was saved.
 function Inventory:SaveBags(trustEmpty)
     if self:UsesSyndicator() then return false end
+    -- Rule 5d: the record of the bags this save replaces is taken first.
+    LastSession()
     local Client = LazyProf.Client
     local items, bound, backpackSlots, locked = Client:BagContents()
     if not backpackSlots or backpackSlots <= 0 then
@@ -1989,7 +2051,7 @@ end
 -- visit could use.
 local function EndSession()
     local Client = LazyProf.Client
-    if lastSession.state == "waiting" then
+    if LastSession().state == "waiting" then
         local items = BagsToCompare(false)
         if items then
             CompareLastSession(items)
@@ -2041,6 +2103,7 @@ end
 function Inventory:Initialize()
     sessionStartedAt = GetTime()
     visitedThisSession = false
+    lastSession = { looked = false, marked = {}, started = true }
     bankClosedAt = nil
     closedBankUpdates = { count = 0, lastAfter = nil, quiet = 0, marked = 0 }
     Protected("start", function()
@@ -2208,6 +2271,7 @@ local function AddBankVisitLines(add)
     -- The note the character's last session left at the bank, and what the
     -- comparison with this session's bags gave (rule 5c).
     if lastSession.state then
+        local damagedText = lastSession.fromRecord and " (the record's time is damaged)" or " (the note's time is damaged)"
         local marks = {}
         for _, kind in ipairs(BANK_KINDS) do
             if lastSession.marked[kind] then marks[#marks + 1] = kind end
@@ -2231,9 +2295,11 @@ local function AddBankVisitLines(add)
             waiting = "not compared yet",
             equal = "compared, equal",
             different = "compared, different: " .. banks,
-            unknown = "unknown" .. (lastSession.damaged and " (the note's time is damaged)" or "") .. ": " .. banks,
+            unknown = "unknown" .. (lastSession.damaged and damagedText or "") .. ": " .. banks,
         }
-        add("bags at the bank (from the last session): " .. said[lastSession.state])
+        local label = lastSession.fromRecord and "bags as last saved (no note from the last session)"
+            or "bags at the bank (from the last session)"
+        add(label .. ": " .. said[lastSession.state])
     end
     -- Whether the client reports bank changes while the window is closed
     -- (they cannot be read then), when, and what they did (rule 5a).

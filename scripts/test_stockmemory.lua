@@ -104,9 +104,19 @@ T.section("save and read back", function()
     T.eq("and carries the new time", at, NOW + 60)
     T.eq("one record per character", count(LazyProf.db.global.stock.characters), 1)
 
-    Memory:SaveBags(MAIN, { [2589] = 5 }, {}, NOW + 120)
+    T.check("bags never saved: none", Memory:OwnBags(MAIN.guid) == nil)
+    Memory:SaveBags(MAIN, { [2589] = 5, [6948] = 1 }, { [6948] = 1 }, NOW + 120)
     T.eq("saving the bags keeps the bank", (Memory:OwnBank(MAIN.guid))[4306], 7)
     T.eq("still one record", count(LazyProf.db.global.stock.characters), 1)
+    local bags, bagsAt = Memory:OwnBags(MAIN.guid)
+    T.check("the character's own bags as last saved, soulbound ones included, with their time",
+        bags[2589] == 5 and bags[6948] == 1 and count(bags) == 2 and bagsAt == NOW + 120)
+    bags[2589] = 99
+    T.eq("a copy", (Memory:OwnBags(MAIN.guid))[2589], 5)
+    T.check("another character's, or none asked: nothing", Memory:OwnBags("Player-1-OTHER") == nil and Memory:OwnBags(nil) == nil)
+    LazyProf.db.global.stock.characters[MAIN.guid].bags.items = "x"
+    T.check("a saved part that cannot be read: none", Memory:OwnBags(MAIN.guid) == nil)
+    Memory:SaveBags(MAIN, { [2589] = 5 }, {}, NOW + 120)
 
     -- What is handed out is a copy: a caller cannot change what is remembered.
     got = Memory:OwnBank(MAIN.guid)

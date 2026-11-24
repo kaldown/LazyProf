@@ -3006,6 +3006,148 @@ T.section("the end of a session at the bank", function()
 end)
 
 -- ===========================================================================
+-- A session that ends without its saved data written (the client is killed
+-- or crashes) leaves nothing: the next session starts from what the session
+-- before saved, and a withdrawal made in the lost session is both in the
+-- bags and in the remembered bank. When the last session left no note, the
+-- next one compares its bags the same way with the bags as the character's
+-- last save left them: a count that rose for an item a bank this character
+-- counts holds marks that bank; until then a scan leaves those banks out.
+T.section("a session that ended without its saved data written", function()
+    local function line()
+        local lines = {}
+        Inventory:RunDiagnostic(lines)
+        return (("\n" .. table.concat(lines, "\n") .. "\n"):match("\n(bags as last saved [^\n]*)\n"))
+    end
+    -- What the last save left: 5 linen carried, 100 in the bank, 4 linen and
+    -- 9 silk in the account bank. `bags`: what is carried now.
+    local function session(bags, prepare)
+        fresh()
+        Memory:SaveBags(MAIN, { [2589] = 5 }, {}, NOW - DAY)
+        Memory:SaveBank(MAIN, { [2589] = 100 }, {}, NOW - DAY)
+        Memory:SaveAccountBank(MAIN, { [2589] = 4, [4306] = 9 }, NOW - DAY)
+        if prepare then prepare() end
+        client.bags = bags
+        Inventory:Initialize()
+    end
+    local function compareNow()
+        Inventory:OnBagUpdate(0)
+        nextFrame()
+    end
+
+    -- 60 linen withdrawn in a session whose saved data was never written.
+    session({ [2589] = 65 })
+    local combined, _, meta = scan()
+    T.check("before the comparison the banks are left out, as being read", combined[2589] == 65 and combined[4306] == nil
+        and meta.bankPending == true and meta.accountPending == true and meta.bankInDoubt == nil, combined[2589])
+    T.eq("the dump says so", line(), "bags as last saved (no note from the last session): not compared yet")
+    compareNow()
+    combined, _, meta = scan()
+    T.check("linen rose against the last save: the banks that hold linen are in doubt, nothing counts twice",
+        combined[2589] == 65 and combined[4306] == nil and meta.bankInDoubt == true and meta.accountInDoubt == true
+        and meta.bankPending == nil and meta.accountPending == nil, combined[2589])
+    T.eq("the dump says why", line(), "bags as last saved (no note from the last session): compared, different: "
+        .. "character,account marked in doubt")
+    T.check("the record of the bags is not taken away", Memory:OwnBags(MAIN.guid) ~= nil)
+
+    -- Only a bank that holds what rose.
+    session({ [2589] = 5, [4306] = 3 })
+    compareNow()
+    combined, _, meta = scan()
+    T.check("silk rose: only the account bank holds silk, only it is in doubt", meta.bankInDoubt == nil
+        and meta.accountInDoubt == true and combined[2589] == 105, combined[2589])
+    -- A count that fell, or rose for an item no bank holds: nothing.
+    session({ [2589] = 2, [765] = 3 })
+    compareNow()
+    combined, _, meta = scan()
+    T.check("a count that fell, another that rose for what no bank holds: both banks count", combined[2589] == 2 + 100 + 4
+        and combined[4306] == 9 and meta.bankInDoubt == nil and meta.accountInDoubt == nil and meta.bankPending == nil, combined[2589])
+    T.eq("the dump says so", line(), "bags as last saved (no note from the last session): compared, different: "
+        .. "none marked in doubt; character,account not marked (nothing it holds rose)")
+    session({ [2589] = 5 })
+    compareNow()
+    combined, _, meta = scan()
+    T.check("the bags as the last save left them: both count", combined[2589] == 109 and meta.bankPending == nil
+        and meta.accountPending == nil, combined[2589])
+    T.eq("the dump says so", line(), "bags as last saved (no note from the last session): compared, equal")
+
+    -- The same safeguards and moments as with a note: without a bag update,
+    -- at the first save of the bags.
+    session({ [2589] = 65 })
+    advance(1.9)
+    T.check("1.9 s after the start without a bag update: still left out", select(3, scan()).bankPending == true)
+    advance(0.2)
+    T.check("at the first save the bags are compared", select(3, scan()).bankInDoubt == true)
+    -- And at the opening of the bank, before its first read.
+    session({ [2589] = 65 })
+    client.bankOpen = true
+    client.bank.character = { items = { [2589] = 40 }, slots = 28 }
+    client.started.onBankOpened()
+    T.check("compared at the opening: the read that follows counts", (scan())[2589] == 65 + 40
+        and line() == "bags as last saved (no note from the last session): compared, different: character,account marked in doubt",
+        line())
+    client.started.onBankClosing(); client.bankOpen = false; client.started.onBankClosed()
+
+    -- Only a bank this character's scan would count.
+    session({ [2589] = 65 }, function() Memory:SaveAccountBank(HORDE, { [2589] = 4 }, NOW - DAY) end)
+    compareNow()
+    T.check("an account bank read by the other faction is not marked", select(3, Memory:AccountBank("eu")) == false
+        and select(3, Memory:OwnBank(MAIN.guid)) == true)
+    session({ [2589] = 65 })
+    LazyProf.db.char.selfFoundMode = true
+    compareNow()
+    T.check("nor the account bank of a Self-Found character", select(3, Memory:AccountBank("eu")) == false
+        and select(3, Memory:OwnBank(MAIN.guid)) == true)
+    LazyProf.db.char.selfFoundMode = false
+
+    -- A record whose time is damaged is taken as not known: the banks that
+    -- hold something are marked, whatever the bags.
+    session({ [2589] = 5 }, function() LazyProf.db.global.stock.characters[MAIN.guid].bags.at = 0 end)
+    compareNow()
+    combined, _, meta = scan()
+    T.check("a damaged time: both banks in doubt", meta.bankInDoubt == true and meta.accountInDoubt == true)
+    T.eq("the dump says why", line(), "bags as last saved (no note from the last session): unknown (the record's time is damaged): "
+        .. "character,account marked in doubt")
+
+    -- No record of the bags, or one that cannot be read: nothing waits, nothing is marked, no line.
+    fresh()
+    Memory:SaveBank(MAIN, { [2589] = 100 }, {}, NOW - DAY)
+    client.bags = { [2589] = 65 }
+    Inventory:Initialize()
+    combined, _, meta = scan()
+    T.check("no record of the bags: the bank counts at once", combined[2589] == 165 and meta.bankPending == nil, combined[2589])
+    T.check("and the dump has no such line", line() == nil, line())
+    session({ [2589] = 65 }, function() LazyProf.db.global.stock.characters[MAIN.guid].bags.items = "x" end)
+    T.check("a record that cannot be read: the same", select(3, scan()).bankPending == nil and line() == nil, line())
+
+    -- A note of the last session goes first: the bags are compared with it alone.
+    session({ [2589] = 65 }, function() Memory:NoteBagsAtBank(MAIN, { [2589] = 65 }, { character = true }, NOW - DAY + 10) end)
+    compareNow()
+    combined, _, meta = scan()
+    T.check("a note equal to the bags: nothing marked, though they rose against the last save",
+        meta.bankInDoubt == nil and meta.accountInDoubt == nil and combined[2589] == 169, combined[2589])
+    T.check("and the dump has the note's line", line() == nil)
+
+    -- A scan in the frame of the comparison, made before it, is not what the
+    -- frame's later scans get.
+    session({ [2589] = 65 })
+    Inventory:OnBagUpdate(0)
+    fakeNow = fakeNow + FRAME
+    local _, _, before = Inventory:ScanAll()
+    advance(0)                                        -- this frame's timers: the comparison
+    local _, _, after = Inventory:ScanAll()           -- the same frame, the frame's scan not dropped by hand
+    T.check("the frame's scan before the comparison left the banks out", before.bankPending == true)
+    T.check("a scan after it in the same frame says they are in doubt", after.bankInDoubt == true and after.bankPending == nil)
+    session({ [2589] = 5 })
+    Inventory:OnBagUpdate(0)
+    fakeNow = fakeNow + FRAME
+    Inventory:ScanAll()
+    advance(0)
+    combined, _, meta = Inventory:ScanAll()
+    T.check("and that they count again when nothing rose", combined[2589] == 109 and meta.bankPending == nil, combined[2589])
+end)
+
+-- ===========================================================================
 -- Whether a bank's items are there the moment its window opens is not known.
 -- So the bank is always looked at once more half a second after it opened,
 -- and a read without a single item is not believed in the first two seconds

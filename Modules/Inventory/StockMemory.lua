@@ -300,6 +300,16 @@ function StockMemory:SaveAccountBank(identity, items, now)
     return true
 end
 
+-- A character's own bags as its last save left them: a copy of their items
+-- (soulbound ones included) and the time. nil when they were never saved or
+-- the saved part cannot be read.
+function StockMemory:OwnBags(guid)
+    local characters = Store()
+    local bags = characters and guid ~= nil and Part(characters[guid], "bags")
+    if not bags then return nil end
+    return Counts(bags.items), Time(bags.at)
+end
+
 -- A character's own bank as last seen: a copy of its items (soulbound ones
 -- included), the time, and whether it is in doubt (then it must not be
 -- counted). nil when it was never seen.

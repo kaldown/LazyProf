@@ -2241,8 +2241,10 @@ T.section("the answer of a last move arrives after the session ended", function(
     T.check("compared at the first bag update of the session", total == 105 and meta.bankPending == nil and meta.bankInDoubt == nil,
         tostring(total))
 
-    -- Later than ten seconds after the close a session leaves no note, and
-    -- the next one has nothing to wait for.
+    -- Later than ten seconds after the close a session leaves no note. The
+    -- next one compares its bags with what the last save of them held
+    -- instead (a session may have ended without its saved data written),
+    -- at the same moments: until its first bag update the bank waits.
     saved = {}
     addon = bankVisit(3, saved)
     World.event(addon, "BANKFRAME_CLOSED")
@@ -2251,8 +2253,18 @@ T.section("the answer of a last move arrives after the session ended", function(
     T.check("a logout eleven seconds after the close leaves no note", note(saved) == nil)
     addon = relog(saved)
     total, bags, bank, meta = linen(addon)
-    T.check("and the next session counts the bank at once", total == 105 and meta.bankPending == nil, tostring(total))
-    T.eq("with no line in the dump", sessionLine(addon), nil)
+    T.check("the next session leaves the bank out until its bags are compared with their last save",
+        total == 5 and meta.bankPending == true, tostring(total))
+    T.eq("with no line in the dump for a note", sessionLine(addon), nil)
+    World.bagUpdate(addon, 0)
+    World.nextFrame()
+    total, bags, bank, meta = linen(addon)
+    T.check("compared at the first bag update: the bags are as last saved, the bank counts", total == 105
+        and meta.bankPending == nil and meta.bankInDoubt == nil, tostring(total))
+    local lines = {}
+    addon.Inventory:RunDiagnostic(lines)
+    T.check("and the dump says so", table.concat(lines, "\n"):find(
+        "bags as last saved (no note from the last session): compared, equal", 1, true) ~= nil, table.concat(lines, "\n"))
 
     -- Bags that could not be read when the session ended: the note says
     -- that they are not known, and the next session marks.
@@ -2676,6 +2688,75 @@ end)
 -- ===========================================================================
 -- Two characters of one account: what the first one holds reaches the second.
 -- ===========================================================================
+-- A session that ends without its saved data written (the client is killed
+-- or crashes) leaves nothing behind: the next one starts from what the
+-- session before saved. A withdrawal made in the lost session is then in the
+-- bags and still in the remembered bank. The last session left no note, so
+-- the next one compares its bags with what the last save of them held.
+T.section("a session that ended without its saved data written", function()
+    local function copy(t)
+        if type(t) ~= "table" then return t end
+        local c = {}
+        for k, v in pairs(t) do c[k] = copy(v) end
+        return c
+    end
+    local function relog(saved)
+        World.timers = {}
+        World.time = World.time + 30
+        World.serverTime = World.serverTime + 30
+        return World.login(saved)
+    end
+    -- Session 1: a visit, an ordinary logout long after the close.
+    local saved = {}
+    local addon = bankVisit(3, saved)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(15)
+    World.event(addon, "PLAYER_LOGOUT")
+    local written = copy(saved)
+    -- Session 2: 60 linen withdrawn at the bank, without hurry; then the
+    -- client is killed: nothing of this session is written.
+    addon = relog(saved)
+    World.bagUpdate(addon, 0)
+    World.advance(3)
+    World.event(addon, "BANKFRAME_OPENED")
+    World.advance(3)
+    World.containers[6][1] = slot(LINEN, 40)
+    World.containers[0][3] = slot(LINEN, 60)
+    World.bagUpdate(addon, 6, 0)
+    World.bagUpdateDelayed(addon)
+    World.advance(1)
+    World.event(addon, "BANKFRAME_CLOSED")
+    World.advance(20)
+    local total = linen(addon)
+    T.eq("(the lost session counts it right)", total, 105)
+    -- Session 3, from what session 1 wrote.
+    addon = relog(written)
+    local bags, bank, meta
+    total, bags, bank, meta = linen(addon)
+    T.check("before its bags are compared, the bank is left out: nothing counts twice", total == 65 and bank == nil
+        and meta.bankPending == true, tostring(total))
+    World.bagUpdate(addon, 0)
+    World.nextFrame()
+    total, bags, bank, meta = linen(addon)
+    T.check("linen rose against the last save of the bags: the bank holding it is in doubt", total == 65 and bank == nil
+        and meta.bankInDoubt == true and meta.bankPending == nil, tostring(total))
+    T.eq("the Shopping tab says so", firstShoppingRow(addon), BANK_NOT_COUNTED_LINE)
+    T.check("the account bank, which holds no linen, still counts", meta.accountInDoubt == nil
+        and (select(2, World.scan(addon)))[BAR].bank == 50)
+    local lines = {}
+    addon.Inventory:RunDiagnostic(lines)
+    T.check("the dump says why", table.concat(lines, "\n"):find("bags as last saved (no note from the last session): "
+        .. "compared, different: character marked in doubt; account not marked (nothing it holds rose)", 1, true) ~= nil,
+        table.concat(lines, "\n"))
+    World.advance(3)
+    World.event(addon, "BANKFRAME_OPENED")
+    World.advance(3)
+    total, bags, bank, meta = linen(addon)
+    T.check("the next visit reads it again: 65 carried, 40 in the bank", total == 105 and bank == 40 and meta.bankInDoubt == nil,
+        tostring(total))
+    notOver("a session that ended without its saved data written", addon)
+end)
+
 -- The times of a note and of a bank are read back from the saved table, and
 -- a damaged one leans towards not counting: a note whose time is not a
 -- number greater than zero and not later than a day after now marks the
