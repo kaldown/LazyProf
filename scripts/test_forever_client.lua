@@ -772,6 +772,11 @@ section("stock", function()
         table.concat(slotCalls, ","))
     check(p .. "bags: soulbound counts are split off", bound[2592] == 10 and bound[6948] == 1 and bound[2589] == nil)
     check(p .. "bags: the backpack's slot count is the third return", backpackSlots == 16, backpackSlots)
+    containers[1][1].isLocked = true
+    local locked = select(4, Client:BagContents())
+    check(p .. "bags: the part in locked slots is the fourth return", locked[2592] == 10 and locked[2589] == nil, locked[2592])
+    containers[1][1].isLocked = nil
+    check(p .. "bags: nothing locked, nothing in it", next(select(4, Client:BagContents())) == nil)
     containers[0] = nil
     items, bound, backpackSlots = Client:BagContents()
     check(p .. "bags: a backpack that reports no slots is reported as such", backpackSlots == 0 and type(items) == "table")
@@ -914,6 +919,24 @@ section("stock", function()
     containers[-1][1].isLocked = true
     check(p .. "in flight: not a container that is no purchased tab, nor the keyring", Client:MoveInFlight() == false)
     resetContainers()
+    -- Which banks it could look at: each with the number of its slots that
+    -- hold an item; nothing for one it could not.
+    local _, looked = Client:MoveInFlight()
+    check(p .. "looked at: both banks, with their occupied slots", looked.character == 4 and looked.account == 2,
+        tostring(looked.character) .. "/" .. tostring(looked.account))
+    bank[2].canView = false
+    bank[0].locked = 1
+    _, looked = Client:MoveInFlight()
+    check(p .. "looked at: not a bank that may not be viewed, nor a locked one", looked.character == nil and looked.account == nil)
+    bank[2].canView = true
+    bank[0].locked = nil
+    containers[15] = { slots = 0 }
+    _, looked = Client:MoveInFlight()
+    check(p .. "looked at: not a bank whose tabs report no slot", looked.account == nil and looked.character == 4)
+    containers[15] = { slots = 98 }
+    _, looked = Client:MoveInFlight()
+    check(p .. "looked at: an empty bank is looked at, with nothing in it", looked.account == 0)
+    resetContainers()
 
     -- Tab events while open.
     addon.events.BANK_TABS_CHANGED("BANK_TABS_CHANGED", 0)
@@ -934,7 +957,8 @@ section("stock", function()
     check(p .. "closed again: nothing is read", Client:IsBankOpen() == false and Client:BankContents("character") == nil)
     check(p .. "closed again: no bank is usable", Client:BankUsable("character") == false and Client:BankUsable("account") == false)
     containers[6][1].isLocked = true
-    check(p .. "closed again: a bank's slots are not looked at for a move on its way", Client:MoveInFlight() == false)
+    check(p .. "closed again: a bank's slots are not looked at for a move on its way", Client:MoveInFlight() == false
+        and next(select(2, Client:MoveInFlight())) == nil)
     containers[1][1].isLocked = true
     check(p .. "closed again: the carried bags' still are", Client:MoveInFlight() == true)
     resetContainers()

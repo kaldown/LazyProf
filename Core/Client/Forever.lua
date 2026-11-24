@@ -632,13 +632,15 @@ end
 -- Paths below are under Blizzard_APIDocumentationGenerated/ unless they name
 -- another folder.
 
--- Add what a container holds to `items` ({ [itemId] = count }) and the
--- soulbound part of it to `bound`; returns the container's slot count.
+-- Add what a container holds to `items` ({ [itemId] = count }), the
+-- soulbound part of it to `bound` and, when `locked` is given, the part in
+-- slots that read as locked (a move of them on its way, see MoveInFlight) to
+-- it; returns the container's slot count.
 -- C_Container.GetContainerNumSlots(containerIndex) returns a number
 -- (ContainerDocumentation.lua:313-326); GetContainerItemInfo(containerIndex,
--- slotIndex) returns a table with itemID, stackCount and isBound, or nothing
--- for an empty slot (ContainerDocumentation.lua:192-207, 766-781).
-local function ReadContainer(container, items, bound)
+-- slotIndex) returns a table with itemID, stackCount, isBound and isLocked,
+-- or nothing for an empty slot (ContainerDocumentation.lua:192-207, 766-783).
+local function ReadContainer(container, items, bound, locked)
     local slots = C_Container.GetContainerNumSlots(container)
     for slot = 1, slots do
         local info = C_Container.GetContainerItemInfo(container, slot)
@@ -647,13 +649,17 @@ local function ReadContainer(container, items, bound)
             if info.isBound then
                 bound[info.itemID] = (bound[info.itemID] or 0) + info.stackCount
             end
+            if locked and info.isLocked then
+                locked[info.itemID] = (locked[info.itemID] or 0) + info.stackCount
+            end
         end
     end
     return slots
 end
 
--- What the character carries: items, the soulbound part of them, and the
--- backpack's slot count (zero means the bags could not be read just now).
+-- What the character carries: items, the soulbound part of them, the
+-- backpack's slot count (zero means the bags could not be read just now),
+-- and the part of the items in slots that read as locked.
 -- Carried bags are Enum.BagIndex.Backpack (0) to ReagentBag (5): four bag
 -- slots and the reagent-bag slot (BagIndexConstantsDocumentation.lua:18-52;
 -- the client's counts are in the dump, LuaEnum.lua:9729-9735). Blizzard's
@@ -661,15 +667,15 @@ end
 -- (Blizzard_UIPanels_Game/Mainline/ContainerFrame.lua:400-427 with
 -- Blizzard_FrameXMLBase/Constants.lua:165-170). The keyring (-1) is not stock.
 function Client:BagContents()
-    local items, bound = {}, {}
+    local items, bound, locked = {}, {}, {}
     local backpackSlots = 0
     for bag = Enum.BagIndex.Backpack, Enum.BagIndex.ReagentBag do
-        local slots = ReadContainer(bag, items, bound)
+        local slots = ReadContainer(bag, items, bound, locked)
         if bag == Enum.BagIndex.Backpack then
             backpackSlots = slots
         end
     end
-    return items, bound, backpackSlots
+    return items, bound, backpackSlots, locked
 end
 
 -- The bank. This client has the tab-based C_Bank bank
@@ -744,12 +750,19 @@ function Client:BankUsable(kind)
 end
 
 -- Whether a slot of the container reads as locked.
-local function ContainerLocked(container)
-    for slot = 1, C_Container.GetContainerNumSlots(container) do
+-- Whether a slot of the container reads as locked, how many of its slots
+-- hold an item, and how many slots it has.
+local function LookAtSlots(container)
+    local slots = C_Container.GetContainerNumSlots(container)
+    local locked, occupied = false, 0
+    for slot = 1, slots do
         local info = C_Container.GetContainerItemInfo(container, slot)
-        if info and info.isLocked then return true end
+        if info then
+            occupied = occupied + 1
+            if info.isLocked then locked = true end
+        end
     end
-    return false
+    return locked, occupied, slots
 end
 
 -- Whether a move of items is still on its way: a slot of the carried bags,
@@ -759,24 +772,35 @@ end
 -- the field at :773), by which the bag and bank windows grey such a slot
 -- (Blizzard_UIPanels_Game/Mainline/ContainerFrame.lua:1285-1289,
 -- BankFrameTemplates.lua:594-596). A slot is also locked while its item is
--- on the cursor; that reads as a move on its way too.
+-- on the cursor; that reads as a move on its way too. An empty slot has no
+-- item to carry the lock: a move into one is seen by its source alone.
+-- The second return says which banks could be looked at: { [kind] = how
+-- many of its slots hold an item }, nothing for a bank that could not be
+-- (its window is closed, it may not be viewed, it is locked, or none of its
+-- tabs reports a slot) - its locks were not seen.
 -- Verify in game: whether the slots of a move read as locked at the bank's
 -- closing notice, and for which containers (/lp diag stock after a close:
 -- the "bank visit close" line).
 function Client:MoveInFlight()
+    local inFlight = false
     for bag = Enum.BagIndex.Backpack, Enum.BagIndex.ReagentBag do
-        if ContainerLocked(bag) then return true end
+        if LookAtSlots(bag) then inFlight = true end
     end
-    if not bankOpen then return false end
+    local looked = {}
+    if not bankOpen then return inFlight, looked end
     for _, kind in ipairs({ "character", "account" }) do
         local bankType = BankType(kind)
         if C_Bank.CanViewBank(bankType) and C_Bank.FetchBankLockedReason(bankType) == nil then
+            local occupied, slots = 0, 0
             for _, tab in ipairs(C_Bank.FetchPurchasedBankTabData(bankType) or {}) do
-                if ContainerLocked(tab.ID) then return true end
+                local locked, held, count = LookAtSlots(tab.ID)
+                if locked then inFlight = true end
+                occupied, slots = occupied + held, slots + count
             end
+            if slots > 0 then looked[kind] = occupied end
         end
     end
-    return false
+    return inFlight, looked
 end
 
 -- Which bank a container id belongs to ("character" | "account"), nil for

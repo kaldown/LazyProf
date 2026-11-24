@@ -401,17 +401,19 @@ end
 -- Stock: bags, the bank, who the character is, the clock ------------------------
 
 -- What the character carries: items ({ [itemId] = count }), the soulbound
--- part of them, and the backpack's slot count (zero means the bags could not
--- be read just now). Backpack and the four bags, through whichever container
--- call the client has: the table-returning one, or the older positional one
--- (count is its 2nd return, the item link its 7th). The older call does not
--- say what is soulbound, so on such a client nothing is reported as bound.
+-- part of them, the backpack's slot count (zero means the bags could not be
+-- read just now), and the part of the items in slots that read as locked (a
+-- move of them on its way). Backpack and the four bags, through whichever
+-- container call the client has: the table-returning one, or the older
+-- positional one (count is its 2nd return, the lock its 3rd, the item link
+-- its 7th). The older call does not say what is soulbound, so on such a
+-- client nothing is reported as bound.
 function Client:BagContents()
-    local items, bound = {}, {}
+    local items, bound, locked = {}, {}, {}
     local backpackSlots = 0
     local modern = C_Container and C_Container.GetContainerNumSlots and C_Container.GetContainerItemInfo
     if not modern and not (GetContainerNumSlots and GetContainerItemInfo) then
-        return items, bound, backpackSlots
+        return items, bound, backpackSlots, locked
     end
     for bag = 0, 4 do
         local slots = (modern and C_Container.GetContainerNumSlots(bag) or GetContainerNumSlots(bag)) or 0
@@ -419,17 +421,18 @@ function Client:BagContents()
             backpackSlots = slots
         end
         for slot = 1, slots do
-            local itemId, count, isBound
+            local itemId, count, isBound, isLocked
             if modern then
                 local info = C_Container.GetContainerItemInfo(bag, slot)
                 if info then
-                    itemId, count, isBound = info.itemID, info.stackCount, info.isBound
+                    itemId, count, isBound, isLocked = info.itemID, info.stackCount, info.isBound, info.isLocked
                 end
             else
-                local _, itemCount, _, _, _, _, itemLink = GetContainerItemInfo(bag, slot)
+                local _, itemCount, itemLocked, _, _, _, itemLink = GetContainerItemInfo(bag, slot)
                 if itemLink then
                     itemId = tonumber(itemLink:match("item:(%d+)"))
                     count = itemCount
+                    isLocked = itemLocked
                 end
             end
             if itemId and count then
@@ -437,19 +440,23 @@ function Client:BagContents()
                 if isBound then
                     bound[itemId] = (bound[itemId] or 0) + count
                 end
+                if isLocked then
+                    locked[itemId] = (locked[itemId] or 0) + count
+                end
             end
         end
     end
-    return items, bound, backpackSlots
+    return items, bound, backpackSlots, locked
 end
 
 -- Whether a move of items is still on its way: a slot of the carried bags
 -- reads as locked - the table-returning container call's isLocked, or the
 -- older positional call's third return. Without a container call, false.
--- (No bank is read on these clients, so nothing here depends on it.)
+-- The second return, the banks that could be looked at, is empty: no bank
+-- is read on these clients (so nothing here depends on it).
 function Client:MoveInFlight()
     local modern = C_Container and C_Container.GetContainerNumSlots and C_Container.GetContainerItemInfo
-    if not modern and not (GetContainerNumSlots and GetContainerItemInfo) then return false end
+    if not modern and not (GetContainerNumSlots and GetContainerItemInfo) then return false, {} end
     for bag = 0, 4 do
         local slots = (modern and C_Container.GetContainerNumSlots(bag) or GetContainerNumSlots(bag)) or 0
         for slot = 1, slots do
@@ -460,10 +467,10 @@ function Client:MoveInFlight()
             else
                 locked = select(3, GetContainerItemInfo(bag, slot))
             end
-            if locked then return true end
+            if locked then return true, {} end
         end
     end
-    return false
+    return false, {}
 end
 
 -- The bank is not read on these clients: its calls and events could not be

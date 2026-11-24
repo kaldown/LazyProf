@@ -473,10 +473,13 @@ section("stock", function()
     check(p .. "bags: nothing beyond them", items[99999] == nil and items[5396] == nil)
     check(p .. "bags: soulbound counts are split off", bound[2592] == 10 and bound[6948] == 1 and bound[2589] == nil)
     check(p .. "bags: the backpack's slot count is the third return", backpackSlots == 16, backpackSlots)
+    check(p .. "bags: nothing locked, nothing in the fourth return", next(select(4, Client:BagContents())) == nil)
     -- A move on its way: a slot of the carried bags that reads as locked.
-    check(p .. "in flight: nothing locked", Client:MoveInFlight() == false)
+    check(p .. "in flight: nothing locked, and no bank looked at", Client:MoveInFlight() == false
+        and next(select(2, Client:MoveInFlight())) == nil)
     bags[1][2][4] = true
     check(p .. "in flight: a locked slot of a bag", Client:MoveInFlight() == true)
+    check(p .. "bags: its stack is the part in locked slots", (select(4, Client:BagContents()))[2592] == 4)
     bags[1][2][4] = nil
     bags[5][1][4] = true
     check(p .. "in flight: not of a container that is no carried bag here", Client:MoveInFlight() == false)
@@ -501,6 +504,7 @@ section("stock", function()
     check(p .. "older call, in flight: nothing locked", Client:MoveInFlight() == false)
     bags[0][2][4] = 1
     check(p .. "older call, in flight: a locked slot", Client:MoveInFlight() == true)
+    check(p .. "older call: its stack is the part in locked slots", (select(4, Client:BagContents()))[2589] == 5)
     bags[0][2][4] = nil
 
     -- No container call at all: nothing, and the backpack counts as unread.
