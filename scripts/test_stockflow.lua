@@ -197,23 +197,51 @@ T.section("a failing client call", function()
     end)
     T.check("bag updates, a bank visit and logout do not raise", ok, err)
 
-    -- The reason is logged once, and the dump shows the last one.
+    -- The player sees the first failure of a session: it is handed to the
+    -- game's error handler, once. (The debug log gets it too, but that log
+    -- drops everything while debugging is off, which is the default.)
+    T.eq("the first failure is handed to the game's error handler, later ones are not", #World.errors, 1)
+    T.check("it says whose it is, where it happened and what failed",
+        World.errors[1] ~= nil and World.errors[1]:find("LazyProf", 1, true) ~= nil
+        and World.errors[1]:find("(start)", 1, true) ~= nil and World.errors[1]:find("IsGameRuleActive", 1, true) ~= nil,
+        World.errors[1])
     local logged = 0
     for _, line in ipairs(addon.debugLines) do
         if line:find("IsGameRuleActive", 1, true) then logged = logged + 1 end
     end
     T.eq("the reason is logged once, not at every call", logged, 1)
-    local lines = {}
-    addon.Inventory:RunDiagnostic(lines)
-    local text = table.concat(lines, "\n")
-    T.check("the dump names the last failure", text:find("last error:", 1, true) ~= nil
-        and text:find("IsGameRuleActive", 1, true) ~= nil, text)
+    -- The dump: the last failure, where, how many, and what a scan does now.
+    local function dump()
+        local lines = {}
+        addon.Inventory:RunDiagnostic(lines)
+        return table.concat(lines, "\n")
+    end
+    World.nextFrame()
+    World.scan(addon)                              -- the last failure of the lot: a scan
+    local text = dump()
+    local where, howMany = text:match("last error: [^\n]*%(in: ([%a ]+); (%d+) this session")
+    T.check("the dump names the last failure and where it happened", text:find("last error:", 1, true) ~= nil
+        and text:find("IsGameRuleActive", 1, true) ~= nil and where == "scan", text)
+    T.check("and how many there were", tonumber(howMany) ~= nil and tonumber(howMany) > 3, howMany)
+    T.check("and that a scan right now counts the bags only",
+        text:find("scan now: bags only", 1, true) ~= nil and not text:find("scan now: whole", 1, true), text)
+    local before = tonumber(howMany)
+    dump()
+    T.eq("the dump itself counts no failure", tonumber((dump():match("; (%d+) this session"))), before)
 
-    -- Once the call works again, so does the memory.
+    -- Once the call works again, so does the memory - and the dump says so,
+    -- while the failure stays on record.
     _G.C_GameRules.IsGameRuleActive = realRule
     World.nextFrame()
     combined = World.scan(addon)
     T.eq("the call works again: the alt counts", combined[LINEN], 25)
+    text = dump()
+    T.check("the dump: a scan is whole again", text:find("scan now: whole", 1, true) ~= nil
+        and not text:find("scan now: bags only", 1, true), text)
+    T.check("the dump: the failure is still on record", text:find("last error:", 1, true) ~= nil
+        and tonumber((text:match("; (%d+) this session"))) == before, text)
+    T.check("nothing says stock is left out while it is counted", not text:find("not counted while it lasts", 1, true), text)
+    T.eq("no second report to the error handler", #World.errors, 1)
 
     -- A healthy session has no error to show.
     World.reset()
@@ -221,10 +249,91 @@ T.section("a failing client call", function()
     addon = World.login({}, { init = true })
     addon:OnEnable()
     World.advance(3)
-    lines = {}
-    addon.Inventory:RunDiagnostic(lines)
-    T.check("a healthy session: no error line", not table.concat(lines, "\n"):find("last error", 1, true))
+    text = dump()
+    T.check("a healthy session: no error line", not text:find("last error", 1, true))
+    T.check("a healthy session: a scan is whole", text:find("scan now: whole", 1, true) ~= nil, text)
     T.eq("a healthy session: nothing logged", #addon.debugLines, 0)
+    T.eq("a healthy session: nothing handed to the error handler", #World.errors, 0)
+
+    -- One failure, long over: the dump must not say that stock is left out.
+    World.reset()
+    World.containers = { [0] = { slots = 16, slot(LINEN, 5) } }
+    addon = World.login({ stock = { schema = 1, characters = { X = { name = "Alt Goldtooth", world = "eu-pvp", faction = "Horde",
+        seen = World.serverTime, bags = { items = { [LINEN] = 20 }, at = World.serverTime } } }, account = {} } })
+    local realInfo = _G.C_Container.GetContainerItemInfo
+    local failOnce = true
+    _G.C_Container.GetContainerItemInfo = function(bag, index)
+        if failOnce then failOnce = false; error("boom") end
+        return realInfo(bag, index)
+    end
+    ok, err = pcall(World.advance, 3)             -- the first bag save fails
+    _G.C_Container.GetContainerItemInfo = realInfo
+    T.check("a failing bag save does not raise", ok, err)
+    World.bagUpdate(addon, 0)
+    World.advance(600)
+    T.eq("ten minutes later bank and alts are counted", (World.scan(addon))[LINEN], 25)
+    text = dump()
+    T.check("the dump names that one failure", text:find("(in: bag save; 1 this session", 1, true) ~= nil, text)
+    T.check("and says a scan is whole", text:find("scan now: whole", 1, true) ~= nil, text)
+    T.check("the later save went through (no flag was left set)",
+        addon.db.global.stock.characters[MAIN_GUID] ~= nil and addon.db.global.stock.characters[MAIN_GUID].bags ~= nil
+        and text:find("bagSave=false", 1, true) ~= nil, text)
+    T.eq("that failure was shown once", #World.errors, 1)
+
+    -- A client without an error handler, or one whose handler fails itself:
+    -- the memory still never stops the addon.
+    for _, case in ipairs({
+        { "no error handler", nil },
+        { "an error handler that is not a function", function() return "broken" end },
+        { "an error handler that fails", function() return function() error("handler down") end end },
+        { "asking for the error handler fails", function() error("no handler today") end },
+    }) do
+        World.reset()
+        World.containers = { [0] = { slots = 16, slot(LINEN, 5) } }
+        local savedHandler = _G.geterrorhandler
+        _G.geterrorhandler = case[2]
+        addon = World.login({})
+        _G.C_GameRules.IsGameRuleActive = function() error("bad argument") end
+        ok, err = pcall(function()
+            World.advance(3)
+            combined = World.scan(addon)
+        end)
+        _G.C_GameRules.IsGameRuleActive = realRule
+        _G.geterrorhandler = savedHandler
+        T.check(case[1] .. ": a failure in the memory still does not raise", ok, err)
+        T.eq(case[1] .. ": the bags are counted", combined and combined[LINEN], 5)
+    end
+end)
+
+-- ===========================================================================
+-- A scan whose memory part fails half way hands out the live bags and nothing
+-- of what it had added before the failure.
+-- ===========================================================================
+T.section("a scan that fails half way", function()
+    World.reset()
+    World.containers = { [0] = { slots = 16, slot(LINEN, 5) } }
+    local now = World.serverTime
+    local addon = World.login({ stock = { schema = 1, account = { ["eu-pvp"] = { items = { [BAR] = 50 }, at = now } },
+        characters = {
+            [MAIN_GUID] = { name = "Main Goldtooth", world = "eu-pvp", faction = "Horde", seen = now,
+                bank = { items = { [LINEN] = 100, [SILK] = 30 }, at = now } },
+            X = { name = "Alt Goldtooth", world = "eu-pvp", faction = "Horde", seen = now, bags = { items = { [LINEN] = 20 }, at = now } },
+        } } })
+    World.advance(3)
+    T.eq("healthy: bags, bank and alt", (World.scan(addon))[LINEN], 125)
+    local realAlts = addon.StockMemory.Alts
+    addon.StockMemory.Alts = function() error("alts cannot be read") end     -- fails after the banks were added
+    addon.Inventory:ForgetAltsPart()
+    World.nextFrame()
+    local combined, breakdown, meta = World.scan(addon)
+    addon.StockMemory.Alts = realAlts
+    T.check("only the live bags come out", combined[LINEN] == 5 and count(combined) == 1, combined[LINEN])
+    T.check("nothing of the bank that was added before the failure", combined[SILK] == nil and combined[BAR] == nil
+        and breakdown[LINEN].bank == nil and breakdown[SILK] == nil)
+    T.check("and no age of anything", meta ~= nil and meta.remembered == true and meta.bankSeenAt == nil
+        and meta.accountSeenAt == nil and next(meta.alts) == nil)
+    World.nextFrame()
+    T.eq("the next scan is whole again", (World.scan(addon))[LINEN], 125)
 end)
 
 -- ===========================================================================

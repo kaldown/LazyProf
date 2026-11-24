@@ -188,17 +188,35 @@ end
 
 -- The memory must never stop the addon: a damaged saved table or a client
 -- call that fails would otherwise break login or every scan. Its entry
--- points therefore run protected. A failure is not hidden: the first one is
--- written to the debug log, and /lp diag stock prints the last one and how
--- many there were.
+-- points therefore run protected. A failure is not hidden: the first one of
+-- a session is handed to the game's error handler, so the player's error
+-- display shows it once (the debug log gets it too, but drops it while
+-- debugging is off); every one is counted, and /lp diag stock prints the
+-- last one, where it happened, how many there were and whether a scan right
+-- now is whole.
 local memoryErrors = { count = 0, last = nil, where = nil }
+
+-- Hand a message to the game's error handler. geterrorhandler() returns it
+-- (a client global: Ketho BlizzardInterfaceResources, forever branch,
+-- Resources/GlobalAPI.lua:6884; Blizzard calls it the same way in
+-- Blizzard_SharedXMLBase/ErrorUtil.lua:1-6 and :17-19). A client without
+-- one, or a handler that fails itself, changes nothing here.
+local function ShowError(message)
+    if type(geterrorhandler) ~= "function" then return end
+    local found, handler = pcall(geterrorhandler)
+    if found and type(handler) == "function" then
+        pcall(handler, message)
+    end
+end
 
 local function NoteMemoryError(where, err)
     memoryErrors.count = memoryErrors.count + 1
     memoryErrors.last = tostring(err)
     memoryErrors.where = where
     if memoryErrors.count == 1 then
-        LazyProf:Debug("pathfinder", "Stock memory failed (" .. where .. "): " .. tostring(err))
+        local message = "LazyProf: its memory of your stock failed (" .. where .. "): " .. tostring(err)
+        LazyProf:Debug("pathfinder", message)
+        ShowError(message .. " - bank and alt stock may be missing from the lists; /lp diag stock says more.")
     end
 end
 
@@ -361,11 +379,6 @@ local function AddRememberedStock(self, combined, breakdown, countAlts)
     local meta = { remembered = true, alts = {} }
 
     if countBank then
-        -- With the bank window open, count what is in it now (unless this
-        -- frame has read it already).
-        if Client:IsBankOpen() and not self:BankReadThisFrame() then
-            self:LookAtOpenBank()
-        end
         local items, seenAt = Memory:OwnBank(identity.guid)
         if items then
             mergeSource(items, "bank", nil, combined, breakdown)
@@ -394,6 +407,15 @@ local function AddRememberedStock(self, combined, breakdown, countAlts)
         meta.alts = part.seen
     end
     return meta
+end
+
+-- The memory's part of a scan. With the bank window open, what is in it now
+-- is read first (unless this frame has read it already).
+local function ScanMemory(self, combined, breakdown, countAlts)
+    if LazyProf.db.profile.includeBankItems and LazyProf.Client:IsBankOpen() and not self:BankReadThisFrame() then
+        self:LookAtOpenBank()
+    end
+    return AddRememberedStock(self, combined, breakdown, countAlts)
 end
 
 -- Scan all inventory sources based on settings
@@ -435,7 +457,7 @@ function Inventory:ScanAll()
     if self:UsesSyndicator() then
         AddSyndicatorStock(self, combined, breakdown, countAlts)
     else
-        local ok, result = Protected("scan", AddRememberedStock, self, combined, breakdown, countAlts)
+        local ok, result = Protected("scan", ScanMemory, self, combined, breakdown, countAlts)
         if ok then
             meta = result
         else
@@ -796,7 +818,17 @@ function Inventory:RunDiagnostic(lines)
 
     if memoryErrors.count > 0 then
         add("last error: " .. tostring(memoryErrors.last) .. " (in: " .. tostring(memoryErrors.where) .. "; "
-            .. tostring(memoryErrors.count) .. " so far this session - stock outside the bags is not counted while it lasts)")
+            .. tostring(memoryErrors.count) .. " this session; the first was handed to the game's error display)")
+    end
+    -- What a scan does right now: tried here, on tables that are thrown
+    -- away, so that a failure long over does not read as stock left out.
+    if not self:UsesSyndicator() then
+        local whole, err = pcall(AddRememberedStock, self, {}, {}, profile.includeAltCharacters and not IsSelfFound())
+        if whole then
+            add("scan now: whole - bank and alt stock are counted from the memory")
+        else
+            add("scan now: bags only - the memory cannot be read: " .. tostring(err))
+        end
     end
 
     -- Who the character is may be the very call that fails: the rest of the

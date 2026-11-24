@@ -18,7 +18,8 @@
 --   World.scan(addon)                       -- ScanAll past the frame cache
 --
 -- Counters (World.calls) say how often the client was asked: slots (container
--- slot counts), tabs (bank tab lists).
+-- slot counts), tabs (bank tab lists). World.errors holds what was handed to
+-- the client's error handler (what the player's error display would show).
 
 local World = {}
 
@@ -35,6 +36,7 @@ World.guid = "Player-4444-000000AA"
 World.name = "Main Goldtooth"
 World.faction = "Horde"
 World.calls = { slots = 0, tabs = 0 }
+World.errors = {}
 
 function World.slot(itemId, stack, isBound)
     return { itemID = itemId, stackCount = stack, isBound = isBound and true or false }
@@ -55,6 +57,7 @@ function World.reset()
     World.name = "Main Goldtooth"
     World.faction = "Horde"
     World.calls = { slots = 0, tabs = 0 }
+    World.errors = {}
 end
 
 -- Install the client's globals (they read World's fields when called).
@@ -111,6 +114,9 @@ function World.install()
     _G.UnitGUID = function(unit) return unit == "player" and World.guid or nil end
     _G.NameUtil = { GetUnmodifiedUnitFullName = function() return World.name end }
     _G.issecretvalue = nil
+    _G.geterrorhandler = function()
+        return function(message) World.errors[#World.errors + 1] = tostring(message) end
+    end
     _G.Syndicator = nil
     _G.InCombatLockdown = function() return false end
     -- The realm name is a shard name on this client and the Classic container
