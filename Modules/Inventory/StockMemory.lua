@@ -29,8 +29,9 @@
 -- `bound` holds how many of an item's count are soulbound (left out when
 -- there are none): they stay in the owner's own bank, but another character
 -- cannot be sent them. Times are server time in seconds. A save replaces the
--- record's table; nothing is ever appended. Characters not seen for
--- KEEP_DAYS days are dropped by Prune.
+-- table of the part it saves (`bags`, `bank` or `bagsAtBank`) and brings who
+-- the character is up to date; the rest of the record stays, and nothing is
+-- ever appended. Characters not seen for KEEP_DAYS days are dropped by Prune.
 -- `doubt` is true on a bank the caller has reason to think is behind what is
 -- really in it (MarkBankDoubt / MarkAccountBankDoubt; absent otherwise). The
 -- bank stays remembered, but it is handed out with that mark, and an alt's
