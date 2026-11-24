@@ -410,6 +410,21 @@ T.section("account bank", function()
     items, at = Memory:AccountBank("eu")
     T.check("a second save replaces", items[4306] == 2 and items[2589] == nil and at == NOW + 5)
     T.check("no region asked: nothing", Memory:AccountBank(nil) == nil)
+    -- Which characters have read the account bank: one that may not view
+    -- it never has, and nothing it did can have changed it.
+    T.check("a reader without a record of its own gets none from it", LazyProf.db.global.stock.characters[MAIN.guid] == nil
+        and Memory:ReadsAccountBank(MAIN.guid) == false)
+    Memory:SaveBags(MAIN, { [1] = 1 }, {}, NOW)
+    Memory:SaveAccountBank(MAIN, { [4306] = 2 }, NOW + 5)
+    T.check("the reader's record says that it has read the account bank", Memory:ReadsAccountBank(MAIN.guid) == true)
+    T.check("and nothing else of it changed", LazyProf.db.global.stock.characters[MAIN.guid].seen == NOW
+        and (Memory:OwnBags(MAIN.guid))[1] == 1)
+    T.check("another character has not", Memory:ReadsAccountBank("Player-1-OTHER") == false
+        and Memory:ReadsAccountBank(nil) == false)
+    LazyProf.db.global.stock.characters[MAIN.guid].readsAccount = "yes"
+    T.check("a damaged value says that it has (it leans towards marking, so towards not counting)",
+        Memory:ReadsAccountBank(MAIN.guid) == true)
+    LazyProf.db.global.stock.characters[MAIN.guid].readsAccount = true
     -- One copy per region: a character of another world or of the other
     -- faction that reads it makes the copy its own.
     Memory:SaveAccountBank(who("Player-1-HORDE", "Other Side", "eu-pvp", "Horde"), { [774] = 3 }, NOW + 6)

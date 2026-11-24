@@ -3244,6 +3244,15 @@ T.section("a session that ended without its saved data written", function()
     T.check("nor the account bank of a Self-Found character", select(3, Memory:AccountBank("eu")) == false
         and select(3, Memory:OwnBank(MAIN.guid)) == true)
     LazyProf.db.char.selfFoundMode = false
+    -- Nor one this character has never read: a character that may not view
+    -- the account bank cannot have changed it, and could not clear the mark.
+    session({ [2589] = 65 }, function()
+        Memory:SaveAccountBank(ALT, { [2589] = 4 }, NOW - DAY)
+        LazyProf.db.global.stock.characters[MAIN.guid].readsAccount = nil
+    end)
+    compareNow()
+    T.check("an account bank this character has never read is not marked", select(3, Memory:AccountBank("eu")) == false
+        and select(3, Memory:OwnBank(MAIN.guid)) == true)
 
     -- A record whose time is damaged is taken as not known: the banks that
     -- hold something are marked, whatever the bags.

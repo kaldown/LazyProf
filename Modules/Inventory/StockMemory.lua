@@ -15,6 +15,8 @@
 --       bags = { items = { [itemId] = count }, bound = { [itemId] = count }, at },
 --       bank = { items = ..., bound = ..., at, doubt },
 --       bagsAtBank = { items = { [itemId] = count }, banks = { character, account }, at },
+--       readsAccount,            true once a read of the account bank by this
+--                                character was saved (absent otherwise)
 --   }
 --   stock.account[region] = { items = { [itemId] = count }, at, doubt, world, faction }
 -- The account bank is remembered once per region (the region part of the
@@ -291,13 +293,28 @@ function StockMemory:SaveAccountBank(identity, items, now)
             and type(items) == "table" and type(now) == "number") then
         return false
     end
-    local _, account = Store(true)
+    local characters, account = Store(true)
     if not account then return false end
     for region in pairs(account) do
         if not AccountEntry(account, region) then account[region] = nil end
     end
     account[identity.region] = { items = Counts(items), at = now, world = identity.world, faction = identity.faction }
+    -- The reader's record, when it has one, says that it reads the account
+    -- bank (see ReadsAccountBank). Nothing else of the record is touched.
+    local record = identity.guid ~= nil and characters[identity.guid] or nil
+    if type(record) == "table" then
+        record.readsAccount = true
+    end
     return true
+end
+
+-- Has this character ever read the account bank (a save of it was made from
+-- its read)? One that may not view it never has, and nothing it did can
+-- have changed it. Read back, any value but nothing and false is yes.
+function StockMemory:ReadsAccountBank(guid)
+    local characters = Store()
+    local record = characters and guid ~= nil and characters[guid]
+    return type(record) == "table" and Set(record.readsAccount) or false
 end
 
 -- A character's own bags as its last save left them: a copy of their items

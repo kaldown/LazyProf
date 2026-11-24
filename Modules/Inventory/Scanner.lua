@@ -262,7 +262,9 @@
 --        risen against that record for an item that the character's own
 --        remembered bank, or the account bank as it counts for this
 --        character (of its world and faction; not for a Self-Found
---        character), holds marks that bank in doubt; bags that cannot be
+--        character; and only when this character has read it before - one
+--        that may not view it cannot have changed it, and could not clear
+--        the mark), holds marks that bank in doubt; bags that cannot be
 --        compared, and a record whose time is damaged, mark each of those
 --        banks that holds something. A count that fell, no record or a
 --        record that cannot be read: no mark. There is no exception for a
@@ -1166,8 +1168,11 @@ local function CompareLastSession(items)
                     held = Memory:OwnBank(ls.guid)
                 elseif not ls.fromRecord then
                     held = Memory:AccountBank(identity.region)
-                elseif not IsSelfFound() then
-                    -- Rule 5d: only the account bank this character counts.
+                elseif not IsSelfFound() and Memory:ReadsAccountBank(ls.guid) then
+                    -- Rule 5d: only the account bank this character counts,
+                    -- and only when it has read it before: a character that
+                    -- may not view it cannot have changed it, and could
+                    -- never read it to take the mark away.
                     held = AccountBankOf(identity)
                 end
                 if ls.fromRecord and not (held and next(held) ~= nil) then
