@@ -66,6 +66,10 @@
 --                        or the Shopping tab does not say so (settled)
 --   I2.alt               the other character's bank is in doubt and left out, and the
 --                        scan's third return or the Shopping tab does not name it
+--   I2.elsewhere         the account bank's copy holds items and was read on a
+--                        character of another faction or world, and the scan's third
+--                        return (accountElsewhere) or the Shopping tab does not say so;
+--                        or one of them says so when it is not the case (settled)
 --   I3.count|doubt       a well-behaved client: an open bank wrong or in doubt after two
 --                        quiet seconds (I3x.*: the same on any other client)
 --   I4.blindmark         a bank is marked in doubt by a character that may not view it
@@ -661,7 +665,8 @@ local function Guard(what, fn, ...)
 end
 
 -- The lines the Shopping tab starts with, as the window would draw them from
--- `meta`: its first two rows (one for the character's banks, one for alts).
+-- `meta`: its first three rows (the character's own bank and the account
+-- bank can have a line each, the alts one more).
 local function ShoppingLine(meta)
     local addon = S.addon
     if not addon.GuideViews then
@@ -670,7 +675,9 @@ local function ShoppingLine(meta)
         end
     end
     local rows = addon.GuideViews.Shopping({ path = {}, missing = { rows = {} }, stockMeta = meta, now = World.serverTime })
-    return (rows[1] and tostring(rows[1].text) or "") .. "\n" .. (rows[2] and tostring(rows[2].text) or "")
+    local texts = {}
+    for index = 1, 3 do texts[index] = rows[index] and tostring(rows[index].text) or "" end
+    return table.concat(texts, "\n")
 end
 
 -- remembered against true: "none" (nothing remembered), "eq", "high", "low", "mixed"
@@ -870,8 +877,25 @@ local function SettledChecks(meta)
                     .. Literal(items) .. ", in the bank " .. Literal(truth), { cause = cause })
             end
         end
-        if not items and next(truth) ~= nil and Viewable(kind) and (own and Me().visited or (not own and Me().visited)) then
-            S.stats.unseen = S.stats.unseen + 1
+        -- The account bank's copy of the region was read on a character of
+        -- another faction or world: not counted here, and the scan and the
+        -- Shopping tab say exactly that whenever the copy holds something.
+        if not own then
+            local copy, _, _, world, faction = RegionCopy("account")
+            local elsewhere = copy ~= nil and next(copy) ~= nil and (world ~= Me().world or faction ~= Me().faction)
+            if elsewhere then
+                S.stats.elsewhere = S.stats.elsewhere + 1
+                if not meta.accountElsewhere then
+                    Violate("I2.elsewhere", "the account bank holds items, was read on a character of another faction or"
+                        .. " world, and the scan does not say so", { cause = cause })
+                elseif not ShoppingLine(meta):find("The account bank is not counted: LazyProf last read it on a character"
+                        .. " of another faction or world.", 1, true) then
+                    Violate("I2.elsewhere", "read elsewhere, and the Shopping tab starts with: " .. ShoppingLine(meta), { cause = cause })
+                end
+            elseif meta.accountElsewhere then
+                Violate("I2.elsewhere", "the scan says the account bank was read elsewhere, and it was not (or it holds nothing)",
+                    { cause = cause })
+            end
         end
         -- I3: the bank has been open for two seconds and more, and all is quiet.
         if S.bankOpen and S.now - S.openMs >= SETTLE and Viewable(kind) then
@@ -2250,7 +2274,7 @@ local function NewWalk(config, init, opts)
         density = opts.density or "frame", init = opts.init or false, habits = opts.habits or DEFAULT_HABITS,
         trace = opts.trace and {} or nil, wanted = opts.wanted,
         stats = { scans = 0, frames = 0, visits = {}, episodes = {}, longest = {}, doubtNeeded = 0, doubtIdle = 0,
-                  doubtSettled = 0, unseen = 0, healChecks = 0, settled = 0 },
+                  doubtSettled = 0, elsewhere = 0, healChecks = 0, settled = 0 },
     }
     local world = CopyInit(init)
     S.chars, S.account = world.chars, world.account
@@ -3039,6 +3063,7 @@ none("I2: no counted bank is short without a word once things have settled", "I2
 none("I2: a bank in doubt is named by the scan and has its line on the Shopping tab", "I2.unsaid.", "I2.noline.")
 none("I2: no bank is still left out as \"being read\" two seconds after the last event", "I2.pending.")
 none("I2: an alt's bank that is left out is named too", "I2.alt")
+none("I2: an account bank holding items and read on a character of another faction or world is said to be so", "I2.elsewhere")
 none("I3: on a well-behaved client an open bank is right and without doubt after two quiet seconds", "I3.count.", "I3.doubt.")
 none("I3: and on every other client", "I3x.")
 none("I4: no character marks a bank in doubt that it may not view, and so could not read again", "I4.blindmark.")

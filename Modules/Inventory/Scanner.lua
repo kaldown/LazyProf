@@ -551,6 +551,16 @@ local function AccountBankOf(identity)
     return items, seenAt, doubt
 end
 
+-- Is the account bank of the character's region left out for this reason
+-- alone: its copy holds at least one item and was read on a character of
+-- another world or of the other faction? (Not when the character's own
+-- world or faction is unknown: that is another reason.)
+local function AccountReadElsewhere(identity)
+    if identity.world == nil or identity.faction == nil then return false end
+    local items, _, _, world, faction = LazyProf.StockMemory:AccountBank(identity.region)
+    return items ~= nil and next(items) ~= nil and (world ~= identity.world or faction ~= identity.faction)
+end
+
 -- Frame-level cache: ScanAll is called many times per frame (once per recipe in
 -- GetCandidates). Cache results so only the first call per frame does real work.
 local scanCache = { time = 0, combined = nil, breakdown = nil, meta = nil }
@@ -714,6 +724,10 @@ end
 --                    not been compared yet with what they held when the
 --                    last session ended at the bank
 --     accountPending the same for the account bank
+--     accountElsewhere true when the account bank is not counted because
+--                    its copy, which holds items, was read on a character
+--                    of another world or of the other faction (set only
+--                    while bank items count for this character at all)
 --     altBanksInDoubt  { name, ... }: the alts whose bank is in doubt and so
 --                    left out, by name; nil when there is none (or alts or
 --                    bank items do not count)
@@ -757,6 +771,8 @@ local function AddRememberedStock(self, combined, breakdown, countAlts, selfFoun
             elseif items then
                 mergeSource(items, "bank", nil, combined, breakdown)
                 meta.accountSeenAt = seenAt
+            elseif AccountReadElsewhere(identity) then
+                meta.accountElsewhere = true
             end
         end
     end

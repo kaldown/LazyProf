@@ -1600,6 +1600,8 @@ T.section("shopping: a bank that is not counted says so", function()
         .. "Open the bank on those characters to count them again."
     local THREE_ALTS = "The banks of Amy Alt, Bob Alt and Zed Alt are not counted: they may have changed after LazyProf last read them. "
         .. "Open the bank on those characters to count them again."
+    local ELSEWHERE = "The account bank is not counted: LazyProf last read it on a character of another faction or world. "
+        .. "It counts again once a character of this faction and world reads it at the bank."
 
     local plain = rowsWith({ remembered = true, alts = {} })
     local rows = rowsWith({ remembered = true, alts = {}, bankInDoubt = true })
@@ -1638,6 +1640,21 @@ T.section("shopping: a bank that is not counted says so", function()
         altBanksInDoubt = { "Zed Alt" } }, stock, where)
     T.check("own banks and an alt's: two lines, the character's first", rows[1].text == BOTH and rows[2].text == ONE_ALT, rows[2].text)
     T.eq("both before the collect block", rows[3].text, "Collect first")
+    -- An account bank last read on a character of another faction or world
+    -- is not counted here, and it is not "in doubt" here either: a line of
+    -- its own, which says what makes it count.
+    rows = rowsWith({ remembered = true, alts = {}, accountElsewhere = true })
+    T.eq("the account bank read elsewhere", rows[1].text, ELSEWHERE)
+    T.check("grey and wrapping like the others", rows[1].kind == "line" and rows[1].wrap == true and rows[1].color[1] == 0.7)
+    T.eq("one line", #rows, #plain + 1)
+    rows = rowsWith({ remembered = true, alts = {}, bankInDoubt = true, accountElsewhere = true })
+    T.check("the own bank in doubt as well: its own line, then this one", rows[1].text == OWN and rows[2].text == ELSEWHERE,
+        tostring(rows[1].text) .. " | " .. tostring(rows[2].text))
+    T.eq("two lines", #rows, #plain + 2)
+    rows = rowsWith({ remembered = true, alts = { ["Zed Alt"] = { bags = NOW - DAY } }, bankInDoubt = true, accountElsewhere = true,
+        altBanksInDoubt = { "Zed Alt" } }, stock, where)
+    T.check("and an alt's: the character's lines first", rows[1].text == OWN and rows[2].text == ELSEWHERE
+        and rows[3].text == ONE_ALT and rows[4].text == "Collect first", tostring(rows[3].text))
     rows = rowsWith({ remembered = true, alts = {}, altBanksInDoubt = {} })
     T.eq("an empty list of alts: no line", #rows, #plain)
 
@@ -1650,7 +1667,7 @@ T.section("shopping: a bank that is not counted says so", function()
     rows = rowsWith({ remembered = true, alts = {}, bankInDoubt = true },
         nil, nil, { steps = {}, nothingLeft = true, actualSkill = 300, currentSkill = 300, totalCost = 0 })
     T.check("nothing left to level: the notice alone", #rows >= 1 and rows[1].text ~= OWN)
-    for _, text in ipairs({ OWN, ACCOUNT, BOTH, ONE_ALT, TWO_ALTS, THREE_ALTS }) do
+    for _, text in ipairs({ OWN, ACCOUNT, BOTH, ONE_ALT, TWO_ALTS, THREE_ALTS, ELSEWHERE }) do
         T.check("plain ASCII: " .. text:sub(1, 24), not text:find("[\128-\255]"))
     end
 end)

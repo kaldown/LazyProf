@@ -406,20 +406,50 @@ T.section("no inventory addon: the account bank counts only where it was read", 
     Memory:SaveAccountBank(MAIN, { [4306] = 10 }, NOW - DAY)
     local combined, _, meta = scan()
     T.check("read by this world and faction: counted", combined[4306] == 10 and meta.accountSeenAt == NOW - DAY)
-    for _, other in ipairs({ HORDE, NORMAL, US }) do
+    T.check("read here: nothing said of it being read elsewhere", meta.accountElsewhere == nil)
+    -- The other faction or another world of the region: not counted, and the
+    -- scan says why - it was read elsewhere, which is no doubt about it.
+    for _, other in ipairs({ HORDE, NORMAL }) do
         client.identity = other
         combined, _, meta = scan()
-        T.check(other.name .. ": not counted, and nothing is said of it", combined[4306] == nil and meta.accountSeenAt == nil
-            and meta.accountInDoubt == nil and meta.accountPending == nil)
+        T.check(other.name .. ": not counted, and the scan says it was read elsewhere", combined[4306] == nil
+            and meta.accountSeenAt == nil and meta.accountInDoubt == nil and meta.accountPending == nil
+            and meta.accountElsewhere == true)
     end
+    -- Only where bank items count for the character at all.
+    client.identity = HORDE
+    LazyProf.db.profile.includeBankItems = false
+    T.check("bank items off: nothing said", select(3, scan()).accountElsewhere == nil)
+    LazyProf.db.profile.includeBankItems = true
+    LazyProf.db.char.selfFoundMode = true
+    T.check("Self-Found: nothing said (the account bank is no stock of its own)", select(3, scan()).accountElsewhere == nil)
+    LazyProf.db.char.selfFoundMode = false
+    client.gameSelfFound = true
+    T.check("the game's Self-Found flag: the same", select(3, scan()).accountElsewhere == nil)
+    client.gameSelfFound = false
+    client.identity = { guid = HORDE.guid, name = HORDE.name, faction = "Horde", region = "eu" }
+    T.check("the character's world unknown: not said (the bank is not counted for that reason)",
+        select(3, scan()).accountElsewhere == nil)
+    -- Another region has a copy of its own (none here): nothing to say.
+    client.identity = US
+    combined, _, meta = scan()
+    T.check(US.name .. ": not counted, and nothing is said of it", combined[4306] == nil and meta.accountSeenAt == nil
+        and meta.accountInDoubt == nil and meta.accountPending == nil and meta.accountElsewhere == nil)
     -- In doubt: said only where it would count.
     Memory:MarkAccountBankDoubt("eu")
     client.identity = HORDE
     combined, _, meta = scan()
-    T.check("in doubt, read by the other faction: not counted and not named", combined[4306] == nil and meta.accountInDoubt == nil)
+    T.check("in doubt, read by the other faction: not counted, said to be read elsewhere, not in doubt here",
+        combined[4306] == nil and meta.accountInDoubt == nil and meta.accountElsewhere == true)
     client.identity = MAIN
     combined, _, meta = scan()
-    T.check("in doubt, read here: not counted and named", combined[4306] == nil and meta.accountInDoubt == true)
+    T.check("in doubt, read here: not counted and named", combined[4306] == nil and meta.accountInDoubt == true
+        and meta.accountElsewhere == nil)
+    -- A copy read elsewhere without a single item: nothing it holds is left out.
+    local saved = LazyProf.db.global.stock.account.eu
+    LazyProf.db.global.stock.account.eu = { items = {}, at = NOW, world = "eu-pvp", faction = "Horde" }
+    T.check("an empty copy read elsewhere: nothing said", select(3, scan()).accountElsewhere == nil)
+    LazyProf.db.global.stock.account.eu = saved
 
     -- The other faction reads it: the copy is its own from then on.
     client.identity = HORDE
@@ -437,7 +467,8 @@ T.section("no inventory addon: the account bank counts only where it was read", 
     T.eq("and counts for it", (scan())[4306], 3)
     client.identity = MAIN
     combined, _, meta = scan()
-    T.check("and no longer for this faction", combined[4306] == nil and meta.accountSeenAt == nil and meta.accountInDoubt == nil)
+    T.check("and no longer for this faction", combined[4306] == nil and meta.accountSeenAt == nil and meta.accountInDoubt == nil
+        and meta.accountElsewhere == true)
     local lines = {}
     Inventory:RunDiagnostic(lines)
     local text = table.concat(lines, "\n")

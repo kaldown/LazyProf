@@ -1107,16 +1107,28 @@ end
 -- instead of asking every character to open the bank.
 local function DoubtLine(meta)
     if not meta then return nil end
-    if meta.bankInDoubt and meta.accountInDoubt then
+    local accountInDoubt = meta.accountInDoubt and not meta.accountElsewhere
+    if meta.bankInDoubt and accountInDoubt then
         return "Your bank and the account bank are not counted: they may have changed after LazyProf last read them. "
             .. "They count again once they are read at the bank."
     elseif meta.bankInDoubt then
         return "Your bank is not counted: it may have changed after LazyProf last read it. Open the bank to count it again."
-    elseif meta.accountInDoubt then
+    elseif accountInDoubt then
         return "The account bank is not counted: it may have changed after LazyProf last read it. "
             .. "It counts again once it is read at the bank."
     end
     return nil
+end
+
+-- The account bank is not counted because LazyProf last read it on a
+-- character of another faction or world (view.stockMeta.accountElsewhere;
+-- set only when that copy holds something and bank items count): it is no
+-- doubt about the bank, so this line takes the place of the account bank's
+-- doubt line, after the character's own bank's.
+local function ElsewhereLine(meta)
+    if not (meta and meta.accountElsewhere) then return nil end
+    return "The account bank is not counted: LazyProf last read it on a character of another faction or world. "
+        .. "It counts again once a character of this faction and world reads it at the bank."
 end
 
 -- The same for the alts whose bank is in doubt (view.stockMeta.altBanksInDoubt,
@@ -1140,7 +1152,9 @@ end
 -- The shopping list. view.missing is the shopping list of the whole path
 -- (the account's, Pathfinder:CalculateMissingMaterials of every run). In order:
 --   a grey line when a remembered bank of the character is not counted
---     because it is in doubt, and one when an alt's is (DoubtLine and
+--     because it is in doubt, one when the account bank is not counted
+--     because it was read on a character of another faction or world, and
+--     one when an alt's bank is in doubt (DoubtLine, ElsewhereLine and
 --     AltDoubtLine above)
 --   "Collect first": owned stock that is not in the bags; a bank or an alt
 --     that LazyProf remembers itself says in its tooltip how old that is
@@ -1171,7 +1185,8 @@ function Views.Shopping(view, ctx)
     local missing = view.missing or {}
     local rows = {}
 
-    for _, doubt in ipairs({ DoubtLine(view.stockMeta) or false, AltDoubtLine(view.stockMeta) or false }) do
+    for _, doubt in ipairs({ DoubtLine(view.stockMeta) or false, ElsewhereLine(view.stockMeta) or false,
+                             AltDoubtLine(view.stockMeta) or false }) do
         if doubt then
             rows[#rows + 1] = { kind = "line", wrap = true, color = GREY, text = doubt }
         end
