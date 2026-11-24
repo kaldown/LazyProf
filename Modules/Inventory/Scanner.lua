@@ -56,7 +56,11 @@
 -- whether the client empties the bank's containers (keeping their slots) and
 -- sends bag updates before or after the close notice; whether the two bag
 -- updates of one move come in one frame; whether the items are all there the
--- moment the window opens.
+-- moment the window opens; whether bank containers report while the window
+-- is closed (at login, or for a craft that takes reagents from the bank);
+-- how long the answer of a move can take. Taken from the client: a slot
+-- reads as locked from the click of a move until its answer (an empty slot
+-- has no item to show it).
 --
 -- 1. When the bank is read.
 --    - At once when the window opens, and again BANK_SETTLE (0.5 s) and
@@ -174,9 +178,8 @@
 --        not be read then, or read as empty while items of it are
 --        remembered) the watch is CLOSE_WATCH_BLIND (3 s): a move from it
 --        into an empty carried slot shows no lock, and its answer may come
---        late. A count
---        that fell, or rose for an item no remembered bank of the visit
---        holds, marks nothing. The comparison is made on the next frame
+--        late. A count that fell, or rose for an item no remembered bank of
+--        the visit holds, marks nothing. The comparison is made on the next frame
 --        after an update of a carried bag, when the bank is opened again,
 --        and at logout; bags that cannot be read then are not compared,
 --        and the comparison stays due. Each comparison lowers the note to
@@ -190,7 +193,7 @@
 --        another can show in both, or in neither; by the next frame the
 --        count is what it was.
 --        A comparison that is due while the bags cannot be read is tried on
---        every later frame until they can; when the second is over (or the
+--        every later frame until they can; when the watch is over (or the
 --        session ends) with it still due, the visit's banks of which items
 --        are remembered are marked.
 --        When no note could be taken at the close (the bags could not be
@@ -202,20 +205,19 @@
 --        bags in between. So when a session ends with the bank open, or
 --        within CLOSE_WATCH_BANK (10 s) after a close, what the carried
 --        bags hold is saved with the character's record as "the bags at the
---        bank":
---        read at that moment when they can be read and hold something
---        (completely empty bags are not trusted at logout), otherwise the
---        note of the close; when there is neither, the fact that it is not
---        known. The note names the banks the visit could use.
+--        bank": read at that moment when they can be read and hold
+--        something (completely empty bags are not trusted at logout),
+--        otherwise the note of the close; when there is neither, the fact
+--        that it is not known. The note names the banks the visit could use.
 --        The next session of that character compares its bags with the
 --        note: on the frame after its first update of a carried bag (bags
---        without backpack slots wait for the next one), at the first save of the bags two
---        seconds after the start - by then bags that cannot be read, or
---        that read as completely empty without a bag update having come
---        (unless the note says they were empty too), are no read to
---        compare with; while the character's id cannot be
---        read, that save, and the comparison with it, is tried again every
---        two seconds -, when the bank is opened, and at a logout that comes
+--        without backpack slots wait for the next one); at the first save
+--        of the bags two seconds after the start - by then bags that cannot
+--        be read, or that read as completely empty without a bag update
+--        having come (unless the note says they were empty too), are no
+--        read to compare with, and while the character's id cannot be read
+--        that save, and the comparison with it, is tried again every two
+--        seconds; when the bank is opened; and at a logout that comes
 --        before all of those (with bags that hold something; else the note
 --        stays for the session after). Until then a scan leaves the banks
 --        the note names out (bankPending, accountPending). A carried count
@@ -248,18 +250,18 @@
 --    kept read of that bank takes the mark away.
 --
 -- What these rules cannot see, or accept on purpose:
---    - A move that is answered after the session has ended. The session
+--    - A move that is answered after the session has ended, where its locks
+--      could not be seen at the close or the logout (rule 4). The session
 --      that ends never hears the answer. The character's next session
---      notices when its bags are not what the last one left (rule 5c), but
---      not every such move shows there: one between the character bank and
---      the account bank changes no carried bag; two moves can cancel in the
---      bags; and on a client that sends the two bag updates of a move
---      frames apart, the session can end between them with only half heard.
---      And another character that plays before the first one returns counts
---      that character's bags and banks as they were remembered when it
---      left - the right sum until it reads the account bank itself. Telling
---      would mean distrusting an alt's remembered bags after every logout
---      at the bank, which would cost the ordinary bank alt its stock.
+--      notices when a carried count rose against what the last one left
+--      (rule 5c), but not every such move shows there: one between the
+--      character bank and the account bank changes no carried bag; two
+--      moves can cancel in the bags. And another character that plays
+--      before the first one returns counts that character's bags and banks
+--      as they were remembered when it left - the right sum until it reads
+--      the account bank itself. Telling would mean distrusting an alt's
+--      remembered bags after every logout at the bank, which would cost the
+--      ordinary bank alt its stock.
 --    - A mark another character set on a bank this one may not view. The
 --      account bank's mark is the account's: a character that could use
 --      that bank set it for a reason, and one that may not view the bank
@@ -273,11 +275,22 @@
 --      is empty. So does a glance of under two seconds at a bank that reads
 --      empty while items of it are remembered (emptied by a hand the memory
 --      did not see, or shown late by the client).
---    - On a client that neither lets the bank be read at the closing notice
---      nor reports the bank's part of a move once the window is closed: a
---      move whose carried bag's part was answered before the close and the
---      bank's part after it. Its carried slot is unlocked by then and the
---      bank's slot cannot be read, so nothing shows it on its way.
+--    - On a client that does not report the bank's part of a move once the
+--      window is closed: a move on its way at the close none of whose locks
+--      can be seen - its carried bag's part answered before the close, and
+--      its bank's part going into an empty slot, or into a bank that cannot
+--      be read at the closing notice; or one into an empty carried slot
+--      from such a bank, answered after the watch of rule 5b. Nothing shows
+--      it on its way, and its bank's update never comes.
+--    - A craft that takes reagents from the closed bank in the first ten
+--      seconds of a session that has not opened the bank: its bank
+--      container's update is only counted (rule 5a), and the remembered bank
+--      stays as it was until the next visit. The same for any change of the
+--      bank in that time (a bank interaction kept across a reload, say).
+--    - A loot or a craft that raises a carried count of an item a bank
+--      holds in the watch after a close, or in the next session before its
+--      bags are compared with the note: it cannot be told from the answer
+--      of a withdrawal, and marks that bank (rules 5b, 5c).
 local ADDON_NAME, LazyProf = ...
 
 LazyProf.Inventory = {}
