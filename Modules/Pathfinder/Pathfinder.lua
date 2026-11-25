@@ -622,20 +622,41 @@ end
 -- cost, sourceInfo, currency }, ... }: one per unlearned recipe that costs
 -- something, by name - gold (cost), a currency (the source's currency table;
 -- cost is 0 when it is the only price) or both; recipeCosts is the gold.
+-- made = { [itemId] = n }: what later steps take from the path's own earlier
+-- crafts (left out of every count above); usedCrafts = { [recipeId] = n }:
+-- the crafts of each recipe used that way.
 function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown, prices)
     local needed = {}
 
-    -- Sum up all reagents needed (preserve name from CraftLib as fallback)
+    -- Sum up all reagents needed (preserve name from CraftLib as fallback).
+    -- The steps are taken in path order: a reagent an earlier step crafts is
+    -- taken from those crafts first (ruling P118), and only the rest is
+    -- needed. `made` counts what the path makes for itself, `usedCrafts`
+    -- the crafts of each recipe used that way (they are not sold).
+    local pool = Utils.MadePool()
+    local made, usedCrafts = {}, {}
+    local function used(recipeId, n)
+        usedCrafts[recipeId] = (usedCrafts[recipeId] or 0) + n
+    end
     for _, step in ipairs(steps) do
         for _, reagent in ipairs(step.recipe.reagents) do
             local itemId = reagent.itemId
-            if not needed[itemId] then
-                needed[itemId] = { count = 0, nameFromData = reagent.name, firstUsedAtSkill = step.skillStart }
-            else
-                needed[itemId].firstUsedAtSkill = math.min(needed[itemId].firstUsedAtSkill, step.skillStart)
+            local count = reagent.count * step.quantity
+            local fromPath = pool.Take(itemId, count, used)
+            if fromPath > 0 then
+                made[itemId] = (made[itemId] or 0) + fromPath
+                count = count - fromPath
             end
-            needed[itemId].count = needed[itemId].count + (reagent.count * step.quantity)
+            if count > 0 then
+                if not needed[itemId] then
+                    needed[itemId] = { count = 0, nameFromData = reagent.name, firstUsedAtSkill = step.skillStart }
+                else
+                    needed[itemId].firstUsedAtSkill = math.min(needed[itemId].firstUsedAtSkill, step.skillStart)
+                end
+                needed[itemId].count = needed[itemId].count + count
+            end
         end
+        pool.Add(step.recipe.itemId, step.quantity, step.recipe.id)
     end
 
     -- Automatic craft-or-buy follows the setting, under the Cheapest strategy
@@ -1045,6 +1066,8 @@ function Pathfinder:CalculateMissingMaterials(steps, inventory, sourceBreakdown,
         recipeRows = recipeRows,
         rows = rows,
         buyTotal = buyTotal,
+        made = made,
+        usedCrafts = usedCrafts,
     }
 end
 
@@ -1055,13 +1078,18 @@ end
 --   saleValues  { [recipeId] = copper per craft } or nil
 -- Returns { missing, reagents, recipes, spend, sale, net }:
 --   reagents = the shopping rows' costs, recipes = the recipes still to learn,
---   spend = reagents + recipes, sale = crafts x sale value, net = spend - sale.
+--   spend = reagents + recipes, sale = crafts x sale value (less the crafts a
+--   later step uses), net = spend - sale.
 function Pathfinder:Account(steps, inventory, sourceBreakdown, prices, saleValues)
     local missing = self:CalculateMissingMaterials(steps, inventory or {}, sourceBreakdown or {}, prices or {})
     local sale = 0
     if saleValues then
         for _, step in ipairs(steps) do
             sale = sale + step.quantity * (saleValues[step.recipe.id] or 0)
+        end
+        -- Crafts a later step uses are not sold.
+        for recipeId, n in pairs(missing.usedCrafts) do
+            sale = sale - n * (saleValues[recipeId] or 0)
         end
     end
     local spend = missing.buyTotal + missing.recipeCosts

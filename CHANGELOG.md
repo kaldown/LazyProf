@@ -32,6 +32,7 @@ Plan, then shop: open a profession, see the cheapest path from your real skill, 
 - Shopping list order: what is still to buy first, the dearest on top; reagents you make yourself next; what you already own last, dimmed. The Buy number is no longer red.
 - A reagent the list has you craft now uses what you own of it first, wherever it is; only the rest is crafted. Before, stock outside the bags was ignored and its raw materials were bought.
 - Craft-or-buy no longer counts the same stock twice (once for the path and once for making another reagent), which could make the list dearer with stock than without.
+- A path that makes something a later run uses (Bolts of Linen Cloth in Tailoring, for example) no longer has you buy it again: the later run uses what the path made, and those crafts are not counted as sold. An opened run on the Path tab says how many of its crafts go into later runs.
 - Alternatives are compared over the whole run, craft by craft, after what the crafts sell for and with spare crafts on both sides. Before, an alternative that changes colour during the run, or any alternative while "With margin" was on, looked cheaper than it is. An alternative that cannot cover the whole run says how far it gets ("only up to 140") instead of a difference.
 - A recipe you chose with "Use" is held exactly over its skill range; it no longer runs a few points past it.
 - Amounts in the receipt and in the cost columns are shown to the copper, so they add up. The merchant panel's rows add up to its "Buy all" total.
@@ -56,7 +57,7 @@ Plan, then shop: open a profession, see the cheapest path from your real skill, 
 
 - Sale value and owned stock change which recipes are chosen under Cheapest only. Fastest still plans for the fewest crafts; its totals count both.
 - One crafted item per craft is assumed, so recipes that make several are undervalued when selling is counted.
-- Crafts that a later step of the same path uses as reagents are still counted as sold and bought again.
+- A run that makes fewer crafts than expected (bad luck with skill-ups) leaves a later run that uses them short; once the path is calculated again the list asks for the missing ones.
 - After buying everything, the list can show a craft or two of top-up again while you follow the path: every calculation rounds the crafts still expected.
 
 ## [0.10.1] - 2026-11-22

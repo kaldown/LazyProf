@@ -510,7 +510,7 @@ Why the plan in hand has to be a candidate, and has to be favoured: once the pla
 - A run that follows a pin or a remembered range ends with that range, and no run carries on into one that begins further on; a recipe that cannot move the skill any more (at its grey point) gives way to the planner's own choice.
 - Each new calculation rounds the crafts still expected, so the shopping list of a plan whose reagents were all bought can show a craft or two of top-up again while the plan is followed.
 - The planner is still greedy: the kept route is the best of the candidates, not the optimum.
-- Crafts that later steps of the same path use as reagents are still counted as sold, and the shopping list still has the player get them again; the shown net is an upper bound for a player who keeps them.
+- Crafts that later steps of the same path use as reagents are taken from the path's own crafts first and are not counted as sold, in the shopping list, the totals and the comparison of candidate routes. The step ranking does not know about it: a recipe is not preferred because it makes a reagent a later step needs.
 - One item per craft is assumed (the recipe data has no yield), so multi-yield recipes are understated.
 - Among recipes that pay for themselves the zero floor makes the ranking blind to how much they pay; the comparison of whole routes catches the cases where that would cost the player.
 

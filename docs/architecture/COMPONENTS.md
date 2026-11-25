@@ -115,7 +115,7 @@ Defines `STRATEGY`, `DISPLAY_MODE`, `PRICE_SOURCE`, `TSM_PRICE_SOURCE`, `MATERIA
 - Remember the kept route per character and profession as recipe-per-skill-range (`RouteRanges`, `ExtendRanges`, `ForgetRoute`)
 - Define what the player pays, once (`Account`): the shopping list of a set of craft steps, less what the crafts sell for. Route comparisons and every total shown use it
 - Keep pinned recipes: a pin covers a skill range and is saved per character and profession (`PinRange`/`UnpinAt`/`ClearPins`); pinning or unpinning forgets the remembered route over that range
-- Calculate the shopping list (`CalculateMissingMaterials`): per-source lists, one row per item (need / have / buy / cost, craft-or-buy) and the recipes still to buy or learn. It works only from the stock it is handed, so it can be asked "what if nothing were owned"
+- Calculate the shopping list (`CalculateMissingMaterials`): per-source lists, one row per item (need / have / buy / cost, craft-or-buy) and the recipes still to buy or learn. It works only from the stock it is handed, so it can be asked "what if nothing were owned". The steps are taken in path order: a reagent an earlier step makes is taken from those crafts first (`made`), and those crafts are not counted as sold (`usedCrafts`); the stages do the same run by run
 - Log calculation triggers, active pins and the kept route for debugging
 
 See ADR-017 in [DECISIONS.md](DECISIONS.md) for why the routes are chosen this way.
