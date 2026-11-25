@@ -152,7 +152,7 @@ function LazyProf:SlashCommand(input)
         self:Print("Diagnostics: /lp diag prices - lists every reagent price of the path and where it came from.")
         self:Print("Diagnostics: /lp diag merchant - at a merchant: what it sells as LazyProf reads it, and what would be bought.")
         self:Print("Diagnostics: /lp diag trainer - at a profession trainer: what it lists as LazyProf reads it, and what is remembered.")
-        self:Print("Diagnostics: /lp diag stock - where your stock is counted from, and your bags as LazyProf reads them.")
+        self:Print("Diagnostics: /lp diag stock - where your stock is counted from, your bags as LazyProf reads them, and the characters Syndicator knows.")
     elseif cmd == "diag stock" then
         self:RunStockDiagnostic()
     elseif cmd == "diag prices" then
@@ -673,8 +673,8 @@ function LazyProf:RunTrainerDiagnostic()
 end
 
 -- /lp diag stock: the bags as the client reports them and as the adapter
--- reads them, where stock outside the bags comes from and the stock
--- settings. Read-only.
+-- reads them, where stock outside the bags comes from, the stock settings
+-- and what Syndicator knows of each character. Read-only.
 function LazyProf:RunStockDiagnostic()
     local out = {}
     local function add(text) out[#out + 1] = text end

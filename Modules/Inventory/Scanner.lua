@@ -363,8 +363,94 @@ end
 -- /lp diag stock
 -- ============================================================================
 
--- /lp diag stock: where stock outside the bags comes from, and the settings
--- that decide which stock counts. Read-only.
+-- The Syndicator block of the dump: one line per character Syndicator
+-- knows, with every plain value (string, number, boolean) of its record's
+-- `details`. On WoW Forever the realm name is a shard name that can change,
+-- so these lines show whether Syndicator keeps the same character twice
+-- under two realm names. Syndicator's record layout is not part of its
+-- documented API, so everything is read defensively: a call that is missing
+-- or fails, or a table that is not there, is said in the line, never raised.
+local SYNDICATOR_CHARACTERS_SHOWN = 60
+
+-- Call a Syndicator.API function by name, protected. Returns whether it ran
+-- and its first result (or what went wrong).
+local function SyndicatorCall(name, ...)
+    local api = Syndicator and Syndicator.API
+    if type(api) ~= "table" then return false, "no Syndicator.API" end
+    local fn = api[name]
+    if type(fn) ~= "function" then return false, "no Syndicator.API." .. name end
+    return pcall(fn, ...)
+end
+
+-- A plain value as the dump prints it: text in quotes, on one line.
+local function PlainValue(value)
+    if type(value) == "string" then
+        return '"' .. value:gsub("%c", " ") .. '"'
+    end
+    return tostring(value)
+end
+
+-- One character's line: its name, whether it is the one being played, and
+-- the plain values of its record's details, sorted by key.
+local function SyndicatorCharacterLine(name, current)
+    local text = "syndicator character: " .. PlainValue(name) .. (name == current and " [current]" or "")
+    local ok, record = SyndicatorCall("GetByCharacterFullName", name)
+    if not ok then
+        return text .. " record: " .. tostring(record)
+    end
+    if type(record) ~= "table" then
+        return text .. " record: none"
+    end
+    local details = record.details
+    if type(details) ~= "table" then
+        return text .. " details: none"
+    end
+    local keys = {}
+    for key, value in pairs(details) do
+        local kind = type(value)
+        if kind == "string" or kind == "number" or kind == "boolean" then
+            keys[#keys + 1] = key
+        end
+    end
+    table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+    local parts = {}
+    for _, key in ipairs(keys) do
+        parts[#parts + 1] = tostring(key) .. "=" .. PlainValue(details[key])
+    end
+    return text .. (#parts > 0 and (" " .. table.concat(parts, " ")) or " details: no plain values")
+end
+
+local function AddSyndicatorLines(add)
+    if not (Syndicator and Syndicator.API) then
+        add("syndicator: not installed")
+        return
+    end
+    local listed, names = SyndicatorCall("GetAllCharacters")
+    if not listed then
+        add("syndicator: the character list could not be read: " .. tostring(names))
+        return
+    end
+    if type(names) ~= "table" then
+        add("syndicator: no character list")
+        return
+    end
+    local currentRead, current = SyndicatorCall("GetCurrentCharacter")
+    add("syndicator: characters=" .. tostring(#names) .. " current="
+        .. (currentRead and PlainValue(current) or ("not readable: " .. tostring(current))))
+    if not currentRead then current = nil end
+    for index, name in ipairs(names) do
+        if index > SYNDICATOR_CHARACTERS_SHOWN then
+            add("syndicator: " .. tostring(#names - SYNDICATOR_CHARACTERS_SHOWN) .. " more")
+            break
+        end
+        local built, line = pcall(SyndicatorCharacterLine, name, current)
+        add(built and line or ("syndicator character: " .. tostring(name) .. " could not be read: " .. tostring(line)))
+    end
+end
+
+-- /lp diag stock: where stock outside the bags comes from, the settings that
+-- decide which stock counts, and what Syndicator knows of each character.
+-- Read-only.
 function Inventory:RunDiagnostic(lines)
     local function add(text) lines[#lines + 1] = text end
     local Client = LazyProf.Client
@@ -381,6 +467,12 @@ function Inventory:RunDiagnostic(lines)
     add("settings: bank=" .. tostring(profile.includeBankItems) .. " alts=" .. tostring(profile.includeAltCharacters)
         .. " guildBank=" .. tostring(profile.includeGuildBank) .. " selfFound=" .. tostring(SelfFoundSetting())
         .. " gameSelfFound=" .. (flagRead and tostring(gameFlag == true) or ("not readable: " .. tostring(gameFlag))))
+
+    -- A section of its own: whatever Syndicator hands back, the lines above stay.
+    local listed, err = pcall(AddSyndicatorLines, add)
+    if not listed then
+        add("SECTION ERROR: syndicator: " .. tostring(err))
+    end
 end
 
 -- ============================================================================

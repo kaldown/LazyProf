@@ -328,6 +328,110 @@ T.section("diagnostic lines", function()
 end)
 
 -- ===========================================================================
+-- The Syndicator block of /lp diag stock: one line per character Syndicator
+-- knows, with every plain value of its record's details. Syndicator's record
+-- layout is not known for sure, so every read is defensive.
+T.section("diagnostic: what Syndicator knows of each character", function()
+    fresh()
+    local function dump()
+        local lines = {}
+        local ok, err = pcall(Inventory.RunDiagnostic, Inventory, lines)
+        return lines, table.concat(lines, "\n"), ok, err
+    end
+    local function hasLine(text, line)
+        return ("\n" .. text .. "\n"):find("\n" .. line .. "\n", 1, true) ~= nil
+    end
+
+    -- Not installed: one line says so.
+    local lines, text = dump()
+    T.check("not installed: one line", hasLine(text, "syndicator: not installed"), text)
+    T.eq("not installed: after the source and settings lines", lines[3], "syndicator: not installed")
+
+    -- Installed: a line per character, the plain values of its details sorted
+    -- by key; tables and functions are left out.
+    local chars = installSyndicator()
+    chars["Main-Realm"].details = { realmNormalized = "Realm", className = "MAGE", level = 60, show = true,
+        faction = "Alliance", character = "Main", hidden = false, lastSeen = 1763900000,
+        nested = { a = 1 }, fn = function() end }
+    chars["Alt-Shard 7"] = { details = { realmNormalized = "Shard7", character = "Alt", note = "two\nlines" } }
+    chars["Bare-Realm"] = {}
+    _G.Syndicator.API.GetAllCharacters = function() return { "Main-Realm", "Alt-Realm", "Alt-Shard 7", "Bare-Realm", "Gone-Realm" } end
+    chars["Alt-Realm"].details = {}
+    lines, text = dump()
+    T.check("installed: a head line with the count and who is played",
+        hasLine(text, 'syndicator: characters=5 current="Main-Realm"'), text)
+    T.check("the current character: marked, its plain values sorted by key",
+        hasLine(text, 'syndicator character: "Main-Realm" [current] character="Main" className="MAGE" faction="Alliance" '
+            .. 'hidden=false lastSeen=1763900000 level=60 realmNormalized="Realm" show=true'), text)
+    T.check("tables and functions are left out", not text:find("nested", 1, true) and not text:find("fn=", 1, true), text)
+    T.check("another character: not marked; a line break in a value is a space",
+        hasLine(text, 'syndicator character: "Alt-Shard 7" character="Alt" note="two lines" realmNormalized="Shard7"'), text)
+    T.check("a record with empty details", hasLine(text, 'syndicator character: "Alt-Realm" details: no plain values'), text)
+    T.check("a record without details", hasLine(text, 'syndicator character: "Bare-Realm" details: none'), text)
+    T.check("a name without a record", hasLine(text, 'syndicator character: "Gone-Realm" record: none'), text)
+    T.check("one line per character, in Syndicator's order", text:find('"Main-Realm"', 1, true) < text:find('"Alt-Realm"', 1, true)
+        and text:find('"Alt-Shard 7"', 1, true) < text:find('"Bare-Realm"', 1, true))
+    T.check("plain ASCII", not text:find("[\128-\255]"))
+
+    -- A record whose read fails, and details that are no table.
+    _G.Syndicator.API.GetByCharacterFullName = function(name)
+        if name == "Gone-Realm" then error("record boom") end
+        if name == "Bare-Realm" then return { details = "text" } end
+        return chars[name]
+    end
+    lines, text = dump()
+    T.check("a failing record read is said in its line", text:find('syndicator character: "Gone-Realm" record: ', 1, true) ~= nil
+        and text:find("record boom", 1, true) ~= nil, text)
+    T.check("details that are no table", hasLine(text, 'syndicator character: "Bare-Realm" details: none'), text)
+    T.check("the other characters still print", hasLine(text, 'syndicator character: "Alt-Realm" details: no plain values'), text)
+
+    -- The character list and the current character, read defensively.
+    _G.Syndicator.API.GetCurrentCharacter = nil
+    lines, text = dump()
+    T.check("no current-character call: said, and no character is marked",
+        text:find("syndicator: characters=5 current=not readable: no Syndicator.API.GetCurrentCharacter", 1, true) ~= nil
+        and not text:find("[current]", 1, true), text)
+    _G.Syndicator.API.GetAllCharacters = function() error("list boom") end
+    local ok, err
+    lines, text, ok, err = dump()
+    T.check("a failing list: no Lua error", ok, err)
+    T.check("a failing list: said", text:find("syndicator: the character list could not be read: ", 1, true) ~= nil
+        and text:find("list boom", 1, true) ~= nil, text)
+    T.check("and the lines before it stay", lines[1] == "source: Syndicator (bank, mail, auctions, alts and guild bank)", lines[1])
+    _G.Syndicator.API.GetAllCharacters = function() return nil end
+    lines, text = dump()
+    T.check("no list: said", hasLine(text, "syndicator: no character list"), text)
+    _G.Syndicator.API.GetAllCharacters = nil
+    lines, text, ok = dump()
+    T.check("no list call: said, no Lua error", ok and text:find("syndicator: the character list could not be read: no Syndicator.API.GetAllCharacters", 1, true) ~= nil, text)
+
+    -- At most 60 characters, then how many more.
+    local many = {}
+    for i = 1, 65 do many[i] = "Char" .. i .. "-Realm" end
+    _G.Syndicator.API.GetAllCharacters = function() return many end
+    _G.Syndicator.API.GetCurrentCharacter = function() return "Char1-Realm" end
+    _G.Syndicator.API.GetByCharacterFullName = function(name) return { details = { character = name:match("^[^-]+") } } end
+    lines, text = dump()
+    local shown = 0
+    for _, line in ipairs(lines) do
+        if line:find("^syndicator character: ") then shown = shown + 1 end
+    end
+    T.eq("capped at 60 characters", shown, 60)
+    T.check("then how many more", hasLine(text, "syndicator: 5 more"), text)
+    T.check("the 60th is shown, the 61st not", text:find('"Char60-Realm"', 1, true) ~= nil and not text:find('"Char61-Realm"', 1, true))
+    many = {}
+    for i = 1, 60 do many[i] = "Char" .. i .. "-Realm" end
+    lines, text = dump()
+    T.check("exactly 60: no more-line", not text:find(" more", 1, true), text)
+
+    -- A Syndicator whose API is no table at all: nothing is read.
+    _G.Syndicator = { API = "broken" }
+    lines, text, ok, err = dump()
+    T.check("an API that is no table: no Lua error", ok, err)
+    _G.Syndicator = nil
+end)
+
+-- ===========================================================================
 T.section("options", function()
     fresh()
     local stockOptions = LazyProf.options.args.display.args
@@ -551,7 +655,8 @@ T.section("init wiring", function()
     T.check("/lp diag stock opens the copyable window", type(shown) == "string")
     T.check("its first line names the client", shown:find("diag stock: build=1.60.1 (70938) interface=16001 family=forever", 1, true) == 1, shown)
     T.check("the adapter's lines are in it", shown:find("adapter: stock lines", 1, true) ~= nil, shown)
-    T.check("and the scanner's", shown:find("source: the bags only (Syndicator is not installed)", 1, true) ~= nil, shown)
+    T.check("and the scanner's", shown:find("source: the bags only (Syndicator is not installed)", 1, true) ~= nil
+        and shown:find("syndicator: not installed", 1, true) ~= nil, shown)
     LazyProf.Client.RunStockDiagnostic = function() error("boom") end
     LazyProf:SlashCommand("diag stock")
     T.check("a failing adapter section is reported, the rest still prints",
@@ -573,6 +678,7 @@ T.section("init wiring", function()
     local help = table.concat(printed, "\n")
     T.check("/lp diag lists the stock dump", help:find("/lp diag stock", 1, true) ~= nil)
     T.check("and no longer speaks of remembered banks", not help:find("remembered for your characters", 1, true), help)
+    T.check("it names the characters Syndicator knows", help:find("the characters Syndicator knows", 1, true) ~= nil, help)
 end)
 
 T.finish()
