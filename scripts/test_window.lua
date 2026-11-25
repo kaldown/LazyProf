@@ -1743,4 +1743,52 @@ T.section("docking and planning order", function()
     T.eq("and is shown", W.rowTexts(window)[1], "No recipe data for Engineering yet.")
 end)
 
+-- The merchant panel shops for a plan the character follows: never for the
+-- "Plan from skill 1" what-if, whose runs below the real skill are done.
+T.section("merchant rows never come from the what-if", function()
+    local env = W.load("forever")
+    local window, addon = env.window, env.addon
+    env.playerSkill = 143
+    local function builtFrom()
+        env.accountCalls = {}
+        local _, name = window:MerchantRows()
+        local call = env.accountCalls[#env.accountCalls]
+        if not call then return tostring(name) .. ": nothing" end
+        local parts = {}
+        for _, s in ipairs(call.steps) do parts[#parts + 1] = s.recipe.name .. "@" .. s.skillStart end
+        return tostring(name) .. ": " .. table.concat(parts, ", ")
+    end
+    local bolt = W.recipe(4, "Bolt", 1, 50, 60, 70)
+    env.planPath = function(key, opts)
+        if opts.planFromOne then
+            return W.path({ planning = true, professionKey = key, planFromOne = true, currentSkill = 1,
+                complete = true, gaps = {},
+                steps = { W.step(bolt, 1, 60, 80, 8000), W.step(W.GLOVES, 60, 143, 90, 9000),
+                    W.step(W.SHIRT, 143, 200, 40, 8000) } })
+        end
+        return W.path({ planning = true, professionKey = key, complete = true, gaps = {},
+            steps = { W.step(W.CAPE, 143, 160, 20, 2000), W.step(W.SHIRT, 160, 200, 40, 8000) } })
+    end
+
+    -- Only the what-if was shown: nothing to shop for.
+    addon.CharStore:Get().planFromOne = { tailoring = true }
+    window:OpenPlanning("tailoring")
+    window:ClosePlanning()
+    T.check("only the what-if was shown: no merchant rows", window:MerchantRows() == nil)
+
+    -- The live path was shown, then the what-if: the live path is shopped for.
+    window.mode = "live"
+    window:SetPath(W.path())
+    window.mode = nil
+    window:OpenPlanning("tailoring")
+    window:ClosePlanning()
+    T.eq("after the what-if: the live path's runs", builtFrom(), "Tailoring: Gloves@143, Shirt@160")
+
+    -- A plan from the real skill (no what-if) is one to shop for.
+    addon.CharStore:Get().planFromOne = nil
+    window:OpenPlanning("tailoring")
+    window:ClosePlanning()
+    T.eq("a plan from the real skill: its runs", builtFrom(), "Tailoring: Cape@143, Shirt@160")
+end)
+
 T.finish()
