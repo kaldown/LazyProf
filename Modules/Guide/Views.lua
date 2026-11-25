@@ -930,41 +930,7 @@ local COLLECT = {
     { list = "fromAlts", label = "From alts", color = { 0.8, 0.6, 1 } },
 }
 
--- How long ago a remembered part of the stock was seen ("less than an hour
--- ago", "5 hours ago", "2 days ago"), counted from the view's clock; nil
--- when there is nothing to say.
-local function SeenAgo(view, at)
-    local memory = LazyProf.StockMemory
-    if not (memory and view.now and at) then return nil end
-    return memory.AgeText(view.now, at)
-end
-
--- How old what a remembered alt holds of an item is: "bags as seen 2 hours
--- ago", "bank as seen 3 days ago", or both when the item is in both. The path's
--- source breakdown says where the alt has it. nil for stock that is not
--- remembered (an inventory addon's) or an alt without a known age.
-local function AltAge(view, itemId, name)
-    local meta = view.stockMeta
-    local seen = meta and meta.alts and meta.alts[name]
-    if not seen then return nil end
-    local sources = view.path and view.path.sourceBreakdown and view.path.sourceBreakdown[itemId]
-    local held = sources and sources.alts and sources.alts[name] or nil
-    local parts = {}
-    for _, part in ipairs({ "bags", "bank" }) do
-        local ago = SeenAgo(view, seen[part])
-        if ago and (held == nil or (held[part] or 0) > 0) then
-            parts[#parts + 1] = part .. " as seen " .. ago
-        end
-    end
-    if #parts == 0 then return nil end
-    return table.concat(parts, ", ")
-end
-
--- view (optional) supplies how old remembered stock is: view.stockMeta (the
--- scan's ages, nil for stock an inventory addon supplied) and view.now.
-local function CollectRow(section, mat, view)
-    view = view or {}
-    local meta = view.stockMeta
+local function CollectRow(section, mat)
     local text = string.format("%dx %s", mat.missing, mat.name or "Unknown")
     local tooltip = {}
     if section.list == "fromAlts" then
@@ -973,12 +939,7 @@ local function CollectRow(section, mat, view)
         for _, char in ipairs(mat.characters or {}) do
             -- Character name without the realm part
             names[#names + 1] = (char.name:match("^([^-]+)") or char.name) .. ":" .. tostring(char.count)
-            local line = string.format("  %s: %d", char.name, char.count)
-            local age = AltAge(view, mat.itemId, char.name)
-            if age then
-                line = line .. " - " .. age
-            end
-            tooltip[#tooltip + 1] = { text = line, r = 1, g = 1, b = 1 }
+            tooltip[#tooltip + 1] = { text = string.format("  %s: %d", char.name, char.count), r = 1, g = 1, b = 1 }
         end
         text = text .. " " .. Grey("(" .. table.concat(names, ", ") .. ")")
         tooltip[#tooltip + 1] = { text = "Transfer to this character before crafting", r = 0.6, g = 0.6, b = 0.6 }
@@ -990,18 +951,6 @@ local function CollectRow(section, mat, view)
         tooltip[#tooltip + 1] = { text = section.tip(mat), r = c[1], g = c[2], b = c[3] }
         if section.warning then
             tooltip[#tooltip + 1] = { text = section.warning, r = 0.6, g = 0.6, b = 0.6 }
-        end
-        -- A remembered bank: when it was last seen. The character's own bank
-        -- and the account-wide one are both bank stock, each with its age.
-        if section.list == "fromBank" and meta then
-            local ago = SeenAgo(view, meta.bankSeenAt)
-            if ago then
-                tooltip[#tooltip + 1] = { text = "Bank as seen " .. ago, r = 0.7, g = 0.7, b = 0.7 }
-            end
-            ago = SeenAgo(view, meta.accountSeenAt)
-            if ago then
-                tooltip[#tooltip + 1] = { text = "Account bank as seen " .. ago, r = 0.7, g = 0.7, b = 0.7 }
-            end
         end
     end
     tooltip[#tooltip + 1] = { text = "Shift-click to link", r = 0.5, g = 0.5, b = 0.5 }
@@ -1097,68 +1046,9 @@ local function TotalRow(label, copper)
     return { kind = "cols", total = true, text = label, color = GOLD, cols = { "", "", "", Money(copper or 0) } }
 end
 
--- A remembered bank that is marked in doubt is not counted (the scan says
--- which: view.stockMeta.bankInDoubt / accountInDoubt, set only while bank
--- items count at all). The line that tells the player, nil when there is
--- nothing to tell. A bank that is merely being read again says nothing.
--- The addon cannot know that such a bank changed, only that it may have.
--- The account bank's mark goes only with a read of it, which a character
--- that may not view that bank cannot take: its line says what clears it
--- instead of asking every character to open the bank.
-local function DoubtLine(meta)
-    if not meta then return nil end
-    local accountInDoubt = meta.accountInDoubt and not meta.accountElsewhere
-    if meta.bankInDoubt and accountInDoubt then
-        return "Your bank and the account bank are not counted: they may have changed after LazyProf last read them. "
-            .. "They count again once they are read at the bank."
-    elseif meta.bankInDoubt then
-        return "Your bank is not counted: it may have changed after LazyProf last read it. Open the bank to count it again."
-    elseif accountInDoubt then
-        return "The account bank is not counted: it may have changed after LazyProf last read it. "
-            .. "It counts again once it is read at the bank."
-    end
-    return nil
-end
-
--- The account bank is not counted because LazyProf last read it on a
--- character of another faction or world (view.stockMeta.accountElsewhere;
--- set only when that copy holds something and bank items count): it is no
--- doubt about the bank, so this line takes the place of the account bank's
--- doubt line, after the character's own bank's.
-local function ElsewhereLine(meta)
-    if not (meta and meta.accountElsewhere) then return nil end
-    return "The account bank is not counted: LazyProf last read it on a character of another faction or world. "
-        .. "It counts again once a character of this faction and world reads it at the bank."
-end
-
--- The same for the alts whose bank is in doubt (view.stockMeta.altBanksInDoubt,
--- their names in order; set only while alts and bank items count): one line
--- that names them, nil when there is none. Only that character can read its
--- bank again.
-local function AltDoubtLine(meta)
-    local names = meta and meta.altBanksInDoubt
-    if type(names) ~= "table" or #names == 0 then return nil end
-    if #names == 1 then
-        return "The bank of " .. tostring(names[1]) .. " is not counted: it may have changed after LazyProf last read it. "
-            .. "Open the bank on that character to count it again."
-    end
-    local listed = {}
-    for index = 1, #names - 1 do listed[index] = tostring(names[index]) end
-    return "The banks of " .. table.concat(listed, ", ") .. " and " .. tostring(names[#names])
-        .. " are not counted: they may have changed after LazyProf last read them. "
-        .. "Open the bank on those characters to count them again."
-end
-
 -- The shopping list. view.missing is the shopping list of the whole path
 -- (the account's, Pathfinder:CalculateMissingMaterials of every run). In order:
---   a grey line when a remembered bank of the character is not counted
---     because it is in doubt, one when the account bank is not counted
---     because it was read on a character of another faction or world, and
---     one when an alt's bank is in doubt (DoubtLine, ElsewhereLine and
---     AltDoubtLine above)
---   "Collect first": owned stock that is not in the bags; a bank or an alt
---     that LazyProf remembers itself says in its tooltip how old that is
---     (view.stockMeta, view.now)
+--   "Collect first": owned stock that is not in the bags
 --   the table (need / have / buy / cost, a "vendor" mark): reagents with
 --     something left to buy, the dearest first and those without a price
 --     last; then the reagents the character makes, each with what it is made
@@ -1185,17 +1075,10 @@ function Views.Shopping(view, ctx)
     local missing = view.missing or {}
     local rows = {}
 
-    for _, doubt in ipairs({ DoubtLine(view.stockMeta) or false, ElsewhereLine(view.stockMeta) or false,
-                             AltDoubtLine(view.stockMeta) or false }) do
-        if doubt then
-            rows[#rows + 1] = { kind = "line", wrap = true, color = GREY, text = doubt }
-        end
-    end
-
     local collect = {}
     for _, section in ipairs(COLLECT) do
         for _, mat in ipairs(missing[section.list] or {}) do
-            collect[#collect + 1] = CollectRow(section, mat, view)
+            collect[#collect + 1] = CollectRow(section, mat)
         end
     end
     if #collect > 0 then

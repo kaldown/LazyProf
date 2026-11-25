@@ -686,14 +686,7 @@ section("init", function()
         GetLine = function() return line[1], line[2], line[3] end,
         IsOpen = function() return open end,
     }
-    local inventory = { started = 0, updates = {} }
-    addon.Inventory = {
-        Initialize = function() inventory.started = inventory.started + 1 end,
-        OnBagUpdate = function(_, bagId) inventory.updates[#inventory.updates + 1] = tostring(bagId) end,
-    }
     addon:OnEnable()
-    check(p .. "OnEnable starts the inventory (bank and logout events are the adapter's)", inventory.started == 1,
-        inventory.started)
     -- No profession-window event here (those go through Client:Start);
     -- AUCTION_HOUSE_CLOSED has the same name on every client family.
     check(p .. "Init registers only AUCTION_HOUSE_CLOSED, BAG_UPDATE and GET_ITEM_INFO_RECEIVED",
@@ -736,8 +729,6 @@ section("init", function()
     open = false
     addon:OnBagUpdate("BAG_UPDATE", 7)
     check(p .. "bag update while closed refreshes nothing", refreshes == 1)
-    check(p .. "every bag update is passed to the inventory with its container id",
-        table.concat(inventory.updates, ",") == "2,7", table.concat(inventory.updates, ","))
     check(p .. "bag updates never schedule a recalculation", #recalcs == 4, #recalcs)
 
     local hidden = 0

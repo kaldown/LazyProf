@@ -133,7 +133,7 @@ assert(#files > 0, "no Lua files found (run from the repo root)")
 -- event silently replaces the first. So each event of the stock memory is
 -- registered in exactly one place: the bank window's events and logout in the
 -- client adapter (logout once in each adapter - one of the two loads), the
--- two bag events in Core/Init.lua, which passes them on to the scanner.
+-- bag update in Core/Init.lua.
 -- [event] = { [file] = how often it is registered there }; anywhere else: never.
 local REGISTERED_IN = {
     PLAYER_LOGOUT = { ["Core/Client/Classic.lua"] = 1, ["Core/Client/Forever.lua"] = 1 },
@@ -141,7 +141,6 @@ local REGISTERED_IN = {
     BANKFRAME_CLOSED = { ["Core/Client/Forever.lua"] = 1 },
     BANK_TABS_CHANGED = { ["Core/Client/Forever.lua"] = 1 },
     BAG_UPDATE = { ["Core/Init.lua"] = 1 },
-    BAG_UPDATE_DELAYED = { ["Core/Init.lua"] = 1 },
 }
 
 local offenders = {}

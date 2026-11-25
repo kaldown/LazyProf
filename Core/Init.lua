@@ -22,13 +22,6 @@ function LazyProf:OnInitialize()
     if self.MigrateSettings then
         self.MigrateSettings(self.db.sv)
     end
-    -- At logout the database tidies the saved tables. Its shutdown notice
-    -- comes before that: the moment for a last write that is sure to be kept.
-    -- (The client's own logout event is heard as well, through the adapter;
-    -- which of the two comes first is not defined.)
-    if self.db.RegisterCallback then
-        self.db.RegisterCallback(self, "OnDatabaseShutdown", "OnDatabaseShutdown")
-    end
     self:RegisterChatCommand("lazyprof", "SlashCommand")
     self:RegisterChatCommand("lp", "SlashCommand")
     if self.SetupConfig then
@@ -89,26 +82,8 @@ function LazyProf:OnEnable()
 
     -- Register events
     self:RegisterEvent("BAG_UPDATE", "OnBagUpdate")
-    -- The client's notice that a batch of bag updates is complete. Only the
-    -- reading of the open bank uses it, and the bank is read on WoW Forever
-    -- only, where the event is known to exist: BAG_UPDATE_DELAYED, without a
-    -- payload (Blizzard_APIDocumentationGenerated/ContainerDocumentation.lua:674-679;
-    -- in the client's event list, Ketho BlizzardInterfaceResources, forever
-    -- branch, Resources/Events.lua:520; Blizzard listens to it beside
-    -- BAG_UPDATE in Blizzard_Professions/Blizzard_ProfessionsCrafting.lua:62, 314).
-    -- Asking a client for an event it does not have is an error, so the
-    -- other clients are not asked.
-    if self.ClientFamily == "forever" then
-        self:RegisterEvent("BAG_UPDATE_DELAYED", "OnBagUpdateDelayed")
-    end
     self:RegisterEvent("GET_ITEM_INFO_RECEIVED", "OnItemInfoReceived")
     self:RegisterEvent("AUCTION_HOUSE_CLOSED", "OnAuctionHouseClosed")
-
-    -- Last, so that nothing above depends on it: the bank and logout events,
-    -- and remembering this character's bags (it protects itself)
-    if self.Inventory then
-        self.Inventory:Initialize()
-    end
 end
 
 -- Leaving the auction house: a scan may just have run there, so fresh
@@ -158,7 +133,7 @@ function LazyProf:SlashCommand(input)
         self:Print("AH scanning not yet implemented.")
     elseif cmd == "reset" then
         -- The same words as the options' "Reset All Settings": what went
-        -- with the settings, and that the remembered stock was kept.
+        -- with the settings.
         self:ResetSettings()
         self:Print(self.RESET_MESSAGE)
     elseif cmd == "resetpanels" then
@@ -177,7 +152,7 @@ function LazyProf:SlashCommand(input)
         self:Print("Diagnostics: /lp diag prices - lists every reagent price of the path and where it came from.")
         self:Print("Diagnostics: /lp diag merchant - at a merchant: what it sells as LazyProf reads it, and what would be bought.")
         self:Print("Diagnostics: /lp diag trainer - at a profession trainer: what it lists as LazyProf reads it, and what is remembered.")
-        self:Print("Diagnostics: /lp diag stock - which bags and banks are remembered for your characters, and what the bank reads as (run it at an open bank).")
+        self:Print("Diagnostics: /lp diag stock - where your stock is counted from, and your bags as LazyProf reads them.")
     elseif cmd == "diag stock" then
         self:RunStockDiagnostic()
     elseif cmd == "diag prices" then
@@ -200,22 +175,12 @@ function LazyProf:SlashCommand(input)
 end
 
 -- /lp reset and "Reset All Settings": every setting goes back to its default,
--- and with the settings the rest of what the database holds. What LazyProf
--- remembers of the characters' bags and banks is not a setting - it cannot be
--- had again without playing every character and opening every bank - and has
--- a button of its own ("Forget remembered characters"). So it is taken out
--- before the reset and put back after it; a saved value that is not a table
--- is not put back. Then nothing a scan kept may answer any more, and what is
--- shown is planned and drawn again.
+-- and with the settings the rest of what the database holds (vendor prices,
+-- trainers, the characters' targets and craft-or-buy choices). Then what is
+-- shown is planned and drawn again (Recalculate drops the frame's scan, which
+-- was made under the old settings).
 function LazyProf:ResetSettings()
-    local stock = self.db.global.stock
     self.db:ResetDB()
-    if type(stock) == "table" then
-        self.db.global.stock = stock
-    end
-    if self.Inventory then
-        self.Inventory:OnSettingsReset()
-    end
     self:Recalculate("settings reset")
 end
 
@@ -264,14 +229,7 @@ function LazyProf:OnTradeSkillClose()
     end
 end
 
--- The database is about to be saved (logout or reload).
-function LazyProf:OnDatabaseShutdown()
-    if self.Inventory then
-        self.Inventory:OnLogout()
-    end
-end
-
-function LazyProf:OnBagUpdate(event, bagId)
+function LazyProf:OnBagUpdate()
     -- PERFORMANCE FIX (GitHub Issue #3): Don't trigger full recalculation on bag changes.
     -- A change of stock never plans again by itself: the shown route stays and only its
     -- counts and the shopping list are redrawn (lightweight RefreshShoppingList()). The
@@ -285,20 +243,6 @@ function LazyProf:OnBagUpdate(event, bagId)
     -- At a merchant: a purchase may have arrived
     if self.MerchantPanel then
         self.MerchantPanel:OnInventoryChanged()
-    end
-    -- What the character carries is remembered for its other characters, and
-    -- the bank is read again while its window is open. This is the one
-    -- BAG_UPDATE handler of the addon, so the update is passed on from here.
-    if self.Inventory then
-        self.Inventory:OnBagUpdate(bagId)
-    end
-end
-
--- A batch of bag updates is complete. Like BAG_UPDATE this event has its one
--- handler here and is passed on; it plans nothing and redraws nothing itself.
-function LazyProf:OnBagUpdateDelayed()
-    if self.Inventory then
-        self.Inventory:OnBagUpdateDelayed()
     end
 end
 
@@ -400,7 +344,7 @@ function LazyProf:RefreshShoppingList()
     end
 
     -- Rescan inventory; the stages and the shopping list are drawn from it
-    -- (stockMeta: how old the remembered part of the stock is)
+    -- (stockMeta: what the scan says of the stock it could count)
     local inventory, sourceBreakdown, stockMeta = self.Inventory:ScanAll()
     if live then
         live.inventory, live.sourceBreakdown, live.stockMeta = inventory, sourceBreakdown, stockMeta
@@ -728,10 +672,9 @@ function LazyProf:RunTrainerDiagnostic()
     self:ShowDiagnosticOutput(table.concat(out, "\n"))
 end
 
--- /lp diag stock: the bags and the bank as the client reports them and as the
--- adapter reads them, who the character is, and what is remembered of every
--- character's bags and bank. Read-only; run it with the bank window open for
--- the bank lines.
+-- /lp diag stock: the bags as the client reports them and as the adapter
+-- reads them, where stock outside the bags comes from and the stock
+-- settings. Read-only.
 function LazyProf:RunStockDiagnostic()
     local out = {}
     local function add(text) out[#out + 1] = text end
@@ -741,7 +684,7 @@ function LazyProf:RunStockDiagnostic()
     local ok, err = pcall(self.Client.RunStockDiagnostic, self.Client, out)
     if not ok then add("SECTION ERROR: adapter: " .. tostring(err)) end
     ok, err = pcall(self.Inventory.RunDiagnostic, self.Inventory, out)
-    if not ok then add("SECTION ERROR: memory: " .. tostring(err)) end
+    if not ok then add("SECTION ERROR: stock: " .. tostring(err)) end
 
     self:Print("diag stock: output ready - copy it from the window that opened.")
     self:ShowDiagnosticOutput(table.concat(out, "\n"))
