@@ -2,7 +2,7 @@
 
 All notable changes to LazyProf will be documented in this file.
 
-## [Unreleased]
+## [0.11.0] - 2026-11-25
 
 Plan, then shop: open a profession, see the cheapest path from your real skill, choose how far to level, get one total of what to buy.
 
@@ -36,6 +36,8 @@ Plan, then shop: open a profession, see the cheapest path from your real skill, 
 - Amounts in the receipt and in the cost columns are shown to the copper, so they add up. The merchant panel's rows add up to its "Buy all" total.
 - The merchant panel works from the shopping list of the whole path (there is no range any more), and also buys what still has to be bought of a reagent you otherwise craft. It never shops for a "Plan from skill 1" path: that one is only a look at the cost from skill 1.
 - The arrow tooltip shows the receipt's amounts instead of the old totals.
+- The status line says "fastest path" while the Fastest strategy is in force (its button is now under More options).
+- The download is smaller: the tools that build CraftLib's recipe data are no longer packaged (about 10 MB of the 18 MB unpacked); the recipe data itself is unchanged.
 - "Reset All Settings" and `/lp reset` say what goes with the settings - the vendor prices and trainers LazyProf has seen; every character's targets, chosen recipes, remembered routes, craft-or-buy choices and Self-Found mode; window positions; and the known recipes, which are read again when you open each profession - in the question before the reset and in the message after it.
 - "With margin" is now called "Spare crafts", "Use this" is "Use" (a recipe you chose says "Your choice"), and the "Target" box is "Level to". A number typed into it counts when you press Enter; clicking elsewhere or pressing Escape puts the planned target back.
 
