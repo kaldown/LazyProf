@@ -398,151 +398,54 @@ function Client:RunTrainerDiagnostic(lines)
     lines[#lines + 1] = "trainer: visited trainers are not recorded on this client"
 end
 
--- Stock: bags, the bank, who the character is, the clock ------------------------
+-- Stock: the bags, the game's Self-Found flag, the clock --------------------------
+-- The bank, mail, alts and guild bank are read from the Syndicator addon
+-- (Modules/Inventory/Scanner.lua), never here.
 
--- What the character carries: items ({ [itemId] = count }), the soulbound
--- part of them, the backpack's slot count (zero means the bags could not be
--- read just now), and the part of the items in slots that read as locked (a
--- move of them on its way). Backpack and the four bags, through whichever
--- container call the client has: the table-returning one, or the older
--- positional one (count is its 2nd return, the lock its 3rd, the item link
--- its 7th). The older call does not say what is soulbound, so on such a
--- client nothing is reported as bound.
+-- What the character carries: { [itemId] = count }. Backpack and the four
+-- bags, through whichever container call the client has: the table-returning
+-- one, or the older positional one (count is its 2nd return, the item link
+-- its 7th). Without either, nothing.
 function Client:BagContents()
-    local items, bound, locked = {}, {}, {}
-    local backpackSlots = 0
+    local items = {}
     local modern = C_Container and C_Container.GetContainerNumSlots and C_Container.GetContainerItemInfo
     if not modern and not (GetContainerNumSlots and GetContainerItemInfo) then
-        return items, bound, backpackSlots, locked
+        return items
     end
     for bag = 0, 4 do
         local slots = (modern and C_Container.GetContainerNumSlots(bag) or GetContainerNumSlots(bag)) or 0
-        if bag == 0 then
-            backpackSlots = slots
-        end
         for slot = 1, slots do
-            local itemId, count, isBound, isLocked
+            local itemId, count
             if modern then
                 local info = C_Container.GetContainerItemInfo(bag, slot)
                 if info then
-                    itemId, count, isBound, isLocked = info.itemID, info.stackCount, info.isBound, info.isLocked
+                    itemId, count = info.itemID, info.stackCount
                 end
             else
-                local _, itemCount, itemLocked, _, _, _, itemLink = GetContainerItemInfo(bag, slot)
+                local _, itemCount, _, _, _, _, itemLink = GetContainerItemInfo(bag, slot)
                 if itemLink then
                     itemId = tonumber(itemLink:match("item:(%d+)"))
                     count = itemCount
-                    isLocked = itemLocked
                 end
             end
             if itemId and count then
                 items[itemId] = (items[itemId] or 0) + count
-                if isBound then
-                    bound[itemId] = (bound[itemId] or 0) + count
-                end
-                if isLocked then
-                    locked[itemId] = (locked[itemId] or 0) + count
-                end
             end
         end
     end
-    return items, bound, backpackSlots, locked
+    return items
 end
 
--- Whether a move of items is still on its way: a slot of the carried bags
--- reads as locked - the table-returning container call's isLocked, or the
--- older positional call's third return. Without a container call, false.
--- The second return, the banks that could be looked at, is empty: no bank
--- is read on these clients (so nothing here depends on it).
-function Client:MoveInFlight()
-    local modern = C_Container and C_Container.GetContainerNumSlots and C_Container.GetContainerItemInfo
-    if not modern and not (GetContainerNumSlots and GetContainerItemInfo) then return false, {} end
-    for bag = 0, 4 do
-        local slots = (modern and C_Container.GetContainerNumSlots(bag) or GetContainerNumSlots(bag)) or 0
-        for slot = 1, slots do
-            local locked
-            if modern then
-                local info = C_Container.GetContainerItemInfo(bag, slot)
-                locked = info and info.isLocked
-            else
-                locked = select(3, GetContainerItemInfo(bag, slot))
-            end
-            if locked then return true, {} end
-        end
-    end
-    return false, {}
-end
-
--- The bank is not read on these clients: its calls and events could not be
--- checked against client source here, and a bank read on a guess could
--- remember a wrong or an empty bank. So the bank never counts as open,
--- nothing is returned for it, no bank is usable and no container is a bank
--- container; bank stock on these clients comes from an inventory addon only.
--- ReadsBank says so to the scanner, which then follows no bank visit.
-function Client:ReadsBank()
-    return false
-end
-
-function Client:IsBankOpen()
-    return false
-end
-
-function Client:BankContents(kind)
-    return nil
-end
-
-function Client:BankUsable(kind)
-    return false
-end
-
-function Client:BankKindOfBag(bagId)
-    return nil
-end
-
--- Who the character is: { guid, name, world, faction, region }. Realms are
--- real on these clients, so the realm name is the world; the region is the
--- region's short name in lower case, where the client has the call. A part
--- the client cannot give is nil. (No bank is read here, so nothing is
--- remembered per region on these clients.)
-function Client:CharacterIdentity()
-    local region = GetCurrentRegionName and GetCurrentRegionName() or nil
-    return {
-        guid = UnitGUID and UnitGUID("player") or nil,
-        name = UnitName and (UnitName("player")) or nil,
-        world = GetRealmName and GetRealmName() or nil,
-        faction = UnitFactionGroup and (UnitFactionGroup("player")) or nil,
-        region = (type(region) == "string" and region ~= "") and region:lower() or nil,
-    }
-end
-
--- Whether the game itself marks the character Self-Found (it can then
--- neither be sent anything nor send anything). The clients that have the mode
--- say so through C_PlayerInfo.IsSelfFoundActive(); not every client of this
--- family has that call, and where it is missing nothing says so: false.
--- Asked at every call. Anything but true is false.
+-- Whether the game itself marks the character Self-Found (it can then not
+-- be sent anything). The clients that have the mode say so through
+-- C_PlayerInfo.IsSelfFoundActive(); not every client of this family has that
+-- call, and where it is missing nothing says so: false. Asked at every call.
+-- Anything but true is false.
 function Client:IsSelfFoundCharacter()
     if C_PlayerInfo and C_PlayerInfo.IsSelfFoundActive then
         return C_PlayerInfo.IsSelfFoundActive() == true
     end
     return false
-end
-
--- Hand a message to the game's error handler (geterrorhandler() returns
--- it), which shows it when Lua errors are displayed. Asking for the handler
--- and calling it both run protected: a client without one, or a handler that
--- fails itself, changes nothing, and nothing is raised from here.
-function Client:ShowError(message)
-    local found, handler = pcall(geterrorhandler)
-    if found and type(handler) == "function" then
-        pcall(handler, message)
-    end
-end
-
--- What the client itself counts of an item, with and without the bank, is
--- not asked on these clients: no bank is remembered here to compare it with
--- (see the bank note above). nil, whatever is asked.
-function Client:ClientItemCounts(itemId)
-    return nil
 end
 
 -- Server time in seconds; the computer's clock on a client without that call.
@@ -551,16 +454,6 @@ function Client:Now()
         return GetServerTime()
     end
     return time()
-end
-
--- callbacks: onBankOpened(), onBankChanged(kind), onBankClosing(),
--- onBankClosed(), onLogout(). Only logout is reported here (see the bank
--- note above). BAG_UPDATE belongs to Core/Init.lua, which passes bag updates
--- on.
-function Client:StartStock(callbacks)
-    LazyProf:RegisterEvent("PLAYER_LOGOUT", function()
-        callbacks.onLogout()
-    end)
 end
 
 -- /lp diag stock: the bags as this adapter reads them. Read-only.
@@ -576,13 +469,9 @@ function Client:RunStockDiagnostic(lines)
             add("bag[" .. tostring(bag) .. "] slots=" .. tostring(slots))
         end
     end
-    local items, bound, backpackSlots = self:BagContents()
-    local itemCount, boundCount = 0, 0
-    for _ in pairs(items) do itemCount = itemCount + 1 end
-    for _ in pairs(bound) do boundCount = boundCount + 1 end
-    add("adapter bags: items=" .. tostring(itemCount) .. " soulbound=" .. tostring(boundCount)
-        .. " backpackSlots=" .. tostring(backpackSlots))
-    add("bank: not recorded on this client")
+    local itemCount = 0
+    for _ in pairs(self:BagContents()) do itemCount = itemCount + 1 end
+    add("adapter bags: items=" .. tostring(itemCount))
 end
 
 -- /lp diag learned: append learned-recipe detection lines to `lines`. It

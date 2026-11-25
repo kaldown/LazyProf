@@ -63,7 +63,6 @@ local FILES = {
     "Core/Utils.lua",
     "Core/Config.lua",
     "Core/CharStore.lua",
-    "Modules/Inventory/StockMemory.lua",
     "Modules/Pathfinder/Pins.lua",
     "Modules/Guide/Text.lua",
     "Modules/Guide/Stages.lua",

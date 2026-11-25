@@ -69,10 +69,6 @@ LazyProf.defaults = {
         -- profile (Modules/Guide/TrainerMemory.lua)
         trainers = {},
         trainerFees = {},
-        -- Each character's bags and bank as last seen, and the account bank
-        -- per region (Modules/Inventory/StockMemory.lua, which also writes the
-        -- table's format number: it must not be a default)
-        stock = {},
     },
     char = {
         -- Per-character price cache
@@ -86,9 +82,23 @@ LazyProf.defaults = {
 
 -- What the player is told after a reset ("Reset All Settings" below and
 -- /lp reset, LazyProf:ResetSettings in Core/Init.lua): what went with the
--- settings and what was kept.
+-- settings.
 LazyProf.RESET_MESSAGE = "Settings reset to defaults. Vendor prices, trainers, targets and craft-or-buy choices "
-    .. "were cleared; remembered bags and banks were kept."
+    .. "were cleared."
+
+-- The stock options say "Requires: Syndicator" and are greyed out while it
+-- is missing. Asked when the options are shown: Syndicator may load after
+-- LazyProf.
+local function NeedsSyndicator()
+    return not LazyProf.Inventory:UsesSyndicator()
+end
+local function SyndicatorNote()
+    if NeedsSyndicator() then
+        return "Requires: Syndicator addon installed. Without it only the bags of the " ..
+               "character you are playing are counted.\n\n"
+    end
+    return ""
+end
 
 -- AceConfig options table
 LazyProf.options = {
@@ -248,12 +258,9 @@ LazyProf.options = {
                            "gathered materials, and anything you can craft with a profession " ..
                            "you have.\n\n" ..
                            "Such a character cannot be sent anything: stock of your other " ..
-                           "characters and of the guild bank is not counted for it. It " ..
-                           "cannot send anything either: where LazyProf remembers the stock " ..
-                           "itself (no inventory addon installed), its own stock is not " ..
-                           "counted for your other characters. A character the game itself " ..
-                           "marks Self-Found is treated this way for stock even with this " ..
-                           "setting off.\n\n" ..
+                           "characters and of the guild bank is not counted for it. A " ..
+                           "character the game itself marks Self-Found is treated this way " ..
+                           "for stock even with this setting off.\n\n" ..
                            "This setting is per character.",
                     type = "toggle",
                     order = 6,
@@ -261,8 +268,6 @@ LazyProf.options = {
                     get = function() return LazyProf.db.char.selfFoundMode end,
                     set = function(_, v)
                         LazyProf.db.char.selfFoundMode = v
-                        -- What is remembered of this character says whether it can send
-                        LazyProf.Inventory:OnSendingChanged()
                         LazyProf:Recalculate("setting changed")
                     end,
                 },
@@ -338,26 +343,20 @@ LazyProf.options = {
                 },
                 includeBankItems = {
                     name = "Include bank items",
-                    desc = "When enabled, items in your bank count as owned: the shopping " ..
-                           "list shows only what you still need to buy, and the Cheapest " ..
-                           "strategy plans the path around them when that is cheaper for you.\n\n" ..
-                           "With the Syndicator addon the bank is read from it. Without an " ..
-                           "inventory addon LazyProf remembers your bank itself, as it was " ..
-                           "when you last opened it (on WoW Forever; on other clients the " ..
-                           "bank needs Syndicator). The tooltip of a \"From bank\" row " ..
-                           "under \"Collect first\" on the Shopping tab says how old that is. " ..
-                           "When the bank may have changed after LazyProf last read it, " ..
-                           "it is not counted until you open the bank again, and the " ..
-                           "Shopping tab says so.\n\n" ..
-                           "Example: You need 20 Thorium Bars but have 8 in your bank. " ..
-                           "The shopping list shows 12 to buy from the AH.",
+                    desc = function()
+                        return "When enabled, items in your bank count as owned: the shopping " ..
+                               "list shows only what you still need to buy, and the Cheapest " ..
+                               "strategy plans the path around them when that is cheaper for you.\n\n" ..
+                               "The bank is read from the Syndicator addon, as it was when you " ..
+                               "last opened it.\n\n" ..
+                               SyndicatorNote() ..
+                               "Example: You need 20 Thorium Bars but have 8 in your bank. " ..
+                               "The shopping list shows 12 to buy from the AH."
+                    end,
                     type = "toggle",
                     order = 6,
                     width = "full",
-                    -- Without Syndicator the bank is remembered on WoW Forever only
-                    disabled = function()
-                        return not LazyProf.Inventory:UsesSyndicator() and LazyProf.ClientFamily ~= "forever"
-                    end,
+                    disabled = NeedsSyndicator,
                     get = function() return LazyProf.db.profile.includeBankItems end,
                     set = function(_, v)
                         LazyProf.db.profile.includeBankItems = v
@@ -366,27 +365,25 @@ LazyProf.options = {
                 },
                 includeAltCharacters = {
                     name = "Include alt characters",
-                    desc = "When enabled, materials on your other characters count as " ..
-                           "owned: they are subtracted from the shopping list, and the " ..
-                           "Cheapest strategy plans the path around them when that is " ..
-                           "cheaper for you.\n\n" ..
-                           "With the Syndicator addon that is their bags, banks, mail and " ..
-                           "AH listings. Without an inventory addon LazyProf remembers what " ..
-                           "it has seen itself: each character's bags when you play it, and " ..
-                           "its bank when you open it (the bank with \"Include bank items\" " ..
-                           "on, and on WoW Forever only). It then counts the characters of " ..
-                           "the same world and faction, without their soulbound items. The " ..
-                           "tooltip of a \"From alts\" row under \"Collect first\" on the " ..
-                           "Shopping tab says how old each character's stock is.\n\n" ..
-                           "A character in Self-Found mode cannot be sent anything, so no " ..
-                           "alt stock is counted for it.\n\n" ..
-                           "Example: Your alt has 200 Silk Cloth. The shopping list " ..
-                           "will show 200 fewer Silk Cloth to buy from the AH.\n\n" ..
-                           "Note: You'll need to transfer materials to your crafter " ..
-                           "before crafting - the addon just helps you plan.",
+                    desc = function()
+                        return "When enabled, materials on your other characters count as " ..
+                               "owned: they are subtracted from the shopping list, and the " ..
+                               "Cheapest strategy plans the path around them when that is " ..
+                               "cheaper for you.\n\n" ..
+                               "Their bags, banks, mail and AH listings are read from the " ..
+                               "Syndicator addon, as it last saw them.\n\n" ..
+                               SyndicatorNote() ..
+                               "A character in Self-Found mode cannot be sent anything, so no " ..
+                               "alt stock is counted for it.\n\n" ..
+                               "Example: Your alt has 200 Silk Cloth. The shopping list " ..
+                               "will show 200 fewer Silk Cloth to buy from the AH.\n\n" ..
+                               "Note: You'll need to transfer materials to your crafter " ..
+                               "before crafting - the addon just helps you plan."
+                    end,
                     type = "toggle",
                     order = 7,
                     width = "full",
+                    disabled = NeedsSyndicator,
                     get = function() return LazyProf.db.profile.includeAltCharacters end,
                     set = function(_, v)
                         LazyProf.db.profile.includeAltCharacters = v
@@ -410,33 +407,10 @@ LazyProf.options = {
                     type = "toggle",
                     order = 8,
                     width = "full",
-                    disabled = function()
-                        return not Syndicator
-                    end,
+                    disabled = NeedsSyndicator,
                     get = function() return LazyProf.db.profile.includeGuildBank end,
                     set = function(_, v)
                         LazyProf.db.profile.includeGuildBank = v
-                        LazyProf:Recalculate("setting changed")
-                    end,
-                },
-                forgetStock = {
-                    name = "Forget remembered characters",
-                    desc = "Without an inventory addon LazyProf remembers each character's " ..
-                           "bags and bank, so that bank and alt stock can count. This " ..
-                           "forgets all of it, for every character - for example after " ..
-                           "deleting a character whose stock still shows up.\n\n" ..
-                           "The character you are playing is remembered again right away " ..
-                           "(its bank the next time you open it), the others the next " ..
-                           "time you play them. A character you have not played for 180 " ..
-                           "days is forgotten by itself.",
-                    type = "execute",
-                    order = 9,
-                    confirm = true,
-                    confirmText = "Forget the bags and banks LazyProf remembers for all your characters?",
-                    -- With Syndicator the stock comes from it and nothing is remembered
-                    hidden = function() return LazyProf.Inventory:UsesSyndicator() end,
-                    func = function()
-                        LazyProf.Inventory:ForgetRemembered()
                         LazyProf:Recalculate("setting changed")
                     end,
                 },
@@ -624,16 +598,13 @@ LazyProf.options = {
                     desc = "Reset all settings to defaults. This also clears the vendor " ..
                            "prices and trainers LazyProf has seen and every character's " ..
                            "targets and craft-or-buy choices.\n\n" ..
-                           "The bags and banks LazyProf remembers for your characters " ..
-                           "are kept: \"Forget remembered characters\" (Display, " ..
-                           "\"Your stock\") is the button for those.\n\n" ..
                            "Same as /lp reset",
                     type = "execute",
                     order = 91,
                     confirm = true,
                     confirmText = "Reset all settings to their defaults? This also clears the vendor " ..
                                   "prices and trainers LazyProf has seen and every character's " ..
-                                  "targets and craft-or-buy choices. Remembered bags and banks are kept.",
+                                  "targets and craft-or-buy choices.",
                     func = function()
                         LazyProf:ResetSettings()
                         LazyProf:Print(LazyProf.RESET_MESSAGE)
@@ -652,8 +623,14 @@ LazyProf.options = {
 --     so nobody's window appears or vanishes by itself.
 --   The saved spots of the two old panels and the retired "calculate from
 --     current skill" setting are dropped.
+--   The bags and banks an unreleased build remembered itself (global.stock)
+--     are dropped: bank and alt stock come from the Syndicator addon.
 function LazyProf.MigrateSettings(sv)
-    if type(sv) ~= "table" or type(sv.profiles) ~= "table" then return end
+    if type(sv) ~= "table" then return end
+    if type(sv.global) == "table" then
+        sv.global.stock = nil
+    end
+    if type(sv.profiles) ~= "table" then return end
     for _, profile in pairs(sv.profiles) do
         if type(profile) == "table" then
             if profile.showMilestonePanel == false and profile.showMissingMaterials == false

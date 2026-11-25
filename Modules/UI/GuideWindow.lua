@@ -216,11 +216,8 @@ function GuideWindow:BuildView(path, mode, plain)
     view.skill = path.actualSkill
     view.hideOwned = LazyProf.CharStore:Get().hideOwned and true or false
     view.advanced = LazyProf.db.profile.showAdvanced and true or false
-    -- How old the remembered part of the stock is (the bank as last opened,
-    -- alts as last played), and the server time to count it from. Both nil
-    -- when the stock outside the bags comes from an inventory addon.
+    -- What the stock scan says of the stock it could count (Inventory:ScanAll)
     view.stockMeta = path.stockMeta
-    view.now = path.stockMeta and LazyProf.Client:Now() or nil
 
     -- The account of the whole path: its shopping list from the stages'
     -- quantities (so the margin is in it), less what the crafts sell for,
