@@ -6,7 +6,8 @@
 --   vendor   the vendor's price for the crafted item - money the player
 --            always gets (the default)
 --   auction  the item's auction price after the cut, never below the vendor
---            value; no auction price: the vendor value
+--            value; no auction price, or one PRICE_STALE_DAYS or more old
+--            (nobody may pay it any more): the vendor value
 --   none     nothing is counted
 --
 -- One item per craft is assumed (the recipe data has no yield), so a recipe
@@ -31,7 +32,8 @@ SaleValue.failed = {}
 --   source   "vendor" | "auction" | nil
 --   loading  the item's data has not arrived, so the vendor value is unknown
 -- deps.sellPrice(itemId)   -> copper or nil, loaded (false while not loaded)
--- deps.marketPrice(itemId) -> copper or nil (auction addons only)
+-- deps.marketPrice(itemId) -> copper or nil (auction addons only), and the
+--                            price's age in days when its source knows it
 function SaleValue.Of(recipe, mode, deps)
     local itemId = recipe and recipe.itemId
     if mode == MODE.NONE or not itemId then
@@ -41,7 +43,8 @@ function SaleValue.Of(recipe, mode, deps)
     local vendor = (loaded and sell and sell > 0) and sell or 0
 
     if mode == MODE.AUCTION then
-        local market = deps.marketPrice(itemId)
+        local market, ageDays = deps.marketPrice(itemId)
+        if ageDays and ageDays >= Constants.PRICE_STALE_DAYS then market = nil end
         if market and market > 0 then
             local afterCut = math.floor(market * (1 - Constants.AUCTION_CUT))
             if afterCut > 0 and afterCut >= vendor then
@@ -84,7 +87,8 @@ local function ClientDeps(self)
         end,
         marketPrice = function(itemId)
             local pm = LazyProf.PriceManager
-            return pm and pm.MarketPrice and pm:MarketPrice(itemId) or nil
+            if not (pm and pm.MarketPrice) then return nil end
+            return pm:MarketPrice(itemId)
         end,
     }
 end

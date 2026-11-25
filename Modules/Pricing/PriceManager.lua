@@ -9,7 +9,7 @@ local PriceManager = LazyProf.PriceManager
 PriceManager.providers = {}
 -- itemId -> price info (see GetPriceInfo). Other modules read .price.
 PriceManager.cache = {}
--- itemId -> { price = copper or false, timestamp } (see MarketPrice)
+-- itemId -> { price = copper or false, ageDays, timestamp } (see MarketPrice)
 PriceManager.marketCache = {}
 
 -- Two auction sources whose prices for one item differ by more than this
@@ -131,14 +131,15 @@ end
 -- vendor buy price, the sell-value estimate or the floor, and nil for an item
 -- a vendor sells (nobody pays more at auction than the vendor asks). Used for
 -- what a crafted item sells for. Kept as long as the reagent prices are, in a
--- cache of its own.
+-- cache of its own. Second return: the price's age in days when its source
+-- says (Auctionator), else nil.
 function PriceManager:MarketPrice(itemId)
     local cached = self.marketCache[itemId]
     if cached and (time() - cached.timestamp) < Constants.PRICE_CACHE_TTL then
-        return cached.price or nil
+        return cached.price or nil, cached.ageDays
     end
 
-    local found
+    local found, foundAge
     local vendor = LazyProf.PriceProviders and LazyProf.PriceProviders.vendor
     local vendorPrice = vendor and vendor:GetPrice(itemId)
     if not (vendorPrice and vendorPrice > 0) then
@@ -146,15 +147,15 @@ function PriceManager:MarketPrice(itemId)
             local price, _, ageDays = provider:GetPrice(itemId)
             if price and price > 0 then
                 if self:IsFreshAge(ageDays) then
-                    found = price
+                    found, foundAge = price, ageDays
                     break
                 end
-                found = found or price
+                if not found then found, foundAge = price, ageDays end
             end
         end
     end
-    self.marketCache[itemId] = { price = found or false, timestamp = time() }
-    return found
+    self.marketCache[itemId] = { price = found or false, ageDays = foundAge, timestamp = time() }
+    return found, foundAge
 end
 
 -- A price somebody really charges: a vendor's or an auction addon's. The
