@@ -222,6 +222,7 @@ function GuideWindow:BuildView(path, mode, plain)
     view.skill = path.actualSkill
     view.hideOwned = LazyProf.CharStore:Get().hideOwned and true or false
     view.advanced = LazyProf.db.profile.showAdvanced and true or false
+    view.strategy = LazyProf.db.profile.strategy
     -- What the stock scan says of the stock it could count (Inventory:ScanAll)
     view.stockMeta = path.stockMeta
 

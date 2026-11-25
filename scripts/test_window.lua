@@ -1861,4 +1861,16 @@ T.section("a redraw missed while hidden", function()
     T.eq("after combat: the stock that came during combat is shown", W.receiptTexts(window)[1], "You spend | 1g")
 end)
 
+-- The view carries the strategy in force, for the status line.
+T.section("the view knows the strategy", function()
+    local env = W.load("forever")
+    local window, addon = env.window, env.addon
+    addon.db.profile.strategy = "fastest"
+    window:Update(W.path({ complete = true, gaps = {} }))
+    T.eq("Fastest: named on the status line", window.status.text:match("fastest path$"), "fastest path")
+    addon.db.profile.strategy = "cheapest"
+    window:Refresh()
+    T.check("Cheapest: not named", window.status.text:find("fastest", 1, true) == nil, window.status.text)
+end)
+
 T.finish()

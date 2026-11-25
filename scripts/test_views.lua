@@ -138,6 +138,17 @@ T.section("header", function()
         "Not learned yet - planned from skill 1")
     T.eq("status: what-if from 1", Views.Header(makeView(makePath({ planFromOne = true }), { cap = 150 })).status,
         "Skill 143 / 150 - planned from skill 1")
+    -- The strategy buttons sit under More options: a path that is not the
+    -- cheapest says so on the status line.
+    local fast = makeView(makePath(), { cap = 150 })
+    fast.strategy = "fastest"
+    T.eq("status: the Fastest strategy is named", Views.Header(fast).status, "Skill 143 / 150 - fastest path")
+    local cheap = makeView(makePath(), { cap = 150 })
+    cheap.strategy = "cheapest"
+    T.eq("status: Cheapest, the default, is not", Views.Header(cheap).status, "Skill 143 / 150")
+    local fastNew = makeView(makePath({ hasProfession = false, actualSkill = 1 }))
+    fastNew.strategy = "fastest"
+    T.eq("status: not learned, Fastest", Views.Header(fastNew).status, "Not learned yet - planned from skill 1 - fastest path")
 
     local lines = { { text = "Prices: TSM 2, vendor 1", r = 0.6, g = 0.6, b = 0.6 }, { text = "more" } }
     h = Views.Header(makeView(makePath(), { priceLines = lines, priceSummary = { total = 3, stale = 0, unpriced = 0, loading = 0 } }))

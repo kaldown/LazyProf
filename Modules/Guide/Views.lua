@@ -110,6 +110,11 @@ function Views.Header(view)
         end
         header.status = status
     end
+    -- The strategy buttons sit under More options: a path that is not the
+    -- cheapest says so here.
+    if view.strategy == "fastest" then
+        header.status = header.status .. " - fastest path"
+    end
 
     local lines = view.priceLines or {}
     header.priceTooltip = lines
