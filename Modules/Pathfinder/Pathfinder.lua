@@ -81,8 +81,8 @@ function Pathfinder:BuildPath(run)
         LazyProf:Debug("pathfinder", string.format("Active pins (%d): %s", #pins, table.concat(pinDetails, ", ")))
     end
 
-    -- Get inventory (bags + all enabled sources); stockMeta says how old the
-    -- remembered part of it is (nil when none of it is remembered)
+    -- Get inventory (bags + all enabled sources); stockMeta is { bagsOnly =
+    -- true } when the bank or alts are asked for and only the bags can be read
     local inventory, sourceBreakdown, stockMeta = LazyProf.Inventory:ScanAll()
 
     -- Log owned materials summary (guarded: GetItemInfo + string building per

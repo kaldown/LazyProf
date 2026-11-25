@@ -36,7 +36,7 @@ Plan, then shop: open a profession, see the cheapest path from your real skill, 
 - Amounts in the receipt and in the cost columns are shown to the copper, so they add up. The merchant panel's rows add up to its "Buy all" total.
 - The merchant panel works from the shopping list of the whole path (there is no range any more), and also buys what still has to be bought of a reagent you otherwise craft. It never shops for a "Plan from skill 1" path: that one is only a look at the cost from skill 1.
 - The arrow tooltip shows the receipt's amounts instead of the old totals.
-- "Reset All Settings" and `/lp reset` say what goes with the settings - the vendor prices and trainers LazyProf has seen and every character's targets and craft-or-buy choices - in the question before the reset and in the message after it.
+- "Reset All Settings" and `/lp reset` say what goes with the settings - the vendor prices and trainers LazyProf has seen; every character's targets, chosen recipes, remembered routes, craft-or-buy choices and Self-Found mode; window positions; and the known recipes, which are read again when you open each profession - in the question before the reset and in the message after it.
 - "With margin" is now called "Spare crafts", "Use this" is "Use" (a recipe you chose says "Your choice"), and the "Target" box is "Level to". A number typed into it counts when you press Enter; clicking elsewhere or pressing Escape puts the planned target back.
 
 ### Removed
