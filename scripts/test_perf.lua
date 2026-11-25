@@ -446,8 +446,9 @@ section("K", function()
         GetCurrentCharacter = function() return "Perf-Realm" end,
         GetAllCharacters = function() return { "Perf-Realm", "Alt-Realm" } end,
         GetByCharacterFullName = function(name)
-            if name == "Alt-Realm" then return { bags = { slots(1, 7) }, bank = { slots(3, 2) } } end
-            return { bank = { slots(1, 3) }, mail = slots(2, 1), auctions = {} }
+            local details = { faction = "Horde", realmNormalized = "Realm" }
+            if name == "Alt-Realm" then return { details = details, bags = { slots(1, 7) }, bank = { slots(3, 2) } } end
+            return { details = details, bank = { slots(1, 3) }, mail = slots(2, 1), auctions = {} }
         end,
         GetCurrentGuild = function() return "Guild-Realm" end,
         GetByGuildFullName = function() return { bank = { { isViewable = true, slots = slots(1, 50) } } } end,

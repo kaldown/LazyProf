@@ -45,6 +45,7 @@ Plan, then shop: open a profession, see the cheapest path from your real skill, 
 
 ### Fixed
 
+- With Syndicator, an alt counts only when it is on the same realm as the character you play and of the same faction, and its soulbound items are left out; a character Syndicator has no realm or faction for does not count. Before, every character Syndicator knew counted, of every realm and faction, soulbound items included, so the list could ask for less than you can really get. `/lp diag stock` says which alts count and why the others do not.
 - Right-click on "I craft it" / "I buy it" now goes back to the automatic choice, as its tooltip says; it never reached the button before. A choice you made shows its button even without More options, so it can be seen and undone.
 - The scroll bar and its buttons were drawn when there was nothing to scroll.
 - The selected strategy button (Cheapest / Fastest) could hardly be told from the other.
