@@ -730,6 +730,9 @@ local function AddOpenedRun(rows, stage, learn, view, ctx)
     if (stage.saleEach or 0) > 0 then
         local sources = view.sale and view.sale.sources
         add({ kind = "line", height = 16, color = GREY, text = Text.SellsFor(stage.saleEach, sources and sources[recipe.id]) })
+        if (stage.usedLater or 0) > 0 then
+            add({ kind = "line", height = 16, color = GREY, text = Text.UsedLater(stage.usedLater, stage.quantity) })
+        end
     end
 
     if learn then

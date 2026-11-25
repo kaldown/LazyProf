@@ -81,6 +81,49 @@ T.section("account", function()
     T.eq("no steps: nothing back", empty.net, 0)
 end)
 
+-- A path that makes an item a later run uses: the later run takes the
+-- path's own crafts first, and the crafts used that way are not sold
+-- (ruling P118). Bolt runs make Bolts from 3 Cloth each; a Shirt takes two
+-- Bolts and a Thread.
+T.section("the path uses what it makes", function()
+    local BOLTS = { id = 3, name = "Bolt of Cloth", learned = true, itemId = BOLT,
+        reagents = { { itemId = CLOTH, count = 3, name = "Cloth" } } }
+    local values = { [3] = 40, [1] = 30 }
+    local function rowsOf(account)
+        local out = {}
+        for _, row in ipairs(account.missing.rows) do out[row.itemId] = row end
+        return out
+    end
+
+    -- 12 Bolts, then 5 Shirts (10 Bolts): 2 Bolts left to sell.
+    local steps = { { recipe = BOLTS, quantity = 12, skillStart = 1 }, { recipe = SHIRT, quantity = 5, skillStart = 20 } }
+    local a = PF:Account(steps, {}, {}, PRICES, values)
+    local rows = rowsOf(a)
+    T.check("no Bolt to buy or make: the path makes them", rows[BOLT] == nil)
+    T.eq("cloth for the 12 Bolts only", rows[CLOTH] and rows[CLOTH].need, 36)
+    T.eq("thread for the Shirts", rows[THREAD] and rows[THREAD].need, 5)
+    T.eq("reagents: 36 Cloth and 5 Thread", a.reagents, 36 * 100 + 5 * 10)
+    T.eq("sale: the 2 Bolts left over and 5 Shirts", a.sale, 2 * 40 + 5 * 30)
+    T.eq("the list says how many the path makes for itself", a.missing.made and a.missing.made[BOLT], 10)
+
+    -- Too few Bolts made: the rest is on the list.
+    local b = PF:Account({ { recipe = BOLTS, quantity = 4, skillStart = 1 }, { recipe = SHIRT, quantity = 5, skillStart = 20 } },
+        {}, {}, PRICES, values)
+    T.eq("the 6 Bolts the path does not make are on the list", rowsOf(b)[BOLT] and rowsOf(b)[BOLT].need, 6)
+    T.eq("every Bolt made is used: none is sold", b.sale, 5 * 30)
+
+    -- Made after it is needed: no help.
+    local c = PF:Account({ { recipe = SHIRT, quantity = 5, skillStart = 1 }, { recipe = BOLTS, quantity = 12, skillStart = 20 } },
+        {}, {}, PRICES, values)
+    T.eq("Bolts made later do not count for the Shirts before them", rowsOf(c)[BOLT] and rowsOf(c)[BOLT].need, 10)
+    T.eq("and all 12 are sold", c.sale, 12 * 40 + 5 * 30)
+
+    -- Owned Bolts stay where they are while the path makes enough.
+    local d = PF:Account(steps, { [BOLT] = 7 }, { [BOLT] = { bank = 7 } }, PRICES, values)
+    T.check("owned Bolts are not collected", rowsOf(d)[BOLT] == nil)
+    T.eq("and the sale is the same", d.sale, a.sale)
+end)
+
 T.section("what the owned stock saves", function()
     local inventory, breakdown = { [CLOTH] = 15 }, { [CLOTH] = { bags = 5, bank = 10 } }
     local a = PF:Account(STEPS, inventory, breakdown, PRICES)
@@ -159,6 +202,7 @@ local CASES = {
 T.section("receipt invariants on the snapshot fixtures", function()
     local withCrafted, withoutCrafted, withFees, withSale, withStock = 0, 0, 0, 0, 0
     local withMaking, withMakingAndFees = 0, 0
+    local withReuse = 0
     for _, case in ipairs(CASES) do
         local CraftLib = harness.loadCraftLib(case.interface, { sod = case.sod, camelot = case.camelot })
         local LP = harness.loadLazyProf(STRATEGY_FILES)
@@ -254,6 +298,7 @@ T.section("receipt invariants on the snapshot fixtures", function()
                     shown.column + shown.fees - shown.making, shown.spend)
                 T.eq(label .. "shown: every run has a cost", shown.unknown, 0)
 
+                if next(account.missing.made or {}) then withReuse = withReuse + 1 end
                 if crafted then withCrafted = withCrafted + 1 else withoutCrafted = withoutCrafted + 1 end
                 if fees > 0 then withFees = withFees + 1 end
                 if account.sale > 0 then withSale = withSale + 1 end
@@ -270,6 +315,7 @@ T.section("receipt invariants on the snapshot fixtures", function()
     T.check("and that changes what is spent", withMaking > 0, withMaking)
     T.check("on paths with recipes to pay for as well", withMakingAndFees > 0, withMakingAndFees)
     T.check("some lists make none", withoutCrafted >= #CASES * 2, withoutCrafted)
+    T.check("some paths use what they make themselves", withReuse > 0, withReuse)
     T.check("some paths have recipes to pay for", withFees > 0, withFees)
     T.check("crafts sell for something in every case", withSale == #CASES * 4, withSale)
     T.check("the stock saves something in every case", withStock == #CASES * 4, withStock)

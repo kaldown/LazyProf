@@ -244,6 +244,54 @@ T.section("done and current", function()
     T.eq("no real skill: nothing done, first stage current", text, "-* - - - -")
 end)
 
+-- A run that uses what an earlier run of the path made takes those crafts
+-- first; the crafts used that way are not sold (ruling P118). Bolts (item
+-- 500) from 3 Cloth each, 12 of them; then 5 Shirts of 2 Bolts and a Thread.
+T.section("a run uses what an earlier run made", function()
+    local BOLT, CLOTH, THREAD = 500, 501, 502
+    local prices = { [BOLT] = 400, [CLOTH] = 100, [THREAD] = 10 }
+    local bolts = recipe(1, "Bolt", 1, 400, 410, 420, { reagents = { { itemId = CLOTH, count = 3, name = "Cloth" } } })
+    bolts.itemId = BOLT
+    local shirt = recipe(2, "Shirt", 1, 400, 410, 420, { reagents = {
+        { itemId = BOLT, count = 2, name = "Bolt" }, { itemId = THREAD, count = 1, name = "Thread" } } })
+    local function path(first, second)
+        return { targetSkill = 75, steps = { first, second }, gaps = {}, totalCost = 0 }
+    end
+    local sale = { [1] = 40, [2] = 30 }
+
+    local stages, totals = Stages.Build(path(step(bolts, 1, 13, 12, 0), step(shirt, 13, 18, 5, 0)),
+        { prices = prices, sale = sale, inventory = { [THREAD] = 2 } })
+    local b, s = stages[1], stages[2]
+    T.eq("the shirts' bolts: 10 needed", s.materials[1].need, 10)
+    T.eq("all of them made by the bolt run", s.materials[1].made, 10)
+    T.eq("so none is missing", s.materials[1].missing, 0)
+    T.eq("the thread: 2 owned, 3 missing", s.materials[2].missing, 3)
+    T.eq("the shirts pay for the thread only", s.outOfPocketCost, 3 * 10)
+    T.eq("the market cost still prices every bolt", s.cost, 10 * 400 + 5 * 10)
+    T.eq("10 bolts are used later", b.usedLater, 10)
+    T.eq("only the 2 left over are sold", b.sale, 2 * 40)
+    T.eq("the shirts sell as before", s.sale, 5 * 30)
+    T.eq("the totals sell 2 bolts and 5 shirts", totals.shownSale, 2 * 40 + 5 * 30)
+    T.eq("the expected quantities too", totals.sale, 2 * 40 + 5 * 30)
+
+    -- Made after the shirts: no help to them, every bolt is sold.
+    stages = Stages.Build(path(step(shirt, 1, 6, 5, 0), step(bolts, 6, 18, 12, 0)), { prices = prices, sale = sale })
+    T.eq("bolts made later: the shirts buy theirs", stages[1].materials[1].missing, 10)
+    T.eq("and every bolt is sold", stages[2].sale, 12 * 40)
+
+    -- Too few made: the rest is missing, and nothing of the bolt run is sold.
+    stages = Stages.Build(path(step(bolts, 1, 5, 4, 0), step(shirt, 5, 10, 5, 0)), { prices = prices, sale = sale })
+    T.eq("4 bolts made, 6 missing", stages[2].materials[1].missing, 6)
+    T.eq("no bolt left to sell", stages[1].sale, 0)
+
+    -- With the margin the shown pass makes and uses the spare crafts.
+    stages = Stages.Build(path(step(bolts, 1, 13, 12, 0), step(shirt, 13, 18, 5, 0)),
+        { prices = prices, sale = sale, marginPercent = 50 })
+    T.eq("margin: 18 bolts made, 16 used by 8 shirts", stages[1].usedLater, 16)
+    T.eq("margin: 2 spare bolts sold", stages[1].sale, 2 * 40)
+    T.eq("margin: the expected pass sells 2 bolts too", stages[1].baseSale, 2 * 40)
+end)
+
 T.section("margin", function()
     local A = recipe(1, "A", 1, 400, 410, 420, { reagents = {
         { itemId = 101, count = 3, name = "Wool" }, { itemId = 104, count = 1, name = "Thread" } } })

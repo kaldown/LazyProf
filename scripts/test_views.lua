@@ -709,6 +709,8 @@ T.section("path list", function()
         if opts.onlyScarf then
             alts = { alts[1], alts[#alts] }
         end
+        -- The boots make what the shoulders use (item 132): 10 boots, 15 shoulders.
+        if opts.bootsMake then boots.itemId = 132 end
         return {
             profession = "Leatherworking", professionKey = "leatherworking", hasProfession = true,
             currentSkill = 117, actualSkill = opts.skill or 117, targetSkill = 190, capSkill = 300, racialBonus = 0,
@@ -1125,6 +1127,14 @@ T.section("path list", function()
     sale = { mode = "auction", values = { [31] = 45 }, sources = { [31] = "vendor" } }
     rows = list({ sale = sale }, { expanded = {} })
     T.eq("sells for, auction mode but only a vendor value", texts(rows)[6], "Sells for 45c each (vendor)")
+    -- Crafts a later run uses are not sold: the run says so (ruling P118).
+    sale = { mode = "vendor", values = { [31] = 45 }, sources = { [31] = "vendor" } }
+    rows = list({ sale = sale, bootsMake = true }, { expanded = {} })
+    T.eq("used later: under what a craft sells for", texts(rows)[7], "All of these go into later runs and are not sold.")
+    T.eq("text: some used later", LazyProf.GuideText.UsedLater(4, 10), "4 of these go into later runs and are not sold.")
+    T.eq("text: all used later", LazyProf.GuideText.UsedLater(10, 10), "All of these go into later runs and are not sold.")
+    rows = list({ sale = sale }, { expanded = {} })
+    T.check("nothing used later: no such line", find(rows, "later runs") == nil)
 
     -- Spare crafts.
     rows = list(nil, { expanded = {}, margin = 15 })

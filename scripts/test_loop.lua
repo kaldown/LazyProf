@@ -135,7 +135,7 @@ for _, case in ipairs(CASES) do
 
         -- Craft from `from` to the target one skill point at a time with
         -- average luck (1 / chance crafts per point, fractions carried), buying
-        -- whatever a craft lacks. mode: "plan" follows the route that was
+        -- whatever a craft lacks and keeping what it makes. mode: "plan" follows the route that was
         -- shopped for; "memory" follows the addon's calculations as they are;
         -- "scratch" follows them with the remembered route wiped before each.
         local function simulate(mode)
@@ -173,6 +173,9 @@ for _, case in ipairs(CASES) do
                         end
                         have[reagent.itemId] = got - need
                     end
+                    -- What the craft makes goes into the bags (a later run
+                    -- may use it: the list counts on that).
+                    if recipe.itemId then have[recipe.itemId] = (have[recipe.itemId] or 0) + crafts end
                 end
             end
             return bought, switches

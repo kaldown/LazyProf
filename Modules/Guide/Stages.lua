@@ -56,17 +56,20 @@ local function WithMargin(quantity, percent)
     return math.ceil(quantity * (1 + percent / 100) - 1e-9)
 end
 
--- Reagent rows for `quantity` crafts against `remaining` (owned counts left
--- after earlier stages), consuming what is used. Returns the rows, the market
--- cost of all reagents and the cost of what is missing (each reagent's cost
--- in whole copper, the sums of those).
-local function Materials(recipe, quantity, remaining, prices)
+-- Reagent rows for `quantity` crafts: first from what earlier runs made
+-- (`made`, a Utils.MadePool; onTake is told which run's crafts were used),
+-- then against `remaining` (owned counts left after earlier stages),
+-- consuming what is used. Returns the rows, the market cost of all reagents
+-- and the cost of what is missing (each reagent's cost in whole copper, the
+-- sums of those). A row's `have` includes what earlier runs made (`made`).
+local function Materials(recipe, quantity, remaining, prices, made, onTake)
     local rows, cost, pay = {}, 0, 0
     for _, reagent in ipairs(recipe.reagents or {}) do
         local need = reagent.count * quantity
+        local fromPath = made and made.Take(reagent.itemId, need, onTake) or 0
         local have = remaining[reagent.itemId] or 0
-        local used = math.min(need, have)
-        local missing = need - used
+        local used = math.min(need - fromPath, have)
+        local missing = need - fromPath - used
         remaining[reagent.itemId] = have - used
         local price = prices[reagent.itemId]
         local missingCost = Round((price or 0) * missing)
@@ -77,7 +80,8 @@ local function Materials(recipe, quantity, remaining, prices)
             icon = icon or QUESTION_MARK,
             link = link,
             need = need,
-            have = have,
+            have = have + fromPath,
+            made = fromPath > 0 and fromPath or nil,
             missing = missing,
             price = price,
             estimatedCost = missingCost,
@@ -395,6 +399,17 @@ function Stages.Build(path, opts)
         remainingBase[itemId] = count
         remainingShown[itemId] = count
     end
+    -- What each run makes is there for the later runs, before any owned
+    -- stock (ruling P118). The crafts used that way are not sold: the run
+    -- that made them sells that many fewer (usedLater says how many).
+    local madeBase, madeShown = Utils.MadePool(), Utils.MadePool()
+    local function usedBase(maker, n)
+        maker.baseSale = maker.baseSale - n * maker.saleEach
+    end
+    local function usedShown(maker, n)
+        maker.sale = maker.sale - n * maker.saleEach
+        maker.usedLater = (maker.usedLater or 0) + n
+    end
     for index, stage in ipairs(stages) do
         stage.index = index
         -- A key for the stage within this stage list (it contains the start
@@ -406,18 +421,34 @@ function Stages.Build(path, opts)
             local feeInside = stage.feeIncluded and stage.fee or 0
             local before = {}
             for itemId, count in pairs(remainingShown) do before[itemId] = count end
+            -- An alternative may use what earlier runs made as well.
+            local counted = {}
+            for _, alt in ipairs(stage.fragments[1].alternatives or {}) do
+                for _, reagent in ipairs(alt.recipe.reagents or {}) do
+                    local itemId = reagent.itemId
+                    if not counted[itemId] then
+                        counted[itemId] = true
+                        local left = madeShown.Left(itemId)
+                        if left > 0 then before[itemId] = (before[itemId] or 0) + left end
+                    end
+                end
+            end
 
-            local _, baseCost, basePay = Materials(stage.recipe, stage.baseQuantity, remainingBase, prices)
+            local _, baseCost, basePay = Materials(stage.recipe, stage.baseQuantity, remainingBase, prices,
+                madeBase, usedBase)
             stage.baseCost, stage.basePay = baseCost, basePay
             stage.quantity = WithMargin(stage.baseQuantity, margin)
             stage.margin = margin and true or nil
-            local rows, cost, pay = Materials(stage.recipe, stage.quantity, remainingShown, prices)
+            local rows, cost, pay = Materials(stage.recipe, stage.quantity, remainingShown, prices,
+                madeShown, usedShown)
             stage.materials = rows
             stage.cost = cost + feeInside
             stage.outOfPocketCost = pay + feeInside
             stage.saleEach = saleValues[stage.recipe.id] or 0
             stage.baseSale = stage.baseQuantity * stage.saleEach
             stage.sale = stage.quantity * stage.saleEach
+            madeBase.Add(stage.recipe.itemId, stage.baseQuantity, stage)
+            madeShown.Add(stage.recipe.itemId, stage.quantity, stage)
             stage.color, stage.colorChanges = Colors(stage.recipe, stage.from, stage.to, racialBonus)
             stage.pinned = (LazyProf.Pins.Find(opts.pins, stage.from) == stage.recipe.id) or nil
             stage.alternatives = Alternatives(stage, before, prices,

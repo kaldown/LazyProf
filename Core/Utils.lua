@@ -52,6 +52,47 @@ function Utils.MinBy(tbl, scorer)
 end
 
 -- Format copper as gold string
+-- What the earlier crafts of a path made, for its later runs to use (one
+-- item per craft is assumed). Taken first made, first used.
+--   pool.Add(itemId, count, owner)   record crafts; owner is passed back
+--   pool.Take(itemId, want, onTake)  take up to `want`; calls onTake(owner, n)
+--                                    for each part taken; returns the number
+--   pool.Left(itemId)                how many are still there
+function Utils.MadePool()
+    local parts = {}
+    local pool = {}
+    function pool.Add(itemId, count, owner)
+        if not itemId or not count or count <= 0 then return end
+        local list = parts[itemId]
+        if not list then
+            list = {}
+            parts[itemId] = list
+        end
+        list[#list + 1] = { owner = owner, left = count }
+    end
+    function pool.Take(itemId, want, onTake)
+        local list = parts[itemId]
+        local taken = 0
+        if not list then return 0 end
+        for _, part in ipairs(list) do
+            if taken >= want then break end
+            local n = math.min(part.left, want - taken)
+            if n > 0 then
+                part.left = part.left - n
+                taken = taken + n
+                if onTake then onTake(part.owner, n) end
+            end
+        end
+        return taken
+    end
+    function pool.Left(itemId)
+        local left = 0
+        for _, part in ipairs(parts[itemId] or {}) do left = left + part.left end
+        return left
+    end
+    return pool
+end
+
 function Utils.FormatMoney(copper)
     if not copper or copper == 0 then
         return "0c"

@@ -86,6 +86,15 @@ function Text.SellsFor(saleEach, source)
     return text
 end
 
+-- A run whose crafts later runs of the path use as reagents: those are not
+-- sold (n of the run's crafts).
+function Text.UsedLater(n, crafts)
+    if n >= crafts then
+        return "All of these go into later runs and are not sold."
+    end
+    return string.format("%d of these go into later runs and are not sold.", n)
+end
+
 -- Learn and rank steps -----------------------------------------------------------
 
 -- On the VANILLA profile the recipe data types every recipe as trainer-taught,
