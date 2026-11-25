@@ -223,6 +223,23 @@ T.section("settings migration", function()
     T.check("running it again changes nothing", d.openWithProfession == false)
     T.check("no saved data: no error", pcall(migrate, nil) and pcall(migrate, {}))
 
+    -- The bags and banks an unreleased build remembered itself are dropped,
+    -- whatever else is saved; the rest of the account-wide data stays.
+    local withStock = { global = { stock = { schema = 1, characters = { ["Player-1-A"] = { name = "A" } }, account = {} },
+                                   vendorPrices = { [2589] = 10 }, characters = { ["Player-1-A"] = { lastTab = "path" } } } }
+    migrate(withStock)
+    T.check("saved stock memory: dropped", withStock.global.stock == nil)
+    T.check("saved stock memory: the rest of the account-wide data stays",
+        withStock.global.vendorPrices[2589] == 10 and withStock.global.characters["Player-1-A"].lastTab == "path")
+    local both = { global = { stock = { schema = 1 } }, profiles = { Default = { showMilestonePanel = false, showMissingMaterials = false } } }
+    migrate(both)
+    T.check("with profiles saved too: dropped, and the profiles still migrated", both.global.stock == nil
+        and both.profiles.Default.openWithProfession == false)
+    migrate(withStock)
+    T.check("running it again: nothing to drop, no error", withStock.global.stock == nil)
+    T.check("a damaged global table: no error", pcall(migrate, { global = "broken" }) and pcall(migrate, { global = { stock = 5 } }))
+    T.check("no default writes it back", LazyProf.defaults.global.stock == nil)
+
     T.eq("default: the window opens with the profession window", LazyProf.defaults.profile.openWithProfession, true)
     T.check("old toggle defaults are gone", LazyProf.defaults.profile.showMilestonePanel == nil
         and LazyProf.defaults.profile.showMissingMaterials == nil)

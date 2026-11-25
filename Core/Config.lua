@@ -623,8 +623,14 @@ LazyProf.options = {
 --     so nobody's window appears or vanishes by itself.
 --   The saved spots of the two old panels and the retired "calculate from
 --     current skill" setting are dropped.
+--   The bags and banks an unreleased build remembered itself (global.stock)
+--     are dropped: bank and alt stock come from the Syndicator addon.
 function LazyProf.MigrateSettings(sv)
-    if type(sv) ~= "table" or type(sv.profiles) ~= "table" then return end
+    if type(sv) ~= "table" then return end
+    if type(sv.global) == "table" then
+        sv.global.stock = nil
+    end
+    if type(sv.profiles) ~= "table" then return end
     for _, profile in pairs(sv.profiles) do
         if type(profile) == "table" then
             if profile.showMilestonePanel == false and profile.showMissingMaterials == false
