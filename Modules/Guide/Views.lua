@@ -1046,8 +1046,16 @@ local function TotalRow(label, copper)
     return { kind = "cols", total = true, text = label, color = GOLD, cols = { "", "", "", Money(copper or 0) } }
 end
 
+-- Said on top of the Shopping tab when only the carried bags could count
+-- although bank or alt stock was asked for: the stock scan's
+-- view.stockMeta.bagsOnly (Inventory:ScanAll), set when the Syndicator addon,
+-- which supplies bank and alt stock, is not installed.
+Views.BAGS_ONLY_LINE = "Only the bags of this character are counted. Install Syndicator to count your bank and alts too."
+
 -- The shopping list. view.missing is the shopping list of the whole path
 -- (the account's, Pathfinder:CalculateMissingMaterials of every run). In order:
+--   a grey line when only the bags count though bank or alt stock was asked
+--     for (Views.BAGS_ONLY_LINE above)
 --   "Collect first": owned stock that is not in the bags
 --   the table (need / have / buy / cost, a "vendor" mark): reagents with
 --     something left to buy, the dearest first and those without a price
@@ -1074,6 +1082,10 @@ function Views.Shopping(view, ctx)
     end
     local missing = view.missing or {}
     local rows = {}
+
+    if view.stockMeta and view.stockMeta.bagsOnly then
+        rows[#rows + 1] = { kind = "line", wrap = true, color = GREY, text = Views.BAGS_ONLY_LINE }
+    end
 
     local collect = {}
     for _, section in ipairs(COLLECT) do

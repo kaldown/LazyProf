@@ -1418,6 +1418,53 @@ T.section("shopping list", function()
     T.eq("nothing left: the notice", Views.Shopping(shopView(done), ctx)[1].text, "Nothing left: Tailoring is at its cap of 300.")
 end)
 
+-- Without the Syndicator addon only the carried bags count. When bank or
+-- alt stock was asked for (the scan's meta.bagsOnly), the player is told in
+-- one grey line on top of the Shopping tab, before "Collect first", or the
+-- Have column is simply lower without a word.
+T.section("shopping: only the bags count says so", function()
+    local SILK = 165
+    local robe = recipe(50, "Robe", 100, 150, 160, 170, { reagents = { { itemId = SILK, count = 3, name = "Silk" } } })
+    local LINE = "Only the bags of this character are counted. Install Syndicator to count your bank and alts too."
+    local function rowsWith(meta, inventory, breakdown, extra)
+        local fields = { complete = true, gaps = {}, currentSkill = 100, actualSkill = 100, prices = { [SILK] = 200 },
+            steps = { step(robe, 100, 110, 10, 0) }, inventory = inventory or {}, sourceBreakdown = breakdown or {}, stockMeta = meta }
+        for k, v in pairs(extra or {}) do fields[k] = v end
+        local v = shopView(makePath(fields), { inventory = inventory or {}, breakdown = breakdown })
+        v.stockMeta = meta
+        return Views.Shopping(v)
+    end
+
+    T.eq("the text, word for word", Views.BAGS_ONLY_LINE, LINE)
+    T.check("plain ASCII, no arrows or symbols", not LINE:find("[\128-\255]") and not LINE:find("[<>|]"))
+    local plain = rowsWith(nil)
+    local rows = rowsWith({ bagsOnly = true })
+    T.eq("bags only: the line is the first row", rows[1].text, LINE)
+    T.check("a plain grey line that wraps", rows[1].kind == "line" and rows[1].wrap == true
+        and rows[1].color[1] == 0.7 and rows[1].color[2] == 0.7 and rows[1].color[3] == 0.7)
+    T.check("nothing to click or hover on it", rows[1].onClick == nil and rows[1].button == nil and rows[1].itemId == nil
+        and rows[1].tooltip == nil)
+    T.eq("the list follows as it would without it", #rows, #plain + 1)
+    T.eq("its next row is the list's first", rows[2].text, plain[1].text)
+
+    -- Stock in the bags is never collected from: the table follows the line.
+    local stock = { [SILK] = 10 }
+    rows = rowsWith({ bagsOnly = true }, stock, { [SILK] = { bags = 10 } })
+    T.eq("with stock in the bags: still the first row", rows[1].text, LINE)
+    T.check("no collect block for the bags", rows[2].text ~= "Collect first", rows[2].text)
+
+    -- Nothing to say.
+    T.check("nothing asked for or Syndicator installed (no meta): no line", plain[1].text ~= LINE)
+    T.eq("a meta without the mark: no line", #rowsWith({}), #plain)
+    rows = rowsWith({ bagsOnly = true }, nil, nil, { steps = {}, nothingLeft = true, actualSkill = 300, currentSkill = 300, totalCost = 0 })
+    T.check("nothing left to level: the notice alone", #rows >= 1 and rows[1].text ~= LINE)
+    local count = 0
+    for _, row in ipairs(rowsWith({ bagsOnly = true })) do
+        if row.text == LINE then count = count + 1 end
+    end
+    T.eq("said once", count, 1)
+end)
+
 -- The target slider's model: from the real skill to the last cap.
 T.section("target", function()
     local function target(extra)

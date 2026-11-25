@@ -953,6 +953,37 @@ T.section("path tab", function()
     T.eq("refresh: stock is taken off the run's cost", W.rowTexts(window)[2], "> Gloves | 143-160,19,0c")
 end)
 
+-- Without the Syndicator addon only the carried bags count; with bank or
+-- alt stock asked for, the Shopping tab says so in its first line, on both
+-- client families.
+for _, family in ipairs({ "forever", "classic" }) do
+    T.section(family .. " shopping tab: only the bags count", function()
+        local p = family .. ": "
+        local env = W.load(family)
+        local window, ui = env.window, env.ui
+        local LINE = "Only the bags of this character are counted. Install Syndicator to count your bank and alts too."
+        window:Update(W.path({ stockMeta = { bagsOnly = true } }))
+        ui.fire(window.tabs.buttons[2], "OnClick")
+        T.eq(p .. "shopping tab selected", window.tab, "shopping")
+        T.check(p .. "the view carries what the scan said", window.view.stockMeta ~= nil and window.view.stockMeta.bagsOnly == true)
+        local first = window.list.rows[1]
+        T.check(p .. "the line is the first row", first ~= nil and first.desc.text == LINE, first and first.desc.text)
+        T.check(p .. "drawn, in grey, wrapping", first.text.text == LINE and first.text.color[1] == 0.7
+            and first.desc.wrap == true and first:IsVisible(), first.text.text)
+        T.eq(p .. "said once", select(2, (table.concat(W.rowTexts(window), "\n")):gsub(LINE:gsub("%p", "%%%0"), "")), 1)
+        -- The Path tab does not say it.
+        ui.fire(window.tabs.buttons[1], "OnClick")
+        T.check(p .. "not on the Path tab", W.findRow(window, "Only the bags of this character") == nil)
+        -- Nothing to say (Syndicator installed, or bank and alts off): no line.
+        window:Update(W.path())
+        ui.fire(window.tabs.buttons[2], "OnClick")
+        T.check(p .. "no meta: no line", W.findRow(window, "Only the bags of this character") == nil)
+        -- A refresh that scans again brings it back.
+        window:Update(W.path({ stockMeta = { bagsOnly = true } }))
+        T.check(p .. "back with the next update", W.findRow(window, "Only the bags of this character") ~= nil)
+    end)
+end
+
 T.section("shopping tab", function()
     local env = W.load("forever")
     local window, ui, addon = env.window, env.ui, env.addon
