@@ -1837,4 +1837,28 @@ T.section("an unheard release, then another profession", function()
     T.eq("the new profession is shown", window.path.professionKey, "alchemy")
 end)
 
+-- A redraw asked for while the window is hidden (combat hides it; a bag
+-- update or the sale-value timer can come meanwhile) is done when it shows
+-- again, not at the next change after that.
+T.section("a redraw missed while hidden", function()
+    local env = W.load("forever")
+    local ui, window = env.ui, env.window
+    local function account(spend)
+        return { missing = { rows = {}, recipeRows = {}, buyTotal = spend, recipeCosts = 0 },
+            reagents = spend, recipes = 0, spend = spend, sale = 0, net = spend }
+    end
+    env.account = account(50000)
+    window:Update(W.path({ complete = true, gaps = {} }))
+    T.eq("fixture: before combat", W.receiptTexts(window)[1], "You spend | 5g")
+    ui.event("PLAYER_REGEN_DISABLED")
+    ui.combat = true
+    T.check("fixture: combat hides the window", not window.frame.shown)
+    env.account = account(10000)
+    window:Refresh()
+    ui.combat = false
+    ui.event("PLAYER_REGEN_ENABLED")
+    T.check("fixture: shown again after combat", window.frame.shown)
+    T.eq("after combat: the stock that came during combat is shown", W.receiptTexts(window)[1], "You spend | 1g")
+end)
+
 T.finish()

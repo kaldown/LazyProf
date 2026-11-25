@@ -384,8 +384,12 @@ function GuideWindow:Build()
     -- Shown (again): wrapped lines are measured once more on a frame that is
     -- on screen, and the list follows. The handle and the box show the
     -- planned target, whatever a drag left there when the window went away.
+    -- A redraw asked for while it was hidden is done now, in full.
     frame:HookScript("OnShow", function()
-        if self.view then
+        if self.needsRender then
+            self.needsRender = nil
+            self:Render()
+        elseif self.view then
             self:ShowTarget()
             self:Layout()
             self:RenderTab()
@@ -988,10 +992,15 @@ function GuideWindow:OnPlanFromOne(checked)
     self:LoadPlanning(self.planning.profKey, "plan from skill 1 changed")
 end
 
--- Redraw from the stored path (stock changed, a setting changed).
+-- Redraw from the stored path (stock changed, a setting changed). A hidden
+-- window (combat hides it) is redrawn when it shows again.
 function GuideWindow:Refresh()
-    if self.frame and self.frame:IsShown() then
+    if not self.frame then return end
+    if self.frame:IsShown() then
+        self.needsRender = nil
         self:Render()
+    else
+        self.needsRender = true
     end
 end
 
