@@ -141,6 +141,12 @@ end
 -- Take a new path. Each profession has its own opened rows and search; they
 -- are kept while another one is shown.
 function GuideWindow:SetPath(path)
+    -- A drag of the slider whose release was not heard belongs to the path
+    -- shown so far: asking ends it and commits it there, before another
+    -- path (maybe another profession's) takes its place.
+    if self.path and self.slider then
+        self.slider:IsHeld()
+    end
     local key = path and path.professionKey or nil
     if key ~= self.profKey then
         self.profKey = key
@@ -216,6 +222,7 @@ function GuideWindow:BuildView(path, mode, plain)
     view.skill = path.actualSkill
     view.hideOwned = LazyProf.CharStore:Get().hideOwned and true or false
     view.advanced = LazyProf.db.profile.showAdvanced and true or false
+    view.strategy = LazyProf.db.profile.strategy
     -- What the stock scan says of the stock it could count (Inventory:ScanAll)
     view.stockMeta = path.stockMeta
 
@@ -378,8 +385,12 @@ function GuideWindow:Build()
     -- Shown (again): wrapped lines are measured once more on a frame that is
     -- on screen, and the list follows. The handle and the box show the
     -- planned target, whatever a drag left there when the window went away.
+    -- A redraw asked for while it was hidden is done now, in full.
     frame:HookScript("OnShow", function()
-        if self.view then
+        if self.needsRender then
+            self.needsRender = nil
+            self:Render()
+        elseif self.view then
             self:ShowTarget()
             self:Layout()
             self:RenderTab()
@@ -982,10 +993,15 @@ function GuideWindow:OnPlanFromOne(checked)
     self:LoadPlanning(self.planning.profKey, "plan from skill 1 changed")
 end
 
--- Redraw from the stored path (stock changed, a setting changed).
+-- Redraw from the stored path (stock changed, a setting changed). A hidden
+-- window (combat hides it) is redrawn when it shows again.
 function GuideWindow:Refresh()
-    if self.frame and self.frame:IsShown() then
+    if not self.frame then return end
+    if self.frame:IsShown() then
+        self.needsRender = nil
         self:Render()
+    else
+        self.needsRender = true
     end
 end
 

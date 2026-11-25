@@ -1819,4 +1819,58 @@ T.section("merchant rows never come from the what-if", function()
     T.eq("a plan from the real skill: its runs", builtFrom(), "Tailoring: Cape@143, Shirt@160")
 end)
 
+-- A drag of the slider whose release was not heard belongs to the path it
+-- started on: when another profession's path arrives first, the drag is
+-- committed to the old one, never to the new one.
+T.section("an unheard release, then another profession", function()
+    local env = W.load("forever")
+    local ui, window, addon = env.ui, env.window, env.addon
+    window:Update(W.path({ complete = true, gaps = {} }))
+    local handle = window.slider.frame
+    ui.fire(handle, "OnMouseDown", "LeftButton")
+    ui.slide(handle, 200)
+    ui.release()
+    window:Update(W.path({ professionKey = "alchemy", profession = "Alchemy", complete = true, gaps = {} }))
+    T.eq("the drag's target is stored on the profession it was made on", addon.CharStore:Profession("tailoring").target, 200)
+    T.check("and not on the one that came next", addon.CharStore:Profession("alchemy").target == nil,
+        tostring(addon.CharStore:Profession("alchemy").target))
+    T.eq("the new profession is shown", window.path.professionKey, "alchemy")
+end)
+
+-- A redraw asked for while the window is hidden (combat hides it; a bag
+-- update or the sale-value timer can come meanwhile) is done when it shows
+-- again, not at the next change after that.
+T.section("a redraw missed while hidden", function()
+    local env = W.load("forever")
+    local ui, window = env.ui, env.window
+    local function account(spend)
+        return { missing = { rows = {}, recipeRows = {}, buyTotal = spend, recipeCosts = 0 },
+            reagents = spend, recipes = 0, spend = spend, sale = 0, net = spend }
+    end
+    env.account = account(50000)
+    window:Update(W.path({ complete = true, gaps = {} }))
+    T.eq("fixture: before combat", W.receiptTexts(window)[1], "You spend | 5g")
+    ui.event("PLAYER_REGEN_DISABLED")
+    ui.combat = true
+    T.check("fixture: combat hides the window", not window.frame.shown)
+    env.account = account(10000)
+    window:Refresh()
+    ui.combat = false
+    ui.event("PLAYER_REGEN_ENABLED")
+    T.check("fixture: shown again after combat", window.frame.shown)
+    T.eq("after combat: the stock that came during combat is shown", W.receiptTexts(window)[1], "You spend | 1g")
+end)
+
+-- The view carries the strategy in force, for the status line.
+T.section("the view knows the strategy", function()
+    local env = W.load("forever")
+    local window, addon = env.window, env.addon
+    addon.db.profile.strategy = "fastest"
+    window:Update(W.path({ complete = true, gaps = {} }))
+    T.eq("Fastest: named on the status line", window.status.text:match("fastest path$"), "fastest path")
+    addon.db.profile.strategy = "cheapest"
+    window:Refresh()
+    T.check("Cheapest: not named", window.status.text:find("fastest", 1, true) == nil, window.status.text)
+end)
+
 T.finish()

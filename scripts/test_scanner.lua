@@ -630,9 +630,14 @@ T.section("init wiring", function()
         LazyProf:SlashCommand("reset")
         T.check("/lp reset: the database is reset and planned again", resets == 1 and reasons[1] == "settings reset", resets)
         T.check("/lp reset: the player is told what was cleared", printed[1] == LazyProf.RESET_MESSAGE, printed[1])
-        T.check("the message says nothing of remembered stock", not LazyProf.RESET_MESSAGE:find("remembered", 1, true)
-            and LazyProf.RESET_MESSAGE:find("Vendor prices, trainers, targets and craft-or-buy choices were cleared.", 1, true) ~= nil,
-            LazyProf.RESET_MESSAGE)
+        -- A reset wipes the whole saved database (AceDB ResetDB): the message
+        -- names everything that goes, so nothing is a surprise later.
+        local msg = LazyProf.RESET_MESSAGE
+        for _, what in ipairs({ "vendor prices", "trainers", "targets", "chosen recipes", "routes",
+                "craft-or-buy choices", "window positions", "Self-Found", "known recipes" }) do
+            T.check("the message names what is cleared: " .. what, msg:find(what, 1, true) ~= nil, msg)
+        end
+        T.check("the message says nothing of remembered stock", not msg:find("remembered stock", 1, true), msg)
         local button = LazyProf.options.args.debug and LazyProf.options.args.debug.args.resetDB
         if not button then
             for _, group in pairs(LazyProf.options.args) do
@@ -643,7 +648,12 @@ T.section("init wiring", function()
         button.func()
         T.check("Reset All Settings: the same", resets == 2 and reasons[2] == "settings reset" and printed[1] == LazyProf.RESET_MESSAGE)
         T.check("Reset All Settings: its texts say nothing of remembered stock",
-            not button.desc:find("emembered", 1, true) and not button.confirmText:find("emembered", 1, true), button.desc)
+            not button.desc:find("remembered stock", 1, true) and not button.confirmText:find("remembered stock", 1, true)
+            and not button.desc:find("bank", 1, true) and not button.confirmText:find("bank", 1, true), button.desc)
+        for _, what in ipairs({ "chosen recipes", "routes", "window positions", "Self-Found", "known recipes" }) do
+            T.check("Reset All Settings: its confirmation names " .. what, button.confirmText:find(what, 1, true) ~= nil,
+                button.confirmText)
+        end
         LazyProf.db.ResetDB = nil
         LazyProf.Recalculate = function() recalcs = recalcs + 1 end
     end

@@ -83,8 +83,9 @@ LazyProf.defaults = {
 -- What the player is told after a reset ("Reset All Settings" below and
 -- /lp reset, LazyProf:ResetSettings in Core/Init.lua): what went with the
 -- settings.
-LazyProf.RESET_MESSAGE = "Settings reset to defaults. Vendor prices, trainers, targets and craft-or-buy choices "
-    .. "were cleared."
+LazyProf.RESET_MESSAGE = "Settings reset to defaults. Also cleared: the vendor prices and trainers LazyProf has seen; "
+    .. "every character's targets, chosen recipes, remembered routes, craft-or-buy choices and Self-Found mode; "
+    .. "window positions; the known recipes (read again when you open each profession)."
 
 -- The stock options say "Requires: Syndicator" and are greyed out while it
 -- is missing. Asked when the options are shown: Syndicator may load after
@@ -596,15 +597,19 @@ LazyProf.options = {
                 resetDB = {
                     name = "Reset All Settings",
                     desc = "Reset all settings to defaults. This also clears the vendor " ..
-                           "prices and trainers LazyProf has seen and every character's " ..
-                           "targets and craft-or-buy choices.\n\n" ..
+                           "prices and trainers LazyProf has seen, every character's " ..
+                           "targets, chosen recipes, remembered routes, craft-or-buy choices " ..
+                           "and Self-Found mode, window positions and the known recipes " ..
+                           "(read again when you open each profession).\n\n" ..
                            "Same as /lp reset",
                     type = "execute",
                     order = 91,
                     confirm = true,
                     confirmText = "Reset all settings to their defaults? This also clears the vendor " ..
-                                  "prices and trainers LazyProf has seen and every character's " ..
-                                  "targets and craft-or-buy choices.",
+                                  "prices and trainers LazyProf has seen, every character's " ..
+                                  "targets, chosen recipes, remembered routes, craft-or-buy choices " ..
+                                  "and Self-Found mode, window positions and the known recipes " ..
+                                  "(read again when you open each profession).",
                     func = function()
                         LazyProf:ResetSettings()
                         LazyProf:Print(LazyProf.RESET_MESSAGE)
