@@ -47,6 +47,7 @@ Plan, then shop: open a profession, see the cheapest path from your real skill, 
 
 ### Fixed
 
+- In the "auction" selling mode an auction price three or more days old no longer counts as what a craft sells for; the vendor value counts instead. Before, a price of any age went into "Back from selling" with no warning.
 - Right-click on "I craft it" / "I buy it" now goes back to the automatic choice, as its tooltip says; it never reached the button before. A choice you made shows its button even without More options, so it can be seen and undone.
 - The scroll bar and its buttons were drawn when there was nothing to scroll.
 - The selected strategy button (Cheapest / Fastest) could hardly be told from the other.

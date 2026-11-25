@@ -148,6 +148,16 @@ section("market price", function()
     pm:OnAuctionHouseVisited()
     check(p .. "a fresh scan wins over the configured order", pm:MarketPrice(2770) == 45, pm:MarketPrice(2770))
 
+    -- It also says how old the price is, when its source knows (Auctionator).
+    addon = loadPricing({ tsm = false })
+    local price, age = addon.PriceManager:MarketPrice(4306)
+    check(p .. "an Auctionator price comes with its age", age == 5, tostring(price) .. " " .. tostring(age))
+    price, age = addon.PriceManager:MarketPrice(4306)
+    check(p .. "and keeps it when cached", age == 5, tostring(age))
+    addon = loadPricing()
+    price, age = addon.PriceManager:MarketPrice(2589)
+    check(p .. "a TSM price has no age", price == 120 and age == nil, tostring(price) .. " " .. tostring(age))
+
     addon = loadPricing({ tsm = false, auctionator = false })
     check(p .. "no auction addon: nil", addon.PriceManager:MarketPrice(2589) == nil)
 

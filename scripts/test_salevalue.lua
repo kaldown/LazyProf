@@ -34,8 +34,9 @@ local function recipe(id, itemId, opts)
 end
 
 -- Injected item data: sell = { [itemId] = copper }, an item missing from
--- `sell` is not loaded; market = { [itemId] = copper }.
-local function deps(sell, market, asked)
+-- `sell` is not loaded; market = { [itemId] = copper }; ages = { [itemId] =
+-- days } the market price's age.
+local function deps(sell, market, asked, ages)
     return {
         sellPrice = function(itemId)
             if asked then asked[#asked + 1] = itemId end
@@ -43,7 +44,7 @@ local function deps(sell, market, asked)
             if value == nil then return nil, false end
             return value, true
         end,
-        marketPrice = function(itemId) return market and market[itemId] or nil end,
+        marketPrice = function(itemId) return market and market[itemId] or nil, ages and ages[itemId] end,
     }
 end
 
@@ -79,6 +80,15 @@ T.section("one craft", function()
 
     value = SV.Of(recipe(8, 508), "auction", deps({ [508] = 0 }, { [508] = 33 }))
     T.eq("auction: whole copper, rounded down", value, 31)
+
+    -- An auction price PRICE_STALE_DAYS (3) or more days old is not trusted
+    -- for a sale: the vendor value counts instead.
+    value, source = SV.Of(recipe(9, 509), "auction", deps({ [509] = 100 }, { [509] = 1000 }, nil, { [509] = 3 }))
+    T.eq("auction: a price 3 days old is not counted", value, 100)
+    T.eq("auction: the vendor value then", source, "vendor")
+    value, source = SV.Of(recipe(10, 510), "auction", deps({ [510] = 100 }, { [510] = 1000 }, nil, { [510] = 2 }))
+    T.eq("auction: a price 2 days old still counts", value, 950)
+    T.eq("auction: as an auction sale", source, "auction")
 
     value, source, loading = SV.Of(recipe(9, 509), "none", deps({ [509] = 45 }, { [509] = 1000 }))
     T.eq("do not count: nothing", value, 0)
