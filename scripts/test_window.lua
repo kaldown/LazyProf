@@ -1819,4 +1819,22 @@ T.section("merchant rows never come from the what-if", function()
     T.eq("a plan from the real skill: its runs", builtFrom(), "Tailoring: Cape@143, Shirt@160")
 end)
 
+-- A drag of the slider whose release was not heard belongs to the path it
+-- started on: when another profession's path arrives first, the drag is
+-- committed to the old one, never to the new one.
+T.section("an unheard release, then another profession", function()
+    local env = W.load("forever")
+    local ui, window, addon = env.ui, env.window, env.addon
+    window:Update(W.path({ complete = true, gaps = {} }))
+    local handle = window.slider.frame
+    ui.fire(handle, "OnMouseDown", "LeftButton")
+    ui.slide(handle, 200)
+    ui.release()
+    window:Update(W.path({ professionKey = "alchemy", profession = "Alchemy", complete = true, gaps = {} }))
+    T.eq("the drag's target is stored on the profession it was made on", addon.CharStore:Profession("tailoring").target, 200)
+    T.check("and not on the one that came next", addon.CharStore:Profession("alchemy").target == nil,
+        tostring(addon.CharStore:Profession("alchemy").target))
+    T.eq("the new profession is shown", window.path.professionKey, "alchemy")
+end)
+
 T.finish()

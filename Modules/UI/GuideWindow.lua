@@ -141,6 +141,12 @@ end
 -- Take a new path. Each profession has its own opened rows and search; they
 -- are kept while another one is shown.
 function GuideWindow:SetPath(path)
+    -- A drag of the slider whose release was not heard belongs to the path
+    -- shown so far: asking ends it and commits it there, before another
+    -- path (maybe another profession's) takes its place.
+    if self.path and self.slider then
+        self.slider:IsHeld()
+    end
     local key = path and path.professionKey or nil
     if key ~= self.profKey then
         self.profKey = key
