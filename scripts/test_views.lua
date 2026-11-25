@@ -1210,6 +1210,13 @@ T.section("shopping rows", function()
         return row
     end
 
+    -- Without More options a choice the player made still acts, so its
+    -- button stays to show it and undo it; an automatic one has none.
+    local plain = Views.Shopping({ path = makePath(), missing = { rows = {
+        item(BOLT, "Chosen buy", { choice = "buy" }), item(BAR, "Automatic", {}) } } }, ctx)
+    T.eq("more options off: a choice made is shown", find(plain, "Chosen buy").button and find(plain, "Chosen buy").button.text, "I buy it")
+    T.check("more options off: an automatic row has no button", find(plain, "Automatic").button == nil)
+
     -- A crafted reagent can have a part to buy (what other crafted reagents
     -- are made from): the row says how many and what they cost.
     local rows = shop({
@@ -1240,6 +1247,7 @@ T.section("shopping rows", function()
     T.check("its tooltip", buy.tooltip[1].text:find("You chose to buy", 1, true) ~= nil)
     buy.onClick("LeftButton")
     T.check("a click switches it to craft", chosen[#chosen][2] == "craft")
+    T.check("it takes right-clicks", buy.rightClick == true)
     buy.onClick("RightButton")
     T.check("a right-click goes back to automatic", chosen[#chosen][2] == "auto")
     T.eq("automatic craft", find(rows, "Automatic craft").button.text, "I craft it")

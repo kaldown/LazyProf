@@ -19,7 +19,9 @@
 --   onClick   function(mouseButton)
 --   itemId    item tooltip on hover; link: shift-click links it
 --   tooltip   { { text, r, g, b }, ... } lines (added under the item when both)
---   button    { text, width, onClick, tooltip = lines, enabled }
+--   button    { text, width, onClick, tooltip = lines, enabled, rightClick }
+--             (onClick gets the mouse button; right-clicks reach it only with
+--             rightClick = true)
 --
 -- "line": lead (text in a fixed column of leadWidth, default 62), text, color
 --   { r, g, b }, font (font object name), right (right-aligned text),
@@ -174,6 +176,12 @@ local function ApplyButton(row, key, spec, rightOffset, height)
     button:SetPoint("RIGHT", row, "RIGHT", -rightOffset, 0)
     button:SetText(spec.text)
     button:SetEnabled(spec.enabled ~= false)
+    -- The stock template takes left clicks only.
+    if spec.rightClick then
+        button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    else
+        button:RegisterForClicks("LeftButtonUp")
+    end
     button:SetScript("OnClick", function(_, mouseButton)
         if spec.onClick then spec.onClick(mouseButton) end
     end)

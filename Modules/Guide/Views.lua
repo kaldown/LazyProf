@@ -1044,6 +1044,7 @@ local function ChoiceButton(row, ctx)
     return {
         text = craft and "I craft it" or "I buy it",
         tooltip = lines,
+        rightClick = true,
         onClick = function(mouseButton)
             if mouseButton == "RightButton" then
                 ctx.onCraftChoice(row, nil)
@@ -1174,7 +1175,8 @@ end
 -- The two sums are the two parts of the receipt's "You spend".
 -- With More options (view.advanced) a reagent the character can make has its
 -- craft / buy button, and view.hideOwned hides the owned rows; without it
--- neither acts, because the checkbox that would undo the filter is hidden.
+-- the filter does not act, because the checkbox that would undo it is
+-- hidden, and only a reagent with a choice the player made keeps its button.
 -- Row fields beyond the list widget's: `item` (the shopping row), `recipe`
 -- (on recipe rows), `total = true` (on the two sum rows).
 -- ctx (optional; without it the rows have nothing to click):
@@ -1253,7 +1255,9 @@ function Views.Shopping(view, ctx)
                 bg = BG_SUB, hoverBg = BG_ROW_HOVER, alpha = alpha,
                 itemId = row.itemId, link = row.link, tooltip = ShoppingTooltip(row),
             }
-            if row.craftable and view.advanced and ctx.onCraftChoice then
+            -- (A choice the player made acts without More options too, so
+            -- its button stays to show it and undo it.)
+            if row.craftable and (view.advanced or row.choice) and ctx.onCraftChoice then
                 desc.button = ChoiceButton(row, ctx)
             end
             table_[#table_ + 1] = desc
