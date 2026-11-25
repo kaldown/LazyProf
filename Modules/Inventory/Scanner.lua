@@ -30,15 +30,21 @@ function Inventory:ScanBags()
     return LazyProf.Client:BagContents()
 end
 
--- Scan bags from Syndicator character data (for alts)
-function Inventory:ScanBagsSyndicator(charData)
+-- Can a stored slot be counted? An alt's soulbound items cannot be sent
+-- (leaveBound), so they are left out; Syndicator marks them `isBound`.
+local function Counts(slot, leaveBound)
+    return slot and slot.itemID and not (leaveBound and slot.isBound == true)
+end
+
+-- Scan bags from Syndicator character data (for alts: leaveBound)
+function Inventory:ScanBagsSyndicator(charData, leaveBound)
     local items = {}
     if not charData or not charData.bags then return items end
 
     for _, bag in ipairs(charData.bags) do
         if bag then
             for _, slot in ipairs(bag) do
-                if slot and slot.itemID then
+                if Counts(slot, leaveBound) then
                     items[slot.itemID] = (items[slot.itemID] or 0) + (slot.itemCount or 1)
                 end
             end
@@ -48,8 +54,8 @@ function Inventory:ScanBagsSyndicator(charData)
     return items
 end
 
--- Scan bank via Syndicator character data
-function Inventory:ScanBank(charData)
+-- Scan bank via Syndicator character data (for an alt: leaveBound)
+function Inventory:ScanBank(charData, leaveBound)
     local items = {}
     if not charData then return items end
 
@@ -58,7 +64,7 @@ function Inventory:ScanBank(charData)
         for _, bag in ipairs(charData.bank) do
             if bag then
                 for _, slot in ipairs(bag) do
-                    if slot and slot.itemID then
+                    if Counts(slot, leaveBound) then
                         items[slot.itemID] = (items[slot.itemID] or 0) + (slot.itemCount or 1)
                     end
                 end
@@ -71,7 +77,7 @@ function Inventory:ScanBank(charData)
         for _, tab in ipairs(charData.bankTabs) do
             if tab and tab.slots then
                 for _, slot in ipairs(tab.slots) do
-                    if slot and slot.itemID then
+                    if Counts(slot, leaveBound) then
                         items[slot.itemID] = (items[slot.itemID] or 0) + (slot.itemCount or 1)
                     end
                 end
@@ -208,6 +214,32 @@ end
 -- GetCandidates). Cache results so only the first call per frame does real work.
 local scanCache = { time = 0, combined = nil, breakdown = nil, meta = nil }
 
+-- Whether an alt's stock counts for the character being played (review F3):
+-- the same realm (on WoW Forever Syndicator records the ruleset, "PvP",
+-- there) and the same faction, as Syndicator recorded both for each of them.
+-- An alt that cannot be judged does not count. Returns counts, and why not.
+local function DetailsOf(record)
+    return type(record) == "table" and type(record.details) == "table" and record.details or nil
+end
+local function RealmOf(details)
+    return details.realmNormalized or details.realm
+end
+local function AltCounts(currentRecord, altRecord)
+    local current = DetailsOf(currentRecord)
+    if not (current and current.faction and RealmOf(current)) then
+        return false, "the played character's realm or faction is unknown"
+    end
+    if type(altRecord) ~= "table" then return false, "no record" end
+    local alt = DetailsOf(altRecord)
+    if not alt then return false, "no details" end
+    if not alt.faction then return false, "faction unknown" end
+    if alt.faction ~= current.faction then return false, "other faction" end
+    if not RealmOf(alt) then return false, "realm unknown" end
+    if RealmOf(alt) ~= RealmOf(current) then return false, "other realm" end
+    return true
+end
+Inventory.AltCounts = AltCounts
+
 -- Stock from Syndicator: the character's bank, mail and auctions, the alts,
 -- the guild bank (the last two not for a Self-Found character: selfFound,
 -- as the scan found it). logLines: build the lines for the debug log.
@@ -241,16 +273,16 @@ local function AddSyndicatorStock(self, combined, breakdown, countAlts, selfFoun
             for _, altName in ipairs(allChars) do
                 if altName ~= currentChar then
                     local altData = Syndicator.API.GetByCharacterFullName(altName)
-                    if altData then
-                        -- Bags
-                        local altBags = self:ScanBagsSyndicator(altData)
+                    if altData and AltCounts(charData, altData) then
+                        -- Bags (soulbound items cannot be sent: left out)
+                        local altBags = self:ScanBagsSyndicator(altData, true)
                         mergeSource(altBags, "bags", altName, combined, breakdown)
 
                         -- Bank, mail, auctions (respecting config for bank)
                         for _, source in ipairs(PER_CHAR_SOURCES) do
                             if not source.configKey or LazyProf.db.profile[source.configKey] then
                                 local scanMethod = "Scan" .. source.key:sub(1,1):upper() .. source.key:sub(2)
-                                local items = self[scanMethod](self, altData)
+                                local items = self[scanMethod](self, altData, true)
                                 mergeSource(items, source.key, altName, combined, breakdown)
                             end
                         end
@@ -420,6 +452,72 @@ local function SyndicatorCharacterLine(name, current)
     return text .. (#parts > 0 and (" " .. table.concat(parts, " ")) or " details: no plain values")
 end
 
+-- The first item stored for a character (bags, then bank), or nil.
+local function FirstStoredItem(record)
+    if type(record) ~= "table" then return nil end
+    for _, key in ipairs({ "bags", "bank" }) do
+        local list = record[key]
+        if type(list) == "table" then
+            for _, bag in ipairs(list) do
+                if type(bag) == "table" then
+                    for _, slot in pairs(bag) do
+                        if type(slot) == "table" and slot.itemID then return slot end
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- The plain fields of one stored item, sorted by key; text longer than 30
+-- characters (an item link) is shown by its length.
+local function ItemFieldsLine(record)
+    local item = FirstStoredItem(record)
+    if not item then return "syndicator item fields: no stored item" end
+    local keys = {}
+    for key, value in pairs(item) do
+        local kind = type(value)
+        if kind == "string" or kind == "number" or kind == "boolean" then keys[#keys + 1] = key end
+    end
+    table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+    local parts = {}
+    for _, key in ipairs(keys) do
+        local value = item[key]
+        local shown = (type(value) == "string" and #value > 30) and ("<" .. #value .. " characters>") or PlainValue(value)
+        parts[#parts + 1] = tostring(key) .. "=" .. shown
+    end
+    return "syndicator item fields: " .. table.concat(parts, " ")
+end
+
+-- Which of Syndicator's characters count as alts (Inventory.AltCounts, the
+-- scan's own rule), and why the others do not.
+local function AltsLine(names, current)
+    local currentRecord
+    if current then
+        local read, record = SyndicatorCall("GetByCharacterFullName", current)
+        if read then currentRecord = record end
+    end
+    local counted, notCounted = {}, {}
+    local more = math.max(0, #names - SYNDICATOR_CHARACTERS_SHOWN)
+    for index, name in ipairs(names) do
+        if index > SYNDICATOR_CHARACTERS_SHOWN then break end
+        if name ~= current then
+            local read, record = SyndicatorCall("GetByCharacterFullName", name)
+            local counts, why = false, "the record could not be read"
+            if read then counts, why = AltCounts(currentRecord, record) end
+            if counts then
+                counted[#counted + 1] = PlainValue(name)
+            else
+                notCounted[#notCounted + 1] = PlainValue(name) .. " (" .. why .. ")"
+            end
+        end
+    end
+    return "syndicator alts: counted " .. (#counted > 0 and table.concat(counted, ", ") or "none")
+        .. "; not counted " .. (#notCounted > 0 and table.concat(notCounted, ", ") or "none")
+        .. (more > 0 and (", and " .. more .. " more") or ""), currentRecord
+end
+
 local function AddSyndicatorLines(add)
     if not (Syndicator and Syndicator.API) then
         add("syndicator: not installed")
@@ -446,6 +544,10 @@ local function AddSyndicatorLines(add)
         local built, line = pcall(SyndicatorCharacterLine, name, current)
         add(built and line or ("syndicator character: " .. tostring(name) .. " could not be read: " .. tostring(line)))
     end
+    local built, line, currentRecord = pcall(AltsLine, names, current)
+    add(built and line or ("syndicator alts: could not be judged: " .. tostring(line)))
+    local fieldsBuilt, fields = pcall(ItemFieldsLine, built and currentRecord or nil)
+    add(fieldsBuilt and fields or ("syndicator item fields: could not be read: " .. tostring(fields)))
 end
 
 -- /lp diag stock: where stock outside the bags comes from, the settings that

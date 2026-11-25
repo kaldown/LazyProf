@@ -97,6 +97,7 @@ end
 local function installSyndicator()
     local chars = {
         ["Main-Realm"] = {
+            details = { character = "Main", faction = "Horde", realmNormalized = "Realm" },
             bags = { slots({ [2589] = 3 }) },                     -- not used: own bags are read live
             bank = { slots({ [2589] = 30 }) },
             bankTabs = { { slots = slots({ [4306] = 2 }) } },
@@ -104,6 +105,7 @@ local function installSyndicator()
             auctions = slots({ [765] = 6 }),
         },
         ["Alt-Realm"] = {
+            details = { character = "Alt", faction = "Horde", realmNormalized = "Realm" },
             bags = { slots({ [2589] = 50 }) },
             bank = { slots({ [2589] = 60 }) },
             mail = slots({ [2592] = 8 }),
@@ -372,6 +374,26 @@ T.section("diagnostic: what Syndicator knows of each character", function()
     T.check("one line per character, in Syndicator's order", text:find('"Main-Realm"', 1, true) < text:find('"Alt-Realm"', 1, true)
         and text:find('"Alt-Shard 7"', 1, true) < text:find('"Bare-Realm"', 1, true))
     T.check("plain ASCII", not text:find("[\128-\255]"))
+    -- Which alts count, and why the others do not (the scan's own rule).
+    T.check("which alts count",
+        hasLine(text, 'syndicator alts: counted none; not counted "Alt-Realm" (faction unknown), "Alt-Shard 7" (faction unknown), '
+            .. '"Bare-Realm" (no details), "Gone-Realm" (no record)'), text)
+    chars["Alt-Realm"].details = { faction = "Alliance", realmNormalized = "Realm" }
+    chars["Alt-Shard 7"].details.faction = "Alliance"
+    lines, text = dump()
+    T.check("an alt that counts, and one of another realm",
+        text:find('syndicator alts: counted "Alt-Realm"; not counted "Alt-Shard 7" (other realm),', 1, true) ~= nil, text)
+    chars["Alt-Realm"].details = {}
+    chars["Alt-Shard 7"].details.faction = nil
+    -- The fields of one item as Syndicator stores it (says whether it marks
+    -- soulbound items, and how); long text is shown by its length.
+    chars["Main-Realm"].bags = { {}, { { itemID = 2589, itemCount = 3, isBound = false, itemLink = string.rep("x", 60), quality = 1 } } }
+    lines, text = dump()
+    T.check("the fields of the first stored item",
+        hasLine(text, 'syndicator item fields: isBound=false itemCount=3 itemID=2589 itemLink=<60 characters> quality=1'), text)
+    chars["Main-Realm"].bags, chars["Main-Realm"].bank = {}, {}
+    lines, text = dump()
+    T.check("no stored item: said", hasLine(text, "syndicator item fields: no stored item"), text)
 
     -- A record whose read fails, and details that are no table.
     _G.Syndicator.API.GetByCharacterFullName = function(name)
@@ -418,6 +440,8 @@ T.section("diagnostic: what Syndicator knows of each character", function()
     end
     T.eq("capped at 60 characters", shown, 60)
     T.check("then how many more", hasLine(text, "syndicator: 5 more"), text)
+    T.check("the alts line stops at 60 as well", text:find("; not counted ", 1, true) ~= nil
+        and text:find(", and 5 more", 1, true) ~= nil, text)
     T.check("the 60th is shown, the 61st not", text:find('"Char60-Realm"', 1, true) ~= nil and not text:find('"Char61-Realm"', 1, true))
     many = {}
     for i = 1, 60 do many[i] = "Char" .. i .. "-Realm" end
@@ -432,6 +456,48 @@ T.section("diagnostic: what Syndicator knows of each character", function()
 end)
 
 -- ===========================================================================
+-- Review F3: an alt counts only on the played character's realm (on WoW
+-- Forever Syndicator records the ruleset there, "PvP") and faction, as
+-- Syndicator recorded both, and without its soulbound items. The played
+-- character's own bound items count.
+T.section("Syndicator alts: same realm and faction, no soulbound items", function()
+    fresh()
+    local chars = installSyndicator()
+    chars["Main-Realm"].bank = { { { itemID = 2589, itemCount = 30 }, { itemID = 4306, itemCount = 9, isBound = true } } }
+    chars["Alt-Realm"].bags = { { { itemID = 2589, itemCount = 50 }, { itemID = 765, itemCount = 7, isBound = true } } }
+    chars["Alt-Realm"].bank = { { { itemID = 2589, itemCount = 60, isBound = true } } }
+    chars["Alt-Realm"].bankTabs = { { slots = { { itemID = 2589, itemCount = 6, isBound = true }, { itemID = 2592, itemCount = 2 } } } }
+    chars["Other-Realm"] = { details = { faction = "Alliance", realmNormalized = "Realm" }, bags = { slots({ [2589] = 1000 }) } }
+    chars["Far-Elsewhere"] = { details = { faction = "Horde", realmNormalized = "Elsewhere" }, bags = { slots({ [2589] = 2000 }) } }
+    chars["Bare-Realm"] = { bags = { slots({ [2589] = 4000 }) } }
+    _G.Syndicator.API.GetAllCharacters = function()
+        return { "Main-Realm", "Alt-Realm", "Other-Realm", "Far-Elsewhere", "Bare-Realm" }
+    end
+    local combined, breakdown = scan()
+    local alts = breakdown[2589].alts or {}
+    T.eq("an alt of the same realm and faction counts, without its bound items", alts["Alt-Realm"] and alts["Alt-Realm"].bags, 50)
+    T.check("its bound bank items are left out", alts["Alt-Realm"].bank == nil, alts["Alt-Realm"].bank)
+    T.check("its bound bag items are left out", breakdown[765] == nil or breakdown[765].alts == nil)
+    T.eq("its unbound bank-tab items count", breakdown[2592].alts["Alt-Realm"].bank, 2)
+    T.check("an alt of the other faction does not count", alts["Other-Realm"] == nil)
+    T.check("an alt of another realm does not count", alts["Far-Elsewhere"] == nil)
+    T.check("an alt Syndicator has no details for does not count", alts["Bare-Realm"] == nil)
+    T.eq("the played character's own bound items count", breakdown[4306].bank, 9 + 2)
+    T.eq("in all", combined[2589], 5 + 30 + 4 + 50)
+    -- A realm recorded only as `realm` (no realmNormalized) is compared too.
+    chars["Far-Elsewhere"].details = { faction = "Horde", realm = "Realm" }
+    chars["Main-Realm"].details = { faction = "Horde", realm = "Realm" }
+    chars["Alt-Realm"].details = { faction = "Horde", realm = "Realm" }
+    breakdown = select(2, scan())
+    T.check("realm names without the normalized form: the same realm counts",
+        breakdown[2589].alts["Far-Elsewhere"] ~= nil and breakdown[2589].alts["Alt-Realm"] ~= nil)
+    -- The played character's realm or faction unknown: no alt can be judged.
+    chars["Main-Realm"].details = nil
+    combined, breakdown = scan()
+    T.check("the played character's details unknown: no alt counts", breakdown[2589].alts == nil)
+    T.eq("its own stock still does", combined[2589], 5 + 30 + 4)
+end)
+
 T.section("options", function()
     fresh()
     local stockOptions = LazyProf.options.args.display.args
