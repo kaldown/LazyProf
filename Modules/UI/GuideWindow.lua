@@ -63,6 +63,7 @@ local RECEIPT_SPACING = 2
 local RECEIPT_GAP = 8             -- between the label, amount and note columns
 local RECEIPT_AMOUNT_WIDTH = 84   -- an amount to the copper ("888g 88s 88c")
 local RECEIPT_NOTE_MIN = 60
+local RECEIPT_INDENT = 10          -- a note on its own line under its label
 local SEARCH_HEIGHT = 26
 local SHOP_ROW_HEIGHT = 26
 local LIST_GAP = 4                -- between the header and the list
@@ -687,11 +688,24 @@ function GuideWindow:FillReceipt(lines)
     end
 end
 
+-- The width a font string's text takes on one line, whatever width the
+-- string was given (WoW Forever: GetUnboundedStringWidth,
+-- SimpleFontStringAPIDocumentation.lua:398; a client without it gives
+-- GetStringWidth).
+local function OneLineWidth(fontString)
+    if fontString.GetUnboundedStringWidth then
+        return fontString:GetUnboundedStringWidth() or 0
+    end
+    return fontString:GetStringWidth() or 0
+end
+
 -- Place the receipt's lines for a window `width` wide and return the height
 -- they take. Three columns: the labels, as wide as the widest of them; the
 -- amounts, right-aligned, wide enough for an amount to the copper; the notes
--- in what is left, wrapping under themselves. A line that is only a note
--- spans the window and wraps. Nothing is cut.
+-- in what is left. A note longer than that room would break inside an
+-- amount, so it goes whole on its own line under its label, a little in, and
+-- wraps only if the window is too narrow even for that. A line that is only
+-- a note spans the window and wraps. Nothing is cut.
 -- (Text is measured with the font string's own GetStringWidth and, once a
 -- width is set and wrapping is on, GetStringHeight: WoW Forever,
 -- Blizzard_APIDocumentationGenerated/SimpleFontStringAPIDocumentation.lua:339,
@@ -716,13 +730,20 @@ function GuideWindow:LayoutReceipt(width)
         local row = self.receiptRows[i]
         local note = row.note
         note:ClearAllPoints()
+        local noteTop = y
         if line.amount then
             row.label:ClearAllPoints()
             row.label:SetPoint("TOPLEFT", receipt, "TOPLEFT", MARGIN, -y)
             row.amount:ClearAllPoints()
             row.amount:SetPoint("TOPRIGHT", receipt, "TOPLEFT", amountRight, -y)
-            note:SetWidth(noteWidth)
-            note:SetPoint("TOPLEFT", receipt, "TOPLEFT", noteLeft, -y)
+            if line.note and OneLineWidth(note) > noteWidth then
+                noteTop = y + RECEIPT_LINE + RECEIPT_SPACING
+                note:SetWidth(math.max(RECEIPT_NOTE_MIN, fullWidth - RECEIPT_INDENT))
+                note:SetPoint("TOPLEFT", receipt, "TOPLEFT", MARGIN + RECEIPT_INDENT, -noteTop)
+            else
+                note:SetWidth(noteWidth)
+                note:SetPoint("TOPLEFT", receipt, "TOPLEFT", noteLeft, -y)
+            end
         else
             note:SetWidth(fullWidth)
             note:SetPoint("TOPLEFT", receipt, "TOPLEFT", MARGIN, -y)
@@ -731,7 +752,7 @@ function GuideWindow:LayoutReceipt(width)
         if line.note then
             height = math.max(height, note:GetStringHeight() or 0)
         end
-        y = y + height + RECEIPT_SPACING
+        y = noteTop + height + RECEIPT_SPACING
     end
     return y - RECEIPT_SPACING + RECEIPT_PAD
 end

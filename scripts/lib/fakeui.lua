@@ -53,6 +53,7 @@ function M.install(opts)
         function r:GetWidth() return self.width or 0 end
         function r:GetHeight() return self.height or 0 end
         function r:GetStringWidth() return self.text and #tostring(self.text) * 6 or 0 end
+        function r:GetUnboundedStringWidth() return self.text and #tostring(self.text) * 6 or 0 end
         function r:GetStringHeight() return self.stringHeight or 0 end
         function r:SetFontObject(f) self.font = f end
         function r:SetParent(p) self.parent = p end

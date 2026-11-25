@@ -202,15 +202,25 @@ T.section("receipt", function()
     local function right(region) local pt = region.points[#region.points]; return pt[4] end
     local function left(region) local pt = region.points[#region.points]; return pt[4] end
     T.check("amounts share a right edge", right(rows[1].amount) == right(rows[2].amount) and right(rows[2].amount) == right(rows[3].amount))
-    T.check("notes share a left edge", left(rows[1].note) == left(rows[3].note))
-    T.check("the notes start after the amounts", left(rows[1].note) > right(rows[1].amount))
+    T.check("notes share a left edge", left(rows[2].note) == left(rows[3].note))
+    T.check("the notes start after the amounts", left(rows[2].note) > right(rows[2].amount))
     T.check("the amount column has room for an amount to the copper",
         right(rows[1].amount) - left(rows[1].label) >= rows[2].label:GetStringWidth() + 84)
-    T.eq("a note is as wide as what is left of the window", rows[1].note.width, 420 - 12 - left(rows[1].note))
+    T.eq("a note is as wide as what is left of the window", rows[2].note.width, 420 - 12 - left(rows[2].note))
+
+    -- A note longer than the room beside its amount would break inside an
+    -- amount ("... recipes 11g 5s" / "85c"): it goes on its own line under
+    -- the label, whole, and the next line moves down.
+    T.check("fixture: the spend note is wider than the room beside it",
+        rows[1].note:GetStringWidth() > 420 - 12 - left(rows[2].note), rows[1].note:GetStringWidth())
+    T.eq("a long note: under its label, a little in", left(rows[1].note), 12 + 10)
+    T.eq("a long note: one line down", top(rows[1].note) - top(rows[1].label), 16)
+    T.eq("a long note: as wide as the window allows", rows[1].note.width, 420 - 24 - 10)
+    T.eq("a long note: the next line moves down by it", top(rows[2].label) - top(rows[1].label), 32)
 
     -- An amount wider than the column makes the column wider: it is never
     -- drawn over the label, and the notes move right with it.
-    local noteLeft, amountRight = left(rows[1].note), right(rows[1].amount)
+    local noteLeft, amountRight = left(rows[2].note), right(rows[1].amount)
     env.account.spend = 123456789012
     window:Refresh()
     T.eq("fixture: an amount wider than 84", rows[1].amount.text, "12345678g 90s 12c")
@@ -219,7 +229,7 @@ T.section("receipt", function()
     T.eq("a wide amount: the column grows to hold it", right(rows[1].amount), amountRight + (wide - 84))
     T.check("a wide amount: it starts right of the widest label",
         right(rows[1].amount) - wide >= left(rows[2].label) + rows[2].label:GetStringWidth())
-    T.eq("a wide amount: the notes move right with it", left(rows[1].note), noteLeft + (wide - 84))
+    T.eq("a wide amount: the notes move right with it", left(rows[2].note), noteLeft + (wide - 84))
     T.check("a wide amount: every amount still shares the right edge", right(rows[2].amount) == right(rows[1].amount))
     env.account.spend = 143000
     window:Refresh()
@@ -232,7 +242,7 @@ T.section("receipt", function()
     window:Layout()
     T.eq("a wrapped note makes the receipt taller", window.receipt.height, height + 26)
     T.eq("and the list starts lower", top(window.list.frame), listTop + 26)
-    T.eq("the next line moves down too", top(rows[2].label) - top(rows[1].label), 42)
+    T.eq("the next line moves down too", top(rows[2].label) - top(rows[1].label), 58)
     rows[1].note.stringHeight = nil
     window:Layout()
     T.eq("back to one line each", window.receipt.height, height)
@@ -1671,7 +1681,8 @@ T.section("docking and planning order", function()
     local noteWidth = function() return window.receiptRows[1].note.width end
     env.account = { missing = { rows = {}, recipeRows = {}, buyTotal = 100, recipeCosts = 50 },
         reagents = 100, recipes = 50, spend = 150, sale = 0, net = 150 }
-    window:Update(W.path())
+    -- (No gaps: the note fits beside its amount at the default width.)
+    window:Update(W.path({ complete = true, gaps = {} }))
     local before = noteWidth()
     frame.width, frame.height, frame.left, frame.top = 600, 600, 120, 880
     ui.fire(window.resizeGrip, "OnMouseUp")
