@@ -69,6 +69,15 @@ function M.install(opts)
             shown = true, points = {}, scripts = {}, width = 0, height = 0,
             strata = "MEDIUM", level = 1, alpha = 1, events = {}, enabled = true, regions = {},
         }, { __index = methodFallback })
+        -- A button takes left clicks only until RegisterForClicks says
+        -- otherwise (as the client's buttons and UIPanelButtonTemplate do).
+        if ftype == "Button" or ftype == "CheckButton" then
+            f.clicks = { LeftButtonUp = true }
+        end
+        function f:RegisterForClicks(...)
+            self.clicks = {}
+            for _, kind in ipairs({ ... }) do self.clicks[kind] = true end
+        end
         function f:Show()
             local was = self.shown
             self.shown = true
@@ -294,6 +303,13 @@ function M.install(opts)
     function ui.fire(frame, script, ...)
         local fn = frame.scripts[script]
         assert(fn, "no script " .. script .. " on " .. tostring(frame.name or frame.ftype))
+        -- A click with a mouse button the frame did not register never
+        -- reaches its OnClick.
+        if script == "OnClick" and frame.clicks then
+            local button = (...) or "LeftButton"
+            local c = frame.clicks
+            if not (c[button .. "Up"] or c[button .. "Down"] or c.AnyUp or c.AnyDown) then return end
+        end
         if script == "OnMouseDown" then
             ui.buttons[(...) or "LeftButton"] = true
         elseif script == "OnMouseUp" then

@@ -596,11 +596,19 @@ T.section("row list", function()
 
     -- A cols row with a button instead of a mark.
     list:Render({ { kind = "cols", text = "Bolt", cols = { "55", "0", "-", "" },
-        button = { text = "I craft it", onClick = function() buttonClicks = buttonClicks + 1 end } } })
+        button = { text = "I craft it", rightClick = true, onClick = function() buttonClicks = buttonClicks + 1 end } } })
     T.eq("cols: button text", list.rows[1].button.text, "I craft it")
     T.eq("cols: no mark beside a button", list.rows[1].mark.text, "")
     ui.fire(list.rows[1].button, "OnClick", "RightButton")
-    T.eq("cols: button click", buttonClicks, 2)
+    T.eq("cols: a button that asks for right-clicks gets them", buttonClicks, 2)
+    -- A button that does not ask takes left clicks only (the stock button
+    -- template registers nothing else).
+    list:Render({ { kind = "cols", text = "Bolt", cols = { "55", "0", "-", "" },
+        button = { text = "Use", onClick = function() buttonClicks = buttonClicks + 1 end } } })
+    ui.fire(list.rows[1].button, "OnClick", "RightButton")
+    T.eq("cols: a right-click on a left-click button does nothing", buttonClicks, 2)
+    ui.fire(list.rows[1].button, "OnClick", "LeftButton")
+    T.eq("cols: its left click still works", buttonClicks, 3)
 
     list.frame.scroll = 120
     list:Render({ { kind = "line", text = "a" } })

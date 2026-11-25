@@ -1053,12 +1053,14 @@ T.section("shopping tab", function()
     T.eq("receipt: a reagent without a price is said", receipt[2], "1 reagent on the list has no price - the amounts leave it out.")
 
     -- The craft / buy buttons and the hide-owned filter are advanced controls:
-    -- without More options neither acts.
+    -- without More options the filter does not act, and only a reagent with
+    -- a choice the player made (Bar, bought by choice) keeps its button.
     local function hasButton(name)
         local button = W.findRow(window, name).button
         return button ~= nil and button.shown ~= false
     end
-    T.check("no craft / buy button without More options", not hasButton("Bolt") and not hasButton("Bar"))
+    T.check("no craft / buy button without More options on an automatic reagent", not hasButton("Bolt"))
+    T.check("a choice made keeps its button without More options", hasButton("Bar"))
     T.check("no hide-owned box either", not window.shopRow.shown)
     addon.CharStore:Get().hideOwned = true
     window:Refresh()

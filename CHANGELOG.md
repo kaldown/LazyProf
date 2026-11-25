@@ -47,6 +47,7 @@ Plan, then shop: open a profession, see the cheapest path from your real skill, 
 
 ### Fixed
 
+- Right-click on "I craft it" / "I buy it" now goes back to the automatic choice, as its tooltip says; it never reached the button before. A choice you made shows its button even without More options, so it can be seen and undone.
 - The scroll bar and its buttons were drawn when there was nothing to scroll.
 - The selected strategy button (Cheapest / Fastest) could hardly be told from the other.
 - A recipe you chose with "Use" could keep the planner from ever finishing: with "Include green recipes" on, when its range reached the skill where the recipe turns grey, or when the recipe's yellow and grey skill are the same.
