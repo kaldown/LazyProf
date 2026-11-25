@@ -94,7 +94,7 @@ GuideWindow.path = nil        -- the path shown (the live one, or planning's)
 GuideWindow.livePath = nil    -- the open profession's path, also while planning is shown
 GuideWindow.liveNotice = nil  -- its "no recipe data" text
 GuideWindow.planning = nil    -- { profKey, path, notice } while a planning view exists
-GuideWindow.shoppingPath = nil   -- the last path shown, kept after the window closes (merchant panel)
+GuideWindow.shoppingPath = nil   -- the last path shown that is not a what-if, kept after the window closes (merchant panel)
 GuideWindow.returnToPlanning = false   -- planning was set aside for a profession window
 GuideWindow.dockPending = false        -- a profession window opened over planning; its path has not arrived yet
 GuideWindow.profKey = nil
@@ -146,7 +146,10 @@ function GuideWindow:SetPath(path)
         UseState(self, key)
     end
     self.path = path
-    if path then
+    -- The merchant panel shops for the path shown last, but never for the
+    -- "Plan from skill 1" what-if: its runs below the real skill are done and
+    -- the rest is not the plan the character follows.
+    if path and not path.planFromOne then
         self.shoppingPath = path
     end
 end
@@ -250,7 +253,8 @@ function GuideWindow:BuildView(path, mode, plain)
 end
 
 -- For the merchant panel: the shopping rows of the path the window showed
--- last - the whole path's list - worked out from the stock as it is now.
+-- last (never the "Plan from skill 1" what-if) - the whole path's list -
+-- worked out from the stock as it is now.
 -- Returns the rows and a name for the list (the profession); nil when no
 -- path was shown this session.
 function GuideWindow:MerchantRows()
