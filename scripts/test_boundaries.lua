@@ -3,7 +3,8 @@
 -- the adapter, and calls that do not exist on WoW Forever may only appear in
 -- Classic-only code. Strips `--` comments, then fails listing file:line for
 -- every forbidden name.
--- Also: the events of the stock memory are each registered in one place.
+-- Also: BAG_UPDATE is registered in one place, and the Syndicator addon's
+-- API is read by the stock scanner alone.
 -- Run from the repo root: lua5.1 scripts/test_boundaries.lua
 
 local FORBIDDEN = {
@@ -16,28 +17,24 @@ local FORBIDDEN = {
     -- Trainer window calls and the map (the adapter's TrainerInfo / TrainerServices)
     "GetTrainer", "GetNumTrainerServices", "IsTradeskillTrainer", "BuyTrainerService", "ClassTrainerFrame",
     "C_Map", "GetRealZoneText", "GetSubZoneText",
-    -- Bags and the bank (the adapter's BagContents / BankContents / IsBankOpen),
-    -- and the locks of their slots (the adapter's MoveInFlight / BagContents)
+    -- Bags and the bank (the adapter's BagContents; the bank itself is read
+    -- from the Syndicator addon, never from the client)
     "C_Container", "GetContainerItemInfo", "GetContainerNumSlots", "C_Bank", "BANKFRAME", "BANK_TABS_CHANGED",
-    "isLocked", "ITEM_LOCK",
     -- The world a character belongs to and the server clock (the adapter's
-    -- CharacterIdentity / Now): a realm name is no stable key on every client
+    -- Now): a realm name is no stable key on every client
     "C_GameRules", "GetCurrentRegion", "GetRealmName", "GetServerTime",
-    -- Which container is which and which bank is which, the client's way of
-    -- writing a full name, the game's own Self-Found flag and its error
-    -- handler (the adapter's BagContents / BankKindOfBag / CharacterIdentity /
-    -- IsSelfFoundCharacter / ShowError)
-    "Enum.BagIndex", "Enum.BankType", "NameUtil", "C_PlayerInfo", "geterrorhandler",
+    -- Which container is which and which bank is which, and the game's own
+    -- Self-Found flag (the adapter's BagContents / IsSelfFoundCharacter)
+    "Enum.BagIndex", "Enum.BankType", "C_PlayerInfo",
 }
 
 local EXEMPT_DIRS = { "Core/Client/", "Modules/UI/Widgets/" }
 
 -- Calls that only the client adapter may make: not the widget layer either.
--- The client's own count of an item (the adapter's ClientItemCounts, which
--- only /lp diag stock may ask until it is known whether that count sees a
--- closed bank), as a field of C_Item and as the global of older clients, and
--- whether crafts may take reagents from the bank (printed by the adapter's
--- stock dump only).
+-- The client's own count of an item, which can count the bank (as a field of
+-- C_Item and as the global of older clients), and whether crafts may take
+-- reagents from the bank: stock outside the bags comes from the Syndicator
+-- addon alone.
 local ADAPTER_DIR = "Core/Client/"
 local ADAPTER_ONLY = { "C_Item.GetItemCount", "ReagentsFromBankAllowed" }
 local ADAPTER_ONLY_BARE = { "GetItemCount" }
@@ -130,18 +127,17 @@ p:close()
 assert(#files > 0, "no Lua files found (run from the repo root)")
 
 -- The addon object has one handler per event: a second registration of an
--- event silently replaces the first. So each event of the stock memory is
--- registered in exactly one place: the bank window's events and logout in the
--- client adapter (logout once in each adapter - one of the two loads), the
--- bag update in Core/Init.lua.
+-- event silently replaces the first. So BAG_UPDATE is registered in exactly
+-- one place, Core/Init.lua (which refreshes the shown list and the merchant
+-- panel from it).
 -- [event] = { [file] = how often it is registered there }; anywhere else: never.
 local REGISTERED_IN = {
-    PLAYER_LOGOUT = { ["Core/Client/Classic.lua"] = 1, ["Core/Client/Forever.lua"] = 1 },
-    BANKFRAME_OPENED = { ["Core/Client/Forever.lua"] = 1 },
-    BANKFRAME_CLOSED = { ["Core/Client/Forever.lua"] = 1 },
-    BANK_TABS_CHANGED = { ["Core/Client/Forever.lua"] = 1 },
     BAG_UPDATE = { ["Core/Init.lua"] = 1 },
 }
+
+-- The Syndicator addon's API is read by the stock scanner alone; everything
+-- else asks the scanner (Inventory:UsesSyndicator, ScanAll, RunDiagnostic).
+local SYNDICATOR_FILE = "Modules/Inventory/Scanner.lua"
 
 local offenders = {}
 
@@ -171,6 +167,18 @@ for event, expected in pairs(REGISTERED_IN) do
     end
 end
 table.sort(offenders)
+
+for _, path in ipairs(files) do
+    if path ~= SYNDICATOR_FILE then
+        local n = 0
+        for raw in io.lines(path) do
+            n = n + 1
+            if strip_comment(raw):find("Syndicator.API", 1, true) then
+                offenders[#offenders + 1] = string.format("%s:%d: Syndicator.API (only %s may read it)", path, n, SYNDICATOR_FILE)
+            end
+        end
+    end
+end
 
 for _, path in ipairs(files) do
     if path:sub(1, #ADAPTER_DIR) ~= ADAPTER_DIR then
@@ -277,7 +285,7 @@ end
 if #offenders > 0 then
     for _, o in ipairs(offenders) do print(o) end
     print(string.format("FAIL: %d forbidden client-API use(s) (outside the adapter, or a call that does not exist on Forever) "
-        .. "or event registration(s) out of place", #offenders))
+        .. "or out-of-place event registration or Syndicator use", #offenders))
     os.exit(1)
 end
 print(string.format("boundaries: OK (%d files scanned)", #files))

@@ -59,9 +59,7 @@ _G.Enum = { TradeskillRelativeDifficulty = { Optimal = 0, Medium = 1, Easy = 2, 
             BagIndex = { Accountbanktab = -3, Characterbanktab = -2, Keyring = -1, Backpack = 0,
                          Bag_1 = 1, Bag_2 = 2, Bag_3 = 3, Bag_4 = 4, ReagentBag = 5,
                          CharacterBankTab_1 = 6, CharacterBankTab_9 = 14,
-                         AccountBankTab_1 = 15, AccountBankTab_9 = 23 },
-            BankType = { Character = 0, Guild = 1, Account = 2 },
-            GameRule = { HardcoreRuleset = 10, CraftFromBankRestricted = 211, PvPRuleset = 213, RPRuleset = 214 } }
+                         AccountBankTab_1 = 15, AccountBankTab_9 = 23 } }
 _G.BaseScrollBoxEvents = { OnScroll = "OnScroll" }
 _G.ScrollBoxListMixin = { Event = { OnDataRangeChanged = "OnDataRangeChanged" } }
 
@@ -206,9 +204,7 @@ local SURFACE = { "IsOpen", "AnchorFrame", "PanelOffsetX", "GetLine", "NoDataPro
                   "StartMerchant", "IsMerchantOpen", "MerchantAnchorFrame", "MerchantItems", "BuyFromMerchant",
                   "FreeBagSlots", "Money", "RunMerchantDiagnostic",
                   "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic",
-                  "BagContents", "ReadsBank", "IsBankOpen", "BankContents", "BankUsable", "BankKindOfBag", "CharacterIdentity", "Now",
-                  "IsSelfFoundCharacter", "ShowError", "ClientItemCounts", "MoveInFlight",
-                  "StartStock", "RunStockDiagnostic" }
+                  "BagContents", "IsSelfFoundCharacter", "Now", "RunStockDiagnostic" }
 
 -- Names of the functions an adapter installs.
 local function methodNames(client)
@@ -702,7 +698,8 @@ section("trainer", function()
 end)
 
 -- ===========================================================================
--- 4d. Stock: bags, the bank, who the character is, the clock
+-- 4d. Stock: the bags, the game's Self-Found flag, the clock. The bank is
+-- never read here: it comes from the Syndicator addon.
 -- ===========================================================================
 section("stock", function()
     local p = "stock: "
@@ -710,8 +707,8 @@ section("stock", function()
     -- Containers as the client reports them: [bag] = { slots, [slot] = info }.
     local containers = {}
     local slotCalls = {}      -- container ids asked for their slot count, in order
-    local function slot(itemId, stack, isBound)
-        return { itemID = itemId, stackCount = stack, isBound = isBound and true or false }
+    local function slot(itemId, stack)
+        return { itemID = itemId, stackCount = stack, isBound = false }
     end
     _G.C_Container = {
         GetContainerNumSlots = function(bag)
@@ -723,36 +720,20 @@ section("stock", function()
         end,
         GetContainerNumFreeSlots = function() return 0, 0 end,
     }
-    -- The Classic container calls do not exist on this client.
+    -- The Classic container calls do not exist on this client, and the bank
+    -- is not this adapter's to read.
     _G.GetContainerNumSlots = function() error("global GetContainerNumSlots called on Forever") end
     _G.GetContainerItemInfo = function() error("global GetContainerItemInfo called on Forever") end
-
-    -- The bank as C_Bank reports it.
-    local bank = {
-        [0] = { canView = true, locked = nil, tabs = { { ID = 6 }, { ID = 8 } } },
-        [2] = { canView = true, locked = nil, tabs = { { ID = 15 } } },
-    }
-    local fetched = {}
-    _G.C_Bank = {
-        CanViewBank = function(bankType) return bank[bankType] and bank[bankType].canView or false end,
-        FetchBankLockedReason = function(bankType) return bank[bankType] and bank[bankType].locked or nil end,
-        FetchPurchasedBankTabData = function(bankType)
-            fetched[#fetched + 1] = bankType
-            return bank[bankType] and bank[bankType].tabs or {}
-        end,
-        ShouldUsePlayerBagsInBank = function() return true end,
-    }
+    _G.C_Bank = setmetatable({}, { __index = function(_, name) error("C_Bank." .. tostring(name) .. " asked on Forever") end })
 
     local function resetContainers()
         containers = {
-            [0] = { slots = 16, slot(2589, 20), slot(2589, 5), nil, slot(6948, 1, true) },
-            [1] = { slots = 8, slot(2592, 10, true), slot(2592, 4) },
+            [0] = { slots = 16, slot(2589, 20), slot(2589, 5), nil, slot(6948, 1) },
+            [1] = { slots = 8, slot(2592, 10), slot(2592, 4) },
             [4] = { slots = 6, slot(4306, 7) },
             [5] = { slots = 32, slot(765, 11), slot(2447, 3) },              -- the reagent bag
-            [6] = { slots = 28, slot(2589, 100), slot(2770, 9, true) },      -- character bank: the bank itself
-            [7] = { slots = 16, slot(99999, 1) },                            -- not a purchased tab: never read
-            [8] = { slots = 12, slot(2770, 1), slot(4306, 2) },              -- character bank: a bank bag
-            [15] = { slots = 98, slot(2589, 60), slot(774, 2, true) },       -- account bank
+            [6] = { slots = 28, slot(2589, 100), slot(2770, 9) },            -- character bank: never read
+            [15] = { slots = 98, slot(2589, 60) },                           -- account bank: never read
             [-1] = { slots = 4, slot(5396, 1) },                             -- keyring: not stock
         }
     end
@@ -763,358 +744,28 @@ section("stock", function()
 
     -- Bags -----------------------------------------------------------------
     slotCalls = {}
-    local items, bound, backpackSlots = Client:BagContents()
+    local items = Client:BagContents()
     check(p .. "bags: stacks of one item are added up", items[2589] == 25, items[2589])
     check(p .. "bags: the reagent bag (5) is read", items[765] == 11 and items[2447] == 3)
     check(p .. "bags: every carried bag", items[2592] == 14 and items[4306] == 7 and items[6948] == 1)
-    check(p .. "bags: nothing from the bank or the keyring", items[2770] == nil and items[99999] == nil and items[5396] == nil)
+    check(p .. "bags: nothing from the bank or the keyring", items[2770] == nil and items[5396] == nil)
     check(p .. "bags: exactly containers 0 to 5 are asked", table.concat(slotCalls, ",") == "0,1,2,3,4,5",
         table.concat(slotCalls, ","))
-    check(p .. "bags: soulbound counts are split off", bound[2592] == 10 and bound[6948] == 1 and bound[2589] == nil)
-    check(p .. "bags: the backpack's slot count is the third return", backpackSlots == 16, backpackSlots)
-    containers[1][1].isLocked = true
-    local locked = select(4, Client:BagContents())
-    check(p .. "bags: the part in locked slots is the fourth return", locked[2592] == 10 and locked[2589] == nil, locked[2592])
-    containers[1][1].isLocked = nil
-    check(p .. "bags: nothing locked, nothing in it", next(select(4, Client:BagContents())) == nil)
+    check(p .. "bags: one return, the items", select("#", Client:BagContents()) == 1)
     containers[0] = nil
-    items, bound, backpackSlots = Client:BagContents()
-    check(p .. "bags: a backpack that reports no slots is reported as such", backpackSlots == 0 and type(items) == "table")
+    items = Client:BagContents()
+    check(p .. "bags: a backpack that reports no slots: the other bags, no error", type(items) == "table" and items[2592] == 14)
     resetContainers()
 
-    -- Bank kinds of a container id -------------------------------------------
-    check(p .. "kind: 5 (reagent bag) is no bank", Client:BankKindOfBag(5) == nil)
-    check(p .. "kind: 6 is the character bank", Client:BankKindOfBag(6) == "character")
-    check(p .. "kind: 14 is the character bank", Client:BankKindOfBag(14) == "character")
-    check(p .. "kind: 15 is the account bank", Client:BankKindOfBag(15) == "account")
-    check(p .. "kind: 23 is the account bank", Client:BankKindOfBag(23) == "account")
-    check(p .. "kind: 24 is no bank", Client:BankKindOfBag(24) == nil)
-    check(p .. "kind: the backpack, the keyring and nothing are no bank",
-        Client:BankKindOfBag(0) == nil and Client:BankKindOfBag(-1) == nil and Client:BankKindOfBag(nil) == nil)
-
-    -- Events -----------------------------------------------------------------
-    local seen = {}
-    local openDuringClosing, openDuringClose, readDuringClosing = nil, nil, nil
-    local before = {}
-    for event in pairs(addon.events) do before[event] = true end
-    Client:StartStock({
-        onBankOpened = function() seen[#seen + 1] = "opened" end,
-        onBankChanged = function(kind) seen[#seen + 1] = "changed:" .. tostring(kind) end,
-        onBankClosing = function()
-            seen[#seen + 1] = "closing"
-            openDuringClosing = Client:IsBankOpen()
-            readDuringClosing = Client:BankContents("character")
-        end,
-        onBankClosed = function()
-            seen[#seen + 1] = "closed"
-            openDuringClose = Client:IsBankOpen()
-        end,
-        onLogout = function() seen[#seen + 1] = "logout" end,
-    })
-    local added = {}
-    for event in pairs(addon.events) do
-        if not before[event] then added[event] = true end
-    end
-    -- BAG_UPDATE belongs to Core/Init.lua (one handler per event on the addon object).
-    check(p .. "registers the two bank window events, the tab event and logout - not BAG_UPDATE",
-        sortedKeys(added) == "BANKFRAME_CLOSED,BANKFRAME_OPENED,BANK_TABS_CHANGED,PLAYER_LOGOUT", sortedKeys(added))
-
-    -- Closed: nothing is read, whatever the containers hold.
-    check(p .. "the adapter says that it reads the bank (while its window is open)", Client:ReadsBank() == true)
-    check(p .. "bank closed at first", Client:IsBankOpen() == false)
-    fetched = {}
-    check(p .. "closed: no character bank", Client:BankContents("character") == nil)
-    check(p .. "closed: no account bank", Client:BankContents("account") == nil)
-    check(p .. "closed: the bank is not even asked", #fetched == 0, #fetched)
-    check(p .. "closed: no bank is usable", Client:BankUsable("character") == false and Client:BankUsable("account") == false)
-    addon.events.BANK_TABS_CHANGED("BANK_TABS_CHANGED", 0)
-    check(p .. "closed: a tab change is not passed on", #seen == 0, table.concat(seen, ","))
-
-    addon.events.BANKFRAME_OPENED("BANKFRAME_OPENED")
-    check(p .. "BANKFRAME_OPENED -> onBankOpened, bank open", seen[1] == "opened" and Client:IsBankOpen() == true)
-
-    -- Open: read tab by tab, by the tab's container id.
-    fetched = {}
-    items, bound = Client:BankContents("character")
-    check(p .. "open: the character bank is asked by its bank type", fetched[1] == 0, fetched[1])
-    check(p .. "open: both purchased tabs are read by their id", items and items[2589] == 100 and items[2770] == 10
-        and items[4306] == 2)
-    check(p .. "open: a container that is not a purchased tab is not read", items[99999] == nil)
-    check(p .. "open: nothing from the bags or the account bank", items[765] == nil and items[774] == nil)
-    check(p .. "open: soulbound counts are split off", bound and bound[2770] == 9 and bound[2589] == nil)
-    check(p .. "open: the slots of its tabs together are the third return", select(3, Client:BankContents("character")) == 40,
-        select(3, Client:BankContents("character")))
-    local locked = select(4, Client:BankContents("character"))
-    check(p .. "open: nothing locked, the fourth return is an empty table", type(locked) == "table" and next(locked) == nil)
-    containers[6][1].isLocked = true
-    locked = select(4, Client:BankContents("character"))
-    check(p .. "open: the part in slots that read as locked is the fourth return (a move of them on its way)",
-        locked[2589] == 100 and locked[2770] == nil and locked[4306] == nil, locked[2589])
-    containers[6][1].isLocked = false
-    check(p .. "a slot that reads unlocked is not in it", next(select(4, Client:BankContents("character"))) == nil)
-    fetched = {}
-    items, bound = Client:BankContents("account")
-    check(p .. "open: the account bank's slots", select(3, Client:BankContents("account")) == 98)
-    check(p .. "open: the account bank is asked by its bank type", fetched[1] == 2, fetched[1])
-    check(p .. "open: the account bank's tab", items and items[2589] == 60 and items[774] == 2 and bound[774] == 2)
-    check(p .. "open: an unknown kind is nothing", Client:BankContents("guild") == nil and Client:BankContents(nil) == nil)
-    -- Usable: the gates of a read, without reading a slot.
-    slotCalls = {}
-    check(p .. "open: both banks are usable", Client:BankUsable("character") == true and Client:BankUsable("account") == true)
-    check(p .. "usable: no container is asked for its slots", #slotCalls == 0, table.concat(slotCalls, ","))
-    check(p .. "usable: an unknown kind is not", Client:BankUsable("guild") == false and Client:BankUsable(nil) == false)
-
-    -- A bank bag slot without a bag reports no slots: the rest still counts.
-    bank[0].tabs = { { ID = 6 }, { ID = 9 }, { ID = 8 } }
-    items = Client:BankContents("character")
-    check(p .. "open: a tab without slots among others is fine", items and items[2589] == 100 and items[4306] == 2)
-    bank[0].tabs = { { ID = 6 }, { ID = 8 } }
-
-    -- Not readable now: nil, never an empty bank.
-    bank[0].canView = false
-    check(p .. "open but not viewable -> nil", Client:BankContents("character") == nil)
-    check(p .. "open but not viewable: not usable", Client:BankUsable("character") == false)
-    bank[0].canView = true
-    bank[0].locked = 2
-    check(p .. "open but locked -> nil", Client:BankContents("character") == nil)
-    check(p .. "open but locked: not usable", Client:BankUsable("character") == false)
-    bank[0].locked = 0   -- any reason counts as locked, as in the bank window itself
-    check(p .. "open, locked with reason 0 -> nil", Client:BankContents("character") == nil)
-    check(p .. "open, locked with reason 0: not usable", Client:BankUsable("character") == false)
-    bank[0].locked = nil
-    bank[0].tabs = {}
-    check(p .. "open with no tabs -> nil", Client:BankContents("character") == nil)
-    check(p .. "open with no tabs: not usable", Client:BankUsable("character") == false)
-    bank[0].tabs = { { ID = 6 }, { ID = 8 } }
-    local savedSix, savedEight = containers[6], containers[8]
-    containers[6], containers[8] = nil, nil
-    check(p .. "open, tabs that report no slots at all -> nil", Client:BankContents("character") == nil)
-    check(p .. "but usable: the bank can be viewed, is not locked and has its tabs", Client:BankUsable("character") == true)
-    containers[6], containers[8] = savedSix, savedEight
-    bank[2].canView = false
-    check(p .. "an account bank that cannot be viewed -> nil, the character bank still reads",
-        Client:BankContents("account") == nil and Client:BankContents("character") ~= nil)
-    check(p .. "and only the character bank is usable", Client:BankUsable("account") == false and Client:BankUsable("character") == true)
-    bank[2].canView = true
-    containers[6] = { slots = 28 }
-    containers[8] = { slots = 12 }
-    items = Client:BankContents("character")
-    check(p .. "an empty bank that has slots is an empty table, not nil", type(items) == "table" and next(items) == nil)
-    resetContainers()
-
-    -- A move on its way: a slot that reads as locked, in the carried bags or
-    -- in a bank that can be read right now.
-    check(p .. "in flight: nothing locked, nothing on its way", Client:MoveInFlight() == false)
-    containers[0][2].isLocked = true
-    check(p .. "in flight: a locked slot of the backpack", Client:MoveInFlight() == true)
-    containers[0][2].isLocked = nil
-    containers[5][1].isLocked = true
-    check(p .. "in flight: a locked slot of the reagent bag", Client:MoveInFlight() == true)
-    containers[5][1].isLocked = false
-    check(p .. "in flight: a slot that reads unlocked is not", Client:MoveInFlight() == false)
-    containers[8][2].isLocked = true
-    check(p .. "in flight: a locked slot of a character bank tab", Client:MoveInFlight() == true)
-    bank[0].canView = false
-    check(p .. "in flight: not of a bank that cannot be read now", Client:MoveInFlight() == false)
-    bank[0].canView = true
-    bank[0].locked = 1
-    check(p .. "in flight: nor of a locked bank", Client:MoveInFlight() == false)
-    bank[0].locked = nil
-    containers[8][2].isLocked = nil
-    containers[15][1].isLocked = true
-    check(p .. "in flight: a locked slot of the account bank", Client:MoveInFlight() == true)
-    containers[15][1].isLocked = nil
-    containers[7][1].isLocked = true
-    containers[-1][1].isLocked = true
-    check(p .. "in flight: not a container that is no purchased tab, nor the keyring", Client:MoveInFlight() == false)
-    resetContainers()
-    -- Which banks it could look at: each with the number of its slots that
-    -- hold an item; nothing for one it could not.
-    local _, looked = Client:MoveInFlight()
-    check(p .. "looked at: both banks, with their occupied slots", looked.character == 4 and looked.account == 2,
-        tostring(looked.character) .. "/" .. tostring(looked.account))
-    bank[2].canView = false
-    bank[0].locked = 1
-    _, looked = Client:MoveInFlight()
-    check(p .. "looked at: not a bank that may not be viewed, nor a locked one", looked.character == nil and looked.account == nil)
-    bank[2].canView = true
-    bank[0].locked = nil
-    containers[15] = { slots = 0 }
-    _, looked = Client:MoveInFlight()
-    check(p .. "looked at: not a bank whose tabs report no slot", looked.account == nil and looked.character == 4)
-    containers[15] = { slots = 98 }
-    _, looked = Client:MoveInFlight()
-    check(p .. "looked at: an empty bank is looked at, with nothing in it", looked.account == 0)
-    resetContainers()
-
-    -- Tab events while open.
-    addon.events.BANK_TABS_CHANGED("BANK_TABS_CHANGED", 0)
-    addon.events.BANK_TABS_CHANGED("BANK_TABS_CHANGED", 2)
-    addon.events.BANK_TABS_CHANGED("BANK_TABS_CHANGED", 1)   -- the guild bank is not ours
-    check(p .. "BANK_TABS_CHANGED -> onBankChanged with the kind",
-        seen[2] == "changed:character" and seen[3] == "changed:account" and #seen == 3, table.concat(seen, ","))
-
-    addon.events.BANKFRAME_CLOSED("BANKFRAME_CLOSED")
-    addon.events.BANKFRAME_CLOSED("BANKFRAME_CLOSED")
-    check(p .. "BANKFRAME_CLOSED twice -> one closing notice, then one close",
-        #seen == 5 and seen[4] == "closing" and seen[5] == "closed", table.concat(seen, ","))
-    -- A read that is still owed can be taken during the closing notice ...
-    check(p .. "the bank still counts as open during the closing notice", openDuringClosing == true)
-    check(p .. "and can still be read then", readDuringClosing ~= nil and readDuringClosing[2589] == 100)
-    -- ... and never after it.
-    check(p .. "the bank counts as closed inside onBankClosed", openDuringClose == false)
-    check(p .. "closed again: nothing is read", Client:IsBankOpen() == false and Client:BankContents("character") == nil)
-    check(p .. "closed again: no bank is usable", Client:BankUsable("character") == false and Client:BankUsable("account") == false)
-    containers[6][1].isLocked = true
-    check(p .. "closed again: a bank's slots are not looked at for a move on its way", Client:MoveInFlight() == false
-        and next(select(2, Client:MoveInFlight())) == nil)
-    containers[1][1].isLocked = true
-    check(p .. "closed again: the carried bags' still are", Client:MoveInFlight() == true)
-    resetContainers()
-
-    addon.events.PLAYER_LOGOUT("PLAYER_LOGOUT")
-    check(p .. "PLAYER_LOGOUT -> onLogout", seen[6] == "logout", table.concat(seen, ","))
-
-    -- Who the character is -----------------------------------------------------
-    local rules = { [213] = true }   -- PvP
-    local region = "EU"
-    local guidCalls = 0
-    -- The stand-in for a secret value is text, like a real GUID: only the
-    -- secret check can keep it out (a type check would let it through).
-    local SECRET = "Player-4444-SECRET00"
-    local regionNumber = 3
-    local guid = "Player-4444-0A1B2C3D"
-    _G.issecretvalue = function(value) return value == SECRET end
-    _G.UnitGUID = function(unit)
-        guidCalls = guidCalls + 1
-        return unit == "player" and guid or nil
-    end
-    -- The key first, then the name in the client's language (never a key).
-    _G.UnitFactionGroup = function() return "Horde", "Die Horde" end
-    _G.NameUtil = { GetUnmodifiedUnitFullName = function(unit) return unit == "player" and "Thrag Ironhide" or nil end }
-    _G.C_GameRules = { IsGameRuleActive = function(rule) return rules[rule] == true end }
-    -- What the profession window asks before it counts reagents in the bank.
-    local reagentsFromBank = false
-    _G.ReagentsFromBankAllowed = function() return reagentsFromBank end
-    _G.GetCurrentRegionName = function() return region end
-    _G.GetCurrentRegion = function() return regionNumber end
-    -- The realm name is a shard name here: it must never be part of a key.
-    _G.GetRealmName = function() error("GetRealmName called on Forever") end
-
-    local function identityOf(setup)
-        local fresh = loadAdapter(16001)
-        if setup then setup() end
-        return fresh.Client:CharacterIdentity(), fresh.Client
+    -- No stock event: the bank's and logout belong to nothing here any more.
+    check(p .. "no stock event is registered", addon.events.BANKFRAME_OPENED == nil and addon.events.BANKFRAME_CLOSED == nil
+        and addon.events.BANK_TABS_CHANGED == nil and addon.events.PLAYER_LOGOUT == nil)
+    for _, name in ipairs({ "BankContents", "BankUsable", "BankKindOfBag", "MoveInFlight", "ReadsBank", "IsBankOpen",
+                            "StartStock", "ClientItemCounts", "CharacterIdentity", "ShowError" }) do
+        check(p .. "no " .. name .. " any more", Client[name] == nil)
     end
 
-    local id = identityOf()
-    check(p .. "identity: the GUID", id.guid == "Player-4444-0A1B2C3D", id.guid)
-    check(p .. "identity: the full name", id.name == "Thrag Ironhide", id.name)
-    check(p .. "identity: the faction", id.faction == "Horde", id.faction)
-    check(p .. "identity: the world is region and ruleset", id.world == "eu-pvp", id.world)
-    check(p .. "identity: and the region alone", id.region == "eu", id.region)
-
-    rules = {}
-    check(p .. "world: no ruleset flag -> normal", identityOf().world == "eu-normal", identityOf().world)
-    rules = { [214] = true }
-    check(p .. "world: roleplay", identityOf().world == "eu-rp", identityOf().world)
-    rules = { [213] = true, [214] = true }
-    region = "US"
-    check(p .. "world: roleplay PvP, another region", identityOf().world == "us-rppvp" and identityOf().region == "us", identityOf().world)
-    rules = { [10] = true, [213] = true }
-    check(p .. "world: hardcore PvP", identityOf().world == "us-hc-pvp", identityOf().world)
-    rules = { [10] = true }
-    check(p .. "world: hardcore", identityOf().world == "us-hc-normal", identityOf().world)
-    rules = { [213] = true }
-    -- A region without a name (test realms): its number stands in for it.
-    region = ""
-    id = identityOf()
-    check(p .. "world: no region name -> the region's number", id.world == "region3-pvp" and id.region == "region3" and id.guid ~= nil, id.world)
-    region = nil
-    check(p .. "world: nil region name -> the region's number too", identityOf().world == "region3-pvp", identityOf().world)
-    regionNumber = 1
-    rules = {}
-    check(p .. "world: another number, another ruleset", identityOf().world == "region1-normal", identityOf().world)
-    rules = { [213] = true }
-    -- Neither a name nor a number: no world (nothing is then taken for the same world).
-    regionNumber = nil
-    id = identityOf()
-    check(p .. "world: no name and no number -> no world, the rest still read", id.world == nil and id.region == nil and id.guid ~= nil, id.world)
-    regionNumber = "3"
-    check(p .. "world: a number that is not one -> no world", identityOf().world == nil)
-    regionNumber = 3
-    region = "EU"
-    check(p .. "world: with a name the number is not used", identityOf().world == "eu-pvp")
-
-    -- A value the client keeps secret is not read out.
-    guid = SECRET
-    id = identityOf()
-    check(p .. "identity: a secret GUID is not returned", id.guid == nil and id.name == "Thrag Ironhide", id.guid)
-    guid = "Player-4444-0A1B2C3D"
-
-    -- Nothing of it changes during a session: read once, when all of it is there.
-    local client
-    region, regionNumber = "", nil
-    id, client = identityOf()
-    region, regionNumber = "EU", 3
-    check(p .. "identity: an incomplete read is tried again", client:CharacterIdentity().world == "eu-pvp")
-    guidCalls = 0
-    guid = "Player-4444-CHANGED"
-    id = client:CharacterIdentity()
-    check(p .. "identity: a complete read is kept", id.guid == "Player-4444-0A1B2C3D" and guidCalls == 0, guidCalls)
-    guid = "Player-4444-0A1B2C3D"
-    -- A read that lacks the GUID, the name or the faction is not kept: what
-    -- could not be read in the first moments would be missing all session.
-    do
-        local savedNameUtil, savedFaction = _G.NameUtil, _G.UnitFactionGroup
-        local nameReadable, factionReadable = false, true
-        _G.NameUtil = { GetUnmodifiedUnitFullName = function(unit)
-            return (nameReadable and unit == "player") and "Thrag Ironhide" or nil
-        end }
-        _G.UnitFactionGroup = function()
-            if factionReadable then return "Horde", "Die Horde" end
-            return nil
-        end
-        id, client = identityOf()
-        check(p .. "identity: the name cannot be read yet", id.name == nil and id.guid == "Player-4444-0A1B2C3D", id.name)
-        nameReadable = true
-        check(p .. "identity: a read without the name is not kept", client:CharacterIdentity().name == "Thrag Ironhide",
-            client:CharacterIdentity().name)
-        factionReadable = false
-        id, client = identityOf()
-        check(p .. "identity: the faction cannot be read yet", id.faction == nil and id.name == "Thrag Ironhide", id.faction)
-        factionReadable = true
-        check(p .. "identity: a read without the faction is not kept", client:CharacterIdentity().faction == "Horde",
-            client:CharacterIdentity().faction)
-        guid = SECRET
-        id, client = identityOf()
-        check(p .. "identity: the GUID cannot be read yet", id.guid == nil and id.faction == "Horde", id.guid)
-        guid = "Player-4444-0A1B2C3D"
-        check(p .. "identity: a read without the GUID is not kept", client:CharacterIdentity().guid == "Player-4444-0A1B2C3D",
-            client:CharacterIdentity().guid)
-        guidCalls = 0
-        guid = "Player-4444-CHANGED"
-        check(p .. "identity: the complete read that followed is", client:CharacterIdentity().guid == "Player-4444-0A1B2C3D"
-            and guidCalls == 0, guidCalls)
-        guid = "Player-4444-0A1B2C3D"
-        _G.NameUtil, _G.UnitFactionGroup = savedNameUtil, savedFaction
-    end
-    -- The world is not kept: the game rules can read false in the first
-    -- moments after login, and a world frozen then would be wrong for good.
-    rules = {}
-    id, client = identityOf()
-    check(p .. "identity: the rules read false at first", id.world == "eu-normal" and id.guid ~= nil, id.world)
-    rules = { [213] = true }
-    guidCalls = 0
-    id = client:CharacterIdentity()
-    check(p .. "identity: the world is worked out again at every ask", id.world == "eu-pvp", id.world)
-    check(p .. "identity: while who the character is stays the kept read", id.guid == "Player-4444-0A1B2C3D"
-        and id.name == "Thrag Ironhide" and id.faction == "Horde" and guidCalls == 0, guidCalls)
-    rules = { [10] = true, [213] = true }
-    check(p .. "identity: and again", client:CharacterIdentity().world == "eu-hc-pvp", client:CharacterIdentity().world)
-    rules = { [213] = true }
-
-    -- Self-Found by the game's own flag -------------------------------------------
+    -- The game's own Self-Found flag -------------------------------------------
     local flag, flagAsked = true, 0
     _G.C_PlayerInfo = { IsSelfFoundActive = function()
         flagAsked = flagAsked + 1
@@ -1128,120 +779,30 @@ section("stock", function()
         flag = value
         check(p .. "Self-Found: a value that is not true is false (" .. type(value) .. ")", Client:IsSelfFoundCharacter() == false)
     end
-    flag = nil
-    check(p .. "Self-Found: no value is false", Client:IsSelfFoundCharacter() == false)
     _G.C_PlayerInfo = nil
-
-    -- Handing a message to the game's error handler ----------------------------
-    do
-        local savedHandler = _G.geterrorhandler
-        local handed = {}
-        _G.geterrorhandler = function() return function(message) handed[#handed + 1] = message end end
-        Client:ShowError("LazyProf: something failed")
-        check(p .. "ShowError: the message goes to the game's error handler",
-            #handed == 1 and handed[1] == "LazyProf: something failed", handed[1])
-        for _, case in ipairs({
-            { "a client without an error handler", false },
-            { "an error handler that is not a function", function() return "broken" end },
-            { "an error handler that fails", function() return function() error("handler down") end end },
-            { "asking for the error handler fails", function() error("no handler today") end },
-        }) do
-            _G.geterrorhandler = case[2] or nil
-            local ran, err = pcall(Client.ShowError, Client, "another")
-            check(p .. "ShowError: " .. case[1] .. " - nothing raised, nothing handed on", ran and #handed == 1, err)
-        end
-        _G.geterrorhandler = savedHandler
-    end
-
-    -- What the client itself counts of an item ----------------------------------
-    do
-        local asked = {}
-        _G.C_Item.GetItemCount = function(itemInfo, includeBank, includeUses, includeReagentBank, includeAccountBank)
-            asked[#asked + 1] = table.concat({ tostring(itemInfo), tostring(includeBank), tostring(includeUses),
-                tostring(includeReagentBank), tostring(includeAccountBank) }, ",")
-            return 5 + (includeBank and 100 or 0) + (includeAccountBank and 60 or 0)
-        end
-        local carried, withBank, withAccountBank = Client:ClientItemCounts(2589)
-        check(p .. "client counts: carried only, with the bank, with the bank and the account bank",
-            carried == 5 and withBank == 105 and withAccountBank == 165,
-            tostring(carried) .. "," .. tostring(withBank) .. "," .. tostring(withAccountBank))
-        -- All five arguments are passed, as Blizzard does; charges and the
-        -- reagent bank are never asked for.
-        check(p .. "client counts: asked three times, with all five arguments",
-            table.concat(asked, " | ") == "2589,false,false,false,false | 2589,true,false,false,false | 2589,true,false,false,true",
-            table.concat(asked, " | "))
-        check(p .. "client counts: three values", select("#", Client:ClientItemCounts(2589)) == 3)
-        -- Without an item nothing is asked of the client: the answer only
-        -- says that this client has such a count.
-        asked = {}
-        carried, withBank, withAccountBank = Client:ClientItemCounts(nil)
-        check(p .. "client counts: without an item nothing is asked, and the three are zero",
-            carried == 0 and withBank == 0 and withAccountBank == 0 and #asked == 0, #asked)
-        _G.C_Item.GetItemCount = function() error("count down") end
-        check(p .. "client counts: a failing count call is the caller's to catch", pcall(Client.ClientItemCounts, Client, 2589) == false)
-        _G.C_Item.GetItemCount = nil
-    end
 
     -- The clock ----------------------------------------------------------------
     _G.GetServerTime = function() return 1763900000 end
     check(p .. "Now is the server time", Client:Now() == 1763900000, Client:Now())
 
     -- Diagnostic -----------------------------------------------------------------
-    addon.events.BANKFRAME_OPENED("BANKFRAME_OPENED")
     local lines = {}
     local ok, err = pcall(Client.RunStockDiagnostic, Client, lines)
     check(p .. "diag: no Lua error", ok, err)
     local text = table.concat(lines, "\n")
     check(p .. "diag: no SECTION ERROR", not text:find("SECTION ERROR", 1, true), text)
-    check(p .. "diag: the bags, container by container", text:find("bag[5] slots=32 used=2", 1, true) ~= nil, text)
-    check(p .. "diag: bank state", text:find("bank: open=true", 1, true) ~= nil
-        and text:find("usesPlayerBags=true", 1, true) ~= nil, text)
-    check(p .. "diag: raw facts of the character bank",
-        text:find("bank character: canView=true lockedReason=nil tabs=2 [6:28/2 8:12/2]", 1, true) ~= nil, text)
-    check(p .. "diag: raw facts of the account bank",
-        text:find("bank account: canView=true lockedReason=nil tabs=1 [15:98/2]", 1, true) ~= nil, text)
-    check(p .. "diag: what the adapter reads", text:find("adapter bank character: items=3 soulbound=1", 1, true) ~= nil, text)
-    check(p .. "diag: the world's parts", text:find("region=EU", 1, true) ~= nil and text:find("regionNumber=3", 1, true) ~= nil
-        and text:find("pvp=true", 1, true) ~= nil, text)
-    -- Whether crafts may take reagents from the bank (they would change it
-    -- while it is closed): what the profession window asks, and the game rule.
-    local function craftingLine()
-        local out = {}
-        Client:RunStockDiagnostic(out)
-        return (("\n" .. table.concat(out, "\n") .. "\n"):match("\n(crafting from the bank: [^\n]*)\n")), table.concat(out, "\n")
-    end
-    check(p .. "diag: crafting from the bank, in one line",
-        craftingLine() == "crafting from the bank: reagentsFromBankAllowed=false restrictedRule=false", text)
-    reagentsFromBank = true
-    rules[211] = true
-    check(p .. "diag: crafting from the bank allowed, the rule on",
-        craftingLine() == "crafting from the bank: reagentsFromBankAllowed=true restrictedRule=true", select(2, craftingLine()))
-    rules[211] = nil
-    check(p .. "diag: crafting from the bank allowed, the rule off",
-        craftingLine() == "crafting from the bank: reagentsFromBankAllowed=true restrictedRule=false", select(2, craftingLine()))
-    reagentsFromBank = false
-    local savedRule = _G.Enum.GameRule.CraftFromBankRestricted
-    _G.Enum.GameRule.CraftFromBankRestricted = nil
-    local line, whole = craftingLine()
-    check(p .. "diag: a client without that rule says so and prints the rest",
-        line == "crafting from the bank: reagentsFromBankAllowed=false restrictedRule=none (this client has no such rule)"
-        and whole:find("region=EU", 1, true) ~= nil, whole)
-    _G.Enum.GameRule.CraftFromBankRestricted = savedRule
+    check(p .. "diag: the bags, container by container", text:find("bag[0] slots=16 used=3", 1, true) ~= nil
+        and text:find("bag[5] slots=32 used=2", 1, true) ~= nil, text)
+    check(p .. "diag: what the adapter reads", text:find("adapter bags: items=6", 1, true) ~= nil, text)
+    check(p .. "diag: no bank line", not text:find("bank", 1, true), text)
     check(p .. "diag: plain ASCII", not text:find("[\128-\255]"))
-    bank[2].canView = false
-    lines = {}
-    Client:RunStockDiagnostic(lines)
-    check(p .. "diag: a bank that cannot be read says so",
-        table.concat(lines, "\n"):find("adapter bank account: not readable now", 1, true) ~= nil, table.concat(lines, "\n"))
-    bank[2].canView = true
-    _G.C_Bank.FetchPurchasedBankTabData = function() error("boom") end
+    _G.C_Container.GetContainerNumSlots = function() error("boom") end
     lines = {}
     ok = pcall(Client.RunStockDiagnostic, Client, lines)
-    check(p .. "diag: a failing section is reported, the rest still prints",
-        ok and table.concat(lines, "\n"):find("SECTION ERROR", 1, true) ~= nil
-        and table.concat(lines, "\n"):find("region=EU", 1, true) ~= nil)
-    _G.issecretvalue = nil
-    _G.GetContainerNumSlots, _G.GetContainerItemInfo, _G.GetRealmName, _G.GetCurrentRegion = nil, nil, nil, nil
+    check(p .. "diag: a failing read is reported, not raised",
+        ok and table.concat(lines, "\n"):find("SECTION ERROR: bags: ", 1, true) ~= nil, table.concat(lines, "\n"))
+    _G.C_Bank = nil
+    _G.GetContainerNumSlots, _G.GetContainerItemInfo = nil, nil
 end)
 
 -- ===========================================================================
