@@ -526,7 +526,7 @@ Why the plan in hand has to be a candidate, and has to be favoured: once the pla
 
 **Date:** 2026-11-24
 
-**Status:** Accepted
+**Status:** Superseded by ADR-019 (withdrawn before any release; kept here for the reasoning)
 
 ### Context
 
@@ -559,6 +559,43 @@ The shopping list takes owned stock off, and since ADR-017 owned stock also shap
 - Bank and alt stock count by default without another addon.
 - A change to the bank rules must keep the whole test suite green: the seeded random walk (`scripts/test_stockfuzz.lua`) together with `test_scanner.lua`, `test_stockflow.lua` and `test_stockmemory.lua`, which alone guard some of the rules (`docs/development/TESTING.md`).
 - Both resets keep the remembered stock; "Forget remembered characters" clears it, and a character not played for 180 days is forgotten.
+
+---
+
+## ADR-019: Bank and Alts Come From Syndicator; the Own Stock Memory Is Withdrawn
+
+**Date:** 2026-11-25
+
+**Status:** Accepted (supersedes ADR-018)
+
+### Context
+
+ADR-018 had LazyProf remember every character's bags and, on WoW Forever, the bank as read while its window is open, so that bank and alt stock could count without another addon. It was built and tested headless but never shipped. It has never run in game either: with Syndicator installed it switches itself off, and the one client it was tried on has Syndicator. Its bank rules rest on about two dozen client behaviours that are not measured (when the bank reports a change after its window closed, whether a move's slots read as locked at the close, what a crash leaves behind), and a review found a false alarm in them: a stack picked up and put back marks the bank as out of date. Syndicator already reads the bank and the alts on WoW Forever, and it also knows mail, auction listings and the guild bank, which the memory never did. v0.10.1 worked this way.
+
+### Decision
+
+- Bank, mail, auction listings, alts and the guild bank come from the Syndicator addon alone, as in v0.10.1 (`AddSyndicatorStock` and the `Scan*` helpers in `Modules/Inventory/Scanner.lua`). Only the scanner reads `Syndicator.API` (the boundary test checks it).
+- Without Syndicator LazyProf still loads and plans, and counts only the carried bags of the character played, read live through the client adapter (on WoW Forever bags 0-5, so the reagent bag counts).
+- The options "Include bank items", "Include alt characters" and "Include guild bank" are greyed out without Syndicator and say that they need it. When bank or alt stock is asked for and Syndicator is missing, the scan says so (`meta.bagsOnly`) and the Shopping tab starts with one grey line: "Only the bags of this character are counted. Install Syndicator to count your bank and alts too."
+- The memory is removed: `StockMemory.lua`, the bank rules and bank visits in the scanner, the bag saves and the logout flush, the bank and logout methods of both client adapters, "Forget remembered characters", the resets keeping the saved stock, and the Shopping lines and tooltip ages of remembered stock. `MigrateSettings` drops `LazyProfDB.global.stock`, which only unreleased builds wrote.
+- What the memory work improved and is not memory stays: the bags read through the adapter, the Self-Found rule for stock (no alts and no guild bank for a character that is Self-Found by the setting or by the game's own flag), the scan cache keyed on the stock settings, the recalculation that drops the frame's scan, and `/lp diag stock`, which now also lists the characters Syndicator knows with the plain values of their records.
+
+### Alternatives Considered
+
+- Keep the memory beside Syndicator: two sources of truth for one count, and the memory's rules would still be unmeasured.
+- Make Syndicator a hard dependency: turned down. Every player without it would lose the addon, where today they keep the path and the bags.
+- Count the closed bank live through the client's item count: whether that count sees a closed bank on WoW Forever is not known, and the alts would still need a memory.
+
+### Trade-offs Accepted
+
+- Without Syndicator, bank and alt stock do not count at all; the Shopping tab and the options say so.
+- What Syndicator reports is taken as it is. Its alt stock is not yet filtered by faction, soulbound items or realm (a later change, once its records are known in game; `/lp diag stock` prints them).
+
+### Consequences
+
+- About 16,000 lines of code and tests are gone, among them the seeded random walk through bank visits and the suites built on it.
+- The stock a player sees is the stock Syndicator shows, so the two addons agree.
+- On WoW Forever, where the realm name is a shard name that can change, `/lp diag stock` shows whether Syndicator remembers the same character twice under two realm names.
 
 ---
 

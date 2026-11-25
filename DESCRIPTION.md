@@ -37,7 +37,7 @@ See [CraftLib's profession coverage](https://github.com/kaldown/CraftLib#profess
 - **Two strategies** - Cheapest (minimize gold) or Fastest (minimize crafts)
 - **Spare crafts** - Plan extra crafts and reagents for bad luck with skill-ups (5 to 30 percent, 15 by default)
 - **More options** - One switch in the window shows the rest: Cheapest / Fastest, "Spare crafts", the selling mode, where the prices come from, the recipe search, "Hide what I have" and the craft-or-buy buttons
-- **Need / Have / Buy** - The shopping list is one table per reagent: what is still to buy first, the dearest on top, then what you make yourself, then what you already own. What is in your bags is taken off, and so is what is in your bank and on your other characters: read from Syndicator when it is installed (then also mail, your auctions and, if you turn it on, the guild bank), otherwise remembered by LazyProf itself: each character's bags and, on WoW Forever, its bank and the account bank as last seen with the bank window open. LazyProf then says how old that memory is, and stops counting a remembered bank as soon as it has a sign that the bank changed without being read (also after a session that ended without saving), and says so on the Shopping tab - as it does when the account bank was last read on a character of another faction or world. Vendor-sold reagents carry a "vendor" mark, and the recipes still to buy or learn are listed with their price
+- **Need / Have / Buy** - The shopping list is one table per reagent: what is still to buy first, the dearest on top, then what you make yourself, then what you already own. What is in your bags is taken off (on WoW Forever the reagent bag too), and with Syndicator also what is in your bank, mail, auctions and on alts (the guild bank if you turn it on). Without Syndicator the Shopping tab says that only your bags are counted. Vendor-sold reagents carry a "vendor" mark, and the recipes still to buy or learn are listed with their price
 - **Craft or buy per reagent** - LazyProf crafts intermediates (e.g., smelt ore into bars) when that is cheaper; under More options you can choose "I craft it" or "I buy it" per item instead
 - **Buy vendor reagents in one click** - At a merchant that sells reagents on your list, a small panel offers a Buy button per reagent and "Buy all" with the total on the button. Limited-stock items and items not sold for gold are listed but never bought automatically
 - **Skill gaps** - Paths bridge a gap with a green recipe while its skill-up chance is at least 10%, otherwise the gap is shown
@@ -65,7 +65,7 @@ An Auctionator price from a scan you made this session (since login or /reload) 
 
 1. **Open any profession window** - The LazyProf window opens beside it, and an arrow marks the next recipe in the profession's list
 2. **Choose how far to level** - Drag the "Level to" slider, or type a skill and press Enter. The receipt under it says what that costs
-3. **Shop** - The Shopping tab lists what to collect first (from your bank and your alts; with Syndicator also mail and your auctions) and what to buy
+3. **Shop** - The Shopping tab lists what to collect first (bank, mail, alts - with Syndicator) and what to buy
 4. **Come back and craft** - The Path tab marks the recipe you are on and moves on by itself as your skill goes up
 5. **Minimap button** (addon compartment on WoW Forever) - Plan any profession without opening it
    - Left-click: Open profession browser
@@ -91,7 +91,7 @@ LazyProf requires CraftLib to function. Install both addons together.
 
 - **[TradeSkillMaster](https://www.curseforge.com/wow/addons/tradeskill-master)** - TSM pricing (recommended)
 - **[Auctionator](https://www.curseforge.com/wow/addons/auctionator)** - Auctionator pricing + shift-click AH search
-- **[Syndicator](https://www.curseforge.com/wow/addons/syndicator)** - Stock outside your bags read from it: bank, mail, your auctions, alts, guild bank. Without it LazyProf remembers each character's bags when you play it and, on WoW Forever, its bank and the account bank when you open the bank, and counts your bank, the account bank and your alts of the same world and faction from that
+- **[Syndicator](https://www.curseforge.com/wow/addons/syndicator)** - Stock outside your bags: bank, mail, your auctions, alts, guild bank (bank and alts are counted by default once it is installed). Without it only the bags of the character you play are counted
 
 ## Supported Game Versions
 
