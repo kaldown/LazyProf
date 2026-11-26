@@ -749,10 +749,24 @@ T.section("init wiring", function()
     T.check("it is reported with its error, after the adapter's lines", type(shown) == "string"
         and shown:find("adapter: stock lines\nSECTION ERROR: stock: ", 1, true) ~= nil
         and shown:find("stock boom", 1, true) ~= nil, shown)
+    -- /lp diag spec: the specialization report (its lines: test_specialization.lua)
+    local savedAvailability = LazyProf.RecipeAvailability
+    LazyProf.RecipeAvailability = { RunSpecDiagnostic = function(_, out) out[#out + 1] = "spec lines" end }
+    shown = nil
+    LazyProf:SlashCommand("diag spec")
+    T.check("/lp diag spec opens the copyable window with its lines", type(shown) == "string"
+        and shown:find("diag spec: build=1.60.1 (70938) interface=16001 family=forever", 1, true) == 1
+        and shown:find("\nspec lines", 1, true) ~= nil, shown)
+    LazyProf.RecipeAvailability = { RunSpecDiagnostic = function() error("spec boom") end }
+    ran, runError = pcall(LazyProf.SlashCommand, LazyProf, "diag spec")
+    T.check("a failing spec section is reported, not raised", ran and shown:find("SECTION ERROR: spec: ", 1, true) ~= nil
+        and shown:find("spec boom", 1, true) ~= nil, shown)
+    LazyProf.RecipeAvailability = savedAvailability
     printed = {}
     LazyProf:SlashCommand("diag")
     local help = table.concat(printed, "\n")
     T.check("/lp diag lists the stock dump", help:find("/lp diag stock", 1, true) ~= nil)
+    T.check("/lp diag lists the specialization report", help:find("/lp diag spec ", 1, true) ~= nil, help)
     T.check("and no longer speaks of remembered banks", not help:find("remembered for your characters", 1, true), help)
     T.check("it names the characters Syndicator knows", help:find("the characters Syndicator knows", 1, true) ~= nil, help)
 end)

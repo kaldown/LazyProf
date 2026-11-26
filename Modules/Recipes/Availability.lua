@@ -300,3 +300,79 @@ function Availability:MeetsTrainerRequirements(source)
     -- Basic trainer with no special requirements
     return true
 end
+
+-- /lp diag spec (read-only): per profession whose data names specializations,
+-- each one with whether the character knows it, how many recipes need it and
+-- how many of those are left out (not learned); then each recipe whose
+-- requirement the data cannot tell, with its teaching item's tooltip lines as
+-- the client shows them - the paste that settles those (in-game check S2).
+-- An item whose data has not arrived yet is asked for and said so.
+function Availability:RunSpecDiagnostic(lines)
+    local function add(text) lines[#lines + 1] = text end
+    local registry = LazyProf.Professions and LazyProf.Professions.registry or {}
+    local learnedAll = LazyProf.db and LazyProf.db.char and LazyProf.db.char.learnedRecipes or {}
+    local keys = {}
+    for key in pairs(registry) do keys[#keys + 1] = key end
+    table.sort(keys)
+    local any = false
+    for _, key in ipairs(keys) do
+        local prof = registry[key]
+        local learned = type(learnedAll[key]) == "table" and learnedAll[key] or {}
+        local specs, bySpell, unknown, needing = {}, {}, {}, 0
+        for _, spec in ipairs(prof.specializations or {}) do
+            specs[#specs + 1] = spec
+            bySpell[spec.spellId] = { recipes = 0, learned = 0 }
+        end
+        for _, recipe in ipairs(prof.recipes or {}) do
+            local spec = recipe.specialization
+            if spec and spec.unknown then
+                unknown[#unknown + 1] = recipe
+            elseif spec and spec.spellId then
+                needing = needing + 1
+                if not bySpell[spec.spellId] then
+                    -- Named by a recipe but missing from the profession's list.
+                    specs[#specs + 1] = spec
+                    bySpell[spec.spellId] = { recipes = 0, learned = 0 }
+                end
+                local count = bySpell[spec.spellId]
+                count.recipes = count.recipes + 1
+                if learned[recipe.id] then count.learned = count.learned + 1 end
+            end
+        end
+        if #specs > 0 or #unknown > 0 then
+            any = true
+            add(string.format("%s: %d specializations, %d recipes need one, %d unknown", key, #specs, needing, #unknown))
+            table.sort(specs, function(a, b) return a.spellId < b.spellId end)
+            for _, spec in ipairs(specs) do
+                local count = bySpell[spec.spellId]
+                local knows = self:KnowsSpell(spec.spellId)
+                local leftOut = knows and 0 or (count.recipes - count.learned)
+                add(string.format("  %s (%d): known=%s recipes=%d left out=%d%s", tostring(spec.name), spec.spellId,
+                    knows and "yes" or "no", count.recipes, leftOut,
+                    count.learned > 0 and string.format(" (%d learned)", count.learned) or ""))
+            end
+            table.sort(unknown, function(a, b) return a.id < b.id end)
+            for _, recipe in ipairs(unknown) do
+                local itemId = recipe.source and recipe.source.itemId
+                local text
+                if itemId then
+                    local tooltip, why = LazyProf.Client:ItemTooltipText(itemId)
+                    if tooltip then
+                        text = table.concat(tooltip, " | ")
+                    elseif why == "not loaded" then
+                        text = "not loaded - run /lp diag spec again"
+                    else
+                        text = tostring(why)
+                    end
+                else
+                    text = "no teaching item"
+                end
+                add(string.format("  unknown: %s (%d) item %s %s | %s", tostring(recipe.name), recipe.id,
+                    tostring(itemId), learned[recipe.id] and "learned" or "left out", text))
+            end
+        end
+    end
+    if not any then
+        add("no specialization data in this CraftLib")
+    end
+end

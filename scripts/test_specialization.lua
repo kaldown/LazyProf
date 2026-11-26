@@ -301,4 +301,52 @@ T.section("forever leatherworking", function()
     A.GetAHPrice = savedAH
 end)
 
+-- ===========================================================================
+-- /lp diag spec
+-- ===========================================================================
+T.section("diag spec", function()
+    reset()
+    known[DRAGON] = true
+    local lw = {
+        recipe(101, SPEC[DRAGON]), recipe(102, SPEC[TRIBAL]), recipe(107, SPEC[TRIBAL]),
+        recipe(103, { unknown = true }, { source = { type = "unknown", itemId = 15781 } }),
+        recipe(108, { unknown = true }, { source = { type = "unknown", itemId = 20382 } }),
+        recipe(104, nil),
+    }
+    lw[4].name, lw[5].name = "Onyxia Scale Breastplate", "Dreamscale Breastplate"
+    LazyProf.Professions.registry = {
+        leatherworking = { id = 2108, name = "Leatherworking", recipes = lw,
+                           specializations = { SPEC[DRAGON], SPEC[ELEMENTAL], SPEC[TRIBAL] } },
+        alchemy = { id = 2259, name = "Alchemy", recipes = { recipe(301, nil) } },
+    }
+    LazyProf.db.char.learnedRecipes = { leatherworking = { [107] = true } }
+    LazyProf.Client.ItemTooltipText = function(_, itemId)
+        if itemId == 15781 then
+            return { "Pattern: Onyxia Scale Breastplate", "Requires Leatherworking (300)", "Requires Dragonscale Leatherworking" }
+        end
+        return nil, "not loaded"
+    end
+    local lines = {}
+    A:RunSpecDiagnostic(lines)
+    local text = table.concat(lines, "\n")
+    print(text)
+    local function has(s) return text:find(s, 1, true) ~= nil end
+    check("diag: profession summary", has("leatherworking: 3 specializations, 3 recipes need one, 2 unknown"), text)
+    check("diag: a known one", has("  Dragonscale Leatherworking (10656): known=yes recipes=1 left out=0"), text)
+    check("diag: one with no recipe", has("  Elemental Leatherworking (10658): known=no recipes=0 left out=0"), text)
+    check("diag: a learned one counts apart", has("  Tribal Leatherworking (10660): known=no recipes=2 left out=1 (1 learned)"), text)
+    check("diag: an unknown with its tooltip lines",
+        has("  unknown: Onyxia Scale Breastplate (103) item 15781 left out | Pattern: Onyxia Scale Breastplate | "
+            .. "Requires Leatherworking (300) | Requires Dragonscale Leatherworking"), text)
+    check("diag: tooltip not loaded",
+        has("  unknown: Dreamscale Breastplate (108) item 20382 left out | not loaded - run /lp diag spec again"), text)
+    check("diag: a profession without specializations is not listed", not has("alchemy"), text)
+    check("diag: plain ASCII", not text:find("[\128-\255]"))
+
+    lines = {}
+    LazyProf.Professions.registry = { alchemy = { id = 2259, name = "Alchemy", recipes = { recipe(301, nil) } } }
+    A:RunSpecDiagnostic(lines)
+    eq("diag: no data", table.concat(lines, "\n"), "no specialization data in this CraftLib")
+end)
+
 T.finish()

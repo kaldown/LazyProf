@@ -19,6 +19,7 @@ Run these in-game to check addon health:
 /lp diag merchant      -- At a merchant: what it sells as LazyProf reads it, and what would be bought (copyable window)
 /lp diag trainer       -- At a profession trainer: what it lists as LazyProf reads it, and what is remembered (copyable window)
 /lp diag stock         -- Where your stock is counted from, your bags as LazyProf reads them, and the characters Syndicator knows (copyable window)
+/lp diag spec          -- The profession specializations you know, the recipes left out for them, and what unknown patterns require (copyable window)
 /lp resetpanels        -- Move the LazyProf window and its panels back to their default place and size
 /lp reset              -- Reset database to defaults
 ```
@@ -184,6 +185,25 @@ WoW Forever only; on other clients the dump says so.
 | `remembered: professions=N trainers=N fees=N` | What is remembered for this client so far. |
 | `this trainer: profession=.. services=N` | The profession LazyProf matched this trainer to: the one most of whose recipe names appear in its list. `nil` means no listed service is a recipe LazyProf knows (a class trainer, a filter hiding everything, or a client language whose recipe names differ from the recipe data). |
 | `known <profession> trainer: Name - Zone (x, y) mapId=.. faction=.. recipesListed=N` | Each remembered trainer of that profession. A recipe still to learn names a trainer only when the trainer listed that recipe; a "Train the next rank" row names every remembered trainer of the profession. Only trainers visited by a character of your faction are shown. |
+
+### `/lp diag spec` - profession specializations
+
+**When to use:** a recipe that needs a specialization (Tribal Leatherworking, Armorsmith,
+Gnomish Engineer, ...) is offered although you do not have it, or one of your own
+specialization's recipes is missing from the path. LazyProf leaves out every recipe not yet
+learned whose pattern needs a specialization you do not know, and every recipe whose pattern
+the game data says nothing about. Learned recipes always stay.
+
+| Line | Meaning |
+|------|---------|
+| `diag spec: build=.. (..) interface=.. family=..` | The client, as for the other dumps. |
+| `<profession>: N specializations, N recipes need one, N unknown` | Each profession whose recipe data names specializations. |
+| `  <Name> (<spell id>): known=yes/no recipes=N left out=N (N learned)` | Whether the client says you know that specialization, how many recipes need it, and how many of those are left out of every path (not learned). If your own specialization says `known=no`, the client's answer is wrong for it: report it with this dump. |
+| `  unknown: <recipe> (<id>) item <item id> left out/learned \| <tooltip line> \| ...` | A recipe whose teaching item has no entry in the game data LazyProf's data was built from. The lines after it are that item's tooltip as the client shows it: a "Requires ..." line there names the specialization. `not loaded - run /lp diag spec again` means the item's data was not in the client yet and was asked for. The tooltips are read on WoW Forever only. |
+| `no specialization data in this CraftLib` | The recipe data carries no specializations (an older CraftLib). |
+
+Recipes taught by a trainer carry no specialization in the data; the trainer simply does not
+teach one you cannot learn.
 
 ### `/lp diag stock` - where your stock is counted from
 
