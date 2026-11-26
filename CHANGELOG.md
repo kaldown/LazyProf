@@ -4,6 +4,15 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- The path no longer tells you to buy a pattern you cannot learn. A recipe that needs a profession specialization you do not have (for example Chimeric Boots, which needs Tribal Leatherworking) is left out of the path, the alternatives, the shopping list and the merchant panel, even when its pattern is already in your bags. Without a specialization, every recipe that needs one is left out; recipes of your own specialization stay. Recipes you have already learned always stay. This covers WoW Forever (Leatherworking, Blacksmithing, Engineering), Season of Discovery, TBC and WotLK, wherever the game's item data names the specialization.
+- WoW Forever: 23 patterns and schematics whose specialization the game data does not tell (among them 14 Gnomish and Goblin schematics, Onyxia Scale Breastplate and Dreamscale Breastplate) are left out until learned.
+
+### Added
+
+- `/lp diag spec`: the specializations you know, how many recipes each one leaves out, and for the patterns the game data says nothing about, what their tooltip requires.
+
 ### Changed
 
 - The Path tab is now the Crafts tab and shows the plan plainly: every craft numbered in the order you make it, "7x Wild Leather Leggings" with its icon, skill range and cost, and under it what that craft uses - green for what you have, "(buy 14)" for what you still need, "(from 1)" for what an earlier craft makes. Nothing is opened until you click a craft, so no craft hides another.
