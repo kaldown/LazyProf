@@ -696,11 +696,14 @@ end
 -- Blizzard_PerksProgram/Blizzard_PerksProgramElements.lua:911-923). An item
 -- the client has no data for yet is asked for (C_Item.RequestLoadItemDataByID)
 -- and reported as nil, "not loaded": asking again after it arrives reads it.
+-- The third return then says whether the client knows such an item at all
+-- (C_Item.DoesItemExistByID, ItemDocumentation.lua:146-158): an item that
+-- never loads because the client has none is itself the answer.
 -- No tooltip data: nil, "no tooltip".
 function Client:ItemTooltipText(itemId)
     if not C_Item.IsItemDataCachedByID(itemId) then
         C_Item.RequestLoadItemDataByID(itemId)
-        return nil, "not loaded"
+        return nil, "not loaded", C_Item.DoesItemExistByID(itemId) == true
     end
     local data = C_TooltipInfo.GetItemByID(itemId)
     if not (data and data.lines) then

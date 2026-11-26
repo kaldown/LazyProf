@@ -191,19 +191,21 @@ WoW Forever only; on other clients the dump says so.
 **When to use:** a recipe that needs a specialization (Tribal Leatherworking, Armorsmith,
 Gnomish Engineer, ...) is offered although you do not have it, or one of your own
 specialization's recipes is missing from the path. LazyProf leaves out every recipe not yet
-learned whose pattern needs a specialization you do not know, and every recipe whose pattern
-the game data says nothing about. Learned recipes always stay.
+learned that needs a specialization you do not know, and every recipe whose pattern has no
+entry in the game data its recipe data was built from (so what it requires is not known).
+Learned recipes always stay.
 
 | Line | Meaning |
 |------|---------|
 | `diag spec: build=.. (..) interface=.. family=..` | The client, as for the other dumps. |
 | `<profession>: N specializations, N recipes need one, N unknown` | Each profession whose recipe data names specializations. |
 | `  <Name> (<spell id>): known=yes/no recipes=N left out=N (N learned)` | Whether the client says you know that specialization, how many recipes need it, and how many of those are left out of every path (not learned). If your own specialization says `known=no`, the client's answer is wrong for it: report it with this dump. |
-| `  unknown: <recipe> (<id>) item <item id> left out/learned \| <tooltip line> \| ...` | A recipe whose teaching item has no entry in the game data LazyProf's data was built from. The lines after it are that item's tooltip as the client shows it: a "Requires ..." line there names the specialization. `not loaded - run /lp diag spec again` means the item's data was not in the client yet and was asked for. The tooltips are read on WoW Forever only. |
+| `  unknown: <recipe> (<id>) item <item id> left out/learned \| <tooltip line> \| ...` | A recipe whose teaching item has no entry in the game data LazyProf's data was built from. The lines after it are that item's tooltip as the client shows it: a "Requires ..." line there names the specialization. `not loaded - run /lp diag spec again` means the item's data was not in the client yet and was asked for; `not loaded, and the client knows no such item` means the client has no such item at all. The tooltips are read on WoW Forever only. |
 | `no specialization data in this CraftLib` | The recipe data carries no specializations (an older CraftLib). |
 
-Recipes taught by a trainer carry no specialization in the data; the trainer simply does not
-teach one you cannot learn.
+A recipe taught by a trainer is judged by the item it makes: when only a specialist can use that
+item (Dimensional Ripper - Everlook needs Goblin Engineer), the recipe needs the specialization too.
+A trainer recipe whose item says nothing carries no specialization in the data.
 
 ### `/lp diag stock` - where your stock is counted from
 

@@ -356,9 +356,11 @@ function Availability:RunSpecDiagnostic(lines)
                 local itemId = recipe.source and recipe.source.itemId
                 local text
                 if itemId then
-                    local tooltip, why = LazyProf.Client:ItemTooltipText(itemId)
+                    local tooltip, why, exists = LazyProf.Client:ItemTooltipText(itemId)
                     if tooltip then
                         text = table.concat(tooltip, " | ")
+                    elseif why == "not loaded" and exists == false then
+                        text = "not loaded, and the client knows no such item"
                     elseif why == "not loaded" then
                         text = "not loaded - run /lp diag spec again"
                     else

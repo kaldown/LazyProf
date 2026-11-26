@@ -807,9 +807,6 @@ section("stock", function()
 end)
 
 -- ===========================================================================
--- 5. Addon compartment replaces the minimap button on Forever (ruling L8)
--- ===========================================================================
--- ===========================================================================
 -- Spells the character knows, item tooltips (specializations, P121)
 -- ===========================================================================
 section("spells and tooltips", function()
@@ -831,6 +828,7 @@ section("spells and tooltips", function()
     local loads, cached = {}, { [15781] = true, [20382] = false, [99999] = true }
     _G.C_Item.IsItemDataCachedByID = function(id) return cached[id] == true end
     _G.C_Item.RequestLoadItemDataByID = function(id) loads[#loads + 1] = id end
+    _G.C_Item.DoesItemExistByID = function(id) return id ~= 30000 end
     _G.C_TooltipInfo = { GetItemByID = function(id)
         if id ~= 15781 then return nil end
         return { lines = { { leftText = "Pattern: Onyxia Scale Breastplate" }, { leftText = "" },
@@ -840,15 +838,23 @@ section("spells and tooltips", function()
     local lines, why = Client:ItemTooltipText(15781)
     check(p .. "cached item -> its tooltip lines, empty ones dropped",
         lines and #lines == 3 and lines[3] == "Requires Dragonscale Leatherworking", tostring(why))
-    lines, why = Client:ItemTooltipText(20382)
-    check(p .. "tooltip not loaded -> nil, not loaded", lines == nil and why == "not loaded", tostring(why))
+    local exists
+    lines, why, exists = Client:ItemTooltipText(20382)
+    check(p .. "tooltip not loaded -> nil, not loaded, the item exists", lines == nil and why == "not loaded" and exists == true,
+        tostring(why))
     check(p .. "tooltip not loaded -> the item data is requested", loads[1] == 20382 and #loads == 1)
+    lines, why, exists = Client:ItemTooltipText(30000)
+    check(p .. "an item the client does not know -> not loaded, exists false", lines == nil and why == "not loaded"
+        and exists == false)
     lines, why = Client:ItemTooltipText(99999)
     check(p .. "no tooltip data -> nil, no tooltip", lines == nil and why == "no tooltip", tostring(why))
     _G.C_SpellBook, _G.C_TooltipInfo = nil, nil
-    _G.C_Item.IsItemDataCachedByID, _G.C_Item.RequestLoadItemDataByID = nil, nil
+    _G.C_Item.IsItemDataCachedByID, _G.C_Item.RequestLoadItemDataByID, _G.C_Item.DoesItemExistByID = nil, nil, nil
 end)
 
+-- ===========================================================================
+-- 5. Addon compartment replaces the minimap button on Forever (ruling L8)
+-- ===========================================================================
 section("compartment", function()
     local p = "compartment: "
     local registered, created = 0, 0
