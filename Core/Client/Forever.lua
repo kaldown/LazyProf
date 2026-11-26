@@ -676,6 +676,48 @@ function Client:Now()
     return GetServerTime()
 end
 
+-- Spells and item tooltips: which profession specialization the character
+-- knows, and what a teaching item's tooltip says it requires (P121).
+
+-- Whether the character knows the spell (e.g. 10656 Dragonscale
+-- Leatherworking). C_SpellBook.IsSpellKnown is in the running client's globals
+-- (Ketho GlobalAPI.lua:4045); the global IsSpellKnown / IsPlayerSpell exist
+-- only in the deprecated spell-book file. Whether it answers true for a
+-- profession specialization passive is in-game check S1. Anything but true is
+-- false.
+function Client:KnowsSpell(spellId)
+    return C_SpellBook.IsSpellKnown(spellId) == true
+end
+
+-- The left text of each line of an item's tooltip, in order (empty lines
+-- left out), for /lp diag spec. The tooltip data is C_TooltipInfo.GetItemByID
+-- (GlobalAPI.lua:4212), whose `lines[i].leftText` Blizzard reads the same way
+-- (Blizzard_SharedXMLGame/Tooltip/TooltipUtil.lua:44-58,
+-- Blizzard_PerksProgram/Blizzard_PerksProgramElements.lua:911-923). An item
+-- the client has no data for yet is asked for (C_Item.RequestLoadItemDataByID)
+-- and reported as nil, "not loaded": asking again after it arrives reads it.
+-- The third return then says whether the client knows such an item at all
+-- (C_Item.DoesItemExistByID, ItemDocumentation.lua:146-158): an item that
+-- never loads because the client has none is itself the answer.
+-- No tooltip data: nil, "no tooltip".
+function Client:ItemTooltipText(itemId)
+    if not C_Item.IsItemDataCachedByID(itemId) then
+        C_Item.RequestLoadItemDataByID(itemId)
+        return nil, "not loaded", C_Item.DoesItemExistByID(itemId) == true
+    end
+    local data = C_TooltipInfo.GetItemByID(itemId)
+    if not (data and data.lines) then
+        return nil, "no tooltip"
+    end
+    local out = {}
+    for _, line in ipairs(data.lines) do
+        if type(line.leftText) == "string" and line.leftText ~= "" then
+            out[#out + 1] = line.leftText
+        end
+    end
+    return out
+end
+
 -- /lp diag stock: the raw bag values and what the adapter makes of them.
 -- Read-only.
 function Client:RunStockDiagnostic(lines)

@@ -153,8 +153,11 @@ function LazyProf:SlashCommand(input)
         self:Print("Diagnostics: /lp diag merchant - at a merchant: what it sells as LazyProf reads it, and what would be bought.")
         self:Print("Diagnostics: /lp diag trainer - at a profession trainer: what it lists as LazyProf reads it, and what is remembered.")
         self:Print("Diagnostics: /lp diag stock - where your stock is counted from, your bags as LazyProf reads them, and the characters Syndicator knows.")
+        self:Print("Diagnostics: /lp diag spec - the profession specializations you know, the recipes left out for them, and what unknown patterns require.")
     elseif cmd == "diag stock" then
         self:RunStockDiagnostic()
+    elseif cmd == "diag spec" then
+        self:RunSpecDiagnostic()
     elseif cmd == "diag prices" then
         self:RunPriceDiagnostic()
     elseif cmd == "diag merchant" then
@@ -687,6 +690,21 @@ function LazyProf:RunStockDiagnostic()
     if not ok then add("SECTION ERROR: stock: " .. tostring(err)) end
 
     self:Print("diag stock: output ready - copy it from the window that opened.")
+    self:ShowDiagnosticOutput(table.concat(out, "\n"))
+end
+
+-- /lp diag spec: the profession specializations the character knows, the
+-- recipes left out for them, and the tooltips of teaching items whose
+-- requirement the data cannot tell (Availability:RunSpecDiagnostic). Read-only.
+function LazyProf:RunSpecDiagnostic()
+    local out = {}
+    local version, build, _, interface = GetBuildInfo()
+    out[1] = "diag spec: build=" .. tostring(version) .. " (" .. tostring(build) .. ") interface=" .. tostring(interface)
+        .. " family=" .. tostring(self.ClientFamily)
+    local ok, err = pcall(self.RecipeAvailability.RunSpecDiagnostic, self.RecipeAvailability, out)
+    if not ok then out[#out + 1] = "SECTION ERROR: spec: " .. tostring(err) end
+
+    self:Print("diag spec: output ready - copy it from the window that opened.")
     self:ShowDiagnosticOutput(table.concat(out, "\n"))
 end
 

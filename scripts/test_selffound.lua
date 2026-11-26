@@ -45,7 +45,9 @@ _G.CraftLib = {
 }
 
 local knownSpells = {}
-_G.IsSpellKnown = function(id) return knownSpells[id] == true end
+-- The adapter's answer (Client:KnowsSpell); SelfFound asks nothing else.
+addon.Client = { KnowsSpell = function(_self, id) return knownSpells[id] == true end }
+_G.IsSpellKnown = function() error("SelfFound must ask the client adapter, not IsSpellKnown") end
 
 -- ---------------------------------------------------------------------------
 -- Load the real module

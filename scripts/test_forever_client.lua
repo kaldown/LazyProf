@@ -204,7 +204,8 @@ local SURFACE = { "IsOpen", "AnchorFrame", "PanelOffsetX", "GetLine", "NoDataPro
                   "StartMerchant", "IsMerchantOpen", "MerchantAnchorFrame", "MerchantItems", "BuyFromMerchant",
                   "FreeBagSlots", "Money", "RunMerchantDiagnostic",
                   "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic",
-                  "BagContents", "IsSelfFoundCharacter", "Now", "RunStockDiagnostic" }
+                  "BagContents", "IsSelfFoundCharacter", "Now", "RunStockDiagnostic",
+                  "KnowsSpell", "ItemTooltipText" }
 
 -- Names of the functions an adapter installs.
 local function methodNames(client)
@@ -803,6 +804,52 @@ section("stock", function()
         ok and table.concat(lines, "\n"):find("SECTION ERROR: bags: ", 1, true) ~= nil, table.concat(lines, "\n"))
     _G.C_Bank = nil
     _G.GetContainerNumSlots, _G.GetContainerItemInfo = nil, nil
+end)
+
+-- ===========================================================================
+-- Spells the character knows, item tooltips (specializations, P121)
+-- ===========================================================================
+section("spells and tooltips", function()
+    local p = "spells: "
+    local addon = loadAdapter(16001, 18, 18)
+    local Client = addon.Client
+    local asked = {}
+    _G.C_SpellBook = { IsSpellKnown = function(id)
+        asked[#asked + 1] = id
+        if id == 10656 then return true end
+        if id == 10658 then return nil end
+        return false
+    end }
+    check(p .. "known spell -> true", Client:KnowsSpell(10656) == true)
+    check(p .. "unknown spell -> false", Client:KnowsSpell(10660) == false)
+    check(p .. "KnowsSpell nil -> false", Client:KnowsSpell(10658) == false)
+    check(p .. "asks C_SpellBook.IsSpellKnown with the id", asked[1] == 10656 and #asked == 3)
+
+    local loads, cached = {}, { [15781] = true, [20382] = false, [99999] = true }
+    _G.C_Item.IsItemDataCachedByID = function(id) return cached[id] == true end
+    _G.C_Item.RequestLoadItemDataByID = function(id) loads[#loads + 1] = id end
+    _G.C_Item.DoesItemExistByID = function(id) return id ~= 30000 end
+    _G.C_TooltipInfo = { GetItemByID = function(id)
+        if id ~= 15781 then return nil end
+        return { lines = { { leftText = "Pattern: Onyxia Scale Breastplate" }, { leftText = "" },
+                           { leftText = "Requires Leatherworking (300)" },
+                           { leftText = "Requires Dragonscale Leatherworking" } } }
+    end }
+    local lines, why = Client:ItemTooltipText(15781)
+    check(p .. "cached item -> its tooltip lines, empty ones dropped",
+        lines and #lines == 3 and lines[3] == "Requires Dragonscale Leatherworking", tostring(why))
+    local exists
+    lines, why, exists = Client:ItemTooltipText(20382)
+    check(p .. "tooltip not loaded -> nil, not loaded, the item exists", lines == nil and why == "not loaded" and exists == true,
+        tostring(why))
+    check(p .. "tooltip not loaded -> the item data is requested", loads[1] == 20382 and #loads == 1)
+    lines, why, exists = Client:ItemTooltipText(30000)
+    check(p .. "an item the client does not know -> not loaded, exists false", lines == nil and why == "not loaded"
+        and exists == false)
+    lines, why = Client:ItemTooltipText(99999)
+    check(p .. "no tooltip data -> nil, no tooltip", lines == nil and why == "no tooltip", tostring(why))
+    _G.C_SpellBook, _G.C_TooltipInfo = nil, nil
+    _G.C_Item.IsItemDataCachedByID, _G.C_Item.RequestLoadItemDataByID, _G.C_Item.DoesItemExistByID = nil, nil, nil
 end)
 
 -- ===========================================================================

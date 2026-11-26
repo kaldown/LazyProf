@@ -11,13 +11,48 @@ local Availability = LazyProf.RecipeAvailability
 -- otherwise cached. Availability is invariant within one synchronous
 -- calculation, so we memoize by recipe id and reset between calculations.
 Availability._memo = nil  -- nil = disabled (active only between Begin/EndRecalc)
+Availability._spells = nil  -- spell id -> known, for the same span
 
 function Availability:BeginRecalc()
     self._memo = {}
+    self._spells = {}
 end
 
 function Availability:EndRecalc()
     self._memo = nil
+    self._spells = nil
+end
+
+-- Does the character know the spell (a profession specialization)? Asked of
+-- the client adapter once per spell per calculation, so a specialization
+-- learned meanwhile counts from the next calculation (opening the profession
+-- window recalculates). No adapter, or a partial one in headless suites: not
+-- known - the side that leaves a recipe out (P125).
+function Availability:KnowsSpell(spellId)
+    local cache = self._spells
+    if cache and cache[spellId] ~= nil then
+        return cache[spellId]
+    end
+    local client = LazyProf.Client
+    local known = (client and client.KnowsSpell and client:KnowsSpell(spellId)) and true or false
+    if cache then cache[spellId] = known end
+    return known
+end
+
+-- What keeps the character from learning the recipe, as far as profession
+-- specializations go (ruling P121): nil when nothing does - the recipe is
+-- learned, the data names no specialization, or the character knows the one
+-- it names - else the recipe's own `specialization` table: { spellId, name },
+-- or { unknown = true } when the data could not say. Unknown is never "none":
+-- buying a pattern the character cannot learn is the money lost.
+function Availability:SpecializationBlocks(recipe)
+    if recipe.learned then return nil end
+    local spec = recipe.specialization
+    if not spec then return nil end
+    if not spec.unknown and spec.spellId and self:KnowsSpell(spec.spellId) then
+        return nil
+    end
+    return spec
 end
 
 -- Memoizing front for IsRecipeAvailableUncached (see BeginRecalc/EndRecalc).
@@ -45,6 +80,15 @@ function Availability:IsRecipeAvailableUncached(recipe)
     -- 1. Already learned - always available
     if recipe.learned then
         return true, { type = "learned" }
+    end
+
+    -- 1b. A specialization the character does not know: never available, not
+    -- even from a pattern in the bags (that pattern cannot be learned). The
+    -- strategies already leave such recipes out of their candidates; this is
+    -- the second line for any other caller.
+    local blocked = self:SpecializationBlocks(recipe)
+    if blocked then
+        return false, { type = "specialization", specialization = blocked }
     end
 
     -- 2. Check if we have the recipe item in inventory
@@ -255,4 +299,82 @@ function Availability:MeetsTrainerRequirements(source)
 
     -- Basic trainer with no special requirements
     return true
+end
+
+-- /lp diag spec (read-only): per profession whose data names specializations,
+-- each one with whether the character knows it, how many recipes need it and
+-- how many of those are left out (not learned); then each recipe whose
+-- requirement the data cannot tell, with its teaching item's tooltip lines as
+-- the client shows them - the paste that settles those (in-game check S2).
+-- An item whose data has not arrived yet is asked for and said so.
+function Availability:RunSpecDiagnostic(lines)
+    local function add(text) lines[#lines + 1] = text end
+    local registry = LazyProf.Professions and LazyProf.Professions.registry or {}
+    local learnedAll = LazyProf.db and LazyProf.db.char and LazyProf.db.char.learnedRecipes or {}
+    local keys = {}
+    for key in pairs(registry) do keys[#keys + 1] = key end
+    table.sort(keys)
+    local any = false
+    for _, key in ipairs(keys) do
+        local prof = registry[key]
+        local learned = type(learnedAll[key]) == "table" and learnedAll[key] or {}
+        local specs, bySpell, unknown, needing = {}, {}, {}, 0
+        for _, spec in ipairs(prof.specializations or {}) do
+            specs[#specs + 1] = spec
+            bySpell[spec.spellId] = { recipes = 0, learned = 0 }
+        end
+        for _, recipe in ipairs(prof.recipes or {}) do
+            local spec = recipe.specialization
+            if spec and spec.unknown then
+                unknown[#unknown + 1] = recipe
+            elseif spec and spec.spellId then
+                needing = needing + 1
+                if not bySpell[spec.spellId] then
+                    -- Named by a recipe but missing from the profession's list.
+                    specs[#specs + 1] = spec
+                    bySpell[spec.spellId] = { recipes = 0, learned = 0 }
+                end
+                local count = bySpell[spec.spellId]
+                count.recipes = count.recipes + 1
+                if learned[recipe.id] then count.learned = count.learned + 1 end
+            end
+        end
+        if #specs > 0 or #unknown > 0 then
+            any = true
+            add(string.format("%s: %d specializations, %d recipes need one, %d unknown", key, #specs, needing, #unknown))
+            table.sort(specs, function(a, b) return a.spellId < b.spellId end)
+            for _, spec in ipairs(specs) do
+                local count = bySpell[spec.spellId]
+                local knows = self:KnowsSpell(spec.spellId)
+                local leftOut = knows and 0 or (count.recipes - count.learned)
+                add(string.format("  %s (%d): known=%s recipes=%d left out=%d%s", tostring(spec.name), spec.spellId,
+                    knows and "yes" or "no", count.recipes, leftOut,
+                    count.learned > 0 and string.format(" (%d learned)", count.learned) or ""))
+            end
+            table.sort(unknown, function(a, b) return a.id < b.id end)
+            for _, recipe in ipairs(unknown) do
+                local itemId = recipe.source and recipe.source.itemId
+                local text
+                if itemId then
+                    local tooltip, why, exists = LazyProf.Client:ItemTooltipText(itemId)
+                    if tooltip then
+                        text = table.concat(tooltip, " | ")
+                    elseif why == "not loaded" and exists == false then
+                        text = "not loaded, and the client knows no such item"
+                    elseif why == "not loaded" then
+                        text = "not loaded - run /lp diag spec again"
+                    else
+                        text = tostring(why)
+                    end
+                else
+                    text = "no teaching item"
+                end
+                add(string.format("  unknown: %s (%d) item %s %s | %s", tostring(recipe.name), recipe.id,
+                    tostring(itemId), learned[recipe.id] and "learned" or "left out", text))
+            end
+        end
+    end
+    if not any then
+        add("no specialization data in this CraftLib")
+    end
 end
