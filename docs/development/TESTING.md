@@ -32,7 +32,7 @@ The script runs every `scripts/test_*.lua` with `lua5.1`, then parse-checks ever
 | `test_merchant.lua` | The merchant panel and `/lp diag merchant` |
 | `test_trainers.lua` | Remembered trainers and fees |
 | `test_scanner.lua` | Which owned stock counts: the bags through the client adapter, Syndicator's bank, mail, auctions, alts and guild bank as each setting says, the bags only without it (and the scan saying so), Self-Found by the setting or by the game's own flag, the frame cache, the stock options, the wiring in `Core/Init.lua` (bag updates, the refresh, the reset) and `/lp diag stock`, with the block of characters Syndicator knows read defensively |
-| `test_views.lua` | What the window shows, as data: header, receipt, target model, Path list, Shopping list (with its first line when only the bags are counted), recipe search, arrow tooltip |
+| `test_views.lua` | What the window shows, as data: header, receipt, target model, Crafts list (numbers, uses lines), Shopping list (with the craft notes and its first line when only the bags are counted), recipe search, arrow tooltip |
 | `test_window.lua` | The window's frames on both client families: header, More options, target box and slider, receipt, the two tabs (the Shopping tab's line when only the bags are counted), closed state, combat, planning mode |
 | `test_controls.lua` | The widget layer: tabs, button group, number box, checkbox, search box, slider, resize bounds, the row list |
 | `test_widgets.lua` | The row pool and the per-client dropdown |
@@ -75,9 +75,9 @@ After making changes, run `/reload` and verify:
 ### Testing Path Calculation
 
 1. Open profession at various skill levels
-2. Verify the Path tab lists the path: one row per recipe with its skill range, crafts and cost; the row you are on is marked with `>`, highlighted and open
+2. Verify the Crafts tab lists the plan: one numbered row per craft ("7x <recipe>", skill range, cost) with what it uses on the line under it; the craft you are on is highlighted; nothing is open until clicked
 3. Check that costs are reasonable (not 0, not astronomical)
-4. Verify the Shopping tab matches what the rows need
+4. Verify the Shopping tab matches what the crafts use, and each reagent names its craft
 5. Verify the receipt adds up: "You spend" equals "Reagents to buy" plus "Recipes" on the Shopping tab, and "Net cost" equals "You spend" minus "Back from selling"
 
 ### Testing the Target ("Level to")
@@ -141,7 +141,7 @@ After making changes, run `/reload` and verify:
 ### Testing Alternative Recipes
 
 1. Open profession with multiple recipe choices at same skill level
-2. On the Path tab, click a row to open it: "Other recipes for N-M" lists the best three, then "Show all N"
+2. On the Crafts tab, click a craft to open it: "Other recipes for N-M" lists the best three, then "Show all N"
 3. Hover an alternative: the tooltip shows materials and, for unlearned recipes (`[!]`), the source
 4. Click "Use" - verify the path is planned again at once and the opened row shows "Your choice" with a "Reset" button
 5. /reload - verify the choice is still there

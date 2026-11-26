@@ -42,7 +42,7 @@ bug report or dev chat.
 ### `/lp diag learned` - learned-recipe detection
 
 **When to use:** recipes you have already learned are treated as still to learn (a
-"Learn first: ..." line under a row of the Path tab (on Classic Era data: "Learn the recipe first"), "(to learn)" or "[!] Unlearned" on
+"Learn first: ..." line under a craft of the Crafts tab (on Classic Era data: "Learn the recipe first"), "(to learn)" or "[!] Unlearned" on
 an alternative, a learn step in the arrow tooltip), or the wrong recipes are
 treated as known. Open the profession window first, then run it.
 
@@ -169,7 +169,7 @@ figure rounded up to whole bundles.
 
 ### `/lp diag trainer` - what a trainer lists, and what is remembered
 
-**When to use:** an opened row of the Path tab (for a recipe still to learn) or the tooltip
+**When to use:** a craft of the Crafts tab (for a recipe still to learn) or the tooltip
 of a "Train the next rank" row does not list a trainer you have visited, or a recipe's
 fee is missing or wrong. Run it **with the trainer's window open**. Trainers are recorded on
 WoW Forever only; on other clients the dump says so.
@@ -332,7 +332,7 @@ Verify CraftLib is loaded and has profession data:
 
 4. Is the next recipe still to learn?
    - When the profession window hides unlearned recipes, the arrow has no row to point at
-     until you learn it; the recipe's opened row on the Path tab says so.
+     until you learn it; the craft on the Crafts tab says so, under what it uses.
 
 ### LazyProf Window Not Showing
 
@@ -394,7 +394,7 @@ Verify CraftLib is loaded and has profession data:
 
 ### My Path Changed Although Nothing Looks Different
 
-**Symptoms:** The Path tab lists other recipes than before, with the same skill and target
+**Symptoms:** The Crafts tab lists other recipes than before, with the same skill and target
 
 Under the Cheapest strategy four things decide the route besides the reagent prices:
 
@@ -450,11 +450,11 @@ With "Selling" set to "Do not count" the line is not shown at all.
 
 | Before | Now |
 |--------|-----|
-| Guide and Steps tabs | The **Path** tab: one row per recipe. Click a row to open it in place; the opened row shows what the Guide card showed (reagents, how to learn the recipe, the other recipes with "Use"). The row you are on is marked with `>`, highlighted and open until you close it. |
-| The coloured path bar | No bar. The Path list shows every run with its skill range in skill order, a "Train the next rank before N" row at each rank still to train, and gaps as red rows. |
+| Guide and Steps tabs | The **Crafts** tab: one numbered row per craft, with what it uses under it. Click a craft to open it in place; the opened craft shows what the Guide card showed (reagents, how to learn the recipe, the other recipes with "Use"). The craft you are on is highlighted; nothing is open until you click it. |
+| The coloured path bar | No bar. The Crafts tab shows every run with its skill range in skill order, a "Train the next rank before N" row at each rank still to train, and gaps as red rows. |
 | Range dropdown | **"Level to"**: set the target to the end of a bracket and the path, the receipt and the shopping list cover only that part. |
 | The footer with its totals | The **receipt** above the tabs: "You spend", "Back from selling", "Net cost". |
-| Prev / Current step / Next | Click any row of the Path list to open it. |
+| Prev / Current step / Next | Click any craft of the Crafts tab to open it. |
 | "Target" box | "Level to", with a slider under the number box. A typed number counts on Enter. |
 | "With margin" | "Spare crafts", under More options. |
 | Cheapest / Fastest, the price line, the recipe search, "Hide what I have", "I craft it / I buy it", "Plan from skill 1" | Under **More options** (the button on the right of the status line; it stays as you left it). |
@@ -498,7 +498,7 @@ means the skill is at the profession's last cap.
 
 ### Alternatives Not Showing
 
-**Symptoms:** A row of the Path tab has no "or: ..." line under it, or an opened row has no
+**Symptoms:** A craft of the Crafts tab has no "or: ..." line under it, or an opened row has no
 "Other recipes" section
 
 **Check:**
