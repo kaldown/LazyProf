@@ -65,8 +65,8 @@ function M.amounts(Views, view)
         end
     end
     for _, row in ipairs(Views.Path(view, {})) do
-        if row.layout == "path" and row.stage then
-            local cost = copper(row.cols[3])
+        if row.layout == "crafts" and row.stage then
+            local cost = copper(row.cols[2])
             if cost then out.column = out.column + cost else out.unknown = out.unknown + 1 end
         elseif row.sub and row.stage and row.stage.kind == "learn" then
             out.fees = out.fees + (copper(row.text:match(", ([%dgsc ]+)$")) or 0)

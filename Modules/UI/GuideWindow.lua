@@ -1,5 +1,5 @@
 -- Modules/UI/GuideWindow.lua
--- The LazyProf window: one framed window with two tabs, Path and Shopping,
+-- The LazyProf window: one framed window with two tabs, Crafts and Shopping,
 -- under a shared header that answers how far (the target: a number box and a
 -- slider from the real skill to the last cap) and what it costs (the receipt).
 -- Everything else in the header - strategy, spare crafts, what crafts are
@@ -22,7 +22,7 @@
 --   planRow     planning: the profession dropdown
 --   targetRow   "Level to", the number box, the slider and its end labels
 --   receipt     the receipt's lines (Views.Receipt)
---   searchRow   More options, Path tab: the recipe search
+--   searchRow   More options, Crafts tab: the recipe search
 --   shopRow     More options, Shopping tab: "Hide what I have"
 --
 -- The path is never planned again while the slider's handle is moved: moving
@@ -78,7 +78,7 @@ local WHITE = { 1, 1, 1 }
 -- Tabs in display order. key names the tab in saved data. (A tab saved by an
 -- older build as "guide" or "steps" is not in the list and opens the first.)
 GuideWindow.TABS = {
-    { key = "path", label = "Path" },
+    { key = "path", label = "Crafts" },   -- (key kept: stored as lastTab)
     { key = "shopping", label = "Shopping" },
 }
 
@@ -106,7 +106,7 @@ GuideWindow.receiptLines = {} -- Views.Receipt of the view drawn last
 GuideWindow.receiptRows = {}  -- the receipt's font strings: [i] = { label, amount, note }
 -- What the player opened and typed, kept per profession for the session:
 --   expanded     [Views.RowKey(stage)] = true (opened) | false (closed); absent:
---                only the run the player is on is open
+--                closed
 --   showAllAlts  [Views.RowKey(stage)] = true: every alternative of the run is listed
 --   search       the recipe search text
 GuideWindow.states = {}       -- [profKey] = { expanded, showAllAlts, search }
@@ -531,7 +531,7 @@ function GuideWindow:Build()
     receipt.bg:SetPoint("TOPLEFT", MARGIN - 6, 0)
     receipt.bg:SetPoint("BOTTOMRIGHT", -(MARGIN - 6), 0)
 
-    -- Path tab, More options: recipe search above the list
+    -- Crafts tab, More options: recipe search above the list
     local searchRow = Block(body, SEARCH_HEIGHT)
     self.searchRow = searchRow
     self.searchBox = Widgets.CreateSearchBox(searchRow, "LazyProfGuideSearch", "Search recipes...", function(text)
