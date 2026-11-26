@@ -194,9 +194,33 @@ section("selection", function()
                          "StartMerchant", "IsMerchantOpen", "MerchantAnchorFrame", "MerchantItems", "BuyFromMerchant",
                          "FreeBagSlots", "Money", "RunMerchantDiagnostic",
                          "StartTrainer", "TrainerInfo", "TrainerServices", "RunTrainerDiagnostic",
-                         "BagContents", "IsSelfFoundCharacter", "Now", "RunStockDiagnostic" }) do
+                         "BagContents", "IsSelfFoundCharacter", "Now", "RunStockDiagnostic",
+                  "KnowsSpell", "ItemTooltipText" }) do
         check(p .. "Client:" .. m .. " exists", type(classic.Client[m]) == "function")
     end
+end)
+
+-- ===========================================================================
+-- Spells the character knows, item tooltips (specializations, P121)
+-- ===========================================================================
+section("classic spells", function()
+    local p = "classic spells: "
+    local addon = loadAdapter(11508)
+    local Client = addon.Client
+    local savedPlayer, savedKnown = _G.IsPlayerSpell, _G.IsSpellKnown
+    _G.IsPlayerSpell = function(id) return id == 10656 end
+    _G.IsSpellKnown = function() error("IsSpellKnown asked while IsPlayerSpell exists") end
+    check(p .. "IsPlayerSpell first: known", Client:KnowsSpell(10656) == true)
+    check(p .. "IsPlayerSpell first: not known", Client:KnowsSpell(10660) == false)
+    _G.IsPlayerSpell = nil
+    _G.IsSpellKnown = function(id) if id == 10656 then return 1 end return nil end
+    check(p .. "only IsSpellKnown: a true value counts", Client:KnowsSpell(10656) == true)
+    check(p .. "only IsSpellKnown: nil -> false", Client:KnowsSpell(10660) == false)
+    _G.IsSpellKnown = nil
+    check(p .. "neither -> false", Client:KnowsSpell(10656) == false)
+    _G.IsPlayerSpell, _G.IsSpellKnown = savedPlayer, savedKnown
+    local lines, why = Client:ItemTooltipText(15781)
+    check(p .. "ItemTooltipText -> nil, not read on this client", lines == nil and why == "not read on this client")
 end)
 
 -- ===========================================================================

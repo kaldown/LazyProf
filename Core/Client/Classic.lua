@@ -456,6 +456,24 @@ function Client:Now()
     return time()
 end
 
+-- Spells and item tooltips (P121) ---------------------------------------------
+
+-- Whether the character knows the spell (e.g. 10656 Dragonscale
+-- Leatherworking): IsPlayerSpell where the client has it, else the older
+-- IsSpellKnown; looked up at each call. Neither: false. Anything but a true
+-- value is false (IsSpellKnown may return 1 / nil on older clients).
+function Client:KnowsSpell(spellId)
+    local known = IsPlayerSpell or IsSpellKnown
+    if not known then return false end
+    return known(spellId) and true or false
+end
+
+-- Item tooltips are read on WoW Forever only (/lp diag spec); the owner plays
+-- that client, and the Classic tooltip scan is not worth its code here.
+function Client:ItemTooltipText(_itemId)
+    return nil, "not read on this client"
+end
+
 -- /lp diag stock: the bags as this adapter reads them. Read-only.
 function Client:RunStockDiagnostic(lines)
     local function add(text) lines[#lines + 1] = text end

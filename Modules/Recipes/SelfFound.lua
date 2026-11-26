@@ -61,7 +61,10 @@ function SelfFound:BuildKnownProfessions()
         end
     end
 
-    if not known["mining"] and IsSpellKnown and IsSpellKnown(SMELTING_SPELL_ID) then
+    -- Through the client adapter (the only place that may ask the client about
+    -- spells). Headless suites may install a partial adapter: no answer = not known.
+    local client = LazyProf.Client
+    if not known["mining"] and client and client.KnowsSpell and client:KnowsSpell(SMELTING_SPELL_ID) then
         known["mining"] = true
     end
 

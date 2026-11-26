@@ -26,6 +26,9 @@ local FORBIDDEN = {
     -- Which container is which and which bank is which, and the game's own
     -- Self-Found flag (the adapter's BagContents / IsSelfFoundCharacter)
     "Enum.BagIndex", "Enum.BankType", "C_PlayerInfo",
+    -- Spells the character knows and item tooltips (the adapter's KnowsSpell /
+    -- ItemTooltipText)
+    "C_SpellBook", "IsPlayerSpell", "IsSpellKnown", "C_TooltipInfo",
 }
 
 local EXEMPT_DIRS = { "Core/Client/", "Modules/UI/Widgets/" }
