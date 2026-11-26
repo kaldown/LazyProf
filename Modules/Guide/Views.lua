@@ -937,8 +937,10 @@ local function AddRun(rows, stage, learn, isCurrent, number, index, crafted, vie
         AddOpenedRun(rows, stage, (learn and not learn.done) and learn or nil, view, ctx)
         return
     end
-    -- (Inside an opened run the same text is part of its learn lines.)
-    if view.hiddenRecipeId and view.hiddenRecipeId == recipe.id then
+    -- Said once, under the run with the "Learn first" line (a rank step can
+    -- split a recipe into several runs); inside an opened run the same text
+    -- is part of its learn lines.
+    if learn and view.hiddenRecipeId and view.hiddenRecipeId == recipe.id then
         rows[#rows + 1] = { kind = "line", sub = true, wrap = true, stage = stage, indent = CRAFT_SUB_INDENT,
                             color = ORANGE, text = HIDDEN_TEXT, alpha = alpha, onClick = toggle, bg = subBg }
     end

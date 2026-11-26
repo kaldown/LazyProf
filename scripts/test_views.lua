@@ -762,19 +762,39 @@ T.section("crafts list", function()
 
     -- The profession window hides the recipe: the arrow cannot point at it,
     -- and the closed craft says why.
-    view = lwView()
-    view.hiddenRecipeId = 60
-    rows = Views.Path(view, ctx)
-    T.check("hidden recipe: said under the closed craft", rows[4].text:find("hides unlearned recipes", 1, true) ~= nil)
-    T.eq("hidden recipe: in orange", rows[4].color[2], 0.5)
-    -- (The window sets hiddenRecipeId for a recipe still to learn: an opened
-    -- run says it among its learn lines.)
+    -- (The window sets hiddenRecipeId for a recipe still to learn: the run
+    -- with its "Learn first" line says it, opened or closed.)
     local unlearned = {}
     for k, v in pairs(LEGS) do unlearned[k] = v end
     unlearned.learned = false
     unlearned._sourceInfo = { type = "trainer", cost = 100, npcName = "Any Leatherworking Trainer" }
     local hiddenPath = leatherPath()
     hiddenPath.steps[1].recipe = unlearned
+    view = lwView({ path = hiddenPath })
+    view.hiddenRecipeId = 60
+    rows = Views.Path(view, ctx)
+    T.check("fixture: learn line, then uses line", rows[3].text:find("Learn first", 1, true) ~= nil and rows[4].uses == true)
+    T.check("hidden recipe: said under the closed craft", rows[5].text:find("hides unlearned recipes", 1, true) ~= nil)
+    T.eq("hidden recipe: in orange", rows[5].color[2], 0.5)
+    -- A rank step splits the recipe into two runs: said once, under the run
+    -- that is learned first.
+    local hiddenGloves = {}
+    for k, v in pairs(A) do hiddenGloves[k] = v end
+    hiddenGloves.learned = false
+    hiddenGloves._sourceInfo = { type = "trainer", cost = 100, npcName = "Any Tailoring Trainer" }
+    local split = makePath()
+    split.steps[1].recipe, split.steps[2].recipe = hiddenGloves, hiddenGloves
+    view = shopView(split, { liveCap = 150 })
+    view.hiddenRecipeId = 1
+    local hints, firstRunUses = 0, nil
+    for i, r in ipairs(Views.Path(view, ctx)) do
+        if r.uses and r.stage.recipe == hiddenGloves and not firstRunUses then firstRunUses = i end
+        if r.text and r.text:find("hides unlearned recipes", 1, true) then
+            hints = hints + 1
+            T.eq("split recipe: the hint follows the first run's uses line", i, firstRunUses + 1)
+        end
+    end
+    T.eq("split recipe: the hint once", hints, 1)
     view = lwView({ path = hiddenPath, expanded = { ["craft:60"] = true } })
     view.hiddenRecipeId = 60
     local said = 0
