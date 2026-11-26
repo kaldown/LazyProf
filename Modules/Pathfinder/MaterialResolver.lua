@@ -36,6 +36,11 @@ function Resolver:CanCraft(recipeInfo)
     if (LazyProf.Client:PlayerSkill(profKey) or 0) <= 0 then
         return false
     end
+    -- A trainer recipe that needs a specialization the character does not
+    -- know is not one it can have learned (P121).
+    if LazyProf.RecipeAvailability and LazyProf.RecipeAvailability:SpecializationBlocks(recipe) then
+        return false
+    end
     return (recipe.source and recipe.source.type == "trainer") or false
 end
 

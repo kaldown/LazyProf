@@ -29,6 +29,8 @@ function Professions:Initialize()
             name = data.name,
             milestones = data.milestones,
             recipes = data.recipes,
+            -- { { spellId, name }, ... } the recipes need; nil when none does
+            specializations = data.specializations,
         }
     end
 end

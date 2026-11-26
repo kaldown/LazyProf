@@ -38,6 +38,12 @@ LazyProf.PathfinderStrategies.fastest = {
                     local color = Utils.GetSkillColor(effectiveSkill, recipe.skillRange)
                     if color == "green" and not allowGreen then
                         -- Green recipes excluded by setting
+                    elseif LazyProf.RecipeAvailability:SpecializationBlocks(recipe) then
+                        -- Needs a specialization the character does not know
+                        -- (or one the data cannot name): left out entirely, so
+                        -- it is never an alternative, a pin or a remembered
+                        -- route's pick, and no pattern in the bags or Self-Found
+                        -- rule can bring it back (P121).
                     elseif recipe.learned then
                         -- Already learned - always available
                         recipe._isUnavailable = nil

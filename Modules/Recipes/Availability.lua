@@ -11,13 +11,48 @@ local Availability = LazyProf.RecipeAvailability
 -- otherwise cached. Availability is invariant within one synchronous
 -- calculation, so we memoize by recipe id and reset between calculations.
 Availability._memo = nil  -- nil = disabled (active only between Begin/EndRecalc)
+Availability._spells = nil  -- spell id -> known, for the same span
 
 function Availability:BeginRecalc()
     self._memo = {}
+    self._spells = {}
 end
 
 function Availability:EndRecalc()
     self._memo = nil
+    self._spells = nil
+end
+
+-- Does the character know the spell (a profession specialization)? Asked of
+-- the client adapter once per spell per calculation, so a specialization
+-- learned meanwhile counts from the next calculation (opening the profession
+-- window recalculates). No adapter, or a partial one in headless suites: not
+-- known - the side that leaves a recipe out (P125).
+function Availability:KnowsSpell(spellId)
+    local cache = self._spells
+    if cache and cache[spellId] ~= nil then
+        return cache[spellId]
+    end
+    local client = LazyProf.Client
+    local known = (client and client.KnowsSpell and client:KnowsSpell(spellId)) and true or false
+    if cache then cache[spellId] = known end
+    return known
+end
+
+-- What keeps the character from learning the recipe, as far as profession
+-- specializations go (ruling P121): nil when nothing does - the recipe is
+-- learned, the data names no specialization, or the character knows the one
+-- it names - else the recipe's own `specialization` table: { spellId, name },
+-- or { unknown = true } when the data could not say. Unknown is never "none":
+-- buying a pattern the character cannot learn is the money lost.
+function Availability:SpecializationBlocks(recipe)
+    if recipe.learned then return nil end
+    local spec = recipe.specialization
+    if not spec then return nil end
+    if not spec.unknown and spec.spellId and self:KnowsSpell(spec.spellId) then
+        return nil
+    end
+    return spec
 end
 
 -- Memoizing front for IsRecipeAvailableUncached (see BeginRecalc/EndRecalc).
@@ -45,6 +80,15 @@ function Availability:IsRecipeAvailableUncached(recipe)
     -- 1. Already learned - always available
     if recipe.learned then
         return true, { type = "learned" }
+    end
+
+    -- 1b. A specialization the character does not know: never available, not
+    -- even from a pattern in the bags (that pattern cannot be learned). The
+    -- strategies already leave such recipes out of their candidates; this is
+    -- the second line for any other caller.
+    local blocked = self:SpecializationBlocks(recipe)
+    if blocked then
+        return false, { type = "specialization", specialization = blocked }
     end
 
     -- 2. Check if we have the recipe item in inventory
