@@ -192,7 +192,7 @@ T.section("options text", function()
     T.check("the margin option names the box as the window does", margin:find('"Spare crafts"', 1, true) ~= nil
         and margin:find("More options", 1, true) ~= nil, margin)
     local open = LazyProf.options.args.display.args.openWithProfession.desc
-    T.check("the window option names today's tabs", open:find("Path and Shopping", 1, true) ~= nil, open)
+    T.check("the window option names today's tabs", open:find("Crafts and Shopping", 1, true) ~= nil, open)
 end)
 
 T.section("settings migration", function()

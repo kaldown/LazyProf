@@ -74,6 +74,24 @@ local function Grey(text)
     return "|cFF888888" .. text .. "|r"
 end
 
+local function White(text)
+    return "|cFFFFFFFF" .. text .. "|r"
+end
+
+local function Orange(text)
+    return "|cFFFF8000" .. text .. "|r"
+end
+
+-- "1", "1 and 4", "1, 3 and 4".
+function Views.JoinAnd(list)
+    local n = #list
+    if n == 0 then return "" end
+    if n == 1 then return tostring(list[1]) end
+    local head = {}
+    for i = 1, n - 1 do head[i] = tostring(list[i]) end
+    return table.concat(head, ", ") .. " and " .. tostring(list[n])
+end
+
 function Views.DifficultyColor(color)
     return DIFFICULTY_COLOR[color] or DIFFICULTY_COLOR.gray
 end
@@ -572,7 +590,7 @@ function Views.TrainerRows(path, recipeId, label)
     return rows
 end
 
--- Path tab ---------------------------------------------------------------------
+-- Crafts tab -------------------------------------------------------------------
 
 -- An alternative is close when it costs the player at most this share of the
 -- run's own net cost more (a cheaper one always is): it is then offered right
@@ -592,7 +610,89 @@ function Views.RowKey(stage)
 end
 
 local OPEN_INDENT = 14
-local PATH_COLUMNS = { "skill", "crafts", "cost" }
+local CRAFT_COLUMNS = { "skill", "cost" }
+local CRAFT_NUMBER_WIDTH = 18   -- the number column of a craft's row
+local CRAFT_SUB_INDENT = 34     -- the lines under a craft start under its name
+local CRAFTS_HINT = "Click a craft for its other recipes and details."
+
+-- The craft runs of a stage list, numbered in order (the numbers the Crafts
+-- tab shows and the Shopping tab refers to):
+--   numberOf  { [stage] = n } for every craft stage
+--   recipes   how many different recipes the runs use
+--   crafts    the runs' shown quantities added up
+--   usedBy    { [itemId] = { { number, stage, need }, ... } }: the runs that
+--             use each reagent, with how many they use
+function Views.CraftIndex(stages)
+    local index = { numberOf = {}, recipes = 0, crafts = 0, usedBy = {} }
+    local seen, n = {}, 0
+    for _, stage in ipairs(stages or {}) do
+        if stage.kind == "craft" then
+            n = n + 1
+            index.numberOf[stage] = n
+            local id = stage.recipe and stage.recipe.id
+            if id ~= nil and not seen[id] then
+                seen[id] = true
+                index.recipes = index.recipes + 1
+            end
+            index.crafts = index.crafts + (stage.quantity or 0)
+            for _, mat in ipairs(stage.materials or {}) do
+                local list = index.usedBy[mat.itemId]
+                if not list then
+                    list = {}
+                    index.usedBy[mat.itemId] = list
+                end
+                list[#list + 1] = { number = n, stage = stage, need = mat.need }
+            end
+        end
+    end
+    return index
+end
+
+-- What a run uses, one part per reagent: "<need> <name>", then in brackets
+-- the earlier runs that make some of it ("from 1"), what is still to get
+-- ("buy 14", or "make 14" when the shopping list makes it) and "no price"
+-- when it has to be bought without a price. Green: owned stock and earlier
+-- runs cover it; white: some of it is to get; orange: to buy, no price.
+-- `crafted` = { [itemId] = true } for the shopping list's crafted rows.
+local function UsesText(stage, numberOf, crafted)
+    local parts = {}
+    for _, mat in ipairs(stage.materials or {}) do
+        local notes = {}
+        if mat.made and mat.madeBy then
+            local from, seen = {}, {}
+            for _, maker in ipairs(mat.madeBy) do
+                local n = numberOf[maker]
+                if n and not seen[n] then
+                    seen[n] = true
+                    from[#from + 1] = tostring(n)
+                end
+            end
+            if #from > 0 then notes[#notes + 1] = "from " .. Views.JoinAnd(from) end
+        end
+        local unpriced = false
+        if mat.missing > 0 then
+            if crafted[mat.itemId] then
+                notes[#notes + 1] = "make " .. tostring(mat.missing)
+            else
+                notes[#notes + 1] = "buy " .. tostring(mat.missing)
+                if not mat.price then
+                    notes[#notes + 1] = "no price"
+                    unpriced = true
+                end
+            end
+        end
+        local text = tostring(mat.need) .. " " .. tostring(mat.name or "Unknown")
+        if #notes > 0 then text = text .. " (" .. table.concat(notes, ", ") .. ")" end
+        if mat.missing <= 0 then
+            parts[#parts + 1] = Green(text)
+        elseif unpriced then
+            parts[#parts + 1] = Orange(text)
+        else
+            parts[#parts + 1] = White(text)
+        end
+    end
+    return table.concat(parts, ", ")
+end
 
 -- Where the player is in the list: the current stage, or the run (or gap)
 -- right after the learn and rank steps that come before it.
@@ -784,7 +884,9 @@ local function AddOpenedRun(rows, stage, learn, view, ctx)
 end
 
 -- The row of a craft run, its sub-lines and, when it is open, its content.
-local function AddRun(rows, stage, learn, isCurrent, view, ctx)
+-- `number` is the run's number in the list; `index` is Views.CraftIndex of
+-- the stages and `crafted` the shopping list's crafted items (UsesText).
+local function AddRun(rows, stage, learn, isCurrent, number, index, crafted, view, ctx)
     local recipe = stage.recipe
     local unpriced = UnpricedToBuy(stage)
     -- A finished run (the what-if from skill 1 has them) keeps its cost: the
@@ -795,24 +897,23 @@ local function AddRun(rows, stage, learn, isCurrent, view, ctx)
     elseif stage.outOfPocketCost < stage.cost then
         costColor = GREEN
     end
+    local alpha = stage.done and 0.5 or 1
     local tooltip = CraftTooltip(stage, unpriced)
     tooltip[#tooltip + 1] = { text = "Click to open or close", r = 0.5, g = 0.5, b = 0.5 }
-    -- Open when the player opened it; the run the player is on is open until
-    -- it is closed. A click asks for the other state.
-    local open = view.expanded and view.expanded[Views.RowKey(stage)]
-    if open == nil then open = isCurrent end
-    open = open and true or false
+    -- Closed until the player opens it. A click asks for the other state.
+    local open = (view.expanded and view.expanded[Views.RowKey(stage)]) and true or false
     local function toggle() ctx.onToggleExpand(stage, not open) end
     -- The sub-lines of the run the player is on share its highlight.
     local subBg = isCurrent and BG_CURRENT_SUB or nil
     rows[#rows + 1] = {
-        kind = "cols", layout = "path", stage = stage, open = open,
-        text = (isCurrent and "> " or "") .. (recipe.name or "Unknown"),
+        kind = "cols", layout = "crafts", stage = stage, open = open,
+        lead = tostring(number), leadWidth = CRAFT_NUMBER_WIDTH, icon = stage.icon,
+        text = Text.StepRecipeText(stage),
         color = Views.DifficultyColor(stage.color),
-        cols = { Text.StageRange(stage), tostring(stage.quantity), cost },
-        colColors = costColor and { [3] = costColor } or nil,
+        cols = { Text.StageRange(stage), cost },
+        colColors = costColor and { [2] = costColor } or nil,
         bg = isCurrent and BG_CURRENT or BG_ROW, hoverBg = isCurrent and BG_CURRENT_HOVER or BG_ROW_HOVER,
-        alpha = stage.done and 0.5 or 1, tooltip = tooltip, onClick = toggle,
+        alpha = alpha, tooltip = tooltip, onClick = toggle,
     }
 
     if learn then
@@ -821,20 +922,34 @@ local function AddRun(rows, stage, learn, isCurrent, view, ctx)
             learnTip[#learnTip + 1] = { text = line.text, r = 0.7, g = 0.7, b = 0.7 }
         end
         rows[#rows + 1] = { kind = "line", sub = true, stage = learn, text = Text.LearnFirst(learn, view.profile),
-                            color = LEARN_COLOR, alpha = learn.done and 0.5 or 1, tooltip = learnTip, onClick = toggle,
-                            bg = subBg }
+                            indent = CRAFT_SUB_INDENT, color = LEARN_COLOR, alpha = learn.done and 0.5 or 1,
+                            tooltip = learnTip, onClick = toggle, bg = subBg }
+    end
+
+    if stage.materials and #stage.materials > 0 then
+        rows[#rows + 1] = {
+            kind = "line", sub = true, uses = true, wrap = true, stage = stage, indent = CRAFT_SUB_INDENT,
+            text = UsesText(stage, index.numberOf, crafted), alpha = alpha, onClick = toggle, bg = subBg,
+        }
     end
 
     if open then
         AddOpenedRun(rows, stage, (learn and not learn.done) and learn or nil, view, ctx)
         return
     end
+    -- Said once, under the run with the "Learn first" line (a rank step can
+    -- split a recipe into several runs); inside an opened run the same text
+    -- is part of its learn lines.
+    if learn and view.hiddenRecipeId and view.hiddenRecipeId == recipe.id then
+        rows[#rows + 1] = { kind = "line", sub = true, wrap = true, stage = stage, indent = CRAFT_SUB_INDENT,
+                            color = ORANGE, text = HIDDEN_TEXT, alpha = alpha, onClick = toggle, bg = subBg }
+    end
     local alt = CloseAlternative(stage)
     if alt then
         -- (The difference is the row's right-hand text, so a long recipe
         -- name is cut short before the amount is.)
         rows[#rows + 1] = {
-            kind = "line", sub = true, stage = stage, alt = alt, color = GREY,
+            kind = "line", sub = true, stage = stage, alt = alt, color = GREY, indent = CRAFT_SUB_INDENT,
             text = "or: " .. AlternativeName(alt, view.profile),
             right = CostDifference(alt.costDelta, "same cost"), rightColor = GREY, bg = subBg,
             tooltip = AlternativeTooltip(alt, stage, view.profile),
@@ -865,27 +980,33 @@ local function GapRow(stage, isCurrent)
     }
 end
 
--- The path as one list: a row per recipe run in skill order, with what has to
--- be done first and the closest alternative folded in under it, and thin rows
--- for rank steps and gaps. A click opens a run in place (AddOpenedRun).
+-- The Crafts tab: the path as one list of numbered crafts in skill order.
+-- A header row ("2 recipes, 8 crafts" and the column titles), then per craft
+-- run a row - its number, the crafted item's icon, "7x <recipe>" in the
+-- run's colour, skill range, cost - with sub-lines under it: what has to be
+-- learned first, what the run uses (UsesText), why the arrow cannot point at
+-- it when the profession window hides the recipe, and the closest
+-- alternative. Rank steps and gaps are thin rows of their own, without a
+-- number. A last dim line says a click shows more. A click opens a run in
+-- place (AddOpenedRun).
 -- Row descriptors the list widget has to know beyond today's:
---   layout = "path"   on "cols" rows: three columns - skill range, crafts,
---                     cost - in place of need / have / buy / cost, no mark
---                     column; the header row carries the titles
+--   layout = "crafts" on "cols" rows: two columns - skill range, cost - and
+--                     a number (lead) before the icon; the header row
+--                     carries the titles
 --   layout = "nomark" on the reagent table of an opened run: need / have /
 --                     buy / cost without the mark column
 --   sub = true        on "line" rows: a sub-line of the row above it (smaller,
 --                     indented, grey unless `color` is given): "Learn first:
---                     trainer, 4s", and "or: <recipe>" with the difference
+--                     trainer, 4s"; the uses line (`uses = true`, wraps, its
+--                     parts coloured); and "or: <recipe>" with the difference
 --                     in cost on the right ("+14s") and a Use button
 -- Rows also carry `stage` (and `alt` on alternatives) for the caller, and a
 -- run's row `open` (true | false): whether it is shown opened.
--- The row the player is on is marked with "> " and highlighted, and so are
--- the sub-lines under it (a little dimmer).
+-- The run the player is on is highlighted, and so are the sub-lines under
+-- it (a little dimmer).
 -- State is kept under Views.RowKey(stage), which does not change when the
 -- path is planned again from another skill:
---   view.expanded[key]      true = open, false = closed, nil = open only for
---                           the run the player is on
+--   view.expanded[key]      true = open; false or nil = closed
 --   view.showAllAlts[key]   every alternative of that run is listed
 -- ctx: onToggleExpand(stage, open) - `open` is the state the click asks for -
 -- onShowRecipe(recipe, skill), onUseAlternative(stage, alt),
@@ -901,7 +1022,14 @@ function Views.Path(view, ctx)
         return { { kind = "line", height = 26, text = "No steps to show.", color = DIM } }
     end
 
-    local rows = { { kind = "cols", layout = "path", header = true, text = "Recipes", cols = PATH_COLUMNS } }
+    local index = Views.CraftIndex(stages)
+    local crafted = {}
+    for _, row in ipairs(view.missing and view.missing.rows or {}) do
+        if row.crafted then crafted[row.itemId] = true end
+    end
+    local header = string.format("%d %s, %d %s", index.recipes, index.recipes == 1 and "recipe" or "recipes",
+        index.crafts, index.crafts == 1 and "craft" or "crafts")
+    local rows = { { kind = "cols", layout = "crafts", header = true, text = header, cols = CRAFT_COLUMNS } }
     local current = CurrentRow(view)
     local learn = nil   -- the learn step waiting for its run's row
     for _, stage in ipairs(stages) do
@@ -910,12 +1038,15 @@ function Views.Path(view, ctx)
         elseif stage.kind == "craft" then
             local itsLearn = (learn and learn.recipe.id == stage.recipe.id) and learn or nil
             learn = nil
-            AddRun(rows, stage, itsLearn, stage == current, view, ctx)
+            AddRun(rows, stage, itsLearn, stage == current, index.numberOf[stage], index, crafted, view, ctx)
         elseif stage.kind == "rank" then
             rows[#rows + 1] = RankRow(stage, view)
         elseif stage.kind == "gap" then
             rows[#rows + 1] = GapRow(stage, stage == current)
         end
+    end
+    if next(index.numberOf) then
+        rows[#rows + 1] = { kind = "line", height = 18, color = DIM, text = CRAFTS_HINT }
     end
     return rows
 end
@@ -1009,7 +1140,46 @@ local function ChoiceButton(row, ctx)
     }
 end
 
-local function ShoppingTooltip(row)
+-- What a reagent of the shopping list is for, by the Crafts tab's numbers:
+-- "for 2. Blue Suede Shoes" (one recipe; "for 1 and 4. <recipe>" when it has
+-- two runs), "for crafts 1, 3 and 4" (several recipes), "to make Bolt of
+-- Linen Cloth" (needed only to make a reagent the list crafts), or both
+-- joined. nil when nothing uses it. `index` is Views.CraftIndex of the
+-- stages, `parents` { [itemId] = { name, ... } } the crafted rows each item
+-- is made into.
+local function ShoppingNote(itemId, index, parents)
+    local parts = {}
+    local uses = index.usedBy[itemId]
+    if uses and #uses > 0 then
+        local numbers, seenNumber, recipes, distinct, name = {}, {}, {}, 0, nil
+        for _, use in ipairs(uses) do
+            if not seenNumber[use.number] then
+                seenNumber[use.number] = true
+                numbers[#numbers + 1] = tostring(use.number)
+            end
+            local recipe = use.stage.recipe
+            if not recipes[recipe.id] then
+                recipes[recipe.id] = true
+                distinct = distinct + 1
+                name = name or recipe.name
+            end
+        end
+        if distinct == 1 then
+            parts[#parts + 1] = "for " .. Views.JoinAnd(numbers) .. ". " .. tostring(name or "Unknown")
+        else
+            parts[#parts + 1] = "for crafts " .. Views.JoinAnd(numbers)
+        end
+    end
+    local makes = parents[itemId]
+    if makes and #makes > 0 then
+        parts[#parts + 1] = "to make " .. Views.JoinAnd(makes)
+    end
+    if #parts == 0 then return nil end
+    return table.concat(parts, ", ")
+end
+
+-- `uses` (optional): the craft runs that use the item (CraftIndex.usedBy).
+local function ShoppingTooltip(row, uses)
     local lines = {}
     local parts = {}
     if (row.inBags or 0) > 0 then parts[#parts + 1] = "bags " .. row.inBags end
@@ -1028,6 +1198,13 @@ local function ShoppingTooltip(row)
         local pm = LazyProf.PriceManager
         if pm and pm.PeekPriceInfo then
             lines[#lines + 1] = { text = pm.PriceLine(pm:PeekPriceInfo(row.itemId)), r = 0.7, g = 0.7, b = 0.7 }
+        end
+    end
+    if uses and #uses > 0 then
+        lines[#lines + 1] = { text = "Used by:", r = 1, g = 0.82, b = 0 }
+        for _, use in ipairs(uses) do
+            lines[#lines + 1] = { text = string.format("  %d. %s: %s", use.number, tostring(use.stage.recipe.name),
+                tostring(use.need)), r = 0.7, g = 0.7, b = 0.7 }
         end
     end
     lines[#lines + 1] = { text = "Shift-click to link", r = 0.5, g = 0.5, b = 0.5 }
@@ -1069,7 +1246,10 @@ Views.BAGS_ONLY_LINE = "Only the bags of this character are counted. Install Syn
 --   the table (need / have / buy / cost, a "vendor" mark): reagents with
 --     something left to buy, the dearest first and those without a price
 --     last; then the reagents the character makes, each with what it is made
---     from beneath it; then the reagents already owned, dimmed, by name
+--     from beneath it; then the reagents already owned, dimmed, by name.
+--     Under each reagent a grey note says what it is for (ShoppingNote: the
+--     Crafts tab's numbers of the runs that use it, from view.stages; or
+--     the crafted reagent it is made into); `note = true` on that row
 --   "Reagents to buy": the sum of the Cost column (missing.buyTotal)
 --   "Recipes to learn": a row per recipe that costs something, with where it
 --     comes from (never on the VANILLA profile) and its price in gold, and
@@ -1132,6 +1312,20 @@ function Views.Shopping(view, ctx)
             owned = {}
         end
 
+        -- What each reagent is for (ShoppingNote).
+        local index = Views.CraftIndex(view.stages)
+        local parents = {}
+        for _, row in ipairs(items) do
+            for _, child in ipairs(row.crafted and row.children or {}) do
+                local list = parents[child.itemId]
+                if not list then
+                    list = {}
+                    parents[child.itemId] = list
+                end
+                list[#list + 1] = tostring(row.name)
+            end
+        end
+
         local table_ = {}
         local function addItem(row, alpha)
             local buy = row.toBuy > 0 and tostring(row.toBuy) or "-"
@@ -1153,7 +1347,7 @@ function Views.Shopping(view, ctx)
                 },
                 mark = row.isVendor and "vendor" or nil,
                 bg = BG_SUB, hoverBg = BG_ROW_HOVER, alpha = alpha,
-                itemId = row.itemId, link = row.link, tooltip = ShoppingTooltip(row),
+                itemId = row.itemId, link = row.link, tooltip = ShoppingTooltip(row, index.usedBy[row.itemId]),
             }
             -- (A choice the player made acts without More options too, so
             -- its button stays to show it and undo it.)
@@ -1161,6 +1355,14 @@ function Views.Shopping(view, ctx)
                 desc.button = ChoiceButton(row, ctx)
             end
             table_[#table_ + 1] = desc
+            local note = ShoppingNote(row.itemId, index, parents)
+            if note then
+                table_[#table_ + 1] = {
+                    kind = "line", sub = true, note = true, indent = 16, height = 14, text = note,
+                    bg = BG_SUB, hoverBg = BG_ROW_HOVER, alpha = alpha,
+                    itemId = row.itemId, link = row.link, tooltip = desc.tooltip,
+                }
+            end
             for _, child in ipairs(row.crafted and row.children or {}) do
                 table_[#table_ + 1] = {
                     kind = "cols", indent = 14, text = child.name, color = GREY,
@@ -1219,7 +1421,7 @@ end
 -- What the arrow's tooltip says: the current step, the next two, the
 -- receipt's amounts (what is spent, what comes back from selling, the net)
 -- with its notes, and where the prices came from. (The whole path is on the
--- Path tab.)
+-- Crafts tab.)
 -- Returns { { text, right, r, g, b, rr, rg, rb, wrap }, ... }; a line with
 -- `right` is a two-column line.
 function Views.ArrowTooltip(view)
@@ -1283,7 +1485,7 @@ function Views.ArrowTooltip(view)
         end
         local more = #stages - math.min(current.index + 2, #stages)
         if more > 0 then
-            add(string.format("... and %d more step%s (see the Path tab)", more, more == 1 and "" or "s"), 0.5, 0.5, 0.5)
+            add(string.format("... and %d more step%s (see the Crafts tab)", more, more == 1 and "" or "s"), 0.5, 0.5, 0.5)
         end
     end
 

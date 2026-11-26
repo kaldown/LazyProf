@@ -206,11 +206,11 @@ A shared header answers how far and what it costs, and sits above the tabs. It i
 - in planning: the profession dropdown
 - **the target**: "Level to", a number box and a slider from the real skill to the last cap. Moving the handle only rewrites the number; letting go (or Enter in the box) stores the target and plans again, once
 - **the receipt**: "You spend", "Back from selling", "Net cost" and its notes (`Views.Receipt`)
-- with More options: the recipe search (Path tab) or "Hide what I have" (Shopping tab)
+- with More options: the recipe search (Crafts tab) or "Hide what I have" (Shopping tab)
 
 The tabs:
-- **Path** - one row per recipe run (skill range, crafts, cost), with "Learn first" and the closest alternative as sub-lines, thin rows for rank steps and gaps. A click opens a run in place: reagent table, what a craft sells for, how to learn the recipe, the other recipes for the range with "Use"
-- **Shopping** - "Collect first" (bank, mail, auctions, guild bank, alts), a Need / Have / Buy / Cost table (to buy first, then crafted, then owned) with "Reagents to buy", and "Recipes to learn". With More options a craft-or-buy button per craftable reagent
+- **Crafts** (internal key `path`) - a header "N recipes, M crafts", then one numbered row per recipe run ("7x <recipe>", skill range, cost; the crafted item's icon), with "Learn first", what the run uses (green: owned; "(buy N)", "(make N)", "(from 1)") and the closest alternative as sub-lines, thin rows for rank steps and gaps. Nothing is open by default; a click opens a run in place: reagent table, what a craft sells for, how to learn the recipe, the other recipes for the range with "Use". Numbers come from `Views.CraftIndex`
+- **Shopping** - "Collect first" (bank, mail, auctions, guild bank, alts), a Need / Have / Buy / Cost table (to buy first, then crafted, then owned) with "Reagents to buy", and "Recipes to learn". Under each reagent a note says what it is for, by the Crafts tab's numbers ("for 2. Blue Suede Shoes", "for crafts 1, 3 and 4", "to make Bolt of Linen Cloth"). With More options a craft-or-buy button per craftable reagent
 
 The window has two modes: docked to the profession window (live), and undocked for any profession picked from the minimap button, the addon compartment or `/lp browse` (planning). The file only places widgets and passes clicks on; what the header and each tab show is built as plain data by `Modules/Guide/Views.lua` from the stages of `Modules/Guide/Stages.lua` and the path's account (`Pathfinder:Account`), and drawn by `Widgets/RowList.lua`.
 

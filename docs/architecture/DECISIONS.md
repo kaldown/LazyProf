@@ -470,6 +470,14 @@ The window was rearranged around two questions - how far, and what does it cost 
 
 The decision stands: frames are thin and content is built as data. The receipt, the slider's model and both tabs are pure functions in `Modules/Guide/Views.lua` with headless tests; `Modules/UI/GuideWindow.lua` places widgets and passes clicks on. `Modules/Guide/Range.lua` and `Modules/UI/PathBar.lua` were removed. The trade-off that the steps and the shopping list cannot be seen side by side still holds.
 
+### Amended 2026-11-26
+
+In game the plan could not be read: with the run you were on opened by default, its details pushed the next craft out of sight, and the Shopping tab never said what a reagent was for. So:
+
+- The Path tab is now the Crafts tab: a numbered row per craft run ("7x <recipe>", the crafted item's icon), with what the run uses on a line under it. Nothing is opened by default; a click opens a run as before. The tab's internal key stays `path`.
+- Each reagent of the Shopping tab says which craft it is for, by the same numbers.
+- The numbers and the item-to-run map are one pure function, `Views.CraftIndex`; the stages record which earlier run made a reagent (`madeBy`) and each run's icon. Amounts are unchanged.
+
 ---
 
 ## ADR-017: Candidate Routes: Sale Value and Owned Stock, Never Dearer Than the Market Route

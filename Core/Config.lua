@@ -313,7 +313,7 @@ LazyProf.options = {
                 },
                 openWithProfession = {
                     name = "Open with the profession window",
-                    desc = "Show the LazyProf window (Path and Shopping) beside the " ..
+                    desc = "Show the LazyProf window (Crafts and Shopping) beside the " ..
                            "profession window whenever you open a profession.\n\n" ..
                            "When off, the arrow still points at the next recipe, and the " ..
                            "window can be opened from the minimap button or /lp browse.",

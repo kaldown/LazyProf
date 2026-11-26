@@ -2,6 +2,13 @@
 
 All notable changes to LazyProf will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- The Path tab is now the Crafts tab and shows the plan plainly: every craft numbered in the order you make it, "7x Wild Leather Leggings" with its icon, skill range and cost, and under it what that craft uses - green for what you have, "(buy 14)" for what you still need, "(from 1)" for what an earlier craft makes. Nothing is opened until you click a craft, so no craft hides another.
+- The Shopping tab says what each reagent is for: "for 2. Blue Suede Shoes", "for crafts 1, 3 and 4", or "to make Bolt of Linen Cloth".
+
 ## [0.11.0] - 2026-11-25
 
 Plan, then shop: open a profession, see the cheapest path from your real skill, choose how far to level, get one total of what to buy.
