@@ -61,12 +61,21 @@ end
 -- then against `remaining` (owned counts left after earlier stages),
 -- consuming what is used. Returns the rows, the market cost of all reagents
 -- and the cost of what is missing (each reagent's cost in whole copper, the
--- sums of those). A row's `have` includes what earlier runs made (`made`).
+-- sums of those). A row's `have` includes what earlier runs made (`made`),
+-- and `madeBy` lists the runs (stages) those came from, in the order taken.
 local function Materials(recipe, quantity, remaining, prices, made, onTake)
     local rows, cost, pay = {}, 0, 0
     for _, reagent in ipairs(recipe.reagents or {}) do
         local need = reagent.count * quantity
-        local fromPath = made and made.Take(reagent.itemId, need, onTake) or 0
+        -- (onTake is shared by every run and does not know the row, so the
+        -- row's own list of makers is kept here.)
+        local makers = nil
+        local function took(maker, n)
+            makers = makers or {}
+            makers[#makers + 1] = maker
+            if onTake then onTake(maker, n) end
+        end
+        local fromPath = made and made.Take(reagent.itemId, need, took) or 0
         local have = remaining[reagent.itemId] or 0
         local used = math.min(need - fromPath, have)
         local missing = need - fromPath - used
@@ -82,6 +91,7 @@ local function Materials(recipe, quantity, remaining, prices, made, onTake)
             need = need,
             have = have + fromPath,
             made = fromPath > 0 and fromPath or nil,
+            madeBy = makers,
             missing = missing,
             price = price,
             estimatedCost = missingCost,
@@ -90,6 +100,14 @@ local function Materials(recipe, quantity, remaining, prices, made, onTake)
         pay = pay + missingCost
     end
     return rows, cost, pay
+end
+
+-- The icon of the item a recipe makes: the question mark while the item's
+-- data has not arrived, nil for a recipe that makes no item (an enchant).
+local function RunIcon(recipe)
+    if not recipe.itemId then return nil end
+    local _, _, icon = Utils.GetItemInfo(recipe.itemId)
+    return icon or QUESTION_MARK
 end
 
 -- Colour at the stage's start and the skills inside it where it changes.
@@ -305,6 +323,9 @@ end
 --   sale           { [recipeId] = copper } what one craft sells for (default
 --                  path.sale.values; none: nothing is counted as sold)
 -- Returns stages, summary (Stages.Totals of all stages plus currentIndex).
+-- A craft stage carries, among others, `icon` (the crafted item's icon, see
+-- RunIcon) and `materials` (the Materials rows of its shown quantity, each
+-- with `madeBy`: the earlier craft stages that supplied part of it).
 function Stages.Build(path, opts)
     opts = opts or {}
     local prices = opts.prices or path.prices or {}
@@ -381,6 +402,7 @@ function Stages.Build(path, opts)
                 end
                 current = {
                     kind = "craft", recipe = recipe, bridge = step.bridge and true or nil,
+                    icon = RunIcon(recipe),
                     fragments = { step }, baseQuantity = step.quantity,
                     from = step.skillStart, to = step.skillEnd,
                     fromDisplay = math.floor(step.skillStart), toDisplay = math.floor(step.skillEnd),

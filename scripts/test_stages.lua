@@ -638,6 +638,29 @@ T.section("stage order and part totals", function()
     T.eq("totals of a part include its fees", totals.cost, 14005)
 end)
 
+-- The Crafts tab names the earlier run a reagent comes from and shows the
+-- crafted item's icon: the stages carry both.
+T.section("who made a reagent, and the run's icon", function()
+    local maker = recipe(70, "Maker", 100, 120, 130, 140, { reagents = { { itemId = 171, count = 1, name = "Raw" } } })
+    maker.itemId = 170
+    local user = recipe(71, "User", 110, 130, 140, 150, { reagents = { { itemId = 170, count = 1, name = "Made" } } })
+    local path = { targetSkill = 125, steps = { step(maker, 100, 110, 10, 0), step(user, 110, 125, 15, 0) },
+                   gaps = {}, totalCost = 0 }
+    local stages = Stages.Build(path, { prices = { [170] = 10, [171] = 5 }, milestones = MILESTONES, inventory = {} })
+    local first, second
+    for _, s in ipairs(stages) do
+        if s.kind == "craft" and s.recipe == maker then first = s end
+        if s.kind == "craft" and s.recipe == user then second = s end
+    end
+    local made = second.materials[1]
+    T.check("made by run 1", made.madeBy ~= nil and made.madeBy[1] == first and #made.madeBy == 1)
+    T.eq("ten of fifteen from the path", made.made, 10)
+    T.eq("five missing", made.missing, 5)
+    T.check("nothing made for run 1's reagent", first.materials[1].madeBy == nil)
+    T.eq("icon of an item not loaded yet", first.icon, "Interface\\Icons\\INV_Misc_QuestionMark")
+    T.check("no item, no icon", second.icon == nil)
+end)
+
 -- The real planner's output for one shipped case, folded into stages.
 T.section("stage snapshot", function()
     local CraftLib = harness.loadCraftLib(16001, { camelot = true })
