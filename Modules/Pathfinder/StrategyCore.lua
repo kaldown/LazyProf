@@ -278,7 +278,9 @@ LazyProf.StrategyCore = {
         local wholeBounds = replay ~= nil and replay.at ~= currentSkill
 
         -- Can the recipe be crafted for skill-ups at `skill`? (For cutting a
-        -- run where a pin or a remembered range begins.)
+        -- run where a pin or a remembered range begins.) Not one that needs a
+        -- specialization the character lacks: it is never a candidate (P121),
+        -- so a pin or range naming it must cut nothing either.
         local recipeById
         local function canBegin(recipeId, skill)
             if not recipeById then
@@ -290,6 +292,7 @@ LazyProf.StrategyCore = {
             local recipe = recipeById[recipeId]
             return recipe ~= nil and skill >= recipe.skillRequired
                 and (skill - racialBonus) < recipe.skillRange.gray
+                and not LazyProf.RecipeAvailability:SpecializationBlocks(recipe)
         end
         local path = {}
         local gaps = {}

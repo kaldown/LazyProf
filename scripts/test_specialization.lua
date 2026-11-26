@@ -233,6 +233,14 @@ for _, strategyName in ipairs({ "cheapest", "fastest" }) do
         local ok, pinned = pcall(calculate, strategyName, fixture(), 1, 40, pins)
         check(p .. "pin of a blocked recipe: no error", ok, pinned)
         check(p .. "pin of a blocked recipe falls back", ok and #pinned > 0 and uses(pinned, 102) == nil)
+        -- A stale pin in the middle of a run cuts nothing: the path is the one
+        -- without it.
+        local plain = harness.formatSteps(calculate(strategyName, fixture(), 1, 40, {}))
+        local mid = harness.formatSteps(calculate(strategyName, fixture(), 1, 40, { { from = 15, to = 25, recipeId = 102 } }))
+        eq(p .. "a pin of a blocked recipe cuts no run", mid, plain)
+        local replayMid = harness.formatSteps(calculate(strategyName, fixture(), 1, 40, {},
+            { replay = { { from = 15, to = 25, recipeId = 103 }, at = 1 } }))
+        eq(p .. "a remembered range of a blocked recipe cuts no run", replayMid, plain)
         local replay = { { from = 1, to = 40, recipeId = 103 }, at = 1 }
         local ok2, replayed = pcall(calculate, strategyName, fixture(), 1, 40, {}, { replay = replay })
         check(p .. "replay and pin of a blocked recipe fall back",
@@ -298,6 +306,25 @@ T.section("forever leatherworking", function()
     check("Dragonscale: Dragonscale recipes may appear", dragon > 0, dragon)
     local _, tribalSeen = plan(TRIBAL)
     check("control: with Tribal known, Chimeric Boots is offered", tribalSeen[19063] ~= nil)
+
+    -- Trainer recipes judged by their crafted item: the Everlook teleporter
+    -- (23486) needs Goblin Engineer, the Gadgetzan one (23489) Gnomish.
+    local function engineering(spell)
+        known = spell and { [spell] = true } or {}
+        local recipes = LazyProf.Utils.DeepCopy(CraftLib:GetProfession("engineering").recipes)
+        for _, r in ipairs(recipes) do r.learned = false end
+        local seen = {}
+        for _, s in ipairs(calculate("cheapest", recipes, 240, 300, {})) do
+            seen[s.recipe.id] = true
+            for _, alt in ipairs(s.alternatives or {}) do seen[alt.recipe.id] = true end
+        end
+        return seen
+    end
+    local none = engineering(nil)
+    check("engineering, no specialization: neither teleporter offered", not none[23486] and not none[23489])
+    local goblin = engineering(20222)
+    check("engineering, Goblin: the Everlook teleporter can be offered, the Gadgetzan one not",
+        goblin[23486] == true and not goblin[23489])
     A.GetAHPrice = savedAH
 end)
 
@@ -311,6 +338,7 @@ T.section("diag spec", function()
         recipe(101, SPEC[DRAGON]), recipe(102, SPEC[TRIBAL]), recipe(107, SPEC[TRIBAL]),
         recipe(103, { unknown = true }, { source = { type = "unknown", itemId = 15781 } }),
         recipe(108, { unknown = true }, { source = { type = "unknown", itemId = 20382 } }),
+        recipe(109, { unknown = true }, { source = { type = "unknown", itemId = 30000 } }),
         recipe(104, nil),
     }
     lw[4].name, lw[5].name = "Onyxia Scale Breastplate", "Dreamscale Breastplate"
@@ -324,14 +352,14 @@ T.section("diag spec", function()
         if itemId == 15781 then
             return { "Pattern: Onyxia Scale Breastplate", "Requires Leatherworking (300)", "Requires Dragonscale Leatherworking" }
         end
-        return nil, "not loaded"
+        return nil, "not loaded", itemId ~= 30000
     end
     local lines = {}
     A:RunSpecDiagnostic(lines)
     local text = table.concat(lines, "\n")
     print(text)
     local function has(s) return text:find(s, 1, true) ~= nil end
-    check("diag: profession summary", has("leatherworking: 3 specializations, 3 recipes need one, 2 unknown"), text)
+    check("diag: profession summary", has("leatherworking: 3 specializations, 3 recipes need one, 3 unknown"), text)
     check("diag: a known one", has("  Dragonscale Leatherworking (10656): known=yes recipes=1 left out=0"), text)
     check("diag: one with no recipe", has("  Elemental Leatherworking (10658): known=no recipes=0 left out=0"), text)
     check("diag: a learned one counts apart", has("  Tribal Leatherworking (10660): known=no recipes=2 left out=1 (1 learned)"), text)
@@ -340,6 +368,8 @@ T.section("diag spec", function()
             .. "Requires Leatherworking (300) | Requires Dragonscale Leatherworking"), text)
     check("diag: tooltip not loaded",
         has("  unknown: Dreamscale Breastplate (108) item 20382 left out | not loaded - run /lp diag spec again"), text)
+    check("diag: an item the client does not know",
+        has("  unknown: Recipe 109 (109) item 30000 left out | not loaded, and the client knows no such item"), text)
     check("diag: a profession without specializations is not listed", not has("alchemy"), text)
     check("diag: plain ASCII", not text:find("[\128-\255]"))
 
