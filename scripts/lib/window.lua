@@ -264,10 +264,12 @@ function M.findButton(window, text)
 end
 
 -- The row whose descriptor text contains `needle` (plain text).
+-- (A Shopping note - "for 2. Shirt, to make Bolt" - is about the row above
+-- it and is never the row looked for.)
 function M.findRow(window, needle)
     for _, row in ipairs(window.list.rows) do
         local d = row.desc
-        if (d.text and d.text:find(needle, 1, true)) or (d.lead and d.lead:find(needle, 1, true)) then
+        if not d.note and ((d.text and d.text:find(needle, 1, true)) or (d.lead and d.lead:find(needle, 1, true))) then
             return row
         end
     end

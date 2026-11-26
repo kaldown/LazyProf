@@ -1138,7 +1138,46 @@ local function ChoiceButton(row, ctx)
     }
 end
 
-local function ShoppingTooltip(row)
+-- What a reagent of the shopping list is for, by the Crafts tab's numbers:
+-- "for 2. Blue Suede Shoes" (one recipe; "for 1 and 4. <recipe>" when it has
+-- two runs), "for crafts 1, 3 and 4" (several recipes), "to make Bolt of
+-- Linen Cloth" (needed only to make a reagent the list crafts), or both
+-- joined. nil when nothing uses it. `index` is Views.CraftIndex of the
+-- stages, `parents` { [itemId] = { name, ... } } the crafted rows each item
+-- is made into.
+local function ShoppingNote(itemId, index, parents)
+    local parts = {}
+    local uses = index.usedBy[itemId]
+    if uses and #uses > 0 then
+        local numbers, seenNumber, recipes, distinct, name = {}, {}, {}, 0, nil
+        for _, use in ipairs(uses) do
+            if not seenNumber[use.number] then
+                seenNumber[use.number] = true
+                numbers[#numbers + 1] = tostring(use.number)
+            end
+            local recipe = use.stage.recipe
+            if not recipes[recipe.id] then
+                recipes[recipe.id] = true
+                distinct = distinct + 1
+                name = name or recipe.name
+            end
+        end
+        if distinct == 1 then
+            parts[#parts + 1] = "for " .. Views.JoinAnd(numbers) .. ". " .. tostring(name or "Unknown")
+        else
+            parts[#parts + 1] = "for crafts " .. Views.JoinAnd(numbers)
+        end
+    end
+    local makes = parents[itemId]
+    if makes and #makes > 0 then
+        parts[#parts + 1] = "to make " .. Views.JoinAnd(makes)
+    end
+    if #parts == 0 then return nil end
+    return table.concat(parts, ", ")
+end
+
+-- `uses` (optional): the craft runs that use the item (CraftIndex.usedBy).
+local function ShoppingTooltip(row, uses)
     local lines = {}
     local parts = {}
     if (row.inBags or 0) > 0 then parts[#parts + 1] = "bags " .. row.inBags end
@@ -1157,6 +1196,13 @@ local function ShoppingTooltip(row)
         local pm = LazyProf.PriceManager
         if pm and pm.PeekPriceInfo then
             lines[#lines + 1] = { text = pm.PriceLine(pm:PeekPriceInfo(row.itemId)), r = 0.7, g = 0.7, b = 0.7 }
+        end
+    end
+    if uses and #uses > 0 then
+        lines[#lines + 1] = { text = "Used by:", r = 1, g = 0.82, b = 0 }
+        for _, use in ipairs(uses) do
+            lines[#lines + 1] = { text = string.format("  %d. %s: %s", use.number, tostring(use.stage.recipe.name),
+                tostring(use.need)), r = 0.7, g = 0.7, b = 0.7 }
         end
     end
     lines[#lines + 1] = { text = "Shift-click to link", r = 0.5, g = 0.5, b = 0.5 }
@@ -1198,7 +1244,10 @@ Views.BAGS_ONLY_LINE = "Only the bags of this character are counted. Install Syn
 --   the table (need / have / buy / cost, a "vendor" mark): reagents with
 --     something left to buy, the dearest first and those without a price
 --     last; then the reagents the character makes, each with what it is made
---     from beneath it; then the reagents already owned, dimmed, by name
+--     from beneath it; then the reagents already owned, dimmed, by name.
+--     Under each reagent a grey note says what it is for (ShoppingNote: the
+--     Crafts tab's numbers of the runs that use it, from view.stages; or
+--     the crafted reagent it is made into); `note = true` on that row
 --   "Reagents to buy": the sum of the Cost column (missing.buyTotal)
 --   "Recipes to learn": a row per recipe that costs something, with where it
 --     comes from (never on the VANILLA profile) and its price in gold, and
@@ -1261,6 +1310,20 @@ function Views.Shopping(view, ctx)
             owned = {}
         end
 
+        -- What each reagent is for (ShoppingNote).
+        local index = Views.CraftIndex(view.stages)
+        local parents = {}
+        for _, row in ipairs(items) do
+            for _, child in ipairs(row.crafted and row.children or {}) do
+                local list = parents[child.itemId]
+                if not list then
+                    list = {}
+                    parents[child.itemId] = list
+                end
+                list[#list + 1] = tostring(row.name)
+            end
+        end
+
         local table_ = {}
         local function addItem(row, alpha)
             local buy = row.toBuy > 0 and tostring(row.toBuy) or "-"
@@ -1282,7 +1345,7 @@ function Views.Shopping(view, ctx)
                 },
                 mark = row.isVendor and "vendor" or nil,
                 bg = BG_SUB, hoverBg = BG_ROW_HOVER, alpha = alpha,
-                itemId = row.itemId, link = row.link, tooltip = ShoppingTooltip(row),
+                itemId = row.itemId, link = row.link, tooltip = ShoppingTooltip(row, index.usedBy[row.itemId]),
             }
             -- (A choice the player made acts without More options too, so
             -- its button stays to show it and undo it.)
@@ -1290,6 +1353,14 @@ function Views.Shopping(view, ctx)
                 desc.button = ChoiceButton(row, ctx)
             end
             table_[#table_ + 1] = desc
+            local note = ShoppingNote(row.itemId, index, parents)
+            if note then
+                table_[#table_ + 1] = {
+                    kind = "line", sub = true, note = true, indent = 16, height = 14, text = note,
+                    bg = BG_SUB, hoverBg = BG_ROW_HOVER, alpha = alpha,
+                    itemId = row.itemId, link = row.link, tooltip = desc.tooltip,
+                }
+            end
             for _, child in ipairs(row.crafted and row.children or {}) do
                 table_[#table_ + 1] = {
                     kind = "cols", indent = 14, text = child.name, color = GREY,

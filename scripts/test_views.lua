@@ -1483,11 +1483,20 @@ T.section("shopping list", function()
         end
         return out
     end
+    -- (The note under each reagent - what it is for - has its own section,
+    -- "shopping notes"; the rows here are read without it.)
+    local function withoutNotes(rows)
+        local out = {}
+        for _, r in ipairs(rows) do
+            if not r.note then out[#out + 1] = r end
+        end
+        return out
+    end
     local function shopping(opts)
         opts = opts or {}
         opts.inventory = opts.inventory or stock
         local view = shopView(shopPath(), opts)
-        return Views.Shopping(view, ctx), view
+        return withoutNotes(Views.Shopping(view, ctx)), view
     end
 
     local rows, view = shopping()
@@ -1628,6 +1637,80 @@ T.section("shopping list", function()
         "No reagents needed in this path.")
     local done = makePath({ steps = {}, gaps = {}, totalCost = 0, nothingLeft = true, actualSkill = 300, currentSkill = 300 })
     T.eq("nothing left: the notice", Views.Shopping(shopView(done), ctx)[1].text, "Nothing left: Tailoring is at its cap of 300.")
+end)
+
+-- Every reagent of the Shopping tab says which craft wants it, by the
+-- Crafts tab's numbers (the 2026-11-26 case: Rune Thread and Blue Dye are for
+-- the shoes).
+T.section("shopping notes", function()
+    local function noteAfter(rows, name)
+        for i, r in ipairs(rows) do
+            if r.item and r.text == name then
+                local nxt = rows[i + 1]
+                return (nxt and nxt.note) and nxt or nil, r
+            end
+        end
+    end
+
+    local view = shopView(leatherPath(), { inventory = LW_STOCK, liveCap = 300 })
+    local rows = Views.Shopping(view, {})
+    local note, row = noteAfter(rows, "Rune Thread")
+    T.eq("one craft: its number and recipe", note and note.text, "for 2. Blue Suede Shoes")
+    T.check("a sub-line under the row", note ~= nil and note.kind == "line" and note.sub == true
+        and note.indent == 16 and note.height == 14 and note.item == nil)
+    T.check("same background as its row", note ~= nil and note.bg == row.bg)
+    T.eq("the other craft", (noteAfter(rows, "Wildvine")).text, "for 1. Wild Leather Leggings")
+    note, row = noteAfter(rows, "Thick Leather")
+    T.eq("an owned reagent too", note and note.text, "for 1. Wild Leather Leggings")
+    T.check("dimmed with its row", note ~= nil and note.alpha == 0.55 and row.alpha == 0.55)
+    local tip = {}
+    for _, line in ipairs((noteAfter(rows, "Rune Thread")).tooltip) do tip[#tip + 1] = line.text end
+    tip = table.concat(tip, " / ")
+    T.check("tooltip: which crafts use it, and how many", tip:find("Used by: /   2. Blue Suede Shoes: 1", 1, true) ~= nil, tip)
+    T.check("the row's tooltip says it too", select(2, noteAfter(rows, "Rune Thread")).tooltip ~= nil)
+
+    -- One recipe in two runs (a rank step between them).
+    rows = Views.Shopping(shopView(makePath(), { liveCap = 150 }), {})
+    T.eq("one recipe, two runs", (noteAfter(rows, "MatGloves")).text, "for 1 and 2. Gloves")
+
+    -- Two recipes share a reagent.
+    local X = recipe(80, "Xa", 100, 120, 130, 140, { reagents = { { itemId = 301, count = 1, name = "Shared" } } })
+    local Y = recipe(81, "Yb", 100, 130, 140, 150, { reagents = { { itemId = 302, count = 1, name = "Own" } } })
+    local Z = recipe(82, "Zc", 100, 140, 150, 160, { reagents = { { itemId = 301, count = 1, name = "Shared" } } })
+    local shared = makePath({ currentSkill = 100, actualSkill = 100, targetSkill = 130, prices = { [301] = 10, [302] = 10 },
+        steps = { step(X, 100, 110, 5, 0), step(Y, 110, 120, 5, 0), step(Z, 120, 130, 5, 0) }, gaps = {} })
+    rows = Views.Shopping(shopView(shared, {}), {})
+    T.eq("several recipes", (noteAfter(rows, "Shared")).text, "for crafts 1 and 3")
+
+    -- A reagent only needed to make another one, then also used directly.
+    local P = recipe(90, "Pa", 100, 120, 130, 140, { reagents = { { itemId = BOLT, count = 1, name = "Bolt of Cloth" } } })
+    local Q = recipe(91, "Qb", 100, 130, 140, 150, { reagents = { { itemId = 401, count = 1, name = "Other" } } })
+    local R = recipe(92, "Rc", 100, 140, 150, 160, { reagents = { { itemId = BOLT, count = 1, name = "Bolt of Cloth" } } })
+    local boltPath = makePath({ currentSkill = 100, actualSkill = 100, targetSkill = 130, prices = { [BOLT] = 500, [401] = 10 },
+        steps = { step(P, 100, 110, 5, 0), step(Q, 110, 120, 5, 0), step(R, 120, 130, 5, 0) }, gaps = {} })
+    local stages = Stages.Build(boltPath, {})
+    local missing = { rows = {
+        { itemId = BOLT, name = "Bolt of Cloth", need = 10, have = 0, toBuy = 0, cost = 0, sources = {}, crafted = true,
+          craftQuantity = 10, craftRecipeName = "Bolt of Cloth", children = { { itemId = CLOTH, name = "Cloth", need = 30 } } },
+        { itemId = CLOTH, name = "Cloth", need = 30, have = 0, toBuy = 30, cost = 300, unitPrice = 10, sources = {} },
+    } }
+    rows = Views.Shopping({ path = boltPath, stages = stages, missing = missing }, {})
+    T.eq("a crafted reagent: the crafts it is for", (noteAfter(rows, "Bolt of Cloth")).text, "for crafts 1 and 3")
+    T.eq("only to make another reagent", (noteAfter(rows, "Cloth")).text, "to make Bolt of Cloth")
+    P.reagents[2] = { itemId = CLOTH, count = 1, name = "Cloth" }
+    R.reagents[2] = { itemId = CLOTH, count = 1, name = "Cloth" }
+    rows = Views.Shopping({ path = boltPath, stages = Stages.Build(boltPath, {}), missing = missing }, {})
+    T.eq("both", (noteAfter(rows, "Cloth")).text, "for crafts 1 and 3, to make Bolt of Cloth")
+
+    -- Hide what I have hides the notes of the rows it hides.
+    view = shopView(leatherPath(), { inventory = LW_STOCK, liveCap = 300, advanced = true, hideOwned = true })
+    rows = Views.Shopping(view, {})
+    local items, notes = 0, 0
+    for _, r in ipairs(rows) do
+        if r.item then items = items + 1 end
+        if r.note then notes = notes + 1 end
+    end
+    T.check("hidden rows: no note left behind", items == 3 and notes == 3, items .. " items, " .. notes .. " notes")
 end)
 
 -- Without the Syndicator addon only the carried bags count. When bank or
