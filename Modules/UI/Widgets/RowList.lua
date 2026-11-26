@@ -31,11 +31,15 @@
 --   unless the descriptor says otherwise.
 -- "cols": text, color, cols = { ... } strings for the right-aligned columns,
 --   colColors = { [i] = { r, g, b } }, header = true for the column titles.
+--   lead (a short text, e.g. a number) in a column of leadWidth (default 18)
+--   at the left, leadColor (default gold); the icon comes after it, and the
+--   text starts at the same place with or without an icon, so rows with a
+--   lead line up.
 --   layout picks the columns:
 --     nil        need / have / buy / cost, then a mark column: mark (short
 --                text, e.g. "vendor") or a button in its place
 --     "nomark"   need / have / buy / cost up to the right edge
---     "path"     skill range / crafts / cost up to the right edge
+--     "crafts"   skill range / cost up to the right edge
 --   (the last two have neither mark nor button).
 --   The text ends where the first column that has something in it begins, so
 --   a row that only fills its last column has the room of the empty ones.
@@ -77,7 +81,7 @@ local REAGENT_WIDTHS = { COL_NUMBER_WIDTH, COL_NUMBER_WIDTH, COL_NUMBER_WIDTH, C
 local DEFAULT_LAYOUT = { widths = REAGENT_WIDTHS, trailing = COL_MARK_WIDTH, mark = true }
 local LAYOUTS = {
     nomark = { widths = REAGENT_WIDTHS, trailing = COL_EDGE },
-    path = { widths = { 62, 46, COL_COST_WIDTH }, trailing = COL_EDGE },   -- skill range, crafts, cost
+    crafts = { widths = { 62, COL_COST_WIDTH }, trailing = COL_EDGE },   -- skill range, cost
 }
 
 local function Font(name)
@@ -274,7 +278,8 @@ KINDS.cols = {
         row.bg:SetAllPoints()
         row.icon = row:CreateTexture(nil, "ARTWORK")
         row.icon:SetSize(14, 14)
-        row.icon:SetPoint("LEFT", 2, 0)
+        row.lead = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        row.lead:SetJustifyH("LEFT")
         row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.text:SetJustifyH("LEFT")
         row.text:SetWordWrap(false)
@@ -291,13 +296,34 @@ KINDS.cols = {
         return row
     end,
     apply = function(row, desc, width, height)
+        -- Lead, icon and text, from the left. (Placed per render: a pooled
+        -- row serves rows with and without a lead.)
         local x = 4
+        if desc.lead then
+            local leadWidth = desc.leadWidth or 18
+            row.lead:ClearAllPoints()
+            row.lead:SetPoint("LEFT", row, "LEFT", x, 0)
+            row.lead:SetWidth(leadWidth)
+            row.lead:SetText(desc.lead)
+            SetColor(row.lead, desc.leadColor, { 1, 0.82, 0 })
+            row.lead:Show()
+            x = x + leadWidth
+        else
+            row.lead:SetText("")
+            row.lead:Hide()
+        end
+        local iconAt = x - 2
+        row.icon:ClearAllPoints()
+        row.icon:SetPoint("LEFT", row, "LEFT", iconAt, 0)
         if desc.icon then
             row.icon:SetTexture(desc.icon)
             row.icon:Show()
-            x = 20
+            x = iconAt + 18
         else
             row.icon:Hide()
+            -- (A row with a lead keeps the icon's room: its name lines up
+            -- with the names of the rows that have one.)
+            if desc.lead then x = iconAt + 18 end
         end
         local header = desc.header
         local layout = LAYOUTS[desc.layout] or DEFAULT_LAYOUT

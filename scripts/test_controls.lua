@@ -649,30 +649,47 @@ T.section("column layouts", function()
     T.eq("reagents: the mark", row.mark.text, "vendor")
     T.eq("reagents: the mark starts inside its column", -row.mark.points[1][4], 52)
 
-    -- The path list: skill range, crafts, cost; no mark column.
+    -- The craft list: a number, the crafted item's icon, the name, then skill
+    -- range and cost; no mark column.
     local clicked
     list:Render({
-        { kind = "cols", layout = "path", header = true, text = "Recipes", cols = { "skill", "crafts", "cost" } },
-        { kind = "cols", layout = "path", text = "> Gloves", color = { 1, 0.5, 0.25 }, cols = { "143-160", "19", "108g 63s 28c" },
-          colColors = { [3] = { 0.4, 1, 0.4 } }, onClick = function() clicked = true end },
+        { kind = "cols", layout = "crafts", header = true, text = "2 recipes, 8 crafts", cols = { "skill", "cost" } },
+        { kind = "cols", layout = "crafts", lead = "1", icon = "icon", text = "7x Gloves", color = { 1, 0.5, 0.25 },
+          cols = { "143-160", "108g 63s 28c" }, colColors = { [2] = { 0.4, 1, 0.4 } }, onClick = function() clicked = true end },
+        { kind = "cols", layout = "crafts", lead = "2", text = "1x Enchant Bracer", cols = { "160-161", "1s" } },
     })
-    local header, run = list.rows[1], list.rows[2]
-    T.eq("path: a cols row", run.desc.layout, "path")
-    T.eq("path: cost at the right edge", column(run, 3), "84@4")
-    T.eq("path: crafts left of it", column(run, 2), "46@88")
-    T.eq("path: skill range left of that", column(run, 1), "62@134")
-    T.eq("path: texts", run.cols[1].text .. "," .. run.cols[2].text .. "," .. run.cols[3].text, "143-160,19,108g 63s 28c")
-    T.check("path: the fourth column is not used", run.cols[4].shown == false)
-    T.eq("path: no mark", run.mark.text, "")
-    T.eq("path: the name ends where the columns begin", nameEnd(run), 198)
-    T.eq("path: name", run.text.text, "> Gloves")
-    T.eq("path: name colour", run.text.color[2], 0.5)
-    T.eq("path: column colour", run.cols[3].color[1], 0.4)
-    T.eq("path header: titles in the same columns", header.cols[1].text .. "," .. header.cols[3].text, "skill,cost")
-    T.eq("path header: at the same places", column(header, 1) .. " " .. column(header, 3), "62@134 84@4")
-    T.eq("path header: gold", header.text.color[2], 0.82)
+    local header, run, noIcon = list.rows[1], list.rows[2], list.rows[3]
+    T.eq("crafts: a cols row", run.desc.layout, "crafts")
+    T.eq("crafts: cost at the right edge", column(run, 2), "84@4")
+    T.eq("crafts: skill range left of it", column(run, 1), "62@88")
+    T.eq("crafts: texts", run.cols[1].text .. "," .. run.cols[2].text, "143-160,108g 63s 28c")
+    T.check("crafts: the third column is not used", run.cols[3].shown == false and run.cols[4].shown == false)
+    T.eq("crafts: no mark", run.mark.text, "")
+    T.eq("crafts: the name ends where the columns begin", nameEnd(run), 152)
+    T.eq("crafts: name", run.text.text, "7x Gloves")
+    T.eq("crafts: name colour", run.text.color[2], 0.5)
+    T.eq("crafts: column colour", run.cols[2].color[1], 0.4)
+    T.eq("crafts: the number", run.lead.text, "1")
+    T.check("crafts: the number is shown, in gold", run.lead.shown ~= false and run.lead.color[2] == 0.82)
+    T.eq("crafts: the number at the left", run.lead.points[1][4], 4)
+    T.eq("crafts: the number's column", run.lead.width, 18)
+    T.eq("crafts: the icon after the number", run.icon.points[1][4], 20)
+    T.eq("crafts: the name after the icon", run.text.points[1][4], 38)
+    T.check("crafts: a run without an icon has none", noIcon.icon.shown == false)
+    T.eq("crafts: its name lines up with the others", noIcon.text.points[1][4], 38)
+    T.eq("crafts header: titles in the same columns", header.cols[1].text .. "," .. header.cols[2].text, "skill,cost")
+    T.eq("crafts header: at the same places", column(header, 1) .. " " .. column(header, 2), "62@88 84@4")
+    T.eq("crafts header: gold", header.text.color[2], 0.82)
+    T.check("crafts header: no number", header.lead.shown == false)
     ui.fire(run, "OnClick", "LeftButton")
-    T.check("path: a row is clickable", clicked == true)
+    T.check("crafts: a row is clickable", clicked == true)
+
+    -- A row drawn with a number, then without: the number goes and the
+    -- name moves back.
+    list:Render({ { kind = "cols", icon = "icon", text = "Wool Cloth", cols = { "1", "2", "3", "4c" } } })
+    T.check("no number: the reused row hides it", list.rows[1].lead.shown == false)
+    T.eq("no number: icon back at the edge", list.rows[1].icon.points[1][4], 2)
+    T.eq("no number: name after the icon", list.rows[1].text.points[1][4], 20)
 
     -- A reagent table without the mark column (inside an opened run).
     list:Render({
@@ -739,7 +756,7 @@ T.section("column layouts", function()
             { kind = "cols", icon = "icon", text = "Heavy Scorpid Scale", cols = { "1234", "1234", "1234", "888g 88s 88c" }, mark = "vendor" },
             { kind = "cols", icon = "icon", text = "Bolt of Runecloth", cols = { "55", "0", "-", "" },
               button = { text = "I craft it", onClick = function() end } },
-            { kind = "cols", layout = "path", text = "> Charged Scorpid Bracers", cols = { "274-280", "100", "888g 88s 88c" } },
+            { kind = "cols", layout = "crafts", lead = "12", icon = "icon", text = "100x Charged Scorpid Bracers", cols = { "274-280", "888g 88s 88c" } },
             { kind = "cols", layout = "nomark", indent = 14, icon = "icon", text = "Heavy Scorpid Scale", cols = { "28", "0", "28", "3g 82s" } },
         })
         local p = "window " .. window .. ": "
@@ -839,7 +856,7 @@ T.section("a reused row shows nothing of its previous use", function()
     local cols = list.rows[1]
     T.check("fixture: the rich reagent row shows all of it", cols.icon.shown and cols.bg.shown and cols.button.shown
         and cols.alpha == 0.55 and cols.cols[4].text == "4g 15s")
-    list:Render({ { kind = "cols", layout = "path", text = "Gloves", cols = { "143-160", "19", "19s" } } })
+    list:Render({ { kind = "cols", layout = "crafts", text = "Gloves", cols = { "143-160", "19s" } } })
     T.check("cols: the same frame", list.rows[1] == cols)
     T.eq("cols: full strength again", cols.alpha, 1)
     T.check("cols: no icon", cols.icon.shown == false)
@@ -852,8 +869,8 @@ T.section("a reused row shows nothing of its previous use", function()
     -- ...and a marked reagent row, then a path row.
     list:Render({ { kind = "cols", text = "Thread", cols = { "9", "0", "9", "9s" }, mark = "vendor" } })
     T.eq("fixture: the mark", cols.mark.text, "vendor")
-    list:Render({ { kind = "cols", layout = "path", text = "Gloves", cols = { "143-160", "19", "19s" } } })
-    T.eq("cols: no mark left over on a path row", cols.mark.text, "")
+    list:Render({ { kind = "cols", layout = "crafts", text = "Gloves", cols = { "143-160", "19s" } } })
+    T.eq("cols: no mark left over on a craft row", cols.mark.text, "")
     list:Render({ { kind = "cols", text = "Thread", cols = { "9", "0", "9", "9s" }, mark = "vendor" } })
     list:Render({ { kind = "cols", layout = "nomark", text = "Thread", cols = { "9", "0", "9", "9s" } } })
     T.eq("cols: nor on a row of the table without a mark column", cols.mark.text, "")
