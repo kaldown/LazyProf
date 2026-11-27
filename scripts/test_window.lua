@@ -1883,4 +1883,53 @@ T.section("the view knows the strategy", function()
     T.check("Cheapest: not named", window.status.text:find("fastest", 1, true) == nil, window.status.text)
 end)
 
+-- Crafted-item icons that were question marks because the item's data had
+-- not arrived (row C9): the window says which items it waits for, so the
+-- arrival of one can redraw it (Core/Init.lua), never plan again.
+T.section("icons waiting for item data", function()
+    for _, family in ipairs({ "forever", "classic" }) do
+        local env = W.load(family)
+        local window, addon = env.window, env.addon
+        local gloves, shirt = {}, {}
+        for k, v in pairs(W.GLOVES) do gloves[k] = v end
+        for k, v in pairs(W.SHIRT) do shirt[k] = v end
+        gloves.itemId, shirt.itemId = 9001, 9002
+        local loaded = {}
+        addon.Client.GetItemInfo = function(_, itemId)
+            if loaded[itemId] then
+                return "Item " .. itemId, "link", nil, nil, nil, nil, nil, nil, nil, "Interface\\Icons\\Item" .. itemId
+            end
+            return nil
+        end
+        local path = W.path({ complete = true, gaps = {}, steps = {
+            W.step(gloves, 143, 160, 19, 1900), W.step(shirt, 160, 200, 40, 8000) } })
+        window:Update(path)
+        local p = family .. ": "
+        T.check(p .. "fixture: the Crafts tab", window.tab == "path")
+        T.check(p .. "waits for a shown run's crafted item", window:WaitsForIcon(9001) == true)
+        T.check(p .. "and for the other run's", window:WaitsForIcon(9002) == true)
+        T.check(p .. "not for a reagent or another item", window:WaitsForIcon(101) == false and window:WaitsForIcon(12345) == false)
+        loaded[9001] = true
+        window:Refresh()
+        T.check(p .. "redrawn after the data came: no longer waits for it", window:WaitsForIcon(9001) == false)
+        T.check(p .. "still waits for the one not loaded", window:WaitsForIcon(9002) == true)
+        local icon
+        for _, row in ipairs(window.list.rows) do
+            if row.desc and row.desc.layout == "crafts" and row.desc.stage and row.desc.stage.recipe == gloves then
+                icon = row.desc.icon
+            end
+        end
+        T.eq(p .. "and the run shows the item's icon", icon, "Interface\\Icons\\Item9001")
+        -- The Shopping tab shows no runs: nothing to wait for there (the
+        -- Crafts tab is drawn afresh when it is chosen).
+        window:SelectTab("shopping", true)
+        T.check(p .. "Shopping tab: waits for nothing", window:WaitsForIcon(9002) == false)
+        window:SelectTab("path", true)
+        T.check(p .. "back on the Crafts tab: waits again", window:WaitsForIcon(9002) == true)
+        -- No window drawn yet: nothing.
+        local fresh = W.load(family).window
+        T.check(p .. "a window never drawn waits for nothing", fresh:WaitsForIcon(9002) == false)
+    end
+end)
+
 T.finish()

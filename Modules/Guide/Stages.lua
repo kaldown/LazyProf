@@ -103,11 +103,13 @@ local function Materials(recipe, quantity, remaining, prices, made, onTake)
 end
 
 -- The icon of the item a recipe makes: the question mark while the item's
--- data has not arrived, nil for a recipe that makes no item (an enchant).
+-- data has not arrived (then also true: the icon is still missing), nil for
+-- a recipe that makes no item (an enchant).
 local function RunIcon(recipe)
     if not recipe.itemId then return nil end
     local _, _, icon = Utils.GetItemInfo(recipe.itemId)
-    return icon or QUESTION_MARK
+    if icon then return icon end
+    return QUESTION_MARK, true
 end
 
 -- Colour at the stage's start and the skills inside it where it changes.
@@ -324,7 +326,8 @@ end
 --                  path.sale.values; none: nothing is counted as sold)
 -- Returns stages, summary (Stages.Totals of all stages plus currentIndex).
 -- A craft stage carries, among others, `icon` (the crafted item's icon, see
--- RunIcon) and `materials` (the Materials rows of its shown quantity, each
+-- RunIcon; `iconMissing` = true while it is the question mark because the
+-- item's data has not arrived) and `materials` (the Materials rows of its shown quantity, each
 -- with `madeBy`: the earlier craft stages that supplied part of it).
 function Stages.Build(path, opts)
     opts = opts or {}
@@ -400,9 +403,10 @@ function Stages.Build(path, opts)
                         fromDisplay = math.floor(step.skillStart), toDisplay = math.floor(step.skillStart),
                     }
                 end
+                local icon, iconMissing = RunIcon(recipe)
                 current = {
                     kind = "craft", recipe = recipe, bridge = step.bridge and true or nil,
-                    icon = RunIcon(recipe),
+                    icon = icon, iconMissing = iconMissing,
                     fragments = { step }, baseQuantity = step.quantity,
                     from = step.skillStart, to = step.skillEnd,
                     fromDisplay = math.floor(step.skillStart), toDisplay = math.floor(step.skillEnd),
