@@ -534,10 +534,19 @@ T.section("no pipe inside a colour code", function()
     local source = f:read("*a")
     f:close()
     T.check("no literal colour code closes right after a pipe", source:find("||r", 1, true) == nil)
-    local found
-    for _, helper in ipairs({ "Grey", "Green" }) do
-        found = found or source:match(helper .. '%(%s*"[^"\n]*|[^"\n]*"')
+    local helpers = { "Grey", "Green", "White", "Orange" }
+    local function pipeHandedTo(text)
+        for _, helper in ipairs(helpers) do
+            local hit = text:match(helper .. '%(%s*"[^"\n]*|[^"\n]*"')
+            if hit then return hit end
+        end
+        return nil
     end
+    for _, helper in ipairs(helpers) do
+        T.check("the check sees a pipe handed to " .. helper,
+            pipeHandedTo("x = " .. helper .. '("a | b")') ~= nil)
+    end
+    local found = pipeHandedTo(source)
     T.check("no colour helper is handed a text with a pipe", found == nil, found)
     -- And what the views build: a pipe is only ever the start of a colour
     -- code or its end.
