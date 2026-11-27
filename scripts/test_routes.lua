@@ -133,6 +133,71 @@ T.section("the zero floor", function()
     T.eq("an empty context: the same", cheapest:ScoreRecipe(orange, 100, 200, {}, prices, 0, {}, {}), full)
 end)
 
+-- Recipes that pay for themselves (ruling P130). Their cost after the sale is
+-- zero, so the zero floor cannot tell them apart; they are ranked by what one
+-- craft leaves the player - per craft, never per skill-up, so a lower chance
+-- never helps - and only then by the old score (range, chance).
+T.section("recipes that pay for themselves", function()
+    local LazyProf = load()
+    local mat = { { itemId = 20, count = 1, name = "Mat" } }
+    local function pair(yellowSale)
+        -- At 100: O orange (chance 1), Y yellow (chance 0.5); both cost 100.
+        local o = recipe(1, "O", { itemId = 601, orange = 100, yellow = 150, green = 160, gray = 170, reagents = mat })
+        local y = recipe(2, "Y", { itemId = 602, orange = 80, yellow = 90, green = 105, gray = 110, required = 80,
+            reagents = mat })
+        return { o, y }, { [1] = 300, [2] = yellowSale }
+    end
+    local prices = { [20] = 100 }
+    local function first(recipes, values)
+        local steps = run(LazyProf, "cheapest", 100, 101, recipes, {}, prices, { rankSale = values, sale = values })
+        return steps[1].recipe.id, steps[1].alternatives
+    end
+    local recipes, values = pair(300)
+    local id = first(recipes, values)
+    T.eq("both leave 200 a craft: the higher chance first, as before", id, 1)
+    recipes, values = pair(500)
+    local alts
+    id, alts = first(recipes, values)
+    T.eq("Y leaves 400 a craft, O 200: Y first, although its chance is lower", id, 2)
+    T.eq("and the list of alternatives in that order", alts[1].recipe.id .. "," .. alts[2].recipe.id, "2,1")
+    T.check("the scores are what they were: zero cost, never negative",
+        alts[1].score > -1 and alts[2].score > -1 and alts[1].score > alts[2].score)
+
+    -- A recipe that costs something comes after every one that costs nothing.
+    local dear = recipe(3, "D", { itemId = 603, orange = 100, yellow = 150, green = 160, gray = 170,
+        reagents = { { itemId = 21, count = 1, name = "Cheap" } } })
+    recipes = pair(500)
+    recipes[3] = dear
+    local steps = run(LazyProf, "cheapest", 100, 101, recipes, {}, { [20] = 100, [21] = 1 },
+        { rankSale = { [1] = 300, [2] = 500 }, sale = { [1] = 300, [2] = 500 } })
+    local order = {}
+    for _, alt in ipairs(steps[1].alternatives) do order[#order + 1] = alt.recipe.id end
+    T.eq("one copper a craft is dearer than paying for itself", table.concat(order, ","), "2,1,3")
+
+    -- Property: for a recipe that pays for itself, a lower chance never moves
+    -- it ahead of a competitor. R and R2 differ only in their yellow point,
+    -- so at 100 R2's chance is far lower while every other number is the same
+    -- (grey point, skill points left, cost, sale, fee). R is unlearned with a
+    -- 10000 fee: spread over its crafts, the fee per craft would shrink as the
+    -- chance falls (R2 needs about 513 crafts to grey, R about 214) and put
+    -- R2 ahead of C; spread over the 40 skill points left it does not.
+    local function trio(yellow)
+        local c = recipe(1, "C", { itemId = 611, orange = 100, yellow = 150, green = 160, gray = 170, reagents = mat })
+        local r = recipe(2, "R", { itemId = 612, orange = 0, yellow = yellow, green = 120, gray = 140, required = 1,
+            reagents = mat, source = { type = "trainer", cost = 10000 } })
+        return { c, r }
+    end
+    local trioSale = { [1] = 300, [2] = 330 }
+    local ahead = {}
+    for _, yellow in ipairs({ 90, 60, 20 }) do
+        local list = trio(yellow)
+        local chance = LazyProf.PathfinderStrategies.cheapest:GetExpectedSkillups(list[2], 100, 0)
+        local steps2 = run(LazyProf, "cheapest", 100, 101, list, {}, prices, { rankSale = trioSale, sale = trioSale })
+        ahead[#ahead + 1] = string.format("%.2f:%s", chance, steps2[1].recipe.id == 2 and "R" or "C")
+    end
+    T.eq("R never gets ahead of C as its chance falls", table.concat(ahead, " "), "0.80:C 0.50:C 0.33:C")
+end)
+
 T.section("no sale values: the planner's output is unchanged", function()
     local CraftLib = harness.loadCraftLib(16001, { camelot = true })
     local LazyProf = harness.loadLazyProf(STRATEGY_FILES)
@@ -523,22 +588,31 @@ end)
 
 T.section("candidates: the zero floor cannot make the route dearer", function()
     local LazyProf = loadRoutes()
-    -- Q is cheaper to make and sells for far more; P is dearer, barely pays
-    -- for itself and stays useful longer. With both floored at zero the
-    -- sale-value ranking prefers P (longer range); the player is better off with Q.
+    -- Both pay for themselves. P (orange) leaves 300 a craft, so the
+    -- sale-value ranking takes it (P130). Q leaves 250 a craft but is the
+    -- cheaper per skill-up at market prices, so the market route takes it;
+    -- at its lower chance it takes many more crafts, each sold, and by what
+    -- the player pays the Q route costs less. The market route is always a
+    -- candidate, so the dearer sale route is not kept.
+    -- (Until P130 this fixture was Q 100 -> 500 against P 140 -> 150: with
+    -- both at zero the tie went to P's longer range though Q left 400 a
+    -- craft and P 10. That is the tie P130 removes: the ranking now takes Q
+    -- there, and that sale route is the cheaper one.)
     local function fixture()
-        local q = recipe(1, "Q", { itemId = 601, orange = 100, yellow = 110, green = 115, gray = 118,
+        local q = recipe(1, "Q", { itemId = 601, orange = 40, yellow = 60, green = 130, gray = 140, required = 40,
             reagents = { { itemId = 30, count = 1, name = "Q mat" } } })
-        local p = recipe(2, "P", { itemId = 602, orange = 100, yellow = 130, green = 150, gray = 160,
+        local p = recipe(2, "P", { itemId = 602, orange = 100, yellow = 130, green = 140, gray = 150,
             reagents = { { itemId = 31, count = 1, name = "P mat" } } })
         return { q, p }
     end
-    local prices = { [30] = 100, [31] = 140 }
-    local values = { [1] = 500, [2] = 150 }
+    local prices = { [30] = 50, [31] = 200 }
+    local values = { [1] = 300, [2] = 500 }
+    T.eq("fixture: Q's chance at 100 is one half",
+        LazyProf.PathfinderStrategies.cheapest:GetExpectedSkillups(fixture()[1], 100, 0), 0.5)
     local ranked = run(LazyProf, "cheapest", 100, 120, fixture(), {}, prices, { rankSale = values, sale = values })
     T.eq("fixture: ranking with sale values picks P throughout", onlyRecipe(ranked), 2)
     local market = run(LazyProf, "cheapest", 100, 120, fixture(), {}, prices)
-    T.eq("fixture: the market route starts with Q", market[1].recipe.id, 1)
+    T.eq("fixture: the market route takes Q throughout", onlyRecipe(market), 1)
 
     local steps, _, route = plan(LazyProf, "cheapest", 100, 120, fixture(), prices, { values = values, rank = values })
     T.check("the sale route would cost the player more", candidate(route, "sale").net > candidate(route, "market").net,
@@ -1373,7 +1447,11 @@ T.section("the whole calculation", function()
         if c.key == "stock" then stockCandidate = c end
     end
     T.check("scanned stock: a stock route is planned", stockCandidate ~= nil)
-    T.eq("scanned stock: the leather in the bank is not bought again", stockCandidate and stockCandidate.spend, 0)
+    -- (With the leather owned both recipes pay for themselves; the Shoes
+    -- leave more per craft (P130), so the stock route buys their pattern,
+    -- 20000, and nothing else.)
+    T.eq("scanned stock: the leather in the bank is not bought again, only the Shoes' pattern",
+        stockCandidate and stockCandidate.spend, 20000)
     T.eq("scanned stock: the market route is costed with it too", path.route.candidates[1].spend, 0)
     T.check("scanned stock: the path carries it", path.inventory[LEATHER] == 80)
     LazyProf.Inventory.ScanAll = function() return {}, {} end
@@ -1402,6 +1480,77 @@ local CASES = {
     { name = "forever_alchemy_1_300", interface = 16001, camelot = true, prof = "alchemy", from = 1, to = 300 },
     { name = "forever_tailoring_1_225", interface = 16001, camelot = true, prof = "tailoring", from = 1, to = 225 },
 }
+
+-- The owner's case of 2026-11-26 on the bundled WoW Forever data:
+-- Leatherworking 250-255 with 208 Thick Leather, 14 Cured Thick Hide and 59
+-- Rugged Leather owned, the prices the receipt showed and the vendor values
+-- of the crafts. Wild Leather Leggings (yellow) use owned leather and sell
+-- for 1g 15s 85c; Blue Suede Shoes (orange) need a bought Rune Thread and
+-- Blue Dye and sell for 96s 65c. Both pay for themselves.
+T.section("the owner's Leatherworking 250-255 on Forever data", function()
+    local CraftLib = harness.loadCraftLib(16001, { camelot = true })
+    local LazyProf = harness.loadLazyProf(ROUTE_FILES)
+    LazyProf.Client = LazyProf.Client or {}
+    LazyProf.Client.PlayerSkill = function() return 0 end
+    LazyProf.Client.GetItemInfo = function() return nil end
+    LazyProf.Client.KnowsSpell = function() return false end
+    LazyProf.PriceManager = { PeekPriceInfo = function() return { price = 1, source = "TSM" } end }
+    LazyProf.db.profile.strategy = "cheapest"
+    local PF = LazyProf.Pathfinder
+    local LEGS, CLOAK, SHOES = 10572, 10574, 1255048
+    local THICK, WILDVINE, HIDE, RUGGED, RUNE_THREAD, BLUE_DYE = 4304, 8153, 8172, 8170, 14341, 6260
+    local function known()
+        local recipes = LazyProf.Utils.DeepCopy(CraftLib:GetProfession("leatherworking").recipes)
+        for _, r in ipairs(recipes) do r.learned = true end
+        return recipes
+    end
+    local byId = {}
+    for _, r in ipairs(known()) do byId[r.id] = r end
+    local stock = { [THICK] = 208, [HIDE] = 14, [RUGGED] = 59 }
+    local breakdown = {}
+    for itemId, n in pairs(stock) do breakdown[itemId] = { bags = n } end
+    local values = { [LEGS] = 11585, [CLOAK] = 9028, [SHOES] = 9665 }
+    local function pricesWith(hide)
+        local prices = harness.priceTable(known())
+        prices[THICK], prices[WILDVINE], prices[HIDE] = 300, 50, hide
+        prices[RUGGED], prices[RUNE_THREAD], prices[BLUE_DYE] = 400, 4275, 43
+        return prices
+    end
+    local function account(steps, hide)
+        return PF:Account(steps, stock, breakdown, pricesWith(hide), values)
+    end
+
+    -- The plan the owner saw: its account is the receipt in the screenshot.
+    local seen = { { recipe = byId[LEGS], quantity = 7, skillStart = 250 },
+                   { recipe = byId[SHOES], quantity = 1, skillStart = 254.525 } }
+    local a = account(seen, 2000)
+    T.eq("fixture: the plan seen in game costs what its receipt said (50s 18c, back 9g 7s 60c)",
+        a.spend .. "/" .. a.sale, "5018/90760")
+
+    for _, case in ipairs({
+        { hide = 2000, last = LEGS, why = "a hide at 20s: an 8th legging leaves 74s 85c, the shoes 53s 47c" },
+        { hide = 3000, last = LEGS, why = "a hide at 30s: 54s 85c against 53s 47c" },
+        { hide = 3100, last = SHOES, why = "a hide at 31s: 52s 85c against 53s 47c" },
+        { hide = 10000, last = SHOES, why = "a hide at 1g: the legging costs more than it sells for" },
+    }) do
+        local steps, _, route = plan(LazyProf, "cheapest", 250, 255, known(), pricesWith(case.hide),
+            { values = values, rank = values }, stock, breakdown)
+        local p = "hide " .. case.hide .. ": "
+        T.check(p .. "the route opens with the leggings from owned leather",
+            steps[1].recipe.id == LEGS and steps[1].quantity == 7, steps[1].recipe.name .. " x" .. steps[1].quantity)
+        T.eq(p .. "the last point (" .. case.why .. ")", steps[#steps].recipe.id, case.last)
+        -- Checked against the one accounting: the kept route costs no more
+        -- than the other last point, nor than five shoes from 250.
+        local other = { { recipe = byId[LEGS], quantity = 7, skillStart = 250 },
+            { recipe = byId[case.last == LEGS and SHOES or LEGS], quantity = 1, skillStart = 254.525 } }
+        local shoes = { { recipe = byId[SHOES], quantity = 5, skillStart = 250 } }
+        local kept = candidate(route, route.kept)
+        T.check(p .. "no dearer than the other last point", kept.net <= account(other, case.hide).net,
+            tostring(kept.net) .. " vs " .. tostring(account(other, case.hide).net))
+        T.check(p .. "far cheaper than five shoes", kept.net < account(shoes, case.hide).net,
+            tostring(kept.net) .. " vs " .. tostring(account(shoes, case.hide).net))
+    end
+end)
 
 T.section("property: never dearer than the market route", function()
     local kept = {}
