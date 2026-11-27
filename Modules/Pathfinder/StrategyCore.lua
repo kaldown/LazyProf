@@ -107,7 +107,19 @@ local function ReagentCostPerCraft(strategy, recipe, skill, targetSkill, invento
     return cost, priced
 end
 
--- Score every candidate and return the alternatives list, best (lowest score) first.
+-- Best first. A recipe that costs nothing (ScoreRecipe's second value,
+-- `leaves`: what one craft leaves the player) comes before every recipe that
+-- costs something; among those, the one that leaves more per craft; then the
+-- lowest score. A strategy that gives no second value is ranked by score
+-- alone, exactly as before (ruling P130).
+local function Better(a, b)
+    local freeA, freeB = a.leaves ~= nil, b.leaves ~= nil
+    if freeA ~= freeB then return freeA end
+    if freeA and a.leaves ~= b.leaves then return a.leaves > b.leaves end
+    return a.score < b.score
+end
+
+-- Score every candidate and return the alternatives list, best first (Better).
 -- ScoreRecipe is called with the superset
 -- (recipe, skill, targetSkill, inventory, prices, racialBonus, purchasedRecipes, scoreCtx);
 -- a strategy ignores what it does not use. scoreCtx is the run's context
@@ -125,7 +137,8 @@ local function ScoreCandidates(strategy, candidates, skill, targetSkill, invento
     end
     local alternatives = {}
     for _, recipe in ipairs(candidates) do
-        local score = strategy:ScoreRecipe(recipe, skill, targetSkill, inventory, prices, racialBonus, purchasedRecipes, scoreCtx)
+        local score, leaves = strategy:ScoreRecipe(recipe, skill, targetSkill, inventory, prices, racialBonus,
+            purchasedRecipes, scoreCtx)
         local color = Utils.GetSkillColor(effectiveSkill, recipe.skillRange)
         local expectedSkillups = strategy:GetExpectedSkillups(recipe, skill, racialBonus)
 
@@ -136,21 +149,22 @@ local function ScoreCandidates(strategy, candidates, skill, targetSkill, invento
         table.insert(alternatives, {
             recipe = recipe,
             score = score,
+            leaves = leaves,
             color = color,
             expectedSkillups = expectedSkillups,
             craftCost = craftCost,
         })
     end
-    -- Sort by score (lowest = best first)
-    table.sort(alternatives, function(a, b) return a.score < b.score end)
+    table.sort(alternatives, Better)
 
     -- Debug: log top 10 (guarded - this string + FormatMoney building is the
     -- bulk of the eager debug cost and would otherwise run even with debug off)
     if strategy.logScoring and LazyProf:IsDebugEnabled("scoring") then
         for i = 1, math.min(10, #alternatives) do
             local d = alternatives[i]
-            LazyProf:Debug("scoring", string.format("  #%d: %s | score=%.2f | color=%s | skillup=%.2f | cost=%s",
-                i, d.recipe.name, d.score, d.color, d.expectedSkillups, Utils.FormatMoney(d.craftCost)))
+            LazyProf:Debug("scoring", string.format("  #%d: %s | score=%.2f | color=%s | skillup=%.2f | cost=%s%s",
+                i, d.recipe.name, d.score, d.color, d.expectedSkillups, Utils.FormatMoney(d.craftCost),
+                d.leaves and (" | pays for itself, leaves " .. Utils.FormatMoney(d.leaves)) or ""))
         end
     end
     return alternatives

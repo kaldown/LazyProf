@@ -83,6 +83,11 @@ LazyProf.PathfinderStrategies.cheapest = {
     -- purchasedRecipes: table of recipe IDs already "bought" in this simulation
     -- ctx: optional run context (StrategyCore.Run); ctx.rankSale[recipeId] is
     --      what one craft sells for, when that may be used for ranking
+    -- Returns score, leaves. `leaves` is set only for a recipe that costs
+    -- nothing once what its craft sells for is taken off (or its reagents are
+    -- owned): what one craft leaves the player, at least zero. The zero floor
+    -- cannot tell such recipes apart, so they are ranked by it, first
+    -- (StrategyCore.ScoreCandidates; ruling P130).
     ScoreRecipe = function(self, recipe, currentSkill, targetSkill, inventory, prices, racialBonus, purchasedRecipes, ctx)
         racialBonus = racialBonus or 0
         purchasedRecipes = purchasedRecipes or {}
@@ -101,13 +106,14 @@ LazyProf.PathfinderStrategies.cheapest = {
         if not priced then
             return math.huge
         end
+        local reagentCost = actualCost
 
         -- Add recipe acquisition cost for unlearned recipes (amortized over expected uses)
         -- Free if: already learned, already purchased in simulation, or recipe item in inventory
         -- Costs if: trainer, vendor, or AH purchase required
+        local recipeCost = 0
         if not recipe.learned and not purchasedRecipes[recipe.id] and recipe._sourceInfo then
             local srcType = recipe._sourceInfo.type
-            local recipeCost = 0
             if srcType == "trainer" or srcType == "vendor" then
                 recipeCost = recipe._sourceInfo.cost or 0
             elseif srcType == "ah" then
@@ -154,7 +160,22 @@ LazyProf.PathfinderStrategies.cheapest = {
         -- Tiebreaker: prefer higher difficulty (better skillup rate)
         local difficultyBonus = -expectedSkillups / 100
 
-        return costPerSkillup + rangeBonus + difficultyBonus
+        -- A recipe that costs nothing: what one craft leaves the player. Per
+        -- craft, not per skill-up, and with the recipe's fee spread over the
+        -- skill points left rather than over the crafts (spread over crafts,
+        -- the share per craft would shrink as the chance falls): a lower
+        -- chance never makes it larger.
+        local leaves = nil
+        if actualCost <= 0 then
+            local feePerPoint = 0
+            if recipeCost > 0 then
+                local stopAt = math.min(targetSkill, recipe.skillRange.gray + racialBonus)
+                feePerPoint = recipeCost / math.max(1, math.ceil(stopAt - currentSkill))
+            end
+            leaves = math.max(0, (saleValue or 0) - reagentCost - feePerPoint)
+        end
+
+        return costPerSkillup + rangeBonus + difficultyBonus, leaves
     end,
 
     -- Calculate total cost and skillups for a given quantity (used after best is chosen)

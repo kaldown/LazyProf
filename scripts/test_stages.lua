@@ -658,7 +658,22 @@ T.section("who made a reagent, and the run's icon", function()
     T.eq("five missing", made.missing, 5)
     T.check("nothing made for run 1's reagent", first.materials[1].madeBy == nil)
     T.eq("icon of an item not loaded yet", first.icon, "Interface\\Icons\\INV_Misc_QuestionMark")
+    T.check("and the run says its icon is still missing", first.iconMissing == true)
     T.check("no item, no icon", second.icon == nil)
+    T.check("and nothing missing", second.iconMissing == nil)
+    -- Once the item's data is there, its own icon and nothing missing.
+    local savedClient = LazyProf.Client
+    LazyProf.Client = setmetatable({ GetItemInfo = function(_, itemId)
+        if itemId == 170 then return "Made", "link", nil, nil, nil, nil, nil, nil, nil, "Interface\\Icons\\Made" end
+        return nil
+    end }, { __index = savedClient })
+    stages = Stages.Build(path, { prices = { [170] = 10, [171] = 5 }, milestones = MILESTONES, inventory = {} })
+    LazyProf.Client = savedClient
+    for _, s in ipairs(stages) do
+        if s.kind == "craft" and s.recipe == maker then first = s end
+    end
+    T.eq("loaded: the item's icon", first.icon, "Interface\\Icons\\Made")
+    T.check("loaded: nothing missing", first.iconMissing == nil)
 end)
 
 -- The real planner's output for one shipped case, folded into stages.

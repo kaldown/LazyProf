@@ -4,6 +4,13 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Cheapest no longer picks the recipe that leaves you poorer when two recipes both pay for themselves. It used to treat them as equal and take the one with the better skill-up chance; now it takes the one whose craft leaves you more after what it sells for. On WoW Forever Leatherworking 250-255 with the leather in your bags, that is Wild Leather Leggings from your own leather (selling for 1g 15s 85c) instead of Blue Suede Shoes from bought Rune Thread and Blue Dye (96s 65c), several gold better. Among recipes that pay for themselves, a lower skill-up chance never moves one ahead of another.
+- Crafted-item icons on the Crafts tab no longer stay question marks after a login when Selling is set to "Do not count": the tab is drawn again once the item data arrives.
+- With "I craft it" on a reagent that has no price to buy it, the summary no longer claims that making it costs more than buying it. The craft's line says "(make 14, no buy price)", and its tooltip says why its cost is not known.
+- The Crafts tab's numbers and icons no longer overlap.
+
 ## [0.12.0] - 2026-11-27
 
 The Crafts tab shows plainly what the plan makes, and the path no longer suggests patterns your specialization cannot learn.

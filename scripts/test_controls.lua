@@ -673,10 +673,12 @@ T.section("column layouts", function()
     T.check("crafts: the number is shown, in gold", run.lead.shown ~= false and run.lead.color[2] == 0.82)
     T.eq("crafts: the number at the left", run.lead.points[1][4], 4)
     T.eq("crafts: the number's column", run.lead.width, 18)
-    T.eq("crafts: the icon after the number", run.icon.points[1][4], 20)
-    T.eq("crafts: the name after the icon", run.text.points[1][4], 38)
+    -- The icon starts where the number's column ends; the name keeps the
+    -- gap a reagent row has after its icon (4).
+    T.eq("crafts: the icon where the number's column ends", run.icon.points[1][4], 22)
+    T.eq("crafts: the name after the icon", run.text.points[1][4], 40)
     T.check("crafts: a run without an icon has none", noIcon.icon.shown == false)
-    T.eq("crafts: its name lines up with the others", noIcon.text.points[1][4], 38)
+    T.eq("crafts: its name lines up with the others", noIcon.text.points[1][4], 40)
     T.eq("crafts header: titles in the same columns", header.cols[1].text .. "," .. header.cols[2].text, "skill,cost")
     T.eq("crafts header: at the same places", column(header, 1) .. " " .. column(header, 2), "62@88 84@4")
     T.eq("crafts header: gold", header.text.color[2], 0.82)
@@ -723,6 +725,14 @@ T.section("column layouts", function()
         local out = {}
         local nameLeft = r.text.points[1][4]
         out[#out + 1] = { "name", nameLeft, rowWidth - nameEnd(r) }
+        if r.lead.shown ~= false and r.lead.text ~= "" then
+            local left = r.lead.points[1][4]
+            out[#out + 1] = { "number", left, left + r.lead.width }
+        end
+        if r.icon.shown ~= false then
+            local left = r.icon.points[1][4]
+            out[#out + 1] = { "icon", left, left + r.icon.width }
+        end
         for i, col in ipairs(r.cols) do
             if col.shown ~= false then
                 local right = rowWidth + col.points[#col.points][4]

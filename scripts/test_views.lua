@@ -402,6 +402,35 @@ T.section("receipt", function()
     T.eq("two unpriced sources: no making line", keys, "spend,problem")
     LazyProf.CharStore:Get().craftChoices[BOLT] = nil
     LazyProf.CharStore:Get().craftChoices[BAR] = nil
+    -- The player makes the Bolt, which has no price to buy it, from Cloth
+    -- that has one (ruling P129). What the list spends is known (the Cloth),
+    -- so there is no problem line; but there is nothing to compare making
+    -- with, so no making line either (it said "costs 60s more than buying").
+    LazyProf.CharStore:Get().craftChoices[BOLT] = "craft"
+    view = shopView(craftPath({ [CLOTH] = 100 }))
+    r, keys = receipt(view)
+    T.eq("made, no buy price: spend is the cloth", r.spend.amount, "60s")
+    T.eq("made, no buy price: no making line and no problem line", keys, "spend")
+    -- The Crafts tab says the same: the run's cost (its reagents at what
+    -- they cost to buy) is not known, and its uses line says why.
+    local pathRows = Views.Path(view, { onToggleExpand = function() end })
+    local run, uses = pathRows[2], pathRows[3]
+    T.eq("made, no buy price: the run's cost is a question mark", run.cols[2], "?")
+    T.check("made, no buy price: in orange", run.colColors and run.colColors[2] and run.colColors[2][2] == 0.5)
+    T.eq("made, no buy price: the uses line says it, in orange", uses.text, "|cFFFF800020 Bolt (make 20, no buy price)|r")
+    local said
+    for _, line in ipairs(run.tooltip) do
+        if line.text:find("no price to buy", 1, true) then said = line.text end
+    end
+    T.eq("made, no buy price: the run's tooltip says why, and where its own reagents are", said,
+        "A reagent you make has no price to buy it, so the run's cost is not known. The Shopping tab lists what you make it from.")
+    -- Another made reagent with a buy price: still no making line, since
+    -- the saving can only be stated when every made reagent has one.
+    view = shopView(craftPath({ [CLOTH] = 100, [BAR] = 300, [ORE] = 100 },
+        { step(shirt, 100, 110, 10, 0), step(sword, 110, 120, 10, 0) }))
+    r, keys = receipt(view)
+    T.eq("made, one without a buy price: no making line", keys, "spend")
+    LazyProf.CharStore:Get().craftChoices[BOLT] = nil
     -- An unpriced reagent that is owned in full needs no price.
     view = shopView(makePath({ complete = true }), { inventory = { [999] = 60 } })
     r, keys = receipt(view)
@@ -534,10 +563,19 @@ T.section("no pipe inside a colour code", function()
     local source = f:read("*a")
     f:close()
     T.check("no literal colour code closes right after a pipe", source:find("||r", 1, true) == nil)
-    local found
-    for _, helper in ipairs({ "Grey", "Green" }) do
-        found = found or source:match(helper .. '%(%s*"[^"\n]*|[^"\n]*"')
+    local helpers = { "Grey", "Green", "White", "Orange" }
+    local function pipeHandedTo(text)
+        for _, helper in ipairs(helpers) do
+            local hit = text:match(helper .. '%(%s*"[^"\n]*|[^"\n]*"')
+            if hit then return hit end
+        end
+        return nil
     end
+    for _, helper in ipairs(helpers) do
+        T.check("the check sees a pipe handed to " .. helper,
+            pipeHandedTo("x = " .. helper .. '("a | b")') ~= nil)
+    end
+    local found = pipeHandedTo(source)
     T.check("no colour helper is handed a text with a pipe", found == nil, found)
     -- And what the views build: a pipe is only ever the start of a colour
     -- code or its end.
@@ -741,7 +779,7 @@ T.section("crafts list", function()
     T.eq("craft 1: what it uses", rows[3].text,
         "|cFF66FF66112 Thick Leather|r, |cFFFFFFFF14 Wildvine (buy 14)|r, |cFF66FF6614 Cured Thick Hide|r")
     T.check("craft 1: the uses line wraps", rows[3].wrap == true and rows[3].sub == true and rows[3].uses == true)
-    T.eq("craft 1: the uses line sits under the name", rows[3].indent, 34)
+    T.eq("craft 1: the uses line sits under the name (indent + the line's own 4 = the name's 40)", rows[3].indent, 36)
     T.check("craft 1: the uses line shares the current highlight", rows[3].bg ~= nil and rows[3].bg[4] < rows[2].bg[4])
     T.eq("craft 2: its number", rows[4].lead, "2")
     T.eq("craft 2: how many of what", rows[4].text, "1x Blue Suede Shoes")
@@ -1946,6 +1984,65 @@ T.section("merchant panel: the rows add up to the button", function()
     T.eq("a row shows its cost to the copper", rows[1].right, "37   1g 23s 21c")
     T.eq("the other row", rows[2].right, "3   12s 45c")
     T.eq("the button's total is their sum", Views.MerchantBuyAll(plan, {}), "Buy all - 1g 35s 66c")
+end)
+
+-- Last: it loads the bundled WoW Forever data and a fresh addon, which
+-- replaces the stubs the sections above use.
+T.section("uses line on bundled Forever data: what an earlier craft made", function()
+    local CraftLib = harness.loadCraftLib(16001, { camelot = true })
+    local LP = harness.loadLazyProf({
+        "Core/Constants.lua", "Core/Utils.lua", "Core/Client/Family.lua", "Core/Client/Classic.lua",
+        "Core/Config.lua", "Core/CharStore.lua", "Modules/Recipes/Availability.lua",
+        "Modules/Recipes/SelfFound.lua", "Modules/Pathfinder/Pins.lua", "Modules/Pathfinder/StrategyCore.lua",
+        "Modules/Pathfinder/Strategies/Cheapest.lua", "Modules/Pathfinder/MaterialResolver.lua",
+        "Modules/Pathfinder/Pathfinder.lua", "Modules/Guide/Text.lua", "Modules/Guide/Stages.lua",
+        "Modules/Guide/Views.lua",
+    })
+    LP.Client = LP.Client or {}
+    LP.Client.PlayerSkill = function() return 0 end
+    LP.Client.GetItemInfo = function() return nil end
+    LP.db.profile.strategy = "cheapest"
+    local prof = CraftLib:GetProfession("tailoring")
+    local recipes = LP.Utils.DeepCopy(prof.recipes)
+    for _, r in ipairs(recipes) do r.learned = false end
+    local prices = harness.priceTable(recipes)
+    LP.RecipeAvailability:BeginRecalc()
+    LP.SelfFound:BeginRecalc({})
+    local steps, meta = LP.PathfinderStrategies.cheapest:Calculate(1, 150, recipes, {}, prices, 0, {})
+    LP.SelfFound:EndRecalc()
+    LP.RecipeAvailability:EndRecalc()
+    local path = { steps = steps, gaps = meta.gaps, complete = meta.complete, prices = prices,
+        currentSkill = 1, actualSkill = 1, targetSkill = 150, racialBonus = 0, milestones = prof.milestones,
+        profession = prof.name, professionKey = "tailoring" }
+    local stages, summary = LP.Stages.Build(path, { prices = prices, includeLearn = true })
+    local account = LP.Pathfinder:Account(LP.Stages.ShoppingSteps(stages), {}, {}, prices)
+    local view = { path = path, stages = stages, summary = summary, account = account, missing = account.missing,
+        profile = "FOREVER", expanded = {}, showAllAlts = {}, skill = 1 }
+    local BOLT_OF_MAGEWEAVE = 4339
+    local index = LP.GuideViews.CraftIndex(stages)
+    local makers = {}
+    for _, stage in ipairs(stages) do
+        if stage.kind == "craft" and stage.recipe.itemId == BOLT_OF_MAGEWEAVE then
+            makers[#makers + 1] = tostring(index.numberOf[stage])
+        end
+    end
+    T.eq("fixture: one run makes Bolts of Mageweave", #makers, 1)
+    local rows = LP.GuideViews.Path(view, { onToggleExpand = function() end })
+    local uses
+    for _, row in ipairs(rows) do
+        -- (Its "Learn first" line comes before the uses line.)
+        if row.uses and row.stage.recipe.name == "Tuxedo Pants" then uses = row end
+    end
+    T.check("fixture: the Tuxedo Pants run has a uses line", uses and uses.uses == true)
+    T.check("the run takes the Bolts the earlier run made, and buys the rest",
+        uses and uses.text:find("|cFFFFFFFF12 Bolt of Mageweave (from " .. tostring(makers[1]) .. ", buy 5)|r", 1, true) ~= nil,
+        uses and uses.text)
+    -- And the shopping list buys only those 5.
+    local bought
+    for _, row in ipairs(account.missing.rows) do
+        if row.itemId == BOLT_OF_MAGEWEAVE then bought = row.toBuy end
+    end
+    T.eq("the Shopping tab buys only the rest", bought, 5)
 end)
 
 T.finish()

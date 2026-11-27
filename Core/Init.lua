@@ -106,6 +106,8 @@ end
 -- recalculate so the path reflects the real vendor sell value.
 -- The same goes for a crafted item whose sale value was waiting for its data;
 -- there a failed load counts too, because the "still loading" note has to go.
+-- A crafted item the Crafts tab shows a question mark for (its icon) only
+-- needs the window redrawn (ScheduleIconRedraw).
 function LazyProf:OnItemInfoReceived(event, itemId, success)
     local changed = false
     if self.SaleValue and self.SaleValue:OnItemInfo(itemId, success) then
@@ -119,6 +121,11 @@ function LazyProf:OnItemInfoReceived(event, itemId, success)
     end
     if changed then
         self:ScheduleItemInfoRecalc()
+    elseif success and self.GuideWindow and self.GuideWindow.WaitsForIcon
+            and self.GuideWindow:WaitsForIcon(itemId) then
+        -- A run on the Crafts tab shows a question mark for this item's icon:
+        -- redraw (the recalculation above draws the window anyway).
+        self:ScheduleIconRedraw()
     end
 end
 
@@ -273,26 +280,51 @@ end
 -- ITEMINFO_MAX_WAIT as a hard cap so a slow stream cannot starve it.
 local ITEMINFO_QUIET = 0.5
 local ITEMINFO_MAX_WAIT = 3.0
-local itemInfoToken = 0
-local itemInfoDeadline = nil
-function LazyProf:ScheduleItemInfoRecalc()
-    local now = GetTime()
-    if not itemInfoDeadline then
-        itemInfoDeadline = now + ITEMINFO_MAX_WAIT
-    end
-    itemInfoToken = itemInfoToken + 1
-    local myToken = itemInfoToken
-    local delay = math.max(0, math.min(ITEMINFO_QUIET, itemInfoDeadline - now))
-    C_Timer.After(delay, function()
-        -- Only the most recently scheduled callback fires once the stream goes
-        -- quiet; the max-wait deadline forces a fire even mid-stream.
-        if myToken ~= itemInfoToken and (itemInfoDeadline == nil or GetTime() < itemInfoDeadline) then
-            return
+
+-- A trailing debounce: `fire` runs once requests have been quiet for `quiet`
+-- seconds, or `maxWait` seconds after the first request of a stream. Returns
+-- the function that makes a request.
+local function TrailingDebounce(quiet, maxWait, fire)
+    local token = 0
+    local deadline = nil
+    return function()
+        local now = GetTime()
+        if not deadline then
+            deadline = now + maxWait
         end
-        itemInfoToken = 0
-        itemInfoDeadline = nil
-        LazyProf:Recalculate("item info settled")
-    end)
+        token = token + 1
+        local myToken = token
+        local delay = math.max(0, math.min(quiet, deadline - now))
+        C_Timer.After(delay, function()
+            -- Only the most recently scheduled callback fires once the stream
+            -- goes quiet; the max-wait deadline forces a fire even mid-stream.
+            if myToken ~= token and (deadline == nil or GetTime() < deadline) then
+                return
+            end
+            token = 0
+            deadline = nil
+            fire()
+        end)
+    end
+end
+
+local itemInfoRecalc = TrailingDebounce(ITEMINFO_QUIET, ITEMINFO_MAX_WAIT, function()
+    LazyProf:Recalculate("item info settled")
+end)
+function LazyProf:ScheduleItemInfoRecalc()
+    itemInfoRecalc()
+end
+
+-- A crafted item's icon drawn as a question mark (its data had not arrived)
+-- is drawn once the data is there: a redraw, never a recalculation, batched
+-- the same way, since the data of many items arrives at once on a first open.
+local iconRedraw = TrailingDebounce(ITEMINFO_QUIET, ITEMINFO_MAX_WAIT, function()
+    if LazyProf.GuideWindow then
+        LazyProf.GuideWindow:Refresh()
+    end
+end)
+function LazyProf:ScheduleIconRedraw()
+    iconRedraw()
 end
 
 -- A crafted item whose data never arrives stops counting as "still loading"

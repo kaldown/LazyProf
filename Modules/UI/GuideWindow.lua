@@ -1005,6 +1005,24 @@ function GuideWindow:Refresh()
     end
 end
 
+-- Does the Crafts tab show a run whose crafted item is `itemId` with the
+-- question mark in place of its icon (the item's data had not arrived when
+-- the tab was drawn)? Then that data's arrival is worth a redraw
+-- (LazyProf:OnItemInfoReceived). The Shopping tab shows no runs, and the
+-- Crafts tab is drawn afresh when it is chosen. (While a recipe search hides
+-- the runs it still asks: clearing the search draws the tab from the view
+-- in hand, which the redraw has brought up to date.)
+function GuideWindow:WaitsForIcon(itemId)
+    local view = self.view
+    if not (self.frame and view and view.path) or self.tab ~= "path" then return false end
+    for _, stage in ipairs(view.stages or {}) do
+        if stage.iconMissing and stage.recipe and stage.recipe.itemId == itemId then
+            return true
+        end
+    end
+    return false
+end
+
 -- Drawing ------------------------------------------------------------------------
 
 -- Put the target the shown path was planned for on the slider and in the

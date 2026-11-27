@@ -234,6 +234,63 @@ section("C2", function()
 end)
 
 -- ===========================================================================
+-- C3: a crafted item's icon that was a question mark (its data had not
+-- arrived) is drawn once the data comes: one batched redraw for the items
+-- the window shows a run of, never a recalculation (row C9)
+-- ===========================================================================
+section("C3", function()
+    check("C3 ScheduleIconRedraw exists", type(LP.ScheduleIconRedraw) == "function")
+    flush()
+    local refreshes, recalcs, scheduledRecalcs = 0, 0, 0
+    local waiting = { [9001] = true, [9002] = true }
+    local savedWindow, savedRecalc, savedSched = LP.GuideWindow, LP.Recalculate, LP.ScheduleItemInfoRecalc
+    LP.GuideWindow = {
+        Refresh = function() refreshes = refreshes + 1 end,
+        WaitsForIcon = function(_, itemId) return waiting[itemId] == true end,
+    }
+    LP.Recalculate = function() recalcs = recalcs + 1 end
+    LP.PriceManager = { flooredItems = {}, cache = {} }
+
+    -- The wiring: only items the window waits for, and only when loaded.
+    local redraws = 0
+    local savedRedraw = LP.ScheduleIconRedraw
+    LP.ScheduleIconRedraw = function() redraws = redraws + 1 end
+    LP.ScheduleItemInfoRecalc = function() scheduledRecalcs = scheduledRecalcs + 1 end
+    LP:OnItemInfoReceived("e", 12345, true)
+    check("C3 an item no run waits for -> nothing", redraws == 0 and scheduledRecalcs == 0, redraws)
+    LP:OnItemInfoReceived("e", 9001, false)
+    check("C3 a failed load -> nothing (the icon stays a question mark)", redraws == 0, redraws)
+    LP:OnItemInfoReceived("e", 9001, true)
+    check("C3 a waited item -> one redraw scheduled", redraws == 1, redraws)
+    check("C3 and no recalculation scheduled", scheduledRecalcs == 0, scheduledRecalcs)
+    -- An item that plans again anyway (a floored reagent) needs no redraw of
+    -- its own: the recalculation draws the window.
+    LP.PriceManager.flooredItems[9002] = true
+    LP:OnItemInfoReceived("e", 9002, true)
+    check("C3 an item that plans again -> the recalculation only", scheduledRecalcs == 1 and redraws == 1,
+        tostring(scheduledRecalcs) .. "/" .. tostring(redraws))
+    LP.ScheduleIconRedraw = savedRedraw
+    LP.ScheduleItemInfoRecalc = savedSched
+
+    -- The batching: a stream of arrivals is one redraw after it goes quiet,
+    -- and a stream that never does is still drawn by the cap.
+    flush(); refreshes = 0
+    LP:ScheduleIconRedraw()
+    advance(0.6)
+    check("C3 one arrival -> one redraw", refreshes == 1, refreshes)
+    flush(); refreshes = 0
+    for _ = 1, 20 do LP:ScheduleIconRedraw(); advance(0.1) end
+    advance(0.6)
+    check("C3 a burst of 20 -> one redraw", refreshes == 1, refreshes)
+    flush(); refreshes = 0
+    for _ = 1, 45 do LP:ScheduleIconRedraw(); advance(0.1) end
+    check("C3 a stream that never goes quiet is still drawn", refreshes >= 1, refreshes)
+    flush()
+    check("C3 never a recalculation", recalcs == 0, recalcs)
+    LP.GuideWindow, LP.Recalculate = savedWindow, savedRecalc
+end)
+
+-- ===========================================================================
 -- D: RecipeAvailability per-recalc memo
 -- ===========================================================================
 section("D", function()
