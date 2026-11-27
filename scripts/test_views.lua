@@ -422,8 +422,8 @@ T.section("receipt", function()
     for _, line in ipairs(run.tooltip) do
         if line.text:find("no price to buy", 1, true) then said = line.text end
     end
-    T.eq("made, no buy price: the run's tooltip says why and where the making cost is", said,
-        "A reagent you make has no price to buy it, so the run's cost is not known. The Shopping tab counts what making it costs.")
+    T.eq("made, no buy price: the run's tooltip says why, and where its own reagents are", said,
+        "A reagent you make has no price to buy it, so the run's cost is not known. The Shopping tab lists what you make it from.")
     -- Another made reagent with a buy price: still no making line, since
     -- the saving can only be stated when every made reagent has one.
     view = shopView(craftPath({ [CLOTH] = 100, [BAR] = 300, [ORE] = 100 },

@@ -397,7 +397,7 @@ local BRIDGE_TEXT = "No orange or yellow recipe is available here, so this green
 
 -- Tooltip of a craft run. unpriced: a reagent the run still has to get has
 -- no price to buy it, so no cost is stated; made: every such reagent is made
--- by the shopping list (whose own total counts what making it costs).
+-- by the shopping list (which lists what it is made from).
 local function CraftTooltip(stage, unpriced, made)
     local lines = {
         { text = Text.StageTitle(stage), r = 1, g = 1, b = 1 },
@@ -410,7 +410,7 @@ local function CraftTooltip(stage, unpriced, made)
     local pay, cost = stage.outOfPocketCost, stage.cost
     if unpriced and made then
         lines[#lines + 1] = { text = "A reagent you make has no price to buy it, so the run's cost is not known."
-            .. " The Shopping tab counts what making it costs.", r = 1, g = 0.5, b = 0 }
+            .. " The Shopping tab lists what you make it from.", r = 1, g = 0.5, b = 0 }
     elseif unpriced then
         lines[#lines + 1] = { text = "A reagent has no price, so the cost is not known.", r = 1, g = 0.5, b = 0 }
     else

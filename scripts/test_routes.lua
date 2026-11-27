@@ -160,7 +160,9 @@ T.section("recipes that pay for themselves", function()
     id, alts = first(recipes, values)
     T.eq("Y leaves 400 a craft, O 200: Y first, although its chance is lower", id, 2)
     T.eq("and the list of alternatives in that order", alts[1].recipe.id .. "," .. alts[2].recipe.id, "2,1")
-    T.check("the scores are what they were: zero cost, never negative",
+    -- (A score is the cost per skill-up, zero here, plus the old range and
+    -- chance tie-breakers, which are a little below zero.)
+    T.check("the scores are what they were: zero cost plus the old tie-breakers, Y's the worse",
         alts[1].score > -1 and alts[2].score > -1 and alts[1].score > alts[2].score)
 
     -- A recipe that costs something comes after every one that costs nothing.

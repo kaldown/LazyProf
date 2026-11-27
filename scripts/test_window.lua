@@ -1926,6 +1926,24 @@ T.section("icons waiting for item data", function()
         T.check(p .. "Shopping tab: waits for nothing", window:WaitsForIcon(9002) == false)
         window:SelectTab("path", true)
         T.check(p .. "back on the Crafts tab: waits again", window:WaitsForIcon(9002) == true)
+        -- A recipe search shows no runs, but data that arrives during it must
+        -- still be drawn: clearing the search only redraws the tab from the
+        -- view in hand.
+        addon.db.profile.showAdvanced = true
+        window:Refresh()
+        window:OnSearch("Shirt")
+        T.check(p .. "during a recipe search: still waits", window:WaitsForIcon(9002) == true)
+        loaded[9002] = true
+        window:Refresh()
+        window:OnSearch("")
+        local shirtIcon
+        for _, row in ipairs(window.list.rows) do
+            if row.desc and row.desc.layout == "crafts" and row.desc.stage and row.desc.stage.recipe == shirt then
+                shirtIcon = row.desc.icon
+            end
+        end
+        T.eq(p .. "search cleared: the icon that came meanwhile is shown", shirtIcon, "Interface\\Icons\\Item9002")
+        addon.db.profile.showAdvanced = false
         -- No window drawn yet: nothing.
         local fresh = W.load(family).window
         T.check(p .. "a window never drawn waits for nothing", fresh:WaitsForIcon(9002) == false)
