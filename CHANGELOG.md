@@ -4,6 +4,10 @@ All notable changes to LazyProf will be documented in this file.
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-11-27
+
+Cheapest picks the better of two recipes that both pay for themselves, and the Crafts tab gets a few fixes.
+
 ### Fixed
 
 - Cheapest no longer picks the recipe that leaves you poorer when two recipes both pay for themselves. It used to treat them as equal and take the one with the better skill-up chance; now it takes the one whose craft leaves you more after what it sells for. On WoW Forever Leatherworking 250-255 with the leather in your bags, that is Wild Leather Leggings from your own leather (selling for 1g 15s 85c) instead of Blue Suede Shoes from bought Rune Thread and Blue Dye (96s 65c), several gold better. Among recipes that pay for themselves, a lower skill-up chance never moves one ahead of another.
