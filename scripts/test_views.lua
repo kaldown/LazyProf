@@ -1986,4 +1986,63 @@ T.section("merchant panel: the rows add up to the button", function()
     T.eq("the button's total is their sum", Views.MerchantBuyAll(plan, {}), "Buy all - 1g 35s 66c")
 end)
 
+-- Last: it loads the bundled WoW Forever data and a fresh addon, which
+-- replaces the stubs the sections above use.
+T.section("uses line on bundled Forever data: what an earlier craft made", function()
+    local CraftLib = harness.loadCraftLib(16001, { camelot = true })
+    local LP = harness.loadLazyProf({
+        "Core/Constants.lua", "Core/Utils.lua", "Core/Client/Family.lua", "Core/Client/Classic.lua",
+        "Core/Config.lua", "Core/CharStore.lua", "Modules/Recipes/Availability.lua",
+        "Modules/Recipes/SelfFound.lua", "Modules/Pathfinder/Pins.lua", "Modules/Pathfinder/StrategyCore.lua",
+        "Modules/Pathfinder/Strategies/Cheapest.lua", "Modules/Pathfinder/MaterialResolver.lua",
+        "Modules/Pathfinder/Pathfinder.lua", "Modules/Guide/Text.lua", "Modules/Guide/Stages.lua",
+        "Modules/Guide/Views.lua",
+    })
+    LP.Client = LP.Client or {}
+    LP.Client.PlayerSkill = function() return 0 end
+    LP.Client.GetItemInfo = function() return nil end
+    LP.db.profile.strategy = "cheapest"
+    local prof = CraftLib:GetProfession("tailoring")
+    local recipes = LP.Utils.DeepCopy(prof.recipes)
+    for _, r in ipairs(recipes) do r.learned = false end
+    local prices = harness.priceTable(recipes)
+    LP.RecipeAvailability:BeginRecalc()
+    LP.SelfFound:BeginRecalc({})
+    local steps, meta = LP.PathfinderStrategies.cheapest:Calculate(1, 150, recipes, {}, prices, 0, {})
+    LP.SelfFound:EndRecalc()
+    LP.RecipeAvailability:EndRecalc()
+    local path = { steps = steps, gaps = meta.gaps, complete = meta.complete, prices = prices,
+        currentSkill = 1, actualSkill = 1, targetSkill = 150, racialBonus = 0, milestones = prof.milestones,
+        profession = prof.name, professionKey = "tailoring" }
+    local stages, summary = LP.Stages.Build(path, { prices = prices, includeLearn = true })
+    local account = LP.Pathfinder:Account(LP.Stages.ShoppingSteps(stages), {}, {}, prices)
+    local view = { path = path, stages = stages, summary = summary, account = account, missing = account.missing,
+        profile = "FOREVER", expanded = {}, showAllAlts = {}, skill = 1 }
+    local BOLT_OF_MAGEWEAVE = 4339
+    local index = LP.GuideViews.CraftIndex(stages)
+    local makers = {}
+    for _, stage in ipairs(stages) do
+        if stage.kind == "craft" and stage.recipe.itemId == BOLT_OF_MAGEWEAVE then
+            makers[#makers + 1] = tostring(index.numberOf[stage])
+        end
+    end
+    T.eq("fixture: one run makes Bolts of Mageweave", #makers, 1)
+    local rows = LP.GuideViews.Path(view, { onToggleExpand = function() end })
+    local uses
+    for _, row in ipairs(rows) do
+        -- (Its "Learn first" line comes before the uses line.)
+        if row.uses and row.stage.recipe.name == "Tuxedo Pants" then uses = row end
+    end
+    T.check("fixture: the Tuxedo Pants run has a uses line", uses and uses.uses == true)
+    T.check("the run takes the Bolts the earlier run made, and buys the rest",
+        uses and uses.text:find("|cFFFFFFFF12 Bolt of Mageweave (from " .. tostring(makers[1]) .. ", buy 5)|r", 1, true) ~= nil,
+        uses and uses.text)
+    -- And the shopping list buys only those 5.
+    local bought
+    for _, row in ipairs(account.missing.rows) do
+        if row.itemId == BOLT_OF_MAGEWEAVE then bought = row.toBuy end
+    end
+    T.eq("the Shopping tab buys only the rest", bought, 5)
+end)
+
 T.finish()
