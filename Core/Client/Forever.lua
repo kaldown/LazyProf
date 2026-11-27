@@ -682,8 +682,9 @@ end
 -- Whether the character knows the spell (e.g. 10656 Dragonscale
 -- Leatherworking). C_SpellBook.IsSpellKnown is in the running client's globals
 -- (Ketho GlobalAPI.lua:4045); the global IsSpellKnown / IsPlayerSpell exist
--- only in the deprecated spell-book file. Whether it answers true for a
--- profession specialization passive is in-game check S1. Anything but true is
+-- only in the deprecated spell-book file. It answers for a profession
+-- specialization passive: checked in game 2026-11-27 on a Dragonscale
+-- leatherworker (10656 true, 10660 and 10658 false). Anything but true is
 -- false.
 function Client:KnowsSpell(spellId)
     return C_SpellBook.IsSpellKnown(spellId) == true
