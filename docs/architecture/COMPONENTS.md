@@ -85,7 +85,7 @@ Defines `STRATEGY`, `DISPLAY_MODE`, `PRICE_SOURCE`, `TSM_PRICE_SOURCE`, `MATERIA
 
 **Events registered here**:
 - `BAG_UPDATE` - lightweight refresh: the stock is rescanned into the shown path and the window redrawn. A change of stock never plans the route again by itself
-- `GET_ITEM_INFO_RECEIVED` - item data arrived for a reagent priced by the floor, or for a crafted item whose sale value was waiting: one recalculation once the stream has gone quiet
+- `GET_ITEM_INFO_RECEIVED` - item data arrived for a reagent priced by the floor, or for a crafted item whose sale value was waiting: one recalculation once the stream has gone quiet. Data for a crafted item the Crafts tab shows a question mark for: one redraw (never a recalculation), batched the same way
 - `AUCTION_HOUSE_CLOSED` - cached prices are expired and, with a profession window open, the path is planned again
 
 **Debug system**: Category-based logging with real-time window, category/bracket filtering, copy filtered/all. The `/lp diag ...` dumps open in a copyable window.
