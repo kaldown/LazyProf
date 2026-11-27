@@ -202,7 +202,8 @@ local GAPS_NOTE = "excluding gaps"
 --   making   the list makes reagents instead of buying them, so the path's
 --            cost column (each run's direct reagents at buy prices) adds up
 --            to more or less than the reagents amount: by how much (not said
---            while something that has to be bought has no price)
+--            while something that has to be bought has no price, or a
+--            reagent made has no price to buy it)
 --   margin   the amounts include spare crafts
 --   problem  a price is missing, still loading or too old: the price
 --            summary's first problem line, else how many rows of the list
@@ -246,15 +247,19 @@ function Views.Receipt(view)
     end
 
     -- Rows with something to buy and no price: the amounts leave them out.
-    local crafted, unpriced = {}, 0
+    local crafted, unpriced, noBuyPrice = {}, 0, 0
     for _, row in ipairs(account.missing and account.missing.rows or {}) do
-        if row.crafted then crafted[#crafted + 1] = row end
+        if row.crafted then
+            crafted[#crafted + 1] = row
+            if row.unitPrice == nil then noBuyPrice = noBuyPrice + 1 end
+        end
         if (row.toBuy or 0) > 0 and row.unpriced then unpriced = unpriced + 1 end
     end
     -- What making reagents saves is only known when everything bought for
-    -- them has a price.
+    -- them has a price, and every reagent made has a price to buy it (there
+    -- is nothing to compare making with otherwise; ruling P129).
     local columnPay = view.summary and view.summary.columnPay
-    if #crafted > 0 and columnPay and unpriced == 0 then
+    if #crafted > 0 and columnPay and unpriced == 0 and noBuyPrice == 0 then
         local saving = Round(columnPay - account.reagents)
         if saving ~= 0 then
             local what = string.format("%d reagents", #crafted)
@@ -390,9 +395,10 @@ end
 
 local BRIDGE_TEXT = "No orange or yellow recipe is available here, so this green recipe keeps you leveling."
 
--- Tooltip of a craft run. unpriced: a reagent that has to be bought has no
--- price, so no cost is stated.
-local function CraftTooltip(stage, unpriced)
+-- Tooltip of a craft run. unpriced: a reagent the run still has to get has
+-- no price to buy it, so no cost is stated; made: every such reagent is made
+-- by the shopping list (whose own total counts what making it costs).
+local function CraftTooltip(stage, unpriced, made)
     local lines = {
         { text = Text.StageTitle(stage), r = 1, g = 1, b = 1 },
         { text = string.format("Skill %d to %d", stage.fromDisplay, stage.toDisplay), r = 0.7, g = 0.7, b = 0.7 },
@@ -402,7 +408,10 @@ local function CraftTooltip(stage, unpriced)
         lines[#lines + 1] = { text = BRIDGE_TEXT, r = 0.25, g = 0.75, b = 0.25 }
     end
     local pay, cost = stage.outOfPocketCost, stage.cost
-    if unpriced then
+    if unpriced and made then
+        lines[#lines + 1] = { text = "A reagent you make has no price to buy it, so the run's cost is not known."
+            .. " The Shopping tab counts what making it costs.", r = 1, g = 0.5, b = 0 }
+    elseif unpriced then
         lines[#lines + 1] = { text = "A reagent has no price, so the cost is not known.", r = 1, g = 0.5, b = 0 }
     else
         if stage.quantity > 0 then
@@ -651,8 +660,9 @@ end
 -- What a run uses, one part per reagent: "<need> <name>", then in brackets
 -- the earlier runs that make some of it ("from 1"), what is still to get
 -- ("buy 14", or "make 14" when the shopping list makes it) and "no price"
--- when it has to be bought without a price. Green: owned stock and earlier
--- runs cover it; white: some of it is to get; orange: to buy, no price.
+-- when it has to be bought without a price ("no buy price" when it is made
+-- and has none). Green: owned stock and earlier runs cover it; white: some
+-- of it is to get; orange: to get, and no price to buy it.
 -- `crafted` = { [itemId] = true } for the shopping list's crafted rows.
 local function UsesText(stage, numberOf, crafted)
     local parts = {}
@@ -673,6 +683,12 @@ local function UsesText(stage, numberOf, crafted)
         if mat.missing > 0 then
             if crafted[mat.itemId] then
                 notes[#notes + 1] = "make " .. tostring(mat.missing)
+                -- Made, but with no price to buy it: the run's cost (its
+                -- reagents at what they cost to buy) is not known (P129).
+                if not mat.price then
+                    notes[#notes + 1] = "no buy price"
+                    unpriced = true
+                end
             else
                 notes[#notes + 1] = "buy " .. tostring(mat.missing)
                 if not mat.price then
@@ -705,12 +721,27 @@ local function CurrentRow(view)
     return index and stages[index] or nil
 end
 
--- A reagent of the run still has to be bought and has no price.
+-- A reagent the run still has to get (to buy, or made by the shopping list)
+-- has no price to buy it: the run's cost, its reagents at what they cost to
+-- buy, is not known.
 local function UnpricedToBuy(stage)
     for _, mat in ipairs(stage.materials or {}) do
         if mat.missing > 0 and not mat.price then return true end
     end
     return false
+end
+
+-- Every reagent of the run without a price to buy it is one the shopping
+-- list makes (`crafted` as in UsesText).
+local function UnpricedAllMade(stage, crafted)
+    local any = false
+    for _, mat in ipairs(stage.materials or {}) do
+        if mat.missing > 0 and not mat.price then
+            if not crafted[mat.itemId] then return false end
+            any = true
+        end
+    end
+    return any
 end
 
 -- "+14s", a green "-40s", or `same` when there is no difference.
@@ -898,7 +929,7 @@ local function AddRun(rows, stage, learn, isCurrent, number, index, crafted, vie
         costColor = GREEN
     end
     local alpha = stage.done and 0.5 or 1
-    local tooltip = CraftTooltip(stage, unpriced)
+    local tooltip = CraftTooltip(stage, unpriced, unpriced and UnpricedAllMade(stage, crafted))
     tooltip[#tooltip + 1] = { text = "Click to open or close", r = 0.5, g = 0.5, b = 0.5 }
     -- Closed until the player opens it. A click asks for the other state.
     local open = (view.expanded and view.expanded[Views.RowKey(stage)]) and true or false

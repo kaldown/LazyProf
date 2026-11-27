@@ -402,6 +402,35 @@ T.section("receipt", function()
     T.eq("two unpriced sources: no making line", keys, "spend,problem")
     LazyProf.CharStore:Get().craftChoices[BOLT] = nil
     LazyProf.CharStore:Get().craftChoices[BAR] = nil
+    -- The player makes the Bolt, which has no price to buy it, from Cloth
+    -- that has one (ruling P129). What the list spends is known (the Cloth),
+    -- so there is no problem line; but there is nothing to compare making
+    -- with, so no making line either (it said "costs 60s more than buying").
+    LazyProf.CharStore:Get().craftChoices[BOLT] = "craft"
+    view = shopView(craftPath({ [CLOTH] = 100 }))
+    r, keys = receipt(view)
+    T.eq("made, no buy price: spend is the cloth", r.spend.amount, "60s")
+    T.eq("made, no buy price: no making line and no problem line", keys, "spend")
+    -- The Crafts tab says the same: the run's cost (its reagents at what
+    -- they cost to buy) is not known, and its uses line says why.
+    local pathRows = Views.Path(view, { onToggleExpand = function() end })
+    local run, uses = pathRows[2], pathRows[3]
+    T.eq("made, no buy price: the run's cost is a question mark", run.cols[2], "?")
+    T.check("made, no buy price: in orange", run.colColors and run.colColors[2] and run.colColors[2][2] == 0.5)
+    T.eq("made, no buy price: the uses line says it, in orange", uses.text, "|cFFFF800020 Bolt (make 20, no buy price)|r")
+    local said
+    for _, line in ipairs(run.tooltip) do
+        if line.text:find("no price to buy", 1, true) then said = line.text end
+    end
+    T.eq("made, no buy price: the run's tooltip says why and where the making cost is", said,
+        "A reagent you make has no price to buy it, so the run's cost is not known. The Shopping tab counts what making it costs.")
+    -- Another made reagent with a buy price: still no making line, since
+    -- the saving can only be stated when every made reagent has one.
+    view = shopView(craftPath({ [CLOTH] = 100, [BAR] = 300, [ORE] = 100 },
+        { step(shirt, 100, 110, 10, 0), step(sword, 110, 120, 10, 0) }))
+    r, keys = receipt(view)
+    T.eq("made, one without a buy price: no making line", keys, "spend")
+    LazyProf.CharStore:Get().craftChoices[BOLT] = nil
     -- An unpriced reagent that is owned in full needs no price.
     view = shopView(makePath({ complete = true }), { inventory = { [999] = 60 } })
     r, keys = receipt(view)
