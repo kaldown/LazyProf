@@ -741,7 +741,7 @@ T.section("crafts list", function()
     T.eq("craft 1: what it uses", rows[3].text,
         "|cFF66FF66112 Thick Leather|r, |cFFFFFFFF14 Wildvine (buy 14)|r, |cFF66FF6614 Cured Thick Hide|r")
     T.check("craft 1: the uses line wraps", rows[3].wrap == true and rows[3].sub == true and rows[3].uses == true)
-    T.eq("craft 1: the uses line sits under the name", rows[3].indent, 34)
+    T.eq("craft 1: the uses line sits under the name (indent + the line's own 4 = the name's 40)", rows[3].indent, 36)
     T.check("craft 1: the uses line shares the current highlight", rows[3].bg ~= nil and rows[3].bg[4] < rows[2].bg[4])
     T.eq("craft 2: its number", rows[4].lead, "2")
     T.eq("craft 2: how many of what", rows[4].text, "1x Blue Suede Shoes")

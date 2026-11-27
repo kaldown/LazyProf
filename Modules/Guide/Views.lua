@@ -612,7 +612,7 @@ end
 local OPEN_INDENT = 14
 local CRAFT_COLUMNS = { "skill", "cost" }
 local CRAFT_NUMBER_WIDTH = 18   -- the number column of a craft's row
-local CRAFT_SUB_INDENT = 34     -- the lines under a craft start under its name
+local CRAFT_SUB_INDENT = 36     -- the lines under a craft start under its name (40, RowList)
 local CRAFTS_HINT = "Click a craft for its other recipes and details."
 
 -- The craft runs of a stage list, numbered in order (the numbers the Crafts

@@ -312,7 +312,9 @@ KINDS.cols = {
             row.lead:SetText("")
             row.lead:Hide()
         end
-        local iconAt = x - 2
+        -- The icon starts where the number's column ends; without a number,
+        -- at the row's edge (2, as on "line" rows).
+        local iconAt = desc.lead and x or (x - 2)
         row.icon:ClearAllPoints()
         row.icon:SetPoint("LEFT", row, "LEFT", iconAt, 0)
         if desc.icon then
