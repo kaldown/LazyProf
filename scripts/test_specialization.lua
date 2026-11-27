@@ -367,7 +367,12 @@ T.section("diag spec", function()
         has("  unknown: Onyxia Scale Breastplate (103) item 15781 left out | Pattern: Onyxia Scale Breastplate | "
             .. "Requires Leatherworking (300) | Requires Dragonscale Leatherworking"), text)
     check("diag: tooltip not loaded",
-        has("  unknown: Dreamscale Breastplate (108) item 20382 left out | not loaded - run /lp diag spec again"), text)
+        has("  unknown: Dreamscale Breastplate (108) item 20382 left out | no item data yet (asked for it)"), text)
+    local _, notes = text:gsub("Run /lp diag spec again in a few seconds", "")
+    check("diag: one note on items with no data, after the lists", notes == 1
+        and text:find("Run /lp diag spec again", 1, true) > text:find("Recipe 109", 1, true), text)
+    check("diag: the note says what a second miss means",
+        has("an item that still has none is not in the game now, so its recipe cannot be learned"), text)
     check("diag: an item the client does not know",
         has("  unknown: Recipe 109 (109) item 30000 left out | not loaded, and the client knows no such item"), text)
     check("diag: a profession without specializations is not listed", not has("alchemy"), text)

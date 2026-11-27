@@ -306,7 +306,11 @@ end
 -- how many of those are left out (not learned); then each recipe whose
 -- requirement the data cannot tell, with its teaching item's tooltip lines as
 -- the client shows them - the paste that settles those (in-game check S2).
--- An item whose data has not arrived yet is asked for and said so.
+-- An item with no data in the client is asked for, and one note at the end
+-- says what that means: data normally arrives within a second, so an item
+-- that still has none on a later run is one the game does not serve (on
+-- Forever: an Item row without an ItemSparse row in the build, measured
+-- 2026-11-27 for all 23 unknown teaching items).
 function Availability:RunSpecDiagnostic(lines)
     local function add(text) lines[#lines + 1] = text end
     local registry = LazyProf.Professions and LazyProf.Professions.registry or {}
@@ -314,7 +318,7 @@ function Availability:RunSpecDiagnostic(lines)
     local keys = {}
     for key in pairs(registry) do keys[#keys + 1] = key end
     table.sort(keys)
-    local any = false
+    local any, asked = false, false
     for _, key in ipairs(keys) do
         local prof = registry[key]
         local learned = type(learnedAll[key]) == "table" and learnedAll[key] or {}
@@ -362,7 +366,8 @@ function Availability:RunSpecDiagnostic(lines)
                     elseif why == "not loaded" and exists == false then
                         text = "not loaded, and the client knows no such item"
                     elseif why == "not loaded" then
-                        text = "not loaded - run /lp diag spec again"
+                        text = "no item data yet (asked for it)"
+                        asked = true
                     else
                         text = tostring(why)
                     end
@@ -376,5 +381,9 @@ function Availability:RunSpecDiagnostic(lines)
     end
     if not any then
         add("no specialization data in this CraftLib")
+    end
+    if asked then
+        add("No item data: the game was asked for it. Run /lp diag spec again in a few seconds;"
+            .. " an item that still has none is not in the game now, so its recipe cannot be learned.")
     end
 end
